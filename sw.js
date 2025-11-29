@@ -1,8 +1,8 @@
-// sw.js - Service Worker CON DIAGNÓSTICO
-const CACHE_NAME = 'almacen-copihue-v2.1';
+// sw.js - VERSIÓN FINAL OPTIMIZADA
+const CACHE_NAME = 'almacen-copihue-v2.2';
 const urlsToCache = [
   './',
-  './index.html',
+  './index.html', 
   './manifest.json',
   './sw.js',
   './icon-192x192.png',
@@ -14,33 +14,20 @@ const urlsToCache = [
 
 // Instalar Service Worker
 self.addEventListener('install', event => {
-  console.log('🚀 Service Worker instalado para Almacén Copihue');
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache => {
-        console.log('📦 Cache abierto - Almacenando archivos esenciales');
-        return cache.addAll(urlsToCache);
-      })
-      .then(() => {
-        console.log('✅ Todos los archivos esenciales cacheados');
-        return self.skipWaiting();
-      })
-      .catch(error => {
-        console.log('⚠️ Algunos archivos no se pudieron cachear:', error);
-        return self.skipWaiting();
-      })
+      .then(cache => cache.addAll(urlsToCache))
+      .then(() => self.skipWaiting())
   );
 });
 
-// Activar Service Worker
+// Activar Service Worker  
 self.addEventListener('activate', event => {
-  console.log('🔄 Service Worker activado');
   event.waitUntil(
     caches.keys().then(cacheNames => {
       return Promise.all(
         cacheNames.map(cacheName => {
           if (cacheName !== CACHE_NAME) {
-            console.log('🗑️ Eliminando cache viejo:', cacheName);
             return caches.delete(cacheName);
           }
         })
@@ -49,73 +36,39 @@ self.addEventListener('activate', event => {
   );
 });
 
-// Fetch events - CON DIAGNÓSTICO DETALLADO
+// Fetch events - Estrategia optimizada
 self.addEventListener('fetch', event => {
   const url = event.request.url;
-  const fileName = url.split('/').pop(); // Extrae el nombre del archivo
   
-  // NUNCA cachear datos dinámicos
-  if (url.includes('docs.google.com') || 
-      url.includes('api.allorigins.win') ||
-      url.includes('/gviz/tq') ||
-      url.includes('wa.me')) {
-    console.log('📊 Fetch DIRECTO (sin cache):', fileName || 'Google Sheets');
+  // Nunca cachear datos dinámicos
+  if (url.includes('docs.google.com') || url.includes('api.allorigins.win')) {
     return fetch(event.request);
   }
 
-  // PARA IMÁGENES - Estrategia Cache First con diagnóstico
-  if (url.includes('.jpg') || url.includes('.png') || url.includes('.jpeg')) {
-    event.respondWith(
-      caches.match(event.request)
-        .then(response => {
-          if (response) {
-            console.log('📸 IMAGEN desde CACHE:', fileName, '✅');
-            return response;
-          }
-          
-          console.log('📸 IMAGEN descargando:', fileName, '⬇️');
-          return fetch(event.request)
-            .then(fetchResponse => {
-              if (fetchResponse && fetchResponse.status === 200) {
-                const responseToCache = fetchResponse.clone();
-                caches.open(CACHE_NAME)
-                  .then(cache => {
-                    cache.put(event.request, responseToCache);
-                    console.log('📸 IMAGEN guardada en cache:', fileName, '💾');
-                  });
-              }
-              return fetchResponse;
-            })
-            .catch(error => {
-              console.log('❌ Error cargando imagen:', fileName, error);
-              return caches.match('./icon-192x192.png');
-            });
-        })
-    );
-    return;
-  }
-
-  // Para otros archivos (HTML, CSS, JS)
   event.respondWith(
     caches.match(event.request)
       .then(response => {
+        // Cache First para archivos estáticos
         if (response) {
           return response;
         }
+        
         return fetch(event.request)
           .then(fetchResponse => {
             if (fetchResponse && fetchResponse.status === 200) {
               const responseToCache = fetchResponse.clone();
               caches.open(CACHE_NAME)
-                .then(cache => {
-                  cache.put(event.request, responseToCache);
-                });
+                .then(cache => cache.put(event.request, responseToCache));
             }
             return fetchResponse;
           })
           .catch(() => {
+            // Fallbacks
             if (event.request.destination === 'document') {
               return caches.match('./index.html');
+            }
+            if (event.request.destination === 'image') {
+              return caches.match('./icon-192x192.png');
             }
           });
       })
