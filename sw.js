@@ -1,4 +1,5 @@
-const CACHE_NAME = 'almacen-copihue-v1.3';
+// sw.js - Service Worker MEJORADO para Almacén Copihue
+const CACHE_NAME = 'almacen-copihue-v2.0';
 const urlsToCache = [
   './',
   './index.html',
@@ -13,70 +14,92 @@ const urlsToCache = [
 
 // Instalar Service Worker
 self.addEventListener('install', event => {
-  console.log('Service Worker instalado para Almacén Copihue');
+  console.log('🚀 Service Worker instalado para Almacén Copihue');
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
-        console.log('Cache abierto');
+        console.log('📦 Cache abierto - Almacenando archivos esenciales');
         return cache.addAll(urlsToCache);
       })
-      .then(() => self.skipWaiting())
+      .then(() => {
+        console.log('✅ Todos los archivos esenciales cacheados');
+        return self.skipWaiting();
+      })
+      .catch(error => {
+        console.log('⚠️ Algunos archivos no se pudieron cachear:', error);
+        // Aunque falle algún archivo, continuamos
+        return self.skipWaiting();
+      })
   );
 });
 
-// Activar Service Worker
+// Activar Service Worker - Limpiar caches viejos
 self.addEventListener('activate', event => {
-  console.log('Service Worker activado');
+  console.log('🔄 Service Worker activado - Limpiando caches viejos');
   event.waitUntil(
     caches.keys().then(cacheNames => {
       return Promise.all(
         cacheNames.map(cacheName => {
           if (cacheName !== CACHE_NAME) {
-            console.log('Eliminando cache viejo:', cacheName);
+            console.log('🗑️ Eliminando cache viejo:', cacheName);
             return caches.delete(cacheName);
           }
         })
       );
-    }).then(() => self.clients.claim())
+    }).then(() => {
+      console.log('✅ Limpieza de cache completada');
+      return self.clients.claim();
+    })
   );
 });
 
-// Fetch events - Estrategia Cache First con fallback a red
+// Fetch events - Estrategia MEJORADA
 self.addEventListener('fetch', event => {
-  // Evitar cachear requests a APIs externas (datos dinámicos)
-  if (event.request.url.includes('docs.google.com') || 
-      event.request.url.includes('api.allorigins.win') ||
-      event.request.url.includes('wa.me')) {
+  const url = event.request.url;
+  
+  // 🔥 NUNCA cachear datos dinámicos de Google Sheets
+  if (url.includes('docs.google.com') || 
+      url.includes('api.allorigins.win') ||
+      url.includes('/gviz/tq') ||
+      url.includes('spreadsheets/d/') ||
+      url.includes('wa.me')) {
+    console.log('📊 Fetch directo (sin cache) para:', new URL(url).pathname);
     return fetch(event.request);
   }
 
+  // Para archivos estáticos, usar estrategia Cache First
   event.respondWith(
     caches.match(event.request)
       .then(response => {
-        // Si existe en cache, devolverlo
+        // Si existe en cache, devolverlo (solo para archivos estáticos)
         if (response) {
+          console.log('💾 Sirviendo desde cache:', new URL(url).pathname);
           return response;
         }
 
         // Si no está en cache, buscar en red
         return fetch(event.request)
           .then(fetchResponse => {
-            // Verificar si la respuesta es válida
+            // Verificar si la respuesta es válida para cachear
             if (!fetchResponse || fetchResponse.status !== 200 || fetchResponse.type !== 'basic') {
               return fetchResponse;
             }
 
-            // Clonar la respuesta para cachearla
-            const responseToCache = fetchResponse.clone();
-
-            caches.open(CACHE_NAME)
-              .then(cache => {
-                cache.put(event.request, responseToCache);
-              });
+            // Solo cachear archivos locales (no externos)
+            if (url.startsWith(self.location.origin)) {
+              const responseToCache = fetchResponse.clone();
+              caches.open(CACHE_NAME)
+                .then(cache => {
+                  cache.put(event.request, responseToCache);
+                  console.log('➕ Nuevo archivo cacheado:', new URL(url).pathname);
+                });
+            }
 
             return fetchResponse;
           })
-          .catch(() => {
+          .catch(error => {
+            console.log('❌ Error en fetch:', error);
+            
             // Fallback para páginas HTML
             if (event.request.destination === 'document') {
               return caches.match('./index.html');
@@ -86,7 +109,20 @@ self.addEventListener('fetch', event => {
             if (event.request.destination === 'image') {
               return caches.match('./icon-192x192.png');
             }
+            
+            // Para otros tipos, devolver error controlado
+            return new Response('Recurso no disponible offline', {
+              status: 408,
+              statusText: 'Offline'
+            });
           });
       })
   );
+});
+
+// Mensaje para forzar actualización de cache
+self.addEventListener('message', event => {
+  if (event.data === 'skipWaiting') {
+    self.skipWaiting();
+  }
 });
