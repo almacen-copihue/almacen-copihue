@@ -853,7 +853,7 @@
         // ========== CÓDIGO ALMACÉN COPIHUE ==========
         let products = [];
         let cart = [];
-        let currentCategory = "OFERTAS"; // Cambiado de "TODOS" a "OFERTAS"
+        let currentCategory = "TODOS";
         let lowStockAlertSent = false;
         let esAdmin = false;
         let currentSearchTerm = "";
@@ -1180,8 +1180,12 @@
             products = [
                 { id: 1, name: "ACEITE 900 CC GIRASOL", price: 4000, category: "ALMACEN", stock: "STOCK", stockNumber: 10, image: "imagenes-productos/aceite-900-cc-girasol.jpg", tieneOferta: true, textoOferta: "¡Oferta especial!" },
                 { id: 2, name: "SUPREMA", price: 13700, category: "ALMACEN", stock: "STOCK", stockNumber: 5, image: "imagenes-productos/suprema.jpg", tieneOferta: false },
-                { id: 3, name: "CERVEZA X LATA QUILMES IPA 473CC", price: 4500, category: "BEBIDAS", stock: "STOCK", stockNumber: 12, image: "imagenes-productos/cerveza-x-lata-quilmes-ipa-473cc.jpg", tieneOferta: true, textoOferta: "¡Oferta especial!" },
-                { id: 4, name: "ALITAS DE POLLO", price: 4000, category: "HELADERA", stock: "STOCK", stockNumber: 8, image: "imagenes-productos/alitas-de-pollo.jpg", tieneOferta: true, textoOferta: "¡Oferta especial!" }
+                { id: 3, name: "CERVEZA X LATA 473CC HEINEKEN", price: 5000, category: "CERVEZAS", stock: "", stockNumber: 0, image: "imagenes-productos/cerveza-x-lata-473cc-heineken.jpg", tieneOferta: false },
+                { id: 4, name: "LECHE VERONICA 1 LT", price: 2800, category: "ALMACEN", stock: "STOCK", stockNumber: 8, image: "imagenes-productos/leche-veronica-1-lt.jpg", tieneOferta: true, textoOferta: "Precio especial por tiempo limitado" },
+                { id: 5, name: "PAN KG", price: 3300, category: "ALMACEN", stock: "STOCK", stockNumber: 3, image: "imagenes-productos/pan-kg.jpg", tieneOferta: false },
+                { id: 6, name: "BANANA", price: 4500, category: "FRUTAS", stock: "STOCK", stockNumber: 1, image: "imagenes-productos/banana.jpg", tieneOferta: false },
+                { id: 7, name: "CEBOLLA KG.", price: 2000, category: "VERDURAS", stock: "", stockNumber: 0, image: "imagenes-productos/cebolla-kg.jpg", tieneOferta: false },
+                { id: 8, name: "DETERGENTE 500 ML", price: 4500, category: "LIMPIEZA", stock: "", stockNumber: 0, image: "imagenes-productos/detergente-500-ml.jpg", tieneOferta: true, textoOferta: "¡Gran oferta!" }
             ];
             
             renderCategories();
@@ -1194,60 +1198,40 @@
             }
         }
 
-        // ========== NUEVO SISTEMA DE CATEGORÍAS ==========
-        function renderCategories() {
-            console.log('🎯 Configurando categorías...');
+        function init() {
+            detectarAdmin();
+            loadProductsFromSheets();
+            setupEventListeners();
+            updateCartCount();
+        }
+
+        function setupEventListeners() {
+            cartIcon.addEventListener("click", openCart);
+            closeCart.addEventListener("click", closeCartModal);
+            sendOrder.addEventListener("click", sendOrderViaWhatsApp);
             
-            // Detectar productos con oferta automáticamente
-            const productosConOferta = products.filter(p => p.tieneOferta);
-            console.log(`📊 Productos con oferta detectados: ${productosConOferta.length}`);
-            
-            // Obtener categorías únicas de los productos
-            const categoriasExistentes = [...new Set(products.map(p => p.category))];
-            console.log('🏷️ Categorías existentes:', categoriasExistentes);
-            
-            // Crear array final de categorías
-            let categoriasFinales = [];
-            
-            // SI HAY PRODUCTOS CON OFERTA, agregar categoría "OFERTAS"
-            if (productosConOferta.length > 0) {
-                console.log('🔥 Agregando categoría OFERTAS');
-                categoriasFinales = ["OFERTAS", ...categoriasExistentes];
-            } else {
-                // Si no hay ofertas, usar categorías normales
-                console.log('ℹ️ No hay ofertas, usando categorías normales');
-                categoriasFinales = categoriasExistentes;
-                
-                // Si no hay ofertas y currentCategory es "OFERTAS", cambiar a primera categoría
-                if (currentCategory === "OFERTAS" && categoriasExistentes.length > 0) {
-                    currentCategory = categoriasExistentes[0];
+            cartModal.addEventListener("click", function(e) {
+                if (e.target === cartModal) {
+                    closeCartModal();
                 }
-            }
+            });
+        }
+
+        function renderCategories() {
+            const categories = ["TODOS", ...new Set(products.map(p => p.category))];
             
-            console.log('🎪 Categorías finales:', categoriasFinales);
-            console.log('📌 Categoría activa:', currentCategory);
-            
-            // Generar HTML de los botones de categoría
-            categoriesContainer.innerHTML = categoriasFinales.map(category => `
+            categoriesContainer.innerHTML = categories.map(category => `
                 <button class="category-btn ${category === currentCategory ? 'active' : ''}" 
                         data-category="${category}">
-                    ${category === "OFERTAS" ? "🔥 OFERTAS" : category}
+                    ${category}
                 </button>
             `).join("");
             
-            // Configurar event listeners para los botones
             document.querySelectorAll(".category-btn").forEach(btn => {
                 btn.addEventListener("click", function() {
-                    const nuevaCategoria = this.getAttribute("data-category");
-                    console.log(`🔄 Cambiando a categoría: ${nuevaCategoria}`);
-                    
-                    currentCategory = nuevaCategoria;
-                    
-                    // Actualizar estado activo de botones
+                    currentCategory = this.getAttribute("data-category");
                     document.querySelectorAll(".category-btn").forEach(b => b.classList.remove("active"));
                     this.classList.add("active");
-                    
-                    // Limpiar búsqueda y renderizar productos
                     clearSearch();
                     renderProducts();
                 });
@@ -1255,37 +1239,17 @@
         }
 
         function renderProducts() {
-            console.log(`🎯 Renderizando productos para categoría: ${currentCategory}`);
+            const filteredProducts = currentCategory === "TODOS" 
+                ? products 
+                : products.filter(p => p.category === currentCategory);
             
-            let filteredProducts = [];
-            
-            // FILTRADO ESPECIAL PARA CATEGORÍA "OFERTAS"
-            if (currentCategory === "OFERTAS") {
-                console.log('🔥 Filtrando productos en OFERTAS');
-                filteredProducts = products.filter(p => p.tieneOferta);
-                console.log(`📦 Productos en oferta: ${filteredProducts.length}`);
-            } else {
-                // FILTRADO NORMAL POR CATEGORÍA
-                console.log(`🏷️ Filtrando por categoría: ${currentCategory}`);
-                filteredProducts = products.filter(p => p.category === currentCategory);
-            }
-            
-            // FILTRAR: Mostrar solo productos CON stock
             const productsToShow = filteredProducts.filter(product => {
                 const hasStock = product.stock === "STOCK" || product.stockNumber > 0;
                 return hasStock;
             });
             
-            console.log(`📊 Productos a mostrar: ${productsToShow.length}`);
-            
             if (productsToShow.length === 0) {
-                let mensaje = '';
-                if (currentCategory === "OFERTAS") {
-                    mensaje = '😔 No hay productos en oferta en este momento';
-                } else {
-                    mensaje = `No hay productos disponibles en ${currentCategory}`;
-                }
-                productsGrid.innerHTML = `<div class="loading">${mensaje}</div>`;
+                productsGrid.innerHTML = '<div class="loading">No hay productos disponibles en esta categoría</div>';
                 return;
             }
             
@@ -1316,9 +1280,9 @@
                     <div class="product-card ${ofertaClass} ${highlighted}">
                         ${product.tieneOferta ? '<div class="badge-oferta">🔥 OFERTA</div>' : ''}
                         <div class="product-image">
-                            <div style="color: var(--primary); font-weight: bold; text-align: center; padding: 1rem;">
-                                ${product.name}
-                            </div>
+                            <img src="${product.image}" 
+                                 alt="${product.name}"
+                                 onerror="this.style.display='none'; this.parentNode.innerHTML='${product.name}';">
                         </div>
                         <div class="product-info">
                             <div class="product-name">${product.name}</div>
@@ -1355,25 +1319,6 @@
                     const productId = parseInt(this.getAttribute("data-id"));
                     addToCart(productId);
                 });
-            });
-        }
-
-        function init() {
-            detectarAdmin();
-            loadProductsFromSheets();
-            setupEventListeners();
-            updateCartCount();
-        }
-
-        function setupEventListeners() {
-            cartIcon.addEventListener("click", openCart);
-            closeCart.addEventListener("click", closeCartModal);
-            sendOrder.addEventListener("click", sendOrderViaWhatsApp);
-            
-            cartModal.addEventListener("click", function(e) {
-                if (e.target === cartModal) {
-                    closeCartModal();
-                }
             });
         }
 
