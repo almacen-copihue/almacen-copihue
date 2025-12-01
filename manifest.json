@@ -1,112 +1,439 @@
-// ========== MANIFEST.JSON DINÁMICO ==========
+// ========== PWA - INSTALACIÓN EN MÓVILES ==========
+let deferredPrompt;
+const installPrompt = document.getElementById('installPrompt');
+
+// 1. CREAR MANIFEST DINÁMICAMENTE CORREGIDO
 function createDynamicManifest() {
     const manifest = {
         "name": "Almacén Copihue",
         "short_name": "Almacén Copihue",
         "description": "Tu almacén de barrio - Productos de calidad con la confianza de siempre",
-        "start_url": window.location.origin,
+        "start_url": window.location.href,
         "display": "standalone",
         "background_color": "#2e7d32",
         "theme_color": "#2e7d32",
         "icons": [
             {
-                "src": "icon-192x192.png",
+                "src": "https://via.placeholder.com/192x192/2e7d32/ffffff?text=AC",
                 "sizes": "192x192",
                 "type": "image/png"
             },
             {
-                "src": "icon-512x512.png",
+                "src": "https://via.placeholder.com/512x512/2e7d32/ffffff?text=AC",
                 "sizes": "512x512",
                 "type": "image/png"
             }
         ],
         "orientation": "portrait",
-        "scope": "/"
+        "scope": window.location.origin + "/"
     };
-
-    // Crear un blob URL para el manifest
-    const blob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-
-    // Verificar si ya existe un link de manifest, si no, crearlo
-    let link = document.querySelector('link[rel="manifest"]');
-    if (!link) {
-        link = document.createElement('link');
-        link.rel = 'manifest';
-        document.head.appendChild(link);
-    }
-    link.href = url;
-
-    console.log('📱 Manifest.json creado dinámicamente');
+    
+    // Crear el JSON correctamente
+    const manifestJSON = JSON.stringify(manifest, null, 2);
+    console.log('📱 Manifest JSON creado:', manifestJSON);
+    
+    // Crear Blob URL
+    const manifestBlob = new Blob([manifestJSON], { 
+        type: 'application/manifest+json; charset=utf-8' 
+    });
+    const manifestURL = URL.createObjectURL(manifestBlob);
+    
+    // Actualizar el link del manifest
+    const manifestLink = document.getElementById('appManifest');
+    manifestLink.href = manifestURL;
+    
+    console.log('✅ Manifest PWA creado y configurado');
+    return manifestURL;
 }
 
-// ========== SERVICE WORKER DINÁMICO ==========
-function createDynamicServiceWorker() {
-    const swContent = `
-        const CACHE_NAME = 'almacen-copihue-v1';
+// 2. REGISTRAR SERVICE WORKER CORREGIDO
+function registerServiceWorker() {
+    if ('serviceWorker' in navigator) {
+        console.log('🔍 Intentando registrar Service Worker...');
+        
+        // SW más simple y robusto
+        const swContent = `
+            // Cache Name
+            const CACHE_NAME = 'almacen-copihue-v1.0.0';
+            
+            // Instalar Service Worker
+            self.addEventListener('install', (event) => {
+                console.log('🔄 Service Worker instalando...');
+                self.skipWaiting();
+            });
+            
+            // Activar Service Worker
+            self.addEventListener('activate', (event) => {
+                console.log('✅ Service Worker activado');
+                event.waitUntil(self.clients.claim());
+            });
+            
+            // Interceptar peticiones
+            self.addEventListener('fetch', (event) => {
+                // Dejar pasar todas las peticiones
+                return;
+            });
+        `;
+        
+        // Crear URL para el SW
+        const blob = new Blob([swContent], { type: 'application/javascript' });
+        const swURL = URL.createObjectURL(blob);
+        
+        // Registrar el SW
+        navigator.serviceWorker.register(swURL, { 
+            scope: './',
+            updateViaCache: 'none' 
+        })
+        .then(registration => {
+            console.log('✅ Service Worker registrado exitosamente');
+            console.log('📌 Scope:', registration.scope);
+            console.log('📌 Estado:', registration.active ? 'Activo' : 'Inactivo');
+            
+            // Verificar si hay errores de instalación
+            if (registration.installing) {
+                registration.installing.addEventListener('statechange', (e) => {
+                    console.log('📌 Estado del SW:', e.target.state);
+                });
+            }
+        })
+        .catch(error => {
+            console.error('❌ Error registrando Service Worker:', error);
+            console.error('📌 Detalles del error:', error.message);
+            
+            // Intentar con un SW aún más simple
+            registerFallbackServiceWorker();
+        });
+    } else {
+        console.log('⚠️ Service Worker no soportado en este navegador');
+    }
+}
 
+// SW de respaldo extremadamente simple
+function registerFallbackServiceWorker() {
+    console.log('🔄 Intentando SW de respaldo...');
+    
+    const fallbackSW = `
         self.addEventListener('install', (event) => {
+            console.log('✅ SW de respaldo instalado');
             self.skipWaiting();
-            event.waitUntil(
-                caches.open(CACHE_NAME)
-                    .then(cache => {
-                        return cache.addAll([
-                            '/',
-                            '/index.html',
-                            'icon-192x192.png',
-                            'icon-512x512.png'
-                        ]);
-                    })
-            );
         });
-
+        
         self.addEventListener('activate', (event) => {
-            event.waitUntil(
-                caches.keys().then(cacheNames => {
-                    return Promise.all(
-                        cacheNames.map(cache => {
-                            if (cache !== CACHE_NAME) {
-                                return caches.delete(cache);
-                            }
-                        })
-                    );
-                })
-            );
-            return self.clients.claim();
-        });
-
-        self.addEventListener('fetch', (event) => {
-            event.respondWith(
-                caches.match(event.request)
-                    .then(response => {
-                        return response || fetch(event.request);
-                    })
-            );
+            console.log('✅ SW de respaldo activado');
         });
     `;
-
-    // Crear un blob URL para el service worker
-    const blob = new Blob([swContent], { type: 'application/javascript' });
-    const swURL = URL.createObjectURL(blob);
-
-    return swURL;
-}
-
-// ========== REGISTRAR SERVICE WORKER CON MANIFEST DINÁMICO ==========
-function registerServiceWorker() {
-    // Crear manifest dinámico
-    createDynamicManifest();
-
-    // Crear service worker dinámico
-    const swURL = createDynamicServiceWorker();
-
-    if ('serviceWorker' in navigator) {
+    
+    try {
+        const blob = new Blob([fallbackSW], { type: 'application/javascript' });
+        const swURL = URL.createObjectURL(blob);
+        
         navigator.serviceWorker.register(swURL)
-            .then(registration => {
-                console.log('✅ Service Worker registrado:', registration.scope);
+            .then(reg => {
+                console.log('✅ SW de respaldo registrado');
+                console.log('📌 Scope:', reg.scope);
             })
-            .catch(error => {
-                console.log('❌ Error registrando Service Worker:', error);
+            .catch(err => {
+                console.error('❌ Falló SW de respaldo:', err);
+                console.log('⚠️ PWA funcionará sin Service Worker');
             });
+    } catch (e) {
+        console.error('❌ Error creando SW de respaldo:', e);
     }
 }
+
+// 3. MANEJAR INSTALACIÓN PWA - VERSIÓN SIMPLIFICADA
+window.addEventListener('beforeinstallprompt', (e) => {
+    console.log('📱 beforeinstallprompt disparado - Móvil detectado');
+    
+    // Prevenir que el banner aparezca automáticamente
+    e.preventDefault();
+    
+    // Guardar el evento para usarlo más tarde
+    deferredPrompt = e;
+    
+    // Mostrar botón de instalación SOLO en móviles
+    if (/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)) {
+        console.log('📱 Dispositivo móvil confirmado - Preparando instalación');
+        
+        // Mostrar el botón después de 2 segundos
+        setTimeout(() => {
+            if (deferredPrompt && !checkIfPWAInstalled()) {
+                console.log('📱 Mostrando botón de instalación');
+                showInstallButton();
+            }
+        }, 2000);
+    }
+});
+
+// Función para mostrar el botón de instalación
+function showInstallButton() {
+    if (installPrompt) {
+        installPrompt.style.display = 'flex';
+        console.log('✅ Botón de instalación visible');
+        
+        // Ocultar después de 30 segundos
+        setTimeout(() => {
+            if (installPrompt.style.display !== 'none') {
+                installPrompt.style.display = 'none';
+                console.log('⏰ Botón de instalación ocultado por timeout');
+            }
+        }, 30000);
+    }
+}
+
+// Verificar si ya está instalada
+function checkIfPWAInstalled() {
+    console.log('🔍 Verificando si PWA ya está instalada...');
+    
+    // Método 1: Para iOS
+    if (window.navigator.standalone === true) {
+        console.log('📱 PWA ya instalada en iOS (window.navigator.standalone)');
+        if (installPrompt) installPrompt.style.display = 'none';
+        return true;
+    }
+    
+    // Método 2: Para Android/Chrome
+    if (window.matchMedia('(display-mode: standalone)').matches) {
+        console.log('📱 PWA ya instalada (display-mode: standalone)');
+        if (installPrompt) installPrompt.style.display = 'none';
+        return true;
+    }
+    
+    // Método 3: Para otros navegadores
+    if (window.matchMedia('(display-mode: fullscreen)').matches || 
+        window.matchMedia('(display-mode: minimal-ui)').matches) {
+        console.log('📱 PWA ya instalada (otros modos)');
+        if (installPrompt) installPrompt.style.display = 'none';
+        return true;
+    }
+    
+    console.log('📱 PWA NO está instalada');
+    return false;
+}
+
+// Evento para el botón de instalación
+if (installPrompt) {
+    installPrompt.addEventListener('click', async () => {
+        console.log('🖱️ Botón de instalación clickeado');
+        
+        if (!deferredPrompt) {
+            console.log('⚠️ No hay prompt de instalación disponible');
+            
+            // Intentar método alternativo para iOS
+            if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
+                showIOSInstallInstructions();
+                return;
+            }
+            
+            return;
+        }
+        
+        console.log('📱 Mostrando diálogo de instalación...');
+        
+        try {
+            // Mostrar el prompt de instalación
+            deferredPrompt.prompt();
+            
+            // Esperar a que el usuario responda
+            const choiceResult = await deferredPrompt.userChoice;
+            
+            console.log(`Usuario ${choiceResult.outcome === 'accepted' ? 'aceptó' : 'rechazó'} la instalación`);
+            
+            // Limpiar la variable
+            deferredPrompt = null;
+            
+            // Ocultar el botón
+            if (installPrompt) {
+                installPrompt.style.display = 'none';
+            }
+            
+            if (choiceResult.outcome === 'accepted') {
+                console.log('🎉 Instalación aceptada');
+                showInstallSuccess();
+            }
+            
+        } catch (error) {
+            console.error('❌ Error durante la instalación:', error);
+        }
+    });
+}
+
+// Instrucciones para iOS
+function showIOSInstallInstructions() {
+    const instructions = document.createElement('div');
+    instructions.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.8);
+        color: white;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 10000;
+        padding: 20px;
+        text-align: center;
+    `;
+    
+    instructions.innerHTML = `
+        <div style="background: white; color: #333; padding: 30px; border-radius: 15px; max-width: 400px;">
+            <h2 style="color: #2e7d32;">📱 Instalar en iOS</h2>
+            <ol style="text-align: left; margin: 20px 0;">
+                <li>Toca el botón <strong>Compartir</strong> (📤)</li>
+                <li>Desplázate hacia abajo</li>
+                <li>Selecciona <strong>"Agregar a Inicio"</strong></li>
+                <li>Toca <strong>"Agregar"</strong></li>
+            </ol>
+            <button onclick="this.parentElement.parentElement.remove()" 
+                    style="background: #2e7d32; color: white; border: none; padding: 10px 20px; 
+                           border-radius: 10px; cursor: pointer; font-weight: bold;">
+                Entendido
+            </button>
+        </div>
+    `;
+    
+    document.body.appendChild(instructions);
+}
+
+// Detectar si la app ya está instalada
+window.addEventListener('appinstalled', () => {
+    console.log('✅ PWA instalada exitosamente (evento appinstalled)');
+    
+    if (installPrompt) {
+        installPrompt.style.display = 'none';
+    }
+    
+    deferredPrompt = null;
+    
+    // Mostrar notificación de éxito
+    showInstallSuccess();
+});
+
+// Mostrar notificación de éxito
+function showInstallSuccess() {
+    const notification = document.createElement('div');
+    notification.style.cssText = `
+        position: fixed;
+        top: 100px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #4CAF50;
+        color: white;
+        padding: 15px 25px;
+        border-radius: 25px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+        z-index: 10000;
+        font-weight: bold;
+        text-align: center;
+        animation: slideIn 0.5s ease;
+    `;
+    
+    // Agregar animación si no existe
+    if (!document.querySelector('style#slideInAnimation')) {
+        const style = document.createElement('style');
+        style.id = 'slideInAnimation';
+        style.textContent = `
+            @keyframes slideIn {
+                from { 
+                    transform: translateX(-50%) translateY(-50px); 
+                    opacity: 0; 
+                }
+                to { 
+                    transform: translateX(-50%) translateY(0); 
+                    opacity: 1; 
+                }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+    
+    notification.innerHTML = '✅ ¡App instalada exitosamente!';
+    
+    document.body.appendChild(notification);
+    
+    // Remover después de 3 segundos
+    setTimeout(() => {
+        notification.style.opacity = '0';
+        notification.style.transform = 'translateX(-50%) translateY(-20px)';
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.parentNode.removeChild(notification);
+            }
+        }, 500);
+    }, 3000);
+}
+
+// 4. INICIALIZAR PWA - VERSIÓN ROBUSTA
+function initPWA() {
+    console.log('🚀 Inicializando PWA...');
+    console.log('📍 URL actual:', window.location.href);
+    console.log('📱 User Agent:', navigator.userAgent);
+    console.log('🔌 Online:', navigator.onLine);
+    
+    // Verificar HTTPS (importante para PWA)
+    if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
+        console.warn('⚠️ PWA requiere HTTPS para funcionar completamente');
+    }
+    
+    // Crear manifest dinámico
+    try {
+        createDynamicManifest();
+    } catch (error) {
+        console.error('❌ Error creando manifest:', error);
+    }
+    
+    // Registrar Service Worker
+    try {
+        registerServiceWorker();
+    } catch (error) {
+        console.error('❌ Error inicializando Service Worker:', error);
+    }
+    
+    // Verificar si ya está instalada
+    setTimeout(() => {
+        checkIfPWAInstalled();
+    }, 1000);
+    
+    // Forzar verificación de instalación periódicamente
+    setInterval(() => {
+        checkIfPWAInstalled();
+    }, 5000);
+    
+    // Mostrar botón de instalación en móviles si no hay prompt automático
+    if (/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)) {
+        setTimeout(() => {
+            if (!deferredPrompt && !checkIfPWAInstalled()) {
+                console.log('📱 Mostrando botón de instalación (fallback para móvil)');
+                showInstallButton();
+            }
+        }, 5000);
+    }
+}
+
+// Agregar esta función a tu init() existente
+function init() {
+    detectarAdmin();
+    loadProductsFromSheets();
+    setupEventListeners();
+    setupSearch();
+    updateCartCount();
+    
+    // INICIALIZAR PWA
+    initPWA();
+}
+
+// Iniciar cuando el DOM esté listo
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('📄 DOM completamente cargado');
+    init();
+});
+
+// También iniciar cuando la ventana se cargue completamente
+window.addEventListener('load', () => {
+    console.log('🔄 Ventana completamente cargada');
+    // Verificar instalación nuevamente
+    setTimeout(checkIfPWAInstalled, 2000);
+});
