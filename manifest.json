@@ -1,27 +1,112 @@
-{
-  "name": "Almacén Copihue",
-  "short_name": "Copihue",
-  "description": "Tu almacén de barrio - Productos de calidad con la confianza de siempre",
-  "start_url": "/",
-  "display": "standalone",
-  "background_color": "#2e7d32",
-  "theme_color": "#2e7d32",
-  "orientation": "portrait-primary",
-  "scope": "/",
-  "lang": "es",
-  "icons": [
-    {
-      "src": "icon-192x192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "icon-512x512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
+// ========== MANIFEST.JSON DINÁMICO ==========
+function createDynamicManifest() {
+    const manifest = {
+        "name": "Almacén Copihue",
+        "short_name": "Almacén Copihue",
+        "description": "Tu almacén de barrio - Productos de calidad con la confianza de siempre",
+        "start_url": window.location.origin,
+        "display": "standalone",
+        "background_color": "#2e7d32",
+        "theme_color": "#2e7d32",
+        "icons": [
+            {
+                "src": "icon-192x192.png",
+                "sizes": "192x192",
+                "type": "image/png"
+            },
+            {
+                "src": "icon-512x512.png",
+                "sizes": "512x512",
+                "type": "image/png"
+            }
+        ],
+        "orientation": "portrait",
+        "scope": "/"
+    };
+
+    // Crear un blob URL para el manifest
+    const blob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+
+    // Verificar si ya existe un link de manifest, si no, crearlo
+    let link = document.querySelector('link[rel="manifest"]');
+    if (!link) {
+        link = document.createElement('link');
+        link.rel = 'manifest';
+        document.head.appendChild(link);
     }
-  ],
-  "categories": ["shopping", "food"]
+    link.href = url;
+
+    console.log('📱 Manifest.json creado dinámicamente');
+}
+
+// ========== SERVICE WORKER DINÁMICO ==========
+function createDynamicServiceWorker() {
+    const swContent = `
+        const CACHE_NAME = 'almacen-copihue-v1';
+
+        self.addEventListener('install', (event) => {
+            self.skipWaiting();
+            event.waitUntil(
+                caches.open(CACHE_NAME)
+                    .then(cache => {
+                        return cache.addAll([
+                            '/',
+                            '/index.html',
+                            'icon-192x192.png',
+                            'icon-512x512.png'
+                        ]);
+                    })
+            );
+        });
+
+        self.addEventListener('activate', (event) => {
+            event.waitUntil(
+                caches.keys().then(cacheNames => {
+                    return Promise.all(
+                        cacheNames.map(cache => {
+                            if (cache !== CACHE_NAME) {
+                                return caches.delete(cache);
+                            }
+                        })
+                    );
+                })
+            );
+            return self.clients.claim();
+        });
+
+        self.addEventListener('fetch', (event) => {
+            event.respondWith(
+                caches.match(event.request)
+                    .then(response => {
+                        return response || fetch(event.request);
+                    })
+            );
+        });
+    `;
+
+    // Crear un blob URL para el service worker
+    const blob = new Blob([swContent], { type: 'application/javascript' });
+    const swURL = URL.createObjectURL(blob);
+
+    return swURL;
+}
+
+// ========== REGISTRAR SERVICE WORKER CON MANIFEST DINÁMICO ==========
+function registerServiceWorker() {
+    // Crear manifest dinámico
+    createDynamicManifest();
+
+    // Crear service worker dinámico
+    const swURL = createDynamicServiceWorker();
+
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register(swURL)
+            .then(registration => {
+                console.log('✅ Service Worker registrado:', registration.scope);
+            })
+            .catch(error => {
+                console.log('❌ Error registrando Service Worker:', error);
+            });
+    }
 }
