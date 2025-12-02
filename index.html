@@ -928,24 +928,24 @@
         <span class="cart-count" id="floatingCartCount">0</span>
     </div>
 
-<!-- MODAL DE BÚSQUEDA PARA MÓVIL -->
-<div class="search-modal" id="searchModal">
-    <div class="search-modal-content">
-        <div class="search-modal-header">
-            <h2>Buscar Productos</h2>
-            <button class="close-search" id="closeSearch">&times;</button>
-        </div>
-        <div class="search-wrapper">
-            <input type="text" id="mobileSearch" class="search-input" 
-                   placeholder="🔍 Escribe nombre, abreviatura o sinónimo..."
-                   onkeydown="handleMobileSearchEnter(event)">
-            <button class="clear-search" id="clearMobileSearchBtn">✖️</button>
-        </div>
-        <div class="mobile-search-results" id="mobileSearchResults">
-            <!-- Resultados de búsqueda móvil -->
+    <!-- MODAL DE BÚSQUEDA PARA MÓVIL -->
+    <div class="search-modal" id="searchModal">
+        <div class="search-modal-content">
+            <div class="search-modal-header">
+                <h2>Buscar Productos</h2>
+                <button class="close-search" id="closeSearch">&times;</button>
+            </div>
+            <div class="search-wrapper">
+                <input type="text" id="mobileSearch" class="search-input" 
+                       placeholder="🔍 Escribe nombre, abreviatura o sinónimo..."
+                       onkeydown="handleMobileSearchEnter(event)">
+                <button class="clear-search" id="clearMobileSearchBtn">✖️</button>
+            </div>
+            <div class="mobile-search-results" id="mobileSearchResults">
+                <!-- Resultados de búsqueda móvil -->
+            </div>
         </div>
     </div>
-</div>
 
     <!-- MODAL DEL CARRITO -->
     <div class="cart-modal" id="cartModal">
@@ -2228,128 +2228,247 @@
             `;
         }
 
-        // ========== CÓDIGO PARA PWA ==========
-        let deferredPrompt;
-        const installPrompt = document.getElementById('installPrompt');
+// ========== CÓDIGO MEJORADO PARA PWA ==========
+let deferredPrompt;
+const installPrompt = document.getElementById('installPrompt');
+
+// Verificar si ya está instalada (más robusto)
+function checkIfPWAInstalled() {
+    // Método 1: Para Chrome/Android
+    if (window.matchMedia('(display-mode: standalone)').matches) {
+        console.log('📱 App ya instalada (modo standalone)');
+        hideInstallPrompt();
+        return true;
+    }
+    
+    // Método 2: Para iOS
+    if (window.navigator.standalone === true) {
+        console.log('📱 App ya instalada en iOS');
+        hideInstallPrompt();
+        return true;
+    }
+    
+    // Método 3: Para otros navegadores
+    if (window.location.search.includes('source=pwa')) {
+        console.log('📱 Accediendo desde PWA');
+        hideInstallPrompt();
+        return true;
+    }
+    
+    console.log('📱 App NO está instalada aún');
+    return false;
+}
+
+// Ocultar el prompt de instalación
+function hideInstallPrompt() {
+    if (installPrompt) {
+        installPrompt.style.display = 'none';
+        installPrompt.style.visibility = 'hidden';
+        installPrompt.style.opacity = '0';
+    }
+}
+
+// Mostrar el prompt de instalación
+function showInstallPrompt() {
+    if (installPrompt && !checkIfPWAInstalled()) {
+        console.log('📱 Mostrando botón de instalación');
+        installPrompt.style.display = 'flex';
+        installPrompt.style.visibility = 'visible';
+        installPrompt.style.opacity = '1';
+        installPrompt.style.animation = 'slideUp 0.5s ease';
         
-        window.addEventListener('beforeinstallprompt', (e) => {
-            e.preventDefault();
-            deferredPrompt = e;
-            
-            setTimeout(() => {
-                if (deferredPrompt && installPrompt) {
-                    installPrompt.style.display = 'flex';
-                    
-                    setTimeout(() => {
-                        if (installPrompt.style.display !== 'none') {
-                            installPrompt.style.display = 'none';
-                        }
-                    }, 30000);
-                }
-            }, 3000);
-        });
+        // Ocultar después de 30 segundos si no se usa
+        setTimeout(() => {
+            if (installPrompt.style.display === 'flex') {
+                hideInstallPrompt();
+            }
+        }, 30000);
+    }
+}
+
+// Cuando el navegador detecta que se puede instalar
+window.addEventListener('beforeinstallprompt', (e) => {
+    console.log('📱 Navegador quiere instalar la app');
+    
+    // Prevenir que muestre el banner automático
+    e.preventDefault();
+    
+    // Guardar el evento para usarlo después
+    deferredPrompt = e;
+    
+    // Verificar si ya está instalada primero
+    if (!checkIfPWAInstalled()) {
+        // Mostrar nuestro botón personalizado después de 5 segundos
+        setTimeout(showInstallPrompt, 5000);
+    }
+});
+
+// Cuando el usuario toca el botón "Instalar App"
+if (installPrompt) {
+    installPrompt.addEventListener('click', async () => {
+        console.log('🖱️ Usuario tocó el botón de instalación');
         
-        if (installPrompt) {
-            installPrompt.addEventListener('click', async () => {
-                if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
-                    document.getElementById('iosInstructions').style.display = 'flex';
-                    return;
+        // Si es iPhone/iPad
+        if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
+            console.log('📱 Dispositivo iOS detectado');
+            document.getElementById('iosInstructions').style.display = 'flex';
+            hideInstallPrompt();
+            return;
+        }
+        
+        // Si es Android/Chrome y tenemos el prompt
+        if (deferredPrompt) {
+            try {
+                console.log('📱 Mostrando diálogo de instalación...');
+                deferredPrompt.prompt();
+                
+                // Esperar a que el usuario decida
+                const choiceResult = await deferredPrompt.userChoice;
+                
+                console.log(`📊 Usuario ${choiceResult.outcome === 'accepted' ? 'aceptó' : 'rechazó'} la instalación`);
+                
+                // Limpiar el prompt
+                deferredPrompt = null;
+                
+                // Ocultar nuestro botón
+                hideInstallPrompt();
+                
+                // Mostrar mensaje de éxito si aceptó
+                if (choiceResult.outcome === 'accepted') {
+                    showSuccessMessage('✅ ¡App instalada exitosamente!');
+                    // Agregar parámetro para evitar que vuelva a aparecer
+                    if (!window.location.search.includes('installed=true')) {
+                        const newUrl = window.location.href + (window.location.search ? '&' : '?') + 'installed=true';
+                        window.history.replaceState({}, '', newUrl);
+                    }
                 }
                 
-                if (deferredPrompt) {
-                    try {
-                        deferredPrompt.prompt();
-                        const choiceResult = await deferredPrompt.userChoice;
-                        
-                        deferredPrompt = null;
-                        installPrompt.style.display = 'none';
-                        
-                        if (choiceResult.outcome === 'accepted') {
-                            showSuccessMessage('✅ ¡App instalada exitosamente!');
-                        }
-                        
-                    } catch (error) {
-                        console.error('Error durante la instalación:', error);
-                        showSuccessMessage('⚠️ Error en la instalación');
-                    }
-                } else {
-                    location.reload();
-                }
-            });
+            } catch (error) {
+                console.error('❌ Error durante la instalación:', error);
+                showSuccessMessage('⚠️ Error en la instalación');
+            }
+        } else {
+            console.log('⚠️ No hay prompt disponible');
+            // Si no hay prompt pero el usuario quiere instalar, mostrar instrucciones
+            if (/Android/i.test(navigator.userAgent)) {
+                showSuccessMessage('📱 Usa el menú de Chrome (⋮) → "Instalar app"');
+            } else {
+                document.getElementById('iosInstructions').style.display = 'flex';
+            }
+            hideInstallPrompt();
         }
-        
-        window.addEventListener('appinstalled', () => {
-            if (installPrompt) {
-                installPrompt.style.display = 'none';
-            }
-            deferredPrompt = null;
-            showSuccessMessage('✅ ¡App instalada correctamente!');
-        });
-        
-        function showSuccessMessage(message) {
-            const notification = document.createElement('div');
-            notification.className = 'success-notification';
-            notification.textContent = message;
-            document.body.appendChild(notification);
-            
-            setTimeout(() => {
-                if (notification.parentNode) {
-                    notification.parentNode.removeChild(notification);
-                }
-            }, 3000);
-        }
-        
-        function checkIfPWAInstalled() {
-            if (window.matchMedia('(display-mode: standalone)').matches) {
-                if (installPrompt) installPrompt.style.display = 'none';
-                return true;
-            }
-            
-            if (window.navigator.standalone === true) {
-                if (installPrompt) installPrompt.style.display = 'none';
-                return true;
-            }
-            
-            return false;
-        }
-        
-        function initPWA() {
-            setTimeout(checkIfPWAInstalled, 1000);
-            
-            const manifest = {
-                "name": "Almacén Copihue",
-                "short_name": "Almacén",
-                "description": "Tu almacén de barrio",
-                "start_url": ".",
-                "display": "standalone",
-                "background_color": "#2e7d32",
-                "theme_color": "#2e7d32",
-                "icons": [{
-                    "src": "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTkyIiBoZWlnaHQ9IjE5MiIgdmlld0JveD0iMCAwIDE5MiAxOTIiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iOTYiIGN5PSI5NiIgcj0iOTYiIGZpbGw9IiMyRTdEMzIiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjQ4IiBmaWxsPSJ3aGl0ZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSI+QTwvdGV4dD48L3N2Zz4=",
-                    "sizes": "192x192",
-                    "type": "image/svg+xml"
-                }],
-                "orientation": "portrait",
-                "scope": "."
-            };
-            
-            const manifestLink = document.getElementById('appManifest');
-            if (manifestLink) {
-                const blob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
-                manifestLink.href = URL.createObjectURL(blob);
-            }
-            
-            const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-            if (isMobile && installPrompt) {
-                setTimeout(() => {
-                    if (!deferredPrompt && !checkIfPWAInstalled()) {
-                        installPrompt.style.display = 'flex';
-                    }
-                }, 5000);
-            }
-        }
+    });
+}
 
-        document.addEventListener("DOMContentLoaded", init);
+// Cuando la app ya se instaló
+window.addEventListener('appinstalled', () => {
+    console.log('🎉 ¡App instalada exitosamente!');
+    
+    hideInstallPrompt();
+    deferredPrompt = null;
+    
+    showSuccessMessage('✅ ¡App instalada correctamente!');
+    
+    // Agregar parámetro a la URL para evitar que aparezca de nuevo
+    if (!window.location.search.includes('installed=true')) {
+        const newUrl = window.location.href + (window.location.search ? '&' : '?') + 'installed=true';
+        window.history.replaceState({}, '', newUrl);
+    }
+});
+
+// Función para mostrar mensajes de éxito/error
+function showSuccessMessage(message) {
+    const notification = document.createElement('div');
+    notification.className = 'success-notification';
+    notification.textContent = message;
+    document.body.appendChild(notification);
+    
+    // Auto-eliminar después de 3 segundos
+    setTimeout(() => {
+        if (notification.parentNode) {
+            notification.parentNode.removeChild(notification);
+        }
+    }, 3000);
+}
+
+// Inicializar el sistema de instalación PWA mejorado
+function initPWA() {
+    console.log('🚀 Iniciando sistema de instalación PWA mejorado...');
+    console.log('📱 Dispositivo:', navigator.userAgent);
+    console.log('📱 URL:', window.location.href);
+    
+    // Verificar parámetros de URL que indiquen instalación
+    if (window.location.search.includes('installed=true')) {
+        console.log('📱 Parámetro "installed=true" detectado, ocultando prompt');
+        hideInstallPrompt();
+        return;
+    }
+    
+    // Verificar si ya está instalada inmediatamente
+    checkIfPWAInstalled();
+    
+    // Verificar cada 10 segundos (por si acaso)
+    const checkInterval = setInterval(() => {
+        if (checkIfPWAInstalled()) {
+            clearInterval(checkInterval);
+        }
+    }, 10000);
+    
+    // Crear manifest automáticamente (sin archivo externo)
+    const manifest = {
+        "name": "Almacén Copihue",
+        "short_name": "Almacén",
+        "description": "Tu almacén de barrio",
+        "start_url": window.location.origin + window.location.pathname + "?source=pwa",
+        "display": "standalone",
+        "background_color": "#2e7d32",
+        "theme_color": "#2e7d32",
+        "icons": [{
+            "src": "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTkyIiBoZWlnaHQ9IjE5MiIgdmlld0JveD0iMCAwIDE5MiAxOTIiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iOTYiIGN5PSI5NiIgcj0iOTYiIGZpbGw9IiMyRTdEMzIiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjQ4IiBmaWxsPSJ3aGl0ZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSI+QTwvdGV4dD48L3N2Zz4=",
+            "sizes": "192x192",
+            "type": "image/svg+xml"
+        }],
+        "orientation": "portrait",
+        "scope": "."
+    };
+    
+    // Actualizar el link del manifest
+    const manifestLink = document.getElementById('appManifest');
+    if (manifestLink) {
+        const blob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
+        manifestLink.href = URL.createObjectURL(blob);
+        console.log('✅ Manifest creado automáticamente');
+    }
+    
+    // Mostrar botón solo si es móvil y no está instalado
+    const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+    if (isMobile && !checkIfPWAInstalled()) {
+        // Mostrar después de 8 segundos (más tiempo para que cargue todo)
+        setTimeout(() => {
+            if (!checkIfPWAInstalled() && deferredPrompt) {
+                showInstallPrompt();
+            }
+        }, 8000);
+    }
+}
+
+// También agregar un listener para cuando la visibilidad de la página cambie
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+        // Cuando la página vuelve a ser visible, verificar estado
+        setTimeout(checkIfPWAInstalled, 1000);
+    }
+});
+
+// Llamar a initPWA() en tu función init()
+function init() {
+    detectarAdmin();
+    loadProductsFromSheets();
+    setupEventListeners();
+    setupSearch();
+    updateCartCount();
+    initPWA(); // <-- ¡Esto es importante!
+}
     </script>
 </body>
 </html>
