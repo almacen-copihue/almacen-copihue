@@ -1285,7 +1285,7 @@
         };
 
         // ========== CÓDIGO ALMACÉN COPIHUE ==========
-        const SHEET_ID = '1UFXOYC8uj1NK066SYDFiSZiS8scugImwwhw-OzmnQQU';
+        const SHEET_ID = '1hKeM-13t6wyGD5Ya4Rx9NeUJXsgJoVN4dOb-rklPznA';
         
         // Variables globales
         let products = [];
@@ -1489,33 +1489,53 @@
             return results;
         }
 
-        // Cargar productos desde Google Sheets
-        async function loadProductsFromSheets() {
-            try {
-                productsGrid.innerHTML = '<div class="loading">🔄 Conectando con Google Sheets...</div>';
-                
-                const PROXY_URL = 'https://corsproxy.io/?';
-                const SHEET_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Hoja1`;
-                const URL_CON_PROXY = PROXY_URL + encodeURIComponent(SHEET_URL);
-                
-                const response = await fetch(URL_CON_PROXY);
-                
-                if (!response.ok) {
-                    throw new Error(`Error HTTP: ${response.status}`);
-                }
-                
-                const csvText = await response.text();
-                
-                if (!csvText || csvText.trim() === '') {
-                    throw new Error('No se recibieron datos del Sheets');
-                }
-                
-                processCSVData(csvText);
-                
-            } catch (error) {
-                loadBackupProducts();
-            }
+async function loadProductsFromSheets() {
+    try {
+        productsGrid.innerHTML = '<div class="loading">🔄 Cargando productos...</div>';
+        
+        // PRIMERO: Prueba con "inventario" (minúscula)
+        const SHEET_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=inventario`;
+        const PROXY_URL = 'https://corsproxy.io/?';
+        let URL_CON_PROXY = PROXY_URL + encodeURIComponent(SHEET_URL);
+        
+        console.log('Intentando con URL:', SHEET_URL);
+        
+        let response = await fetch(URL_CON_PROXY);
+        
+        // SEGUNDO: Si falla, prueba con "Inventario" (mayúscula)
+        if (!response.ok) {
+            console.log('Probando con "Inventario" (mayúscula)...');
+            const SHEET_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=inventario`;
+            URL_CON_PROXY = PROXY_URL + encodeURIComponent(SHEET_URL);
+            response = await fetch(URL_CON_PROXY);
         }
+        
+        // TERCERO: Si aún falla, prueba con "Stock"
+        if (!response.ok) {
+            console.log('Probando con "Stock"...');
+            SHEET_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Stock`;
+            URL_CON_PROXY = PROXY_URL + encodeURIComponent(SHEET_URL);
+            response = await fetch(URL_CON_PROXY);
+        }
+        
+        if (!response.ok) {
+            throw new Error(`Error HTTP: ${response.status}`);
+        }
+        
+        const csvText = await response.text();
+        console.log('Datos recibidos (primeros 500 chars):', csvText.substring(0, 500));
+        
+        if (!csvText || csvText.trim() === '') {
+            throw new Error('No se recibieron datos del Sheets');
+        }
+        
+        processCSVData(csvText);
+        
+    } catch (error) {
+        console.error('Error completo:', error);
+        loadBackupProducts();
+    }
+}
 
         function processCSVData(csvText) {
             const lines = csvText.split('\n').filter(line => line.trim() !== '');
