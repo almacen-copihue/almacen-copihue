@@ -3227,80 +3227,28 @@ function renderCartItems() {
             return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
         }
 
-        function verificarStockBajo() {
-            if (!esAdmin) return;
-            
-            const lowStockProducts = products.filter(p => 
-                p.stockNumber > 0 && p.stockNumber <= 3
-            );
-            
-            if (lowStockProducts.length > 0 && !lowStockAlertSent) {
-                lowStockAlertSent = true;
-                
-                // 1. NOTIFICACIÓN EN PANTALLA
-                const lowStockNotification = document.createElement('div');
-                lowStockNotification.className = 'stock-notification';
-                lowStockNotification.innerHTML = `
-                    ⚠️ <strong>ALERTA ADMIN:</strong> ${lowStockProducts.length} producto(s) con stock bajo
-                    <br>
-                    <small>${lowStockProducts.map(p => `${p.name} (${p.stockNumber})`).join(', ')}</small>
-                    <br><br>
-                    <button id="enviarAlertaWhatsApp" style="
-                        background: #4CAF50;
-                        color: white;
-                        border: none;
-                        padding: 8px 16px;
-                        border-radius: 20px;
-                        cursor: pointer;
-                        font-weight: bold;
-                        margin-top: 5px;
-                        font-size: 0.8rem;
-                    ">
-                        📱 Enviar lista por WhatsApp
-                    </button>
-                `;
-                
-                document.body.appendChild(lowStockNotification);
-                
-                // 2. AGREGAR EVENT LISTENER AL BOTÓN
-                setTimeout(() => {
-                    const enviarBtn = document.getElementById('enviarAlertaWhatsApp');
-                    if (enviarBtn) {
-                        enviarBtn.addEventListener('click', function() {
-                            enviarAlertaStockWhatsApp(lowStockProducts);
-                            lowStockNotification.remove();
-                            lowStockAlertSent = false;
-                        });
-                    }
-                }, 100);
-                
-                // 3. AUTO-ELIMINAR DESPUÉS DE 30 SEGUNDOS
-                setTimeout(() => {
-                    if (document.body.contains(lowStockNotification)) {
-                        lowStockNotification.remove();
-                        lowStockAlertSent = false;
-                    }
-                }, 30000);
-            }
-        }
-
+// ========== FUNCIÓN MEJORADA PARA VERIFICAR STOCK BAJO ==========
 function verificarStockBajo() {
     if (!esAdmin) return;
     
+    // Filtrar SOLO los productos con stock 0 o 1 (críticos)
     const lowStockProducts = products.filter(p => 
-        p.stockNumber > 0 && p.stockNumber <= 3
+        p.stockNumber === 0 || p.stockNumber === 1
     );
+    
+    // Ordenar por stock: primero los que tienen 0, luego los que tienen 1
+    lowStockProducts.sort((a, b) => a.stockNumber - b.stockNumber);
     
     if (lowStockProducts.length > 0 && !lowStockAlertSent) {
         lowStockAlertSent = true;
         
-        // 1. NOTIFICACIÓN EN PANTALLA
+        // 1. NOTIFICACIÓN EN PANTALLA MÁS LIMPIA
         const lowStockNotification = document.createElement('div');
         lowStockNotification.className = 'stock-notification';
         lowStockNotification.innerHTML = `
-            ⚠️ <strong>ALERTA ADMIN:</strong> ${lowStockProducts.length} producto(s) con stock bajo
+            ⚠️ <strong>ALERTA ADMIN - STOCK CRÍTICO</strong>
             <br>
-            <small>${lowStockProducts.map(p => `${p.name} (${p.stockNumber})`).join(', ')}</small>
+            <small>${lowStockProducts.length} producto(s) con stock 0-1</small>
             <br><br>
             <button id="enviarAlertaWhatsApp" style="
                 background: #4CAF50;
@@ -3311,16 +3259,33 @@ function verificarStockBajo() {
                 cursor: pointer;
                 font-weight: bold;
                 margin-top: 5px;
-                font-size: 0.8rem;
+                font-size: 0.9rem;
+                width: 100%;
             ">
-                📱 Enviar lista por WhatsApp
+                📱 Enviar alerta por WhatsApp
+            </button>
+            <br>
+            <button id="cerrarAlerta" style="
+                background: #ff6f00;
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 15px;
+                cursor: pointer;
+                font-weight: bold;
+                margin-top: 5px;
+                font-size: 0.8rem;
+                width: 100%;
+            ">
+                ✖️ Cerrar
             </button>
         `;
         
         document.body.appendChild(lowStockNotification);
         
-        // 2. AGREGAR EVENT LISTENER AL BOTÓN
+        // 2. AGREGAR EVENT LISTENERS
         setTimeout(() => {
+            // Botón para enviar WhatsApp
             const enviarBtn = document.getElementById('enviarAlertaWhatsApp');
             if (enviarBtn) {
                 enviarBtn.addEventListener('click', function() {
@@ -3329,15 +3294,108 @@ function verificarStockBajo() {
                     lowStockAlertSent = false;
                 });
             }
+            
+            // Botón para cerrar
+            const cerrarBtn = document.getElementById('cerrarAlerta');
+            if (cerrarBtn) {
+                cerrarBtn.addEventListener('click', function() {
+                    lowStockNotification.remove();
+                    lowStockAlertSent = false;
+                });
+            }
         }, 100);
         
-        // 3. AUTO-ELIMINAR DESPUÉS DE 30 SEGUNDOS
+        // 3. AUTO-ELIMINAR DESPUÉS DE 45 SEGUNDOS
         setTimeout(() => {
             if (document.body.contains(lowStockNotification)) {
                 lowStockNotification.remove();
                 lowStockAlertSent = false;
             }
-        }, 30000);
+        }, 45000);
+    }
+}
+
+// ========== FUNCIÓN MEJORADA PARA ENVIAR ALERTA WHATSAPP ==========
+function enviarAlertaStockWhatsApp(lowStockProducts) {
+    const phoneNumber = "5492944907380";
+    
+    // Formatear fecha
+    const ahora = new Date();
+    const fecha = ahora.toLocaleDateString('es-AR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+    
+    // Separar productos por nivel de stock
+    const sinStock = lowStockProducts.filter(p => p.stockNumber === 0);
+    const stockUno = lowStockProducts.filter(p => p.stockNumber === 1);
+    
+    // Crear mensaje estructurado
+    let message = `*🚨 ALERTA STOCK CRÍTICO - ALMACÉN COPIHUE*\n`;
+    message += `📅 ${fecha}\n`;
+    message += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    
+    // PRODUCTOS SIN STOCK (0)
+    if (sinStock.length > 0) {
+        message += `*❌ SIN STOCK (${sinStock.length} productos):*\n`;
+        sinStock.forEach((p, index) => {
+            message += `${index + 1}. ${p.name}\n`;
+        });
+        message += '\n';
+    }
+    
+    // PRODUCTOS CON STOCK 1
+    if (stockUno.length > 0) {
+        message += `*⚠️ ÚLTIMA UNIDAD (${stockUno.length} productos):*\n`;
+        stockUno.forEach((p, index) => {
+            message += `${index + 1}. ${p.name}\n`;
+        });
+        message += '\n';
+    }
+    
+    // RESUMEN
+    message += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+    message += `📊 *RESUMEN:*\n`;
+    message += `• ❌ Sin stock: ${sinStock.length}\n`;
+    message += `• ⚠️ Última unidad: ${stockUno.length}\n`;
+    message += `• 📦 Total crítico: ${lowStockProducts.length}\n\n`;
+    
+    message += `📍 *Almacén Copihue* - Copihue 457\n`;
+    message += `⏰ Generado automáticamente por el sistema\n`;
+    
+    // Enviar mensaje
+    const encodedMessage = encodeURIComponent(message);
+    const whatsappURL = `https://wa.me/${phoneNumber}?text=${encodedMessage}`;
+    window.open(whatsappURL, "_blank");
+}
+
+// ========== FUNCIÓN PARA MOSTRAR RESUMEN EN CONSOLA ==========
+function mostrarResumenStock() {
+    if (!esAdmin) return;
+    
+    const sinStock = products.filter(p => p.stockNumber === 0);
+    const stockUno = products.filter(p => p.stockNumber === 1);
+    const stockDosTres = products.filter(p => p.stockNumber >= 2 && p.stockNumber <= 3);
+    
+    console.log('📊 RESUMEN DE STOCK - ALMACÉN COPIHUE');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log(`❌ Sin stock: ${sinStock.length} productos`);
+    console.log(`⚠️ Última unidad: ${stockUno.length} productos`);
+    console.log(`📦 Stock bajo (2-3): ${stockDosTres.length} productos`);
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    
+    // Mostrar solo los primeros 5 de cada categoría
+    if (sinStock.length > 0) {
+        console.log('PRIMEROS 5 SIN STOCK:');
+        sinStock.slice(0, 5).forEach(p => console.log(`- ${p.name}`));
+    }
+    
+    if (stockUno.length > 0) {
+        console.log('PRIMEROS 5 CON UNA UNIDAD:');
+        stockUno.slice(0, 5).forEach(p => console.log(`- ${p.name}`));
     }
 }
 
