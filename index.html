@@ -1764,6 +1764,9 @@ function sendOrderViaWhatsApp() {
     let totalSavings = 0;
     let itemsCount = 0;
     let orderLines = [];
+    
+    // Contador de productos con oferta
+    let ofertasCount = 0;
 
     // 1. CALCULAR TODOS LOS DATOS
     cart.forEach(item => {
@@ -1779,57 +1782,26 @@ function sendOrderViaWhatsApp() {
         totalSavings += itemSavings;
         itemsCount += item.quantity;
         
-        // DETERMINAR TIPO DE PRODUCTO
-        const nombreLower = product.name.toLowerCase();
+        if (itemSavings > 0) ofertasCount++;
+        
+        // Formato simple y directo
         const nombreUpper = product.name.toUpperCase();
         let icono = itemSavings > 0 ? '🔥' : '✅';
+        
+        // Formato según tipo
         let descripcion = '';
+        const nombreLower = product.name.toLowerCase();
         
-        // === REGLAS ESPECÍFICAS DE ALMACÉN COPIHUE ===
-        
-        // 1. QUESOS POR 250g (PORCIÓN ESPECIAL)
-        const esQueso250g = nombreLower.includes('queso') && 
-                           (nombreLower.includes('250gr') || nombreLower.includes('250g') || 
-                            nombreLower.includes('250 gr') || nombreLower.includes('x 250'));
-        
-        if (esQueso250g) {
-            const totalGramos = item.quantity * 250;
-            descripcion = `${icono} ${nombreUpper}\n   ${item.quantity} porción${item.quantity > 1 ? 'es' : ''} × $${item.price} = $${itemFinal}\n   (${totalGramos}g total)`;
-        } 
-        // 2. FRUTAS/VERDURAS POR KILO
-        else if (product.category === "FRUTAS Y VERDURAS" && 
-                (nombreLower.includes(' kg') || nombreLower.includes('kilo') || 
-                 nombreLower.endsWith('kg'))) {
-            
+        // QUESOS POR PORCIÓN
+        if (nombreLower.includes('queso') && 
+            (nombreLower.includes('250gr') || nombreLower.includes('250g'))) {
+            descripcion = `${icono} ${nombreUpper}\n   ${item.quantity} porción${item.quantity > 1 ? 'es' : ''} × $${item.price} = $${itemFinal}`;
+        }
+        // POR KILO
+        else if (nombreLower.includes('kg') || nombreLower.endsWith('kg')) {
             descripcion = `${icono} ${nombreUpper}\n   ${item.quantity} kg × $${item.price} = $${itemFinal}`;
         }
-        // 3. FRUTAS/VERDURAS POR UNIDAD (cuando dice "x UNIDAD")
-        else if (product.category === "FRUTAS Y VERDURAS" && 
-                (nombreLower.includes('x unidad') || nombreLower.includes('por unidad'))) {
-            
-            descripcion = `${icono} ${nombreUpper}\n   ${item.quantity} unidad${item.quantity > 1 ? 'es' : ''} × $${item.price} = $${itemFinal}`;
-        }
-        // 4. PRODUCTOS POR PESO (NO frutas/verduras) - ejemplo: "AZÚCAR KG"
-        else if (nombreLower.includes(' kg') || nombreLower.includes('kilo') || 
-                nombreLower.endsWith('kg')) {
-            
-            descripcion = `${icono} ${nombreUpper}\n   ${item.quantity} kg × $${item.price} = $${itemFinal}`;
-        }
-        // 5. PRODUCTOS POR GRAMOS (NO quesos) - ejemplo: "CAFÉ 250GR"
-        else if ((nombreLower.includes('gr') || nombreLower.includes('gramo') || 
-                 nombreLower.includes('g ')) && !esQueso250g) {
-            
-            // Extraer los gramos del nombre (ej: "250gr", "500g")
-            const match = nombreLower.match(/(\d+)\s*(gr|g|gramo)/);
-            if (match) {
-                const gramos = parseInt(match[1]);
-                const totalGramos = item.quantity * gramos;
-                descripcion = `${icono} ${nombreUpper}\n   ${item.quantity} unidad${item.quantity > 1 ? 'es' : ''} × $${item.price} = $${itemFinal}`;
-            } else {
-                descripcion = `${icono} ${nombreUpper}\n   ${item.quantity} unidad${item.quantity > 1 ? 'es' : ''} × $${item.price} = $${itemFinal}`;
-            }
-        }
-        // 6. TODO LO DEMÁS (PRODUCTOS ENVASADOS/UNIDAD)
+        // TODO LO DEMÁS
         else {
             descripcion = `${icono} ${nombreUpper}\n   ${item.quantity} unidad${item.quantity > 1 ? 'es' : ''} × $${item.price} = $${itemFinal}`;
         }
@@ -1837,51 +1809,77 @@ function sendOrderViaWhatsApp() {
         orderLines.push(descripcion);
     });
 
-    // 2. ARMAR EL MENSAJE CON FORMATO PROFESIONAL
-    let message = `*🧀 PEDIDO ALMACÉN COPIHUE*\n`;
-    message += `═══════════════════════════\n\n`;
+    // 2. MENSAJE PSICOLÓGICAMENTE DISEÑADO 🧠
+    let message = `*🛒 PEDIDO ALMACÉN COPIHUE*\n`;
+    message += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    message += `📦 *TU COMPRA:*\n\n`;
     
-    // PRODUCTOS
+    // PRODUCTOS - Formato ultra claro
     orderLines.forEach(line => {
         message += line + '\n\n';
     });
     
-    // RESUMEN
-    message += `═══════════════════════════\n`;
-    message += `*TOTAL PRODUCTOS:* ${cart.length} items (${itemsCount} unidades)\n`;
+    // RESUMEN CON PSICOLOGÍA DE COMPRA
+    message += `━━━━━━━━━━━━━━━━━━━━━━\n`;
     
-    if (totalSavings > 0) {
-        message += `*VALOR ORIGINAL:* $${totalNormal}\n`;
-        message += `*DESCUENTO APLICADO:* -$${totalSavings}\n`;
+    if (ofertasCount > 0) {
+        message += `🎊 *¡GENIAL! APROVECHASTE ${ofertasCount} OFERTAS!*\n`;
     }
     
-    message += `═══════════════════════════\n`;
-    message += `*💰 TOTAL A PAGAR:* $${totalFinal}\n`;
-    message += `═══════════════════════════\n\n`;
+    message += `🛍️  *Productos:* ${cart.length} items\n`;
+    message += `📊 *Unidades:* ${itemsCount}\n\n`;
     
-    // INFORMACIÓN DEL LOCAL
-    message += `📍 *Retiro:* Copihue 457\n`;
-    message += `⏰ *Horario:* 11:30 a 23:30 hrs\n`;
-    message += `📱 *Confirmar disponibilidad*\n\n`;
-    
-    // MENSAJE ESTACIONAL (si existe la función)
-    if (typeof obtenerMensajeEstacional === 'function') {
-        const mensajeEstacional = obtenerMensajeEstacional();
-        if (mensajeEstacional && mensajeEstacional !== "Gracias por elegirnos 🙌.") {
-            message += `${mensajeEstacional}\n\n`;
+    if (totalSavings > 0) {
+        const porcentajeAhorro = Math.round((totalSavings / totalNormal) * 100);
+        message += `💰 *Precio original:* $${totalNormal}\n`;
+        message += `⚡ *¡AHORRASTE $${totalSavings}!*\n`;
+        message += `🎯 *Eso es ${porcentajeAhorro}% de descuento*\n\n`;
+        
+        // COMPARATIVA PSICOLÓGICA
+        if (porcentajeAhorro >= 30) {
+            message += `🏆 *¡OFERTÓN! Más del 30% de descuento*\n`;
+        } else if (porcentajeAhorro >= 20) {
+            message += `✨ *¡GRAN OFERTA! Más del 20% de descuento*\n`;
         }
     }
     
-    // CIERRE
-    message += `*⏳ Pedido listo en 15-20 min*\n`;
-    message += `_¡Gracias por elegir el barrio!_`;
+    message += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+    message += `💵 *TOTAL A PAGAR: $${totalFinal}*\n`;
+    message += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    
+    // LLAMADO A LA ACCIÓN URGENTE
+    message += `🚀 *¡TU PEDIDO ESTÁ LISTO!*\n\n`;
+    
+    // BENEFICIOS EN NEGRITA
+    message += `✅ *Retiro rápido en 15-20 min*\n`;
+    message += `✅ *Productos frescos y de calidad*\n`;
+    message += `✅ *Atención personalizada*\n`;
+    message += `✅ *Precios de barrio*\n\n`;
+    
+    // INFORMACIÓN CLAVE
+    message += `📍 *Dirección:* Copihue 457\n`;
+    message += `⏰ *Horario:* 11:30 a 23:30 hs\n`;
+    message += `📱 *Confirmá por este WhatsApp*\n\n`;
+    
+    // GATILLO FINAL PSICOLÓGICO
+    if (totalSavings > 0) {
+        message += `💡 *¿Sabías que ahorraste $${totalSavings}?\n`;
+        message += `   ¡Eso te alcanza para un café extra! ☕*\n\n`;
+    }
+    
+    // URGENCIA + RECOMPENSA
+    message += `⏳ *Pedido listo en 15-20 minutos*\n`;
+    message += `🎁 *Gracias por elegir tu almacén de confianza*\n\n`;
+    
+    // HASHTAGS DE MARCA
+    message += `#AlmacénCopihue #PreciosDeBarrio #LaConfianzaDeSiempre`;
     
     // 3. ENVIAR
     const encodedMessage = encodeURIComponent(message);
     const whatsappURL = `https://wa.me/${phoneNumber}?text=${encodedMessage}`;
     window.open(whatsappURL, "_blank");
 
-    // 4. LIMPIAR CARRITO
+    // 4. LIMPIAR
     closeCartModal();
     cart = [];
     updateCartCount();
@@ -3229,7 +3227,6 @@ function renderCartItems() {
             return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
         }
 
-        // ========== MONITOREO DE STOCK BAJO ==========
         function verificarStockBajo() {
             if (!esAdmin) return;
             
@@ -3240,22 +3237,109 @@ function renderCartItems() {
             if (lowStockProducts.length > 0 && !lowStockAlertSent) {
                 lowStockAlertSent = true;
                 
+                // 1. NOTIFICACIÓN EN PANTALLA
                 const lowStockNotification = document.createElement('div');
                 lowStockNotification.className = 'stock-notification';
                 lowStockNotification.innerHTML = `
                     ⚠️ <strong>ALERTA ADMIN:</strong> ${lowStockProducts.length} producto(s) con stock bajo
                     <br>
                     <small>${lowStockProducts.map(p => `${p.name} (${p.stockNumber})`).join(', ')}</small>
+                    <br><br>
+                    <button id="enviarAlertaWhatsApp" style="
+                        background: #4CAF50;
+                        color: white;
+                        border: none;
+                        padding: 8px 16px;
+                        border-radius: 20px;
+                        cursor: pointer;
+                        font-weight: bold;
+                        margin-top: 5px;
+                        font-size: 0.8rem;
+                    ">
+                        📱 Enviar lista por WhatsApp
+                    </button>
                 `;
                 
                 document.body.appendChild(lowStockNotification);
                 
+                // 2. AGREGAR EVENT LISTENER AL BOTÓN
                 setTimeout(() => {
-                    lowStockNotification.remove();
-                    lowStockAlertSent = false;
-                }, 10000);
+                    const enviarBtn = document.getElementById('enviarAlertaWhatsApp');
+                    if (enviarBtn) {
+                        enviarBtn.addEventListener('click', function() {
+                            enviarAlertaStockWhatsApp(lowStockProducts);
+                            lowStockNotification.remove();
+                            lowStockAlertSent = false;
+                        });
+                    }
+                }, 100);
+                
+                // 3. AUTO-ELIMINAR DESPUÉS DE 30 SEGUNDOS
+                setTimeout(() => {
+                    if (document.body.contains(lowStockNotification)) {
+                        lowStockNotification.remove();
+                        lowStockAlertSent = false;
+                    }
+                }, 30000);
             }
         }
+
+function verificarStockBajo() {
+    if (!esAdmin) return;
+    
+    const lowStockProducts = products.filter(p => 
+        p.stockNumber > 0 && p.stockNumber <= 3
+    );
+    
+    if (lowStockProducts.length > 0 && !lowStockAlertSent) {
+        lowStockAlertSent = true;
+        
+        // 1. NOTIFICACIÓN EN PANTALLA
+        const lowStockNotification = document.createElement('div');
+        lowStockNotification.className = 'stock-notification';
+        lowStockNotification.innerHTML = `
+            ⚠️ <strong>ALERTA ADMIN:</strong> ${lowStockProducts.length} producto(s) con stock bajo
+            <br>
+            <small>${lowStockProducts.map(p => `${p.name} (${p.stockNumber})`).join(', ')}</small>
+            <br><br>
+            <button id="enviarAlertaWhatsApp" style="
+                background: #4CAF50;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 20px;
+                cursor: pointer;
+                font-weight: bold;
+                margin-top: 5px;
+                font-size: 0.8rem;
+            ">
+                📱 Enviar lista por WhatsApp
+            </button>
+        `;
+        
+        document.body.appendChild(lowStockNotification);
+        
+        // 2. AGREGAR EVENT LISTENER AL BOTÓN
+        setTimeout(() => {
+            const enviarBtn = document.getElementById('enviarAlertaWhatsApp');
+            if (enviarBtn) {
+                enviarBtn.addEventListener('click', function() {
+                    enviarAlertaStockWhatsApp(lowStockProducts);
+                    lowStockNotification.remove();
+                    lowStockAlertSent = false;
+                });
+            }
+        }, 100);
+        
+        // 3. AUTO-ELIMINAR DESPUÉS DE 30 SEGUNDOS
+        setTimeout(() => {
+            if (document.body.contains(lowStockNotification)) {
+                lowStockNotification.remove();
+                lowStockAlertSent = false;
+            }
+        }, 30000);
+    }
+}
 
         // ========== INICIALIZACIÓN ==========
         document.addEventListener("DOMContentLoaded", function() {
