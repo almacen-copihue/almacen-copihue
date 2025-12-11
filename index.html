@@ -1199,32 +1199,20 @@ function initPWA() {
             window.location.reload();
         });
     }
-}  // <-- ¡IMPORTANTE! Este cierre cierra la función initPWA()
-
-function showSuccessMessage(message) {
-    const notification = document.createElement('div');
-    notification.className = 'success-notification';
-    notification.textContent = message;
-    document.body.appendChild(notification);
     
-    setTimeout(() => {
-        if (notification.parentNode) {
-            notification.parentNode.removeChild(notification);
-        }
-    }, 3000);
-}
+    // Función para mostrar mensajes de éxito
+    window.showSuccessMessage = function(message) {
+        const notification = document.createElement('div');
+        notification.className = 'success-notification';
+        notification.textContent = message;
+        document.body.appendChild(notification);
         
-function showSuccessMessage(message) {
-    const notification = document.createElement('div');
-    notification.className = 'success-notification';
-    notification.textContent = message;
-    document.body.appendChild(notification);
-    
-    setTimeout(() => {
-        if (notification.parentNode) {
-            notification.parentNode.removeChild(notification);
-        }
-    }, 3000);
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.parentNode.removeChild(notification);
+            }
+        }, 3000);
+    };
 }
 
         // ========== SISTEMA DE OFERTAS SIMPLIFICADO ==========
@@ -1294,7 +1282,7 @@ function showSuccessMessage(message) {
         'stella', 'heineken', 'corona', 'patagonia', 'cerveza',
         'fernet', 'campari', 'gin', 'vodka', 'ron', 'whisky',
         'energizante', 'speed', 'monster', 'red bull', 'rockstar',
-                // ✅ PRODUCTOS DE ALMACÉN
+                // ✅ PRODUCTOS DE ALMACÉN Soluciono problema sal mostraba "3kg" en vez de unidad "3u"
         'sal', 'azucar', 'azúcar', 'arroz', 'fideo', 'harina', 'aceite', 
         'yerba', 'te', 'cafe', 'café', 'lenteja', 'poroto', 'garbanzo',
         'polenta', 'maiz', 'trigo', 'avena', 'semola', 'levadura',
@@ -1671,7 +1659,7 @@ case 'peso':
         const SHEET_ID = '1hKeM-13t6wyGD5Ya4Rx9NeUJXsgJoVN4dOb-rklPznA';
         let products = [];
         let cart = [];
-        let currentCategory = "TODOS";
+        let currentCategory = "ALMACÉN";
         let lowStockAlertSent = false;
         let esAdmin = false;
         let isSearching = false;
@@ -1984,36 +1972,38 @@ function sendOrderViaWhatsApp() {
             try {
                 productsGrid.innerHTML = '<div class="loading">🔄 Cargando productos...</div>';
 
-                const PROXY_URL = 'https://corsproxy.io/?';
-                const sheetNames = ['inventario', 'Inventario', 'Stock', 'stock'];
-                let response = null;
-                let csvText = '';
+                // ... (código existente de carga) ...
+                // URL correcta del Sheets → CSV real
+                const url = "https://corsproxy.io/?https://docs.google.com/spreadsheets/d/1hKeM-13t6wyGD5Ya4Rx9NeUJXsgJoVN4dOb-rklPznA/export?format=csv&gid=0";
 
-                for (let i = 0; i < sheetNames.length; i++) {
-                    let sheet = sheetNames[i];
-                    let SHEET_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheet)}&_cb=${Date.now()}`;
-                    let URL_CON_PROXY = PROXY_URL + encodeURIComponent(SHEET_URL);
-                    console.log('Intentando with sheet:', sheet, URL_CON_PROXY);
+                // Descargar el CSV
+                const response = await fetch(url);
 
-                    try {
-                        response = await fetch(URL_CON_PROXY);
-                        if (response && response.ok) {
-                            csvText = await response.text();
-                            if (csvText && csvText.trim() !== '') {
-                                console.log('CSV obtenido desde hoja:', sheet);
-                                break;
-                            }
-                        }
-                    } catch (errFetch) {
-                        console.warn('Error fetching sheet', sheet, errFetch);
-                    }
+                // Si falla la descarga, activar modo demo
+                if (!response.ok) {
+                    throw new Error("No se pudo descargar la hoja de cálculo");
                 }
 
-                if (!csvText || csvText.trim() === '') {
-                    throw new Error('No se pudo obtener CSV válido.');
-                }
+                const csvText = await response.text();
 
+                // Procesar datos reales del Google Sheets
                 processCSVData(csvText);
+
+                
+                // ✅ ESTABLECER CATEGORÍA INICIAL DESPUÉS DE CARGAR
+                setTimeout(() => {
+                    if (products.length > 0) {
+                        // Tomar la primera categoría REAL
+                        const primeraCategoria = [...new Set(products.map(p => p.category))][0];
+                        if (primeraCategoria) {
+                            currentCategory = primeraCategoria;
+                            // Re-renderizar categorías para activar la correcta
+                            renderCategories();
+                            renderProducts();
+                        }
+                    }
+                }, 100);
+                
             } catch (error) {
                 console.error('Error en loadProductsFromSheets:', error);
                 loadBackupProducts();
@@ -2358,48 +2348,27 @@ function sendOrderViaWhatsApp() {
         }
 
         // ========== OFERTAS DESTACADAS ==========
-function mostrarOfertasDestacadas() {
-    if (!products || products.length === 0) return;
-    
-    // Obtener productos con oferta y stock
-    const productosConOferta = products.filter(p => 
-        p.hasPromo && (p.stock === "STOCK" || p.stockNumber > 0)
-    );
-    
-    // ✅ NUEVO: Ordenar con PRIORIDAD para ofertas2
-    const ofertasOrdenadas = productosConOferta.sort((a, b) => {
-        // PRIORIDAD 1: Productos con ofertas2 (descuento fijo directo)
-        const aTieneOferta2 = a.ofertas2 && a.ofertas2 !== '' && a.ofertas2 !== '0';
-        const bTieneOferta2 = b.ofertas2 && b.ofertas2 !== '' && b.ofertas2 !== '0';
-        
-        if (aTieneOferta2 && !bTieneOferta2) return -1; // a primero
-        if (!aTieneOferta2 && bTieneOferta2) return 1;  // b primero
-        
-        // Si ambos tienen ofertas2, ordenar por mayor porcentaje
-        if (aTieneOferta2 && bTieneOferta2) {
-            const porcentajeA = parseInt(a.ofertas2) || 0;
-            const porcentajeB = parseInt(b.ofertas2) || 0;
-            return porcentajeB - porcentajeA; // Mayor porcentaje primero
+        function mostrarOfertasDestacadas() {
+            if (!products || products.length === 0) return;
+            
+            const productosConOferta = products.filter(p => 
+                p.hasPromo && (p.stock === "STOCK" || p.stockNumber > 0)
+            );
+            
+            if (productosConOferta.length > 0) {
+                featuredOffers.style.display = 'block';
+                
+                // Tomar hasta 4 productos con oferta para destacar
+                const productosDestacados = productosConOferta.slice(0, 4);
+                featuredProductsGrid.innerHTML = renderProductsToHTML(productosDestacados);
+                
+                // Actualizar texto del botón
+                const categoriasConOferta = [...new Set(productosConOferta.map(p => p.category))];
+                viewAllOffers.textContent = `Ver productos con oferta (${productosConOferta.length})`;
+            } else {
+                featuredOffers.style.display = 'none';
+            }
         }
-        
-        // Si ambos tienen ofertas1 (o ninguno tiene ofertas2), ordenar por descuento real
-        return b.discountPercent - a.discountPercent;
-    }).slice(0, 8); // Limitar a 8 productos
-    
-    if (ofertasOrdenadas.length > 0) {
-        featuredOffers.style.display = 'block';
-        
-        // Renderizar máximo 4 productos destacados
-        const productosDestacados = ofertasOrdenadas.slice(0, 4);
-        featuredProductsGrid.innerHTML = renderProductsToHTML(productosDestacados);
-        
-        // Actualizar texto del botón
-        viewAllOffers.textContent = `Ver todas las ofertas (${productosConOferta.length})`;
-    } else {
-        featuredOffers.style.display = 'none';
-    }
-}
-
         function renderProductsToHTML(productsArray) {
             return productsArray.map(product => {
                 const hasStock = product.stock === "STOCK" || product.stockNumber > 0;
@@ -2479,17 +2448,27 @@ function mostrarOfertasDestacadas() {
         }
 
         function verTodasLasOfertas() {
-            // Cambiar a categoría OFERTAS
-            currentCategory = "OFERTAS";
-            document.querySelectorAll(".category-btn").forEach(b => b.classList.remove("active"));
-            const ofertasBtn = document.querySelector('[data-category="OFERTAS"]');
-            if (ofertasBtn) {
-                ofertasBtn.classList.add("active");
-            }
-            renderProducts();
+            // Encontrar la primera categoría que tenga ofertas
+            const categoriasConOfertas = [...new Set(products
+                .filter(p => p.hasPromo && (p.stock === "STOCK" || p.stockNumber > 0))
+                .map(p => p.category)
+            )];
             
-            // Scroll suave a la sección de productos
-            document.querySelector('.products-grid').scrollIntoView({ behavior: 'smooth' });
+            if (categoriasConOfertas.length > 0) {
+                // Cambiar a la primera categoría con ofertas
+                currentCategory = categoriasConOfertas[0];
+                document.querySelectorAll(".category-btn").forEach(b => b.classList.remove("active"));
+                const ofertasBtn = document.querySelector(`[data-category="${categoriasConOfertas[0]}"]`);
+                if (ofertasBtn) {
+                    ofertasBtn.classList.add("active");
+                }
+                renderProducts();
+                
+                // Scroll suave a la sección de productos
+                document.querySelector('.products-grid').scrollIntoView({ behavior: 'smooth' });
+            } else {
+                alert("No hay ofertas disponibles en este momento");
+            }
         }
 
         // ========== MENSAJES TEMPORADA ==========
@@ -2715,7 +2694,7 @@ function mostrarOfertasDestacadas() {
             }, 100);
         }
 
-        function renderFilteredProducts(filteredProducts, searchTerm) {
+        function renderFilteredProducts(filteredProducts, searchTerm = '') {
             if (filteredProducts.length === 0) {
                 productsGrid.innerHTML = `
                     <div class="loading" style="text-align: center; padding: 2rem;">
@@ -2738,92 +2717,82 @@ function mostrarOfertasDestacadas() {
             isSearching = false;
             clearSearchBtn.style.display = 'none';
             clearMobileSearchBtn.style.display = 'none';
+
+            // 👉 Volver a la categoría inicial REAL (ALMACEN)
+            currentCategory = "ALMACEN";
+
             renderProducts();
-            currentCategory = "TODOS";
-            
+
+            // 👉 Marcar el botón de categoría correcto
             document.querySelectorAll('.category-btn').forEach(btn => {
-                btn.classList.remove('active');
-                if (btn.getAttribute('data-category') === 'TODOS') {
-                    btn.classList.add('active');
-                }
+                btn.classList.toggle(
+                    'active',
+                    btn.getAttribute('data-category') === "ALMACEN"
+                );
             });
         }
 
-        function renderCategories() {
-            const categories = [...new Set(products.map(p => p.category))];
-            
-            // Agregar categoría "OFERTAS" al inicio
-            categories.unshift("OFERTAS");
-            // Agregar categoría "TODOS" al inicio
-            categories.unshift("TODOS");
-            
-            // Contar ofertas por categoría (excepto TODOS y OFERTAS)
-            const ofertasPorCategoria = {};
-            products.forEach(p => {
-                if (p.hasPromo && (p.stock === "STOCK" || p.stockNumber > 0)) {
-                    ofertasPorCategoria[p.category] = (ofertasPorCategoria[p.category] || 0) + 1;
-                }
-            });
-            
-            // Contar ofertas totales para categoría OFERTAS
-            const totalOfertas = Object.values(ofertasPorCategoria).reduce((sum, count) => sum + count, 0);
-            
-            categoriesContainer.innerHTML = categories.map(category => {
-                let badge = '';
-                
-                if (category === "OFERTAS" && totalOfertas > 0) {
-                    badge = `<span class="offer-count-badge">${totalOfertas}🔥</span>`;
-                } else if (category !== "TODOS" && category !== "OFERTAS" && ofertasPorCategoria[category]) {
-                    badge = `<span class="offer-count-badge">${ofertasPorCategoria[category]}🔥</span>`;
-                }
-                
-                return `
-                    <button class="category-btn ${category === currentCategory ? 'active' : ''}" 
-                            data-category="${category}">
-                        ${category} ${badge}
-                    </button>
-                `;
-            }).join("");
-            
-            if (categories.length > 0 && currentCategory === "TODOS") {
-                currentCategory = "TODOS";
-                const todosBtn = document.querySelector('[data-category="TODOS"]');
-                if (todosBtn) {
-                    todosBtn.classList.add('active');
-                }
-            }
-            
-            document.querySelectorAll(".category-btn").forEach(btn => {
-                btn.addEventListener("click", function() {
-                    currentCategory = this.getAttribute("data-category");
-                    document.querySelectorAll(".category-btn").forEach(b => b.classList.remove("active"));
-                    this.classList.add("active");
-                    renderProducts();
-                });
-            });
+
+function renderCategories() {
+    // Obtener categorías REALES de los productos
+    const categories = [...new Set(products.map(p => p.category))];
+    
+    // ✅ ELIMINADO: NO agregar "TODOS" ni "OFERTAS" artificialmente
+    
+    // Contar ofertas por categoría REAL
+    const ofertasPorCategoria = {};
+    products.forEach(p => {
+        if (p.hasPromo && (p.stock === "STOCK" || p.stockNumber > 0)) {
+            ofertasPorCategoria[p.category] = (ofertasPorCategoria[p.category] || 0) + 1;
         }
+    });
+    
+    // Contar ofertas totales (para referencia)
+    const totalOfertas = Object.values(ofertasPorCategoria).reduce((sum, count) => sum + count, 0);
+    
+    categoriesContainer.innerHTML = categories.map(category => {
+        let badge = '';
+        
+        // ✅ SOLO mostrar badge en categorías REALES que tengan ofertas
+        if (ofertasPorCategoria[category]) {
+            badge = `<span class="offer-count-badge">${ofertasPorCategoria[category]}🔥</span>`;
+        }
+        
+        return `
+            <button class="category-btn ${category === currentCategory ? 'active' : ''}" 
+                    data-category="${category}">
+                ${category} ${badge}
+            </button>
+        `;
+    }).join("");
+    
+    // ✅ ESTABLECER CATEGORÍA INICIAL REAL (primera categoría disponible)
+    if (categories.length > 0 && !currentCategory) {
+        currentCategory = categories[0]; // Ej: "ALMACÉN"
+        const primeraCategoriaBtn = document.querySelector(`[data-category="${categories[0]}"]`);
+        if (primeraCategoriaBtn) {
+            primeraCategoriaBtn.classList.add('active');
+        }
+    }
+    
+    document.querySelectorAll(".category-btn").forEach(btn => {
+        btn.addEventListener("click", function() {
+            currentCategory = this.getAttribute("data-category");
+            document.querySelectorAll(".category-btn").forEach(b => b.classList.remove("active"));
+            this.classList.add("active");
+            renderProducts();
+        });
+    });
+}
 
         function renderProducts() {
             let filteredProducts;
             
-            if (currentCategory === "TODOS") {
-                // Mostrar TODOS los productos con stock
-                filteredProducts = products.filter(p => 
-                    p.stock === "STOCK" || p.stockNumber > 0
-                );
-            } else if (currentCategory === "OFERTAS") {
-                // Mostrar SOLO productos con oferta
-                filteredProducts = products.filter(p => 
-                    (p.stock === "STOCK" || p.stockNumber > 0) && 
-                    (p.hasPromo === true)
-                );
-            } else {
-                // Mostrar productos de categoría normal
-                filteredProducts = products.filter(p => 
-                    p.category === currentCategory && 
-                    (p.stock === "STOCK" || p.stockNumber > 0)
-                );
-            }
+            // ✅ CATEGORÍAS NORMALES ÚNICAMENTE
+            filteredProducts = products.filter(p => 
+                p.category === currentCategory && 
+                (p.stock === "STOCK" || p.stockNumber > 0)
+            );
             
             // Ordenar: primero productos con oferta, luego sin oferta
             filteredProducts.sort((a, b) => {
@@ -2840,11 +2809,7 @@ function mostrarOfertasDestacadas() {
             
             if (productsToShow.length === 0) {
                 let mensaje = '';
-                if (currentCategory === "OFERTAS") {
-                    mensaje = '<div class="loading">No hay ofertas disponibles en este momento</div>';
-                } else {
-                    mensaje = '<div class="loading">No hay productos disponibles</div>';
-                }
+            mensaje = '<div class="loading">No hay productos disponibles</div>';
                 productsGrid.innerHTML = mensaje;
                 return;
             }
@@ -3203,8 +3168,8 @@ function handleImageError(img, productName) {
     container.style.background = `linear-gradient(135deg, ${randomColor}, ${adjustColor(randomColor, -20)})`;
     container.style.display = 'flex';
     container.style.justifyContent = 'center';
-    container.style.alignItems = 'center';      // ✅ = NO :
-    container.style.position = 'relative';      // ✅ = NO :
+    container.style.alignItems = 'center';
+    container.style.position = 'relative';
     
     // Crear icono genérico
     const icon = document.createElement('div');
