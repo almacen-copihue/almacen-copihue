@@ -1016,6 +1016,26 @@
         .view-all-offers {
             display: none !important;
         }
+        /* Botón "Compartir esta OFERTA" (solo aparece en la mayor oferta) */
+        .share-offer-btn {
+            margin-top: 8px;
+            width: 100%;
+            padding: 10px 14px;
+            border: none;
+            border-radius: 18px;
+            font-size: 14px;
+            font-weight: 600;
+            background: linear-gradient(135deg,#00c853,#00b14a);
+            color: white;
+            cursor: pointer;
+            box-shadow: 0 3px 12px rgba(0,0,0,0.18);
+        }
+        .share-offer-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 18px rgba(0,0,0,0.22);
+        }
+
+
     </style>
 </head>
 <body>
@@ -1447,6 +1467,16 @@ function initPWA() {
             
             return null; // Sin límite para descuentos < 50%
         }
+
+            function obtenerMayorOferta() {
+            if (!products || products.length === 0) return null;
+            const ofertas = products.filter(p => Number(p.ofertas2) > 0 && (p.stock === "STOCK" || p.stockNumber > 0));
+            if (ofertas.length === 0) return null;
+            // Orden desc por porcentaje ofertas2
+            ofertas.sort((a, b) => Number(b.ofertas2) - Number(a.ofertas2));
+            return ofertas[0];
+        }
+
 
         // ✅ FUNCIÓN PARA TEXTO DE LÍMITE MEJORADA
         function obtenerTextoLimiteOfertas2(ofertas2, nombreProducto = '') {
@@ -2374,10 +2404,14 @@ function sendOrderViaWhatsApp() {
 function mostrarOfertasDestacadas() {
     if (!products || products.length === 0) return;
 
-    // 👉 Usar SOLO OFERTAS2 (descuento directo real de tu planilla)
-  //  const productosConOferta = products.filter(p => Number(p.ofertas2) > 0);
-const productosConOferta = products.filter(p => p.hasPromo);
-    // 👉 Ordenar por mayor descuento
+    // 👉 Filtrar productos con oferta REAL (ofertas2 > 0)
+    const productosConOferta = products.filter(p => {
+        // Verificar que tenga ofertas2 válida (números > 0)
+        const oferta2 = Number(p.ofertas2);
+        return oferta2 > 0 && oferta2 <= 99;
+    });
+
+    // 👉 Ordenar por mayor descuento (de mayor a menor)
     productosConOferta.sort((a, b) => Number(b.ofertas2) - Number(a.ofertas2));
 
     // 👉 Tomar SOLO los 4 con mejor descuento
@@ -2386,10 +2420,14 @@ const productosConOferta = products.filter(p => p.hasPromo);
     if (productosDestacados.length > 0) {
         featuredOffers.style.display = 'block';
 
-        // 👉 Mostrar productos destacados
-        featuredProductsGrid.innerHTML = renderProductsToHTML(productosDestacados);
+        // 👉 Identificar la MEGA OFERTA (la primera del array ordenado)
+        const megaOferta = productosDestacados[0];
+        console.log("🔥 MEGA OFERTA IDENTIFICADA:", megaOferta.name, "con", megaOferta.ofertas2 + "% OFF");
 
-        // 👉 Botón “Ver todas las ofertas”
+        // 👉 Mostrar productos destacados
+        featuredProductsGrid.innerHTML = renderProductsToHTML(productosDestacados, true);
+
+        // 👉 Botón "Ver todas las ofertas"
         viewAllOffers.textContent = `Ver productos con oferta (${productosConOferta.length})`;
 
     } else {
@@ -2398,85 +2436,99 @@ const productosConOferta = products.filter(p => p.hasPromo);
 }
 
 
-
-        function renderProductsToHTML(productsArray) {
-            return productsArray.map(product => {
-                const hasStock = product.stock === "STOCK" || product.stockNumber > 0;
-                const isLowStock = product.stockNumber > 0 && product.stockNumber <= 3;
-                const isOutOfStock = product.stockNumber === 0;
-                
-                // USAR LA NUEVA FUNCIÓN DE STOCK
-                const stockText = obtenerTextoStock(product);
-                
-                // Determinar clase según stock
-                let stockClass = '';
-                if (product.stockNumber === 0) {
-                    stockClass = 'out-of-stock';
-                } else if (product.stockNumber > 0 && product.stockNumber <= 3) {
-                    stockClass = 'low-stock';
-                } else {
-                    stockClass = 'in-stock';
-                }
-                
-                const addButton = isOutOfStock 
-                    ? `<button class="add-to-cart" disabled>❌ Sin Stock</button>`
-                    : `<button class="add-to-cart" data-id="${product.id}">🛒 Agregar al Carrito</button>`;
-                
-                // ✅ USAR offerText que ahora muestra "🔥 OFERTA"
-                const offerBadge = product.offerText 
-                    ? `<div class="offer-badge">${product.offerText}</div>`
-                    : '';
-                
-                // ✅ USAR LA FUNCIÓN CORREGIDA PARA DESCRIPCIÓN
-                const descripcionOferta = obtenerDescripcionOferta(
-                    product.ofertas1, 
-                    product.ofertas2,
-                    product.price
-                );
-                
-                const limiteOferta1 = product.ofertaDetalles ? product.ofertaDetalles.maxUnidades : null;
-                const tieneLimiteOferta2 = product.textoLimiteOfertas2 !== '';
-                
-                return `
-                    <div class="product-card">
-                        ${offerBadge}
-                        <div class="product-image">
-                            <img src="${product.image}" 
-                                 alt="${product.name}"
-                                 onerror="handleImageError(this, '${product.name.replace(/'/g, "\\'")}')">
-                        </div>
-                        <div class="product-info">
-                            <div class="product-name">${product.name}</div>
-                            ${descripcionOferta ? `<div class="offer-description">${descripcionOferta}</div>` : ''}
-                            <div class="product-price-container">
-                                ${product.discountedPrice < product.price ? 
-                                    `<span class="original-price">$${product.price}</span>` : ''}
-                                <span class="product-price">$${product.discountedPrice}</span>
-                                ${product.offerText ? 
-                                    `<span class="discount-percent">${product.offerText}</span>` : ''}
-                            </div>
-                            <!-- MOSTRAR LÍMITES ESPECÍFICOS -->
-                            ${product.textoLimiteOfertas2 ? `
-                                <div class="promo-limit" style="color: #ff6f00; font-weight: 500;">
-                                    ${product.textoLimiteOfertas2}
-                                </div>
-                            ` : ''}
-                            ${product.ofertaDetalles && product.ofertaDetalles.maxUnidades !== null ? `
-                                <div class="promo-limit">
-                                    ⚠️ Máx. ${product.ofertaDetalles.maxUnidades} unidades por grupo familiar
-                                </div>
-                            ` : ''}
-                            <!-- STOCK CON TIPO ESPECÍFICO -->
-                            <div class="product-stock ${stockClass}">
-                                ${stockText}
-                            </div>
-                            ${addButton}
-                        </div>
-                    </div>
-                `;
-            }).join("");
+function renderProductsToHTML(productsArray, isFeaturedSection = false) {
+    // Identificar la mega oferta para toda la página
+    const megaOferta = obtenerMayorOferta();
+    
+    return productsArray.map(product => {
+        const esMega = megaOferta && megaOferta.id === product.id;
+        
+        // Resto del código como tienes...
+        const hasStock = product.stock === "STOCK" || product.stockNumber > 0;
+        const isLowStock = product.stockNumber > 0 && product.stockNumber <= 3;
+        const isOutOfStock = product.stockNumber === 0;
+        
+        // USAR LA NUEVA FUNCIÓN DE STOCK
+        const stockText = obtenerTextoStock(product);
+        
+        // Determinar clase según stock
+        let stockClass = '';
+        if (product.stockNumber === 0) {
+            stockClass = 'out-of-stock';
+        } else if (product.stockNumber > 0 && product.stockNumber <= 3) {
+            stockClass = 'low-stock';
+        } else {
+            stockClass = 'in-stock';
         }
-
+        
+        const addButton = isOutOfStock 
+            ? `<button class="add-to-cart" disabled>❌ Sin Stock</button>`
+            : `<button class="add-to-cart" data-id="${product.id}">🛒 Agregar al Carrito</button>`;
+        
+        // ✅ USAR offerText que ahora muestra "🔥 OFERTA"
+        const offerBadge = product.offerText 
+            ? `<div class="offer-badge">${product.offerText}</div>`
+            : '';
+        
+        // Solo mostrar botón compartir si es la mega oferta
+        const botonCompartir = esMega ? `
+            <button class="share-offer-btn" onclick="compartirMegaOferta(${product.id})">
+                🤝 Compartir esta OFERTA
+            </button>
+        ` : '';
+        
+        // ✅ USAR LA FUNCIÓN CORREGIDA PARA DESCRIPCIÓN
+        const descripcionOferta = obtenerDescripcionOferta(
+            product.ofertas1, 
+            product.ofertas2,
+            product.price
+        );
+        
+        const limiteOferta1 = product.ofertaDetalles ? product.ofertaDetalles.maxUnidades : null;
+        const tieneLimiteOferta2 = product.textoLimiteOfertas2 !== '';
+        
+        return `
+            <div class="product-card">
+                ${offerBadge}
+                ${esMega ? `<div class="promo-badge">🔥 MEGA OFERTA</div>` : ''}
+                <div class="product-image">
+                    <img src="${product.image}" 
+                         alt="${product.name}"
+                         onerror="handleImageError(this, '${product.name.replace(/'/g, "\\'")}')">
+                </div>
+                <div class="product-info">
+                    <div class="product-name">${product.name}</div>
+                    ${descripcionOferta ? `<div class="offer-description">${descripcionOferta}</div>` : ''}
+                    ${esMega ? `<div class="offer-description" style="color: #d50000; font-weight: bold;">🎯 ¡LA MEJOR OFERTA DEL DÍA!</div>` : ''}
+                    <div class="product-price-container">
+                        ${product.discountedPrice < product.price ? 
+                            `<span class="original-price">$${product.price}</span>` : ''}
+                        <span class="product-price">$${product.discountedPrice}</span>
+                        ${product.offerText ? 
+                            `<span class="discount-percent">${product.offerText}</span>` : ''}
+                    </div>
+                    <!-- MOSTRAR LÍMITES ESPECÍFICOS -->
+                    ${product.textoLimiteOfertas2 ? `
+                        <div class="promo-limit" style="color: #ff6f00; font-weight: 500;">
+                            ${product.textoLimiteOfertas2}
+                        </div>
+                    ` : ''}
+                    ${product.ofertaDetalles && product.ofertaDetalles.maxUnidades !== null ? `
+                        <div class="promo-limit">
+                            ⚠️ Máx. ${product.ofertaDetalles.maxUnidades} unidades por grupo familiar
+                        </div>
+                    ` : ''}
+                    <!-- STOCK CON TIPO ESPECÍFICO -->
+                    <div class="product-stock ${stockClass}">
+                        ${stockText}
+                    </div>
+                    ${addButton}
+                    ${botonCompartir}
+                </div>
+            </div>
+        `;
+    }).join("");
+}
         function verTodasLasOfertas() {
             // Encontrar la primera categoría que tenga ofertas
             const categoriasConOfertas = [...new Set(products
@@ -3313,6 +3365,51 @@ document.addEventListener("DOMContentLoaded", function() {
         }
     }, 1000);
 });
+
+function compartirMegaOferta(id) {
+    const p = products.find(x => x.id === id);
+    if (!p) return;
+
+    const descuento = calcularDescuentoReal(p.price, p.discountedPrice);
+    
+    const mensaje = `🔥 *OFERTÓN DEL DÍA* en Almacén Copihue 🔥\n\n` +
+                    `👉 *${p.name}*\n` +
+                    `💰 Antes: $${p.price}\n` +
+                    `🎯 Ahora: $${p.discountedPrice}\n` +
+                    `✅ Ahorrás: ${descuento}% OFF\n\n` +
+                    `📍 *Dirección:* Copihue 457\n` +
+                    `⏰ *Horario:* 11:30 a 23:30 hs\n` +
+                    `📱 *WhatsApp:* +5492944907380\n\n` +
+                    `🛒 Pedí ya en: ${window.location.href}\n\n` +
+                    `¡Aprovechá y compartilo con el vecino! 😄\n` +
+                    `#AlmacénCopihue #Ofertón #PreciosDeBarrio`;
+
+    // Compartir nativo en celular (Android/iOS)
+    if (navigator.share) {
+        navigator.share({
+            title: `🔥 OFERTÓN: ${p.name} - $${p.discountedPrice}`,
+            text: mensaje,
+            url: window.location.href
+        }).then(() => {
+            console.log('✅ Oferta compartida exitosamente');
+        }).catch(err => {
+            console.warn("Share cancelado:", err);
+            // Fallback a WhatsApp
+            fallbackShare(mensaje);
+        });
+    } 
+    // Fallback para WhatsApp en todos los dispositivos
+    else {
+        fallbackShare(mensaje);
+    }
+}
+
+// Función auxiliar para compartir por WhatsApp
+function fallbackShare(mensaje) {
+    const waUrl = `https://wa.me/?text=${encodeURIComponent(mensaje)}`;
+    window.open(waUrl, "_blank", "noopener,noreferrer");
+}
+
     </script>
 </body>
 </html>
