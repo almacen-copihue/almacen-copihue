@@ -1,4 +1,4 @@
-// sw.js - Service Worker CORREGIDO VAO
+// sw.js - Service Worker CORREGIDO
 const CACHE_NAME = 'almacen-copihue-pwa-v3'; // Cambia la versión
 
 // ================== INSTALACIÓN ==================
