@@ -1,81 +1,56 @@
-// sw.js - Service Worker CORREGIDO
-const CACHE_NAME = 'almacen-copihue-pwa-v3'; // Cambia la versión
+// Service Worker MÍNIMO - Sin cache problemático
+console.log('✅ SW cargado - Sin cache activo');
 
-// ================== INSTALACIÓN ==================
-self.addEventListener('install', event => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => {
-      // Solo cachear assets estáticos CRÍTICOS
-      return cache.addAll([
-        './index.html',
-        './manifest.json',
-        // Añade aquí otros assets realmente estáticos
-      ]);
-    }).then(() => self.skipWaiting())
-  );
+self.addEventListener('install', (event) => {
+    console.log('🔧 SW instalado');
+    self.skipWaiting(); // Activar inmediatamente
 });
 
-// ================== ACTIVACIÓN ==================
-self.addEventListener('activate', event => {
-  event.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(
-        keys.map(key => {
-          if (key !== CACHE_NAME) {
-            console.log('🗑️ Eliminando cache antiguo:', key);
-            return caches.delete(key);
-          }
-        })
-      )
-    ).then(() => {
-      // Limpiar completamente el caché antiguo
-      return self.clients.matchAll().then(clients => {
-        clients.forEach(client => {
-          client.postMessage({ type: 'CACHE_CLEARED', version: 'v3' });
-        });
-      });
-    }).then(() => self.clients.claim())
-  );
+self.addEventListener('activate', (event) => {
+    console.log('🚀 SW activado');
+    event.waitUntil(self.clients.claim()); // Tomar control
 });
 
-// ================== FETCH - ESTRATEGIA "NETWORK FIRST" ==================
-self.addEventListener('fetch', event => {
-  const request = event.request;
-  const url = new URL(request.url);
-  
-  // 🚫 NUNCA cachear archivos dinámicos
-  const NO_CACHE_PATHS = [
-    '/imagenes-productos/',
-    'docs.google.com',
-    'spreadsheets',
-    'corsproxy.io',
-    'googleapis.com'
-  ];
-  
-  // Si es una URL que NO debe cachearse
-  if (NO_CACHE_PATHS.some(path => url.href.includes(path))) {
-    event.respondWith(fetch(request));
-    return;
-  }
-  
-  // Para todo lo demás, usar Network First
-  event.respondWith(
-    fetch(request)
-      .then(response => {
-        // Solo cachear si es exitoso y no es HTML dinámico
-        if (response.ok && request.method === 'GET') {
-          const responseClone = response.clone();
-          caches.open(CACHE_NAME).then(cache => {
-            cache.put(request, responseClone);
-          });
-        }
-        return response;
-      })
-      .catch(() => {
-        // Si no hay conexión, buscar en cache
-        return caches.match(request);
-      })
-  );
+self.addEventListener('fetch', (event) => {
+    const url = event.request.url;
+    
+    // 🚫 NUNCA cachear estas URLs
+    if (url.includes('index.html') || 
+        url.includes('docs.google.com') || 
+        url.includes('spreadsheets')) {
+        
+        // Pasar directo, SIN CACHE
+        event.respondWith(fetch(event.request));
+        return;
+    }
+    
+    // Para imágenes: cache solo si ya están cargadas
+    if (url.includes('/imagenes-productos/')) {
+        event.respondWith(
+            fetch(event.request)
+                .catch(() => {
+                    // Si falla, imagen genérica
+                    return new Response(
+                        `<svg width="200" height="200" xmlns="http://www.w3.org/2000/svg">
+                            <rect width="200" height="200" fill="#e8f5e9"/>
+                            <text x="100" y="100" font-family="Arial" font-size="24" 
+                                  text-anchor="middle" fill="#2e7d32">🛒</text>
+                        </svg>`,
+                        { headers: { 'Content-Type': 'image/svg+xml' } }
+                    );
+                })
+        );
+        return;
+    }
+    
+    // Para todo lo demás: pasar directo
+    event.respondWith(fetch(event.request));
 });
 
-console.log('✅ Service Worker v3 activado - Modo Network First');
+// Limpiar cualquier cache antiguo al iniciar
+caches.keys().then(cacheNames => {
+    cacheNames.forEach(cacheName => {
+        caches.delete(cacheName);
+        console.log('🗑️ Cache eliminado:', cacheName);
+    });
+});
