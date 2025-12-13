@@ -1178,43 +1178,67 @@
 
     <script>
 // ============================================
-// 🔥 SISTEMA ANTI-CACHE PARA MÓVILES - VERSIÓN LIGERA
+// 🔥 SISTEMA ANTI-CACHE MEJORADO
 // ============================================
-console.log('🛡️ INICIANDO PROTECCIÓN ANTI-CACHE');
+console.log('🛡️ INICIANDO PROTECCIÓN ANTI-CACHE MEJORADA');
 
-// 1. DETECTAR SI ES MÓVIL
-const esMovil = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+// Detección mejorada de dispositivo
+const esMovil = /Mobi|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+const esSafariIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) && /WebKit/.test(navigator.userAgent) && !/CriOS|FxiOS|OPiOS/.test(navigator.userAgent);
+
 console.log(`📱 Dispositivo: ${esMovil ? 'MÓVIL' : 'PC'}`);
+if (esSafariIOS) console.log('🍎 Safari iOS detectado');
 
-// 2. PARÁMETROS OBLIGATORIOS PARA MÓVILES
+// Solo aplicar a móviles
 if (esMovil) {
     const params = new URLSearchParams(window.location.search);
-    let necesitaRecarga = false;
+    const necesitaRecarga = !params.has('t') || !params.has('v');
     
-    if (!params.has('m')) {
-        params.set('m', '1');
-        necesitaRecarga = true;
-    }
-    
-    if (!params.has('t')) {
+    if (necesitaRecarga) {
+        // Agregar parámetros anti-cache
         params.set('t', Date.now());
-        necesitaRecarga = true;
-    }
-    
-    if (!params.has('v')) {
         params.set('v', '2.0');
-        necesitaRecarga = true;
+        
+        // Parámetro especial para Safari iOS
+        if (esSafariIOS) {
+            params.set('safari', '1');
+        }
+        
+        // Verificar que no estamos en un bucle
+        const intentosCache = parseInt(sessionStorage.getItem('cache_intentos') || '0');
+        
+        if (intentosCache < 3) {
+            sessionStorage.setItem('cache_intentos', (intentosCache + 1).toString());
+            
+            // Usar replace para evitar historial duplicado
+            setTimeout(() => {
+                window.location.replace(window.location.pathname + '?' + params.toString());
+            }, 500);
+        } else {
+            console.log('🚫 Demasiados intentos de recarga anti-cache');
+            sessionStorage.removeItem('cache_intentos');
+        }
+    } else {
+        // Limpiar contador si ya tiene parámetros
+        sessionStorage.removeItem('cache_intentos');
     }
     
-    if (necesitaRecarga && !sessionStorage.getItem('cache_arreglado')) {
-        sessionStorage.setItem('cache_arreglado', 'si');
-        console.log('🔄 Recargando con parámetros anti-cache...');
-        
-        const nuevaURL = window.location.pathname + '?' + params.toString();
-        setTimeout(() => {
-            window.location.href = nuevaURL;
-        }, 300);
+    // Limpiar cache del Service Worker si existe
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+        caches.keys().then(cacheNames => {
+            cacheNames.forEach(cacheName => {
+                if (cacheName.includes('almacen-copihue')) {
+                    caches.delete(cacheName);
+                }
+            });
+        });
     }
+}
+
+// Modo ahorro de datos
+if ('connection' in navigator && navigator.connection.saveData) {
+    document.documentElement.classList.add('save-data');
+    console.log('💾 Modo ahorro de datos activado');
 }
 
 // 3. FETCH ANTI-CACHE PARA GOOGLE SHEETS
@@ -1622,6 +1646,7 @@ const SEARCH_DICTIONARY = {
     'chocolates': ['chocolate']
 };
 
+
 // ========== FUNCIONES PRINCIPALES ==========
 window.handleMobileSearchEnter = function(event) {
     if (event.key === 'Enter') {
@@ -1876,124 +1901,144 @@ function searchProducts(searchTerm) {
 }
 
 // ========== CARGA DE PRODUCTOS ==========
+// PROXY 3 es el que SÍ funciona en Vercel
+const SHEETS_URL_VERCEL = 'https://docs.google.com/spreadsheets/d/1hKeM-13t6wyGD5Ya4Rx9NeUJXsgJoVN4dOb-rklPznA/gviz/tq?tqx=out:csv&gid=0';
+
 async function loadProductsFromSheets() {
     try {
-        console.log('🔄 CARGANDO PRODUCTOS (modo protegido)');
+        console.log('🔄 VERCEL - Cargando datos...');
+        productsGrid.innerHTML = '<div class="loading">📡 Conectando con Google Sheets...</div>';
         
-        // Forzar recarga si estamos en móvil y no tiene timestamp
-        if (esMovil && !window.location.search.includes('t=')) {
-            console.log('⚠️ Móvil sin timestamp - forzando...');
-            window.location.search = window.location.search + 
-                (window.location.search ? '&' : '?') + 't=' + Date.now();
-            return;
+        // USAR SIEMPRE LA URL DIRECTA (Proxy 3) en Vercel
+        const url = `${SHEETS_URL_VERCEL}&t=${Date.now()}&vercel=1`;
+        console.log('🔗 Vercel URL directa:', url);
+        
+        const response = await fetch(url, {
+            cache: 'no-store',
+            mode: 'cors'
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Error ${response.status}`);
         }
         
-        productsGrid.innerHTML = '<div class="loading">🔄 Conectando con Google Sheets...</div>';
-
-        // TRES OPCIONES DE PROXY (prueba en orden)
-        const proxyOptions = [
-            `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://docs.google.com/spreadsheets/d/${SHEETS_ID}/export?format=csv&gid=0`)}`,
-            `https://cors-anywhere.herokuapp.com/https://docs.google.com/spreadsheets/d/${SHEETS_ID}/export?format=csv&gid=0`,
-            `https://docs.google.com/spreadsheets/d/${SHEETS_ID}/gviz/tq?tqx=out:csv&gid=0`
-        ];
-
-        let response = null;
-        let lastError = null;
-
-        // Probar cada proxy hasta que uno funcione
-        for (let i = 0; i < proxyOptions.length; i++) {
-            try {
-                console.log(`🔗 Probando proxy ${i + 1}: ${proxyOptions[i].substring(0, 50)}...`);
-                
-                response = await fetch(proxyOptions[i] + '&nocache=' + Date.now(), {
-                    headers: {
-                        'Cache-Control': 'no-cache, no-store, must-revalidate',
-                        'Pragma': 'no-cache'
-                    },
-                    cache: 'no-store'
-                });
-                
-                if (response.ok) {
-                    console.log(`✅ Proxy ${i + 1} funcionó!`);
-                    break;
-                }
-            } catch (err) {
-                lastError = err;
-                console.warn(`❌ Proxy ${i + 1} falló:`, err.message);
-                continue;
-            }
-        }
-
-        if (!response || !response.ok) {
-            throw new Error(`No se pudo conectar. Último error: ${lastError?.message}`);
-        }
-
         const csvText = await response.text();
-        console.log('✅ DATOS RECIBIDOS:', csvText.length, 'caracteres');
+        console.log('✅ VERCEL - Datos REALES recibidos:', csvText.length, 'caracteres');
         
-        // Mostrar éxito en pantalla
-        const successMsg = document.createElement('div');
-        successMsg.innerHTML = `
+        // Mostrar confirmación
+        const successDiv = document.createElement('div');
+        successDiv.innerHTML = `
             <div style="
                 position: fixed;
                 top: 100px;
                 right: 20px;
                 background: #4CAF50;
                 color: white;
-                padding: 10px 15px;
+                padding: 12px 20px;
                 border-radius: 20px;
                 z-index: 9999;
                 font-weight: bold;
+                text-align: center;
                 box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-                animation: fadeIn 0.5s;
             ">
-                ✅ Datos actualizados
+                ✅ VERCEL CONECTADO
                 <br>
-                <small>${new Date().toLocaleTimeString()}</small>
+                <small>${csvText.length} datos reales</small>
             </div>
         `;
-        document.body.appendChild(successMsg);
-        setTimeout(() => successMsg.remove(), 3000);
+        document.body.appendChild(successDiv);
+        setTimeout(() => successDiv.remove(), 4000);
         
         processCSVData(csvText);
         
     } catch (error) {
-        console.error('❌ ERROR CRÍTICO:', error);
+        console.error('❌ VERCEL ERROR:', error);
         
-        // MOSTRAR ERROR PERO NO CARGAR DEMO AUTOMÁTICAMENTE
+        // En Vercel, NO cargar demo automáticamente
         productsGrid.innerHTML = `
             <div class="error-message">
-                <h3>⚠️ Error de conexión</h3>
-                <p>No se pudieron cargar los productos desde Google Sheets.</p>
-                <p><strong>Detalle:</strong> ${error.message}</p>
+                <h3>⚠️ Error en Vercel</h3>
+                <p>No se pudieron cargar los datos desde Google Sheets.</p>
+                <p><strong>Error:</strong> ${error.message}</p>
                 
                 <div style="margin-top: 20px;">
-                    <button class="retry-btn" onclick="loadProductsFromSheets()">
-                        🔄 Reintentar conexión
+                    <button class="retry-btn" onclick="cargarForzadoVercel()">
+                        🔄 Forzar conexión Vercel
                     </button>
-                    <button class="retry-btn" onclick="location.reload()" 
+                    <button class="retry-btn" onclick="location.href='?vercel_force=1&t='+Date.now()" 
                             style="background: #2196F3; margin-left: 10px;">
-                        🔄 Recargar página
-                    </button>
-                    <button class="retry-btn" onclick="enableDemoMode()" 
-                            style="background: #FF9800; margin-left: 10px;">
-                        🚀 Usar datos de ejemplo (solo desarrollo)
+                        🔄 Recargar con parámetros
                     </button>
                 </div>
                 
-                <div style="margin-top: 15px; font-size: 0.9em; color: #666;">
-                    <strong>¿Problemas en móvil?</strong><br>
-                    1. Borra caché del navegador<br>
-                    2. Usa: ${window.location.origin}?force=1<br>
-                    3. O prueba en PC primero
-                </div>
+                <p style="margin-top: 15px; font-size: 0.9em; color: #666;">
+                    <strong>Proxy 3 (URL directa) es el que funciona en Vercel.</strong>
+                </p>
             </div>
         `;
     }
 }
 
-// Función para activar demo MANUALMENTE
+// Función para forzar carga en Vercel
+window.cargarForzadoVercel = function() {
+    console.log('🚀 Forzando carga en Vercel...');
+    
+    // URL directa garantizada
+    const urlDirecta = 'https://docs.google.com/spreadsheets/d/1hKeM-13t6wyGD5Ya4Rx9NeUJXsgJoVN4dOb-rklPznA/gviz/tq?tqx=out:csv&gid=0&force_vercel=' + Date.now();
+    
+    fetch(urlDirecta)
+        .then(r => r.text())
+        .then(t => {
+            console.log('✅ Forzado exitoso:', t.length, 'caracteres');
+            processCSVData(t);
+        })
+        .catch(e => {
+            console.error('❌ Forzado falló:', e);
+            alert('Error forzado: ' + e.message);
+        });
+};
+
+// Función para activar demo MANUALMENTE - MODIFICADA PARA VERCEL
 function enableDemoMode() {
+    const esVercel = window.location.hostname.includes('vercel.app');
+    
+    if (esVercel) {
+        console.log('❌ VERCEL: Demo bloqueado - Usar datos reales');
+        
+        // Mostrar mensaje especial para Vercel
+        const errorDiv = document.createElement('div');
+        errorDiv.innerHTML = `
+            <div class="error-message">
+                <h3>⚠️ Vercel - Modo Demo Bloqueado</h3>
+                <p>En Vercel debes usar datos REALES desde Google Sheets.</p>
+                <p><strong>¿Por qué?</strong> Los datos demo solo funcionan en localhost.</p>
+                
+                <div style="margin-top: 20px;">
+                    <button class="retry-btn" onclick="cargarForzadoVercel()">
+                        🔄 Forzar datos REALES
+                    </button>
+                    <button class="retry-btn" onclick="location.href='?vercel_real=1&t='+Date.now()" 
+                            style="background: #2196F3; margin-left: 10px;">
+                        🔄 Recargar Vercel
+                    </button>
+                </div>
+                
+                <p style="margin-top: 15px; font-size: 0.9em; color: #666;">
+                    <strong>Solución:</strong><br>
+                    1. Asegúrate que tu Google Sheets sea público<br>
+                    2. Usa la URL directa (gviz/tq?tqx=out:csv)<br>
+                    3. Prueba en localhost primero
+                </p>
+            </div>
+        `;
+        
+        // Reemplazar contenido
+        productsGrid.innerHTML = '';
+        productsGrid.appendChild(errorDiv);
+        
+        return; // NO ejecutar loadBackupProducts()
+    }
+    
     console.log('🚀 Activando modo DEMO manualmente...');
     loadBackupProducts();
     
@@ -2012,7 +2057,7 @@ function enableDemoMode() {
         ">
             🚀 MODO DEMO ACTIVADO
             <br>
-            <small>Datos de ejemplo - Sin conexión a Sheets</small>
+            <small>Datos de ejemplo - Solo localhost</small>
         </div>
     `;
     document.body.appendChild(demoMsg);
@@ -3516,9 +3561,49 @@ if (/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) {
         } catch (error) {
             console.error('❌ Error en móvil:', error);
             
-            // En móvil, intentar con datos de ejemplo inmediatamente
-            console.log('📱 Móvil: Activando datos de ejemplo');
-            loadBackupProducts();
+// En móvil, intentar con datos de ejemplo inmediatamente - MODIFICADO PARA VERCEL
+const esVercel = window.location.hostname.includes('vercel.app');
+
+if (esVercel) {
+    console.log('❌ VERCEL: NO cargar demo automático - Mostrar error');
+    
+    // Mostrar error específico para Vercel
+    const errorHTML = `
+        <div class="error-message">
+            <h3>⚠️ Vercel - Error de Conexión</h3>
+            <p>No se pudo conectar con Google Sheets desde Vercel.</p>
+            <p><strong>Error:</strong> ${error.message}</p>
+            
+            <div style="margin-top: 20px;">
+                <button class="retry-btn" onclick="cargarForzadoVercel()">
+                    🔄 Intentar conexión DIRECTA
+                </button>
+                <button class="retry-btn" onclick="location.href='?vercel_direct=1&t='+Date.now()" 
+                        style="background: #2196F3; margin-left: 10px;">
+                    🔄 Recargar con URL directa
+                </button>
+            </div>
+            
+            <div style="margin-top: 15px; padding: 10px; background: #E3F2FD; border-radius: 8px;">
+                <strong>💡 ¿Por qué pasa esto en Vercel?</strong>
+                <ul style="text-align: left; margin: 10px 0 0 20px;">
+                    <li>Vercel tiene restricciones de CORS</li>
+                    <li>Usa siempre la URL directa (gviz/tq?tqx=out:csv)</li>
+                    <li>Prueba en localhost primero</li>
+                </ul>
+            </div>
+        </div>
+    `;
+    
+    // Actualizar interfaz
+    if (productsGrid) {
+        productsGrid.innerHTML = errorHTML;
+    }
+    
+} else {
+    console.log('📱 Móvil: Activando datos de ejemplo (solo localhost)');
+    loadBackupProducts();
+}
         }
     };
     
