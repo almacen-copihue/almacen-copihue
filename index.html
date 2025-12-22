@@ -182,6 +182,21 @@
         }
         
         /* ========== OFERTAS RELÁMPAGO ========== */
+        .relampago-limit-notification {
+            position: fixed;
+            top: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: linear-gradient(135deg, #ff3d00, #d50000);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 25px;
+            box-shadow: 0 4px 15px rgba(255, 61, 0, 0.4);
+            z-index: 1002;
+            font-weight: 500;
+            animation: slideDown 0.3s ease;
+            border: 2px solid white;
+        }
         .flash-sales-container {
             display: none;
             margin-bottom: 2rem;
@@ -4405,15 +4420,33 @@ function addToCart(productId) {
     const existingItem = cart.find(item => item.id === productId);
     const currentQuantityInCart = existingItem ? existingItem.quantity : 0;
     
+    // ✅ 1. Validar stock total
     if (currentQuantityInCart >= availableStock) {
         showStockError(product.name, availableStock);
         return;
     }
     
+    // ✅ 2. Validar límite de oferta 2 (descuento %)
     if (product.ofertas2) {
         const limiteOferta2 = obtenerLimiteOfertas2(product.ofertas2);
         if (limiteOferta2 !== null) {
             const newQuantity = currentQuantityInCart + 1;
+            if (newQuantity > limiteOferta2) {
+                showLimitError(product.name, limiteOferta2, `${product.ofertas2}% OFF`);
+                return;
+            }
+        }
+    }
+    
+    // ✅ 3. Validar si es oferta relámpago (máx 3)
+    const esRelampago = FLASH_SALES_SYSTEM.todaySelection?.some(p => p.id === productId);
+    if (esRelampago && currentQuantityInCart >= 3) {
+        showRelampagoLimitError(product.name);
+        return;
+    }
+    
+    // ✅ TODO OK - Agregar al carrito
+    const newQuantity = currentQuantityInCart + 1;
             if (newQuantity > limiteOferta2) {
                 showLimitError(product.name, limiteOferta2, `${product.ofertas2}% OFF`);
                 return;
@@ -4686,18 +4719,13 @@ function updateCartQuantity(productId, change) {
     
     const newQuantity = item.quantity + change;
     
-    if (newQuantity < 1) {
-        cart.splice(itemIndex, 1);
-        updateCartCount();
-        renderCartItems();
-        return;
-    }
-    
+    // ✅ PRIMERO: Verificar stock disponible
     if (newQuantity > product.stockNumber) {
         showStockError(product.name, product.stockNumber);
         return;
     }
     
+    // ✅ SEGUNDO: Verificar límite de oferta relámpago
     if (product.ofertas2) {
         const limiteOferta2 = obtenerLimiteOfertas2(product.ofertas2);
         if (limiteOferta2 !== null && newQuantity > limiteOferta2) {
@@ -4706,8 +4734,15 @@ function updateCartQuantity(productId, change) {
         }
     }
     
-    item.quantity = newQuantity;
+    // ✅ TERCERO: Verificar si es producto relámpago
+    const esRelampago = FLASH_SALES_SYSTEM.todaySelection?.some(p => p.id === productId);
+    if (esRelampago && newQuantity > 3) {
+        showRelampagoLimitError(product.name);
+        return;
+    }
     
+    // ✅ TODO BIEN - Actualizar cantidad
+    item.quantity = newQuantity;
     item.price = calcularPrecioConDescuento(
         product.price, 
         product.ofertas1, 
@@ -4717,18 +4752,18 @@ function updateCartQuantity(productId, change) {
     
     updateCartCount();
     renderCartItems();
+}
+
+function showRelampagoLimitError(productName) {
+    const notification = document.createElement('div');
+    notification.className = 'limit-notification';
+    notification.innerHTML = `⚡ Límite oferta relámpago: Máximo 3 unidades por familia`;
     
-    const precioOriginal = product.price;
+    document.body.appendChild(notification);
     
-    if (item.price < precioOriginal) {
-        const descuento = Math.round(((precioOriginal - item.price) / precioOriginal) * 100);
-        
-        if (product.ofertas1 === '1' && newQuantity >= 3) {
-            showAddToCartFeedback(product.name, 0, "3x2");
-        } else {
-            showAddToCartFeedback(product.name, descuento);
-        }
-    }
+    setTimeout(() => {
+        notification.remove();
+    }, 3000);
 }
 
 // ========== FUNCIÓN MEJORADA handleImageError ==========
