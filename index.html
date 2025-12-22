@@ -4426,33 +4426,66 @@ function addToCart(productId) {
         return;
     }
     
+    const newQuantity = currentQuantityInCart + 1;
+    
     // ✅ 2. Validar límite de oferta 2 (descuento %)
     if (product.ofertas2) {
         const limiteOferta2 = obtenerLimiteOfertas2(product.ofertas2);
-        if (limiteOferta2 !== null) {
-            const newQuantity = currentQuantityInCart + 1;
-            if (newQuantity > limiteOferta2) {
-                showLimitError(product.name, limiteOferta2, `${product.ofertas2}% OFF`);
-                return;
-            }
+        if (limiteOferta2 !== null && newQuantity > limiteOferta2) {
+            showLimitError(product.name, limiteOferta2, `${product.ofertas2}% OFF`);
+            return;
         }
     }
     
     // ✅ 3. Validar si es oferta relámpago (máx 3)
     const esRelampago = FLASH_SALES_SYSTEM.todaySelection?.some(p => p.id === productId);
-    if (esRelampago && currentQuantityInCart >= 3) {
+    if (esRelampago && newQuantity > 3) {
         showRelampagoLimitError(product.name);
         return;
     }
     
     // ✅ TODO OK - Agregar al carrito
-    const newQuantity = currentQuantityInCart + 1;
-            if (newQuantity > limiteOferta2) {
-                showLimitError(product.name, limiteOferta2, `${product.ofertas2}% OFF`);
-                return;
-            }
+    if (existingItem) {
+        existingItem.quantity = newQuantity;
+        existingItem.price = calcularPrecioConDescuento(
+            product.price, 
+            product.ofertas1, 
+            product.ofertas2, 
+            newQuantity
+        );
+    } else {
+        const initialPrice = calcularPrecioConDescuento(
+            product.price, 
+            product.ofertas1, 
+            product.ofertas2, 
+            1
+        );
+        
+        cart.push({
+            id: product.id,
+            name: product.name,
+            price: initialPrice,
+            originalPrice: product.price,
+            hasPromo: product.hasPromo,
+            ofertas1: product.ofertas1,
+            ofertas2: product.ofertas2,
+            quantity: 1,
+            maxStock: availableStock,
+            maxOferta2Limit: obtenerLimiteOfertas2(product.ofertas2),
+            esRelampago: esRelampago || false
+        });
+        
+        if (product.ofertas1 === '1') {
+            showAddToCartFeedback(product.name, 0, "3x2");
+        } else {
+            const initialDiscount = calcularDescuentoReal(product.price, initialPrice);
+            showAddToCartFeedback(product.name, initialDiscount);
         }
     }
+    
+    updateCartCount();
+    renderCartItems();
+}
     
     const newQuantity = currentQuantityInCart + 1;
     
@@ -4720,12 +4753,20 @@ function updateCartQuantity(productId, change) {
     const newQuantity = item.quantity + change;
     
     // ✅ PRIMERO: Verificar stock disponible
+    if (newQuantity < 1) {
+        cart.splice(itemIndex, 1);
+        updateCartCount();
+        renderCartItems();
+        return;
+    }
+    
+    // ✅ SEGUNDO: Validar stock total
     if (newQuantity > product.stockNumber) {
         showStockError(product.name, product.stockNumber);
         return;
     }
     
-    // ✅ SEGUNDO: Verificar límite de oferta relámpago
+    // ✅ TERCERO: Validar límite de oferta 2
     if (product.ofertas2) {
         const limiteOferta2 = obtenerLimiteOfertas2(product.ofertas2);
         if (limiteOferta2 !== null && newQuantity > limiteOferta2) {
@@ -4734,7 +4775,7 @@ function updateCartQuantity(productId, change) {
         }
     }
     
-    // ✅ TERCERO: Verificar si es producto relámpago
+    // ✅ CUARTO: Validar si es oferta relámpago (máx 3)
     const esRelampago = FLASH_SALES_SYSTEM.todaySelection?.some(p => p.id === productId);
     if (esRelampago && newQuantity > 3) {
         showRelampagoLimitError(product.name);
@@ -4753,11 +4794,26 @@ function updateCartQuantity(productId, change) {
     updateCartCount();
     renderCartItems();
 }
-
 function showRelampagoLimitError(productName) {
     const notification = document.createElement('div');
-    notification.className = 'limit-notification';
+    notification.className = 'relampago-limit-notification';
     notification.innerHTML = `⚡ Límite oferta relámpago: Máximo 3 unidades por familia`;
+    
+    notification.style.cssText = `
+        position: fixed;
+        top: 100px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: linear-gradient(135deg, #ff3d00, #d50000);
+        color: white;
+        padding: 12px 20px;
+        border-radius: 25px;
+        box-shadow: 0 4px 15px rgba(255, 61, 0, 0.4);
+        z-index: 1002;
+        font-weight: 500;
+        animation: slideDown 0.3s ease;
+        border: 2px solid white;
+    `;
     
     document.body.appendChild(notification);
     
