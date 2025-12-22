@@ -3675,23 +3675,32 @@ function renderCategories() {
     });
 }
 
-// ========== SISTEMA PERFECTO PARA CATEGORÍAS ==========
+// ========== SISTEMA MEJORADO CON VISIBILIDAD COMPLETA ==========
+
 function renderProducts() {
-    console.log('🔍 renderProducts() - MOSTRANDO SOLO PRODUCTOS SIN OFERTA EN CATEGORÍAS');
+    console.log('🔍 renderProducts() - SISTEMA MEJORADO');
     
     let filteredProducts = products.filter(p => {
-        // SOLO productos SIN oferta en categorías normales
-        const sinOferta = !p.hasPromo; // ← ¡ESTO ES CLAVE!
         const enCategoriaCorrecta = p.category === currentCategory;
         const tieneStock = p.stockNumber > 0;
         
-        return sinOferta && enCategoriaCorrecta && tieneStock;
+        // ✅ PRODUCTOS QUE DEBEN APARECER EN CATEGORÍAS:
+        // 1. Productos SIN oferta (siempre visibles)
+        // 2. Productos CON oferta que NO están en las secciones especiales
+        //    (es decir, los 13 de reserva)
+        
+        const estaEnDestacadas = window.productosDestacadosIds?.includes(p.id) || false;
+        const estaEnRelampago = FLASH_SALES_SYSTEM.todaySelection?.some(fp => fp.id === p.id) || false;
+        const estaEnSeccionEspecial = estaEnDestacadas || estaEnRelampago;
+        
+        return enCategoriaCorrecta && tieneStock && !estaEnSeccionEspecial;
     });
     
-    console.log('📦 Productos sin oferta en categoría:', filteredProducts.length);
+    console.log('📦 Productos en categoría:', filteredProducts.length);
     
-    // NUNCA mostrar ofertas en categorías
-    // Ya están excluidas por el filtro anterior
+    // Ahora tenemos:
+    // - Productos sin oferta (normales)
+    // - Productos con oferta pero en reserva (13 esperando)
     
     if (filteredProducts.length === 0) {
         productsGrid.innerHTML = `
@@ -3702,10 +3711,136 @@ function renderProducts() {
         return;
     }
     
-    // Ordenar alfabéticamente o por precio
-    filteredProducts.sort((a, b) => a.name.localeCompare(b.name));
+    // Ordenar: primero productos normales, luego reserva con oferta
+    filteredProducts.sort((a, b) => {
+        if (a.hasPromo && !b.hasPromo) return 1; // Reserva al final
+        if (!a.hasPromo && b.hasPromo) return -1; // Normales primero
+        return a.name.localeCompare(b.name);
+    });
     
-    renderProductsFromArray(filteredProducts);
+    renderProductsFromArrayMejorado(filteredProducts);
+}
+
+function renderProductsFromArrayMejorado(productsArray, searchTerm = '') {
+    const productsToShow = productsArray;
+    
+    if (productsToShow.length === 0) {
+        productsGrid.innerHTML = '<div class="loading">No hay productos disponibles</div>';
+        return;
+    }
+    
+    // Renderizar con DIFERENCIACIÓN entre productos normales y reserva
+    productsGrid.innerHTML = productsToShow.map(product => {
+        const isOutOfStock = product.stockNumber === 0;
+        const stockText = obtenerTextoStock(product);
+        
+        let stockClass = '';
+        if (product.stockNumber === 0) {
+            stockClass = 'out-of-stock';
+        } else if (product.stockNumber > 0 && product.stockNumber <= 3) {
+            stockClass = 'low-stock';
+        } else {
+            stockClass = 'in-stock';
+        }
+        
+        const addButton = isOutOfStock 
+            ? `<button class="add-to-cart" disabled>❌ Sin Stock</button>`
+            : `<button class="add-to-cart" data-id="${product.id}">🛒 Agregar al Carrito</button>`;
+        
+        // ✅ DIFERENCIACIÓN VISUAL:
+        const esProductoEnReserva = product.hasPromo && 
+                                   !window.productosDestacadosIds?.includes(product.id) &&
+                                   !FLASH_SALES_SYSTEM.todaySelection?.some(fp => fp.id === product.id);
+        
+        if (esProductoEnReserva) {
+            // PRODUCTO EN RESERVA (tiene oferta pero no está en secciones especiales)
+            return `
+                <div class="product-card" style="border: 2px dashed #ff9800;">
+                    <!-- SIN offer-badge pero con indicador de reserva -->
+                    <div class="promo-badge" style="background: linear-gradient(135deg, #ff9800, #f57c00);">
+                        🔄 EN RESERVA
+                    </div>
+                    
+                    <div class="product-image">
+                        <img src="${product.image}" 
+                             alt="${product.name}"
+                             onerror="handleImageError(this, '${product.name.replace(/'/g, "\\'")}')">
+                    </div>
+                    <div class="product-info">
+                        <div class="product-name">${product.name}</div>
+                        
+                        <!-- ✅ MOSTRAR PRECIO NORMAL -->
+                        <div class="product-price-container">
+                            <span class="product-price">$${Math.round(product.price)}</span>
+                            <small style="color: #666; font-size: 0.8rem;">
+                                (Oferta disponible para rotación)
+                            </small>
+                        </div>
+                        
+                        <div class="product-stock ${stockClass}">
+                            ${stockText}
+                        </div>
+                        ${addButton}
+                        
+                        <!-- Información para admin -->
+                        ${esAdmin ? `
+                            <div style="font-size: 0.7rem; color: #ff9800; margin-top: 5px; 
+                                      background: #fff3e0; padding: 5px; border-radius: 5px; 
+                                      border-left: 3px solid #ff9800;">
+                                <strong>🔄 EN RESERVA</strong><br>
+                                Oferta: ${product.ofertas2 || product.ofertas1}%<br>
+                                Disponible para rotación a destacadas/relámpago
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+        } else {
+            // PRODUCTO NORMAL (sin oferta)
+            return `
+                <div class="product-card">
+                    <!-- SIN offer-badge -->
+                    <div class="product-image">
+                        <img src="${product.image}" 
+                             alt="${product.name}"
+                             onerror="handleImageError(this, '${product.name.replace(/'/g, "\\'")}')">
+                    </div>
+                    <div class="product-info">
+                        <div class="product-name">${product.name}</div>
+                        
+                        <div class="product-price-container">
+                            <span class="product-price">$${Math.round(product.price)}</span>
+                        </div>
+                        
+                        <div class="product-stock ${stockClass}">
+                            ${stockText}
+                        </div>
+                        ${addButton}
+                    </div>
+                </div>
+            `;
+        }
+    }).join("");
+    
+    setTimeout(() => {
+        addCartEventListeners();
+    }, 100);
+    
+    if (searchTerm) {
+        const searchHeader = `
+            <div class="search-results">
+                <strong>🔍 Búsqueda inteligente: "${searchTerm}"</strong>
+                <br>
+                <small>Encontraste ${productsToShow.length} producto(s)</small>
+                <button onclick="clearSearch()" style="margin-left: 10px; padding: 6px 12px; 
+                        background: #ff6f00; color: white; border: none; border-radius: 15px; 
+                        cursor: pointer; font-size: 0.8rem;">
+                    ✖️ Limpiar búsqueda
+                </button>
+            </div>
+        `;
+        productsGrid.innerHTML = searchHeader + productsGrid.innerHTML;
+    }
 }
 
 function verTodasLasOfertas() {
@@ -4337,43 +4472,68 @@ function updateCartQuantity(productId, change) {
     }
 }
 
+// ========== FUNCIÓN MEJORADA handleImageError ==========
 function handleImageError(img, productName) {
-    console.warn('Error cargando imagen:', img.src);
+    console.log('🖼️ handleImageError llamado para:', productName);
+    console.log('📁 Intentando cargar:', img.src);
     
-    const colors = ['#e8f5e9', '#f1f8e9', '#f9fbe7', '#fffde7', '#fff3e0'];
-    const randomColor = colors[Math.floor(Math.random() * colors.length)];
+    // 1. Primero verificar si realmente hay un error o es otro problema
+    const imageName = img.src.split('/').pop();
+    console.log('🔍 Nombre del archivo:', imageName);
     
-    img.src = '';
-    img.onerror = null;
-    
+    // 2. Crear placeholder temporal
     const container = img.parentElement;
     
-    container.style.background = `linear-gradient(135deg, ${randomColor}, ${adjustColor(randomColor, -20)})`;
+    // 3. Fondo Copihue temporal
+    container.style.background = 'linear-gradient(135deg, #2e7d32, #4caf50)';
     container.style.display = 'flex';
+    container.style.flexDirection = 'column';
     container.style.justifyContent = 'center';
     container.style.alignItems = 'center';
-    container.style.position = 'relative';
+    container.style.padding = '15px';
     
-    const icon = document.createElement('div');
-    icon.innerHTML = '🛒';
-    icon.style.fontSize = '3rem';
-    icon.style.opacity = '0.5';
+    // 4. Mostrar información útil
+    container.innerHTML = `
+        <div style="font-size: 2rem; color: white; opacity: 0.9;">🏪</div>
+        <div style="color: white; font-size: 0.75rem; text-align: center; margin-top: 10px; font-weight: 500;">
+            ${productName}
+        </div>
+        <div style="color: rgba(255,255,255,0.8); font-size: 0.6rem; margin-top: 5px;">
+            Imagen: ${imageName}
+        </div>
+    `;
     
-    const text = document.createElement('div');
-    text.textContent = productName.length > 20 ? productName.substring(0, 20) + '...' : productName;
-    text.style.position = 'absolute';
-    text.style.bottom = '10px';
-    text.style.left = '0';
-    text.style.right = '0';
-    text.style.textAlign = 'center';
-    text.style.fontSize = '0.7rem';
-    text.style.color = '#666';
-    text.style.padding = '0 10px';
+    // 5. Intentar recargar la imagen después de un tiempo (por si se subió después)
+    setTimeout(() => {
+        console.log('🔄 Reintentando cargar imagen...');
+        
+        // Crear una nueva imagen para probar
+        const testImg = new Image();
+        testImg.onload = function() {
+            console.log('✅ ¡Imagen ENCONTRADA! Mostrando...');
+            container.style.background = '';
+            container.innerHTML = '';
+            img.src = testImg.src;
+            img.style.display = 'block';
+        };
+        
+        testImg.onerror = function() {
+            console.log('❌ Imagen NO encontrada después de reintento');
+            console.log('💡 Subir archivo como:', imageName);
+        };
+        
+        testImg.src = img.src;
+    }, 2000); // Esperar 2 segundos antes de reintentar
     
-    container.innerHTML = '';
-    container.appendChild(icon);
-    container.appendChild(text);
+    // 6. IMPORTANTE: Prevenir múltiples llamadas
+    img.onerror = null;
+    
+    console.log('📋 Acción requerida:');
+    console.log('   - Verificar que existe: imagenes-productos/${imageName}');
+    console.log('   - Tamaño máximo: 500x500 px');
+    console.log('   - Formato: JPG o PNG');
 }
+
 
 function adjustColor(color, amount) {
     const hex = color.replace('#', '');
@@ -4501,6 +4661,13 @@ function init() {
     }, 1000);
 }
 
+// Después de cargar los productos
+products.forEach(product => {
+    const imageName = simplificarNombre(product.name) + '.jpg';
+    product.image = `imagenes-productos/${imageName}?v=${Date.now()}`;
+    // ↑ Agregar timestamp para evitar cache
+});
+    
 function initPWA() {
     if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('./sw.js?v=' + APP_VERSION)
