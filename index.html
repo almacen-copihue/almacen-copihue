@@ -1629,7 +1629,30 @@
 
     <script>
 // ========== VERSIÓN Y CONFIGURACIÓN ==========
-const APP_VERSION = '20241219-SISTEMA-PERFECTO-OFERTAS';
+const APP_VERSION = '20241219-SISTEMA-PERFECTO-OFERTAS-' + Date.now();
+
+// ========== SISTEMA ANTI-CACHE AGGRESIVO ==========
+(function() {
+    console.log('🚀 Versión:', APP_VERSION);
+    console.log('🕐 Hora carga:', new Date().toLocaleTimeString());
+    
+    // Verificar si estamos cargando versión antigua
+    const urlParams = new URLSearchParams(window.location.search);
+    const versionParam = urlParams.get('v');
+    
+    if (versionParam && versionParam !== APP_VERSION.split('-')[2]) {
+        console.warn('⚠️ Versión desactualizada detectada');
+        console.warn('   URL tiene:', versionParam);
+        console.warn('   Actual es:', APP_VERSION.split('-')[2]);
+        
+        // Forzar recarga con nueva versión
+        const nuevaURL = window.location.pathname + '?v=' + Date.now() + '&t=' + Date.now();
+        setTimeout(() => {
+            console.log('🔄 Recargando con nueva versión...');
+            window.location.replace(nuevaURL);
+        }, 1000);
+    }
+})();
 
 // ========== SISTEMA DE OFERTAS ==========
 const OFERTAS_SISTEMA = {
@@ -3122,22 +3145,23 @@ function searchProducts(searchTerm) {
 // ========== CARGAR PRODUCTOS ==========
 async function loadProductsFromAPI() {
     try {
-        console.log('🚀 INICIANDO CARGA DESDE TU SCRIPT...');
-        if (productsGrid) {
-            productsGrid.innerHTML = '<div class="loading">🔄 Contactando tu base de datos...</div>';
-        }
+        console.log('🚀 INICIANDO CARGA DESDE API...');
         
         const TU_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
         
-        console.log('📡 Conectando a tu Apps Script...');
+        // ⚡ AGREGAR PARÁMETROS ANTI-CACHE
+        const urlConCache = TU_APPS_SCRIPT_URL + '?v=' + APP_VERSION + '&t=' + Date.now() + '&nocache=' + Math.random();
         
-        const urlConCache = TU_APPS_SCRIPT_URL + '?cache=' + Date.now();
+        console.log('📡 Conectando a:', urlConCache);
         
         const respuesta = await fetch(urlConCache, {
             method: 'GET',
             headers: {
-                'Accept': 'application/json'
-            }
+                'Accept': 'application/json',
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache'
+            },
+            cache: 'no-store' // ⚡ IMPORTANTE
         });
         
         console.log('📊 Estado de respuesta:', respuesta.status, respuesta.statusText);
@@ -4947,10 +4971,20 @@ function verificarSistemaOfertasCompleto() {
 // ========== INICIALIZACIÓN ==========
 function init() {
     console.log('🚀 Inicializando Almacén Copihue v' + APP_VERSION);
-    console.log('📊 Conectando a tu API con 422 productos...');
+    console.log('🔧 Cache busting activado');
     
     if (window.appInitialized) {
-        console.log('⚠️ App ya inicializada, saltando...');
+        console.log('⚠️ App ya inicializada, limpiando y recargando...');
+        window.appInitialized = false;
+        
+        // Limpiar variables globales
+        window.products = [];
+        window.cart = [];
+        
+        // Recargar en 1 segundo
+        setTimeout(() => {
+            window.location.href = window.location.pathname + '?reload=' + Date.now();
+        }, 1000);
         return;
     }
     window.appInitialized = true;
@@ -4961,11 +4995,8 @@ function init() {
     updateCartCount();
     initPWA();
     
+    // Cargar productos CON parámetro anti-cache
     loadProductsFromAPI();
-    
-    setTimeout(() => {
-        console.log('✅ Sistema listo. Botón 🏠 funcionando.');
-    }, 1000);
 }
 
 // Después de cargar los productos
@@ -5852,6 +5883,33 @@ setTimeout(() => {
         console.log('🎮 Panel de control relámpago activado');
     }
 }, 2000);
+
+// Comando para desarrolladores
+window.recargaForzada = function() {
+    console.log('🔄 Ejecutando recarga forzada...');
+    localStorage.clear(); // Limpiar todo
+    sessionStorage.clear();
+    
+    // Eliminar service workers
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(registrations => {
+            registrations.forEach(registration => registration.unregister());
+        });
+    }
+    
+    // Eliminar cache
+    if ('caches' in window) {
+        caches.keys().then(cacheNames => {
+            cacheNames.forEach(cacheName => caches.delete(cacheName));
+        });
+    }
+    
+    // Recargar con parámetros anti-cache
+    window.location.href = window.location.pathname + '?force=' + Date.now() + '&v=' + Date.now();
+};
+
+// También disponible como atajo
+window.rf = window.recargaForzada;
     </script>
 </body>
 </html>
