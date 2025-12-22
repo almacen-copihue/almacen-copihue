@@ -3748,55 +3748,86 @@ function renderProductsFromArrayMejorado(productsArray, searchTerm = '') {
             ? `<button class="add-to-cart" disabled>❌ Sin Stock</button>`
             : `<button class="add-to-cart" data-id="${product.id}">🛒 Agregar al Carrito</button>`;
         
-        // ✅ DIFERENCIACIÓN VISUAL:
-        const esProductoEnReserva = product.hasPromo && 
-                                   !window.productosDestacadosIds?.includes(product.id) &&
-                                   !FLASH_SALES_SYSTEM.todaySelection?.some(fp => fp.id === product.id);
-        
-        if (esProductoEnReserva) {
-            // PRODUCTO EN RESERVA (tiene oferta pero no está en secciones especiales)
-            return `
-                <div class="product-card" style="border: 2px dashed #ff9800;">
-                    <!-- SIN offer-badge pero con indicador de reserva -->
-                    <div class="promo-badge" style="background: linear-gradient(135deg, #ff9800, #f57c00);">
-                        🔄 EN RESERVA
+        // ✅ DIFERENCIACIÓN VISUAL: Productos en RESERVA (sistema de rotación)
+const esProductoEnReserva = product.hasPromo && 
+                           !window.productosDestacadosIds?.includes(product.id) &&
+                           !FLASH_SALES_SYSTEM.todaySelection?.some(fp => fp.id === product.id);
+
+if (esProductoEnReserva) {
+    // ⚠️ IMPORTANTE: Solo MOSTRAR productos en reserva si es MODO ADMIN
+    if (esAdmin) {
+        // PRODUCTO EN RESERVA - VISTA ADMIN (borde violeta, info completa)
+        return `
+            <div class="product-card" style="border: 3px solid #9c27b0; box-shadow: 0 4px 12px rgba(156, 39, 176, 0.2);">
+                <!-- BADGE ESPECIAL SOLO PARA ADMIN -->
+                <div class="promo-badge" style="background: linear-gradient(135deg, #9c27b0, #7b1fa2);">
+                    👁️ RESERVA (SOLO ADMIN)
+                </div>
+                
+                <div class="product-image">
+                    <img src="${product.image}" 
+                         alt="${product.name}"
+                         onerror="handleImageError(this, '${product.name.replace(/'/g, "\\'")}')">
+                </div>
+                <div class="product-info">
+                    <div class="product-name">${product.name}</div>
+                    
+                    <!-- INFO COMPLETA DE LA OFERTA (solo admin ve) -->
+                    <div style="font-size:0.75rem; background:#f3e5f5; padding:8px; border-radius:6px; margin:8px 0; border-left:3px solid #9c27b0;">
+                        <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                            <strong style="color:#7b1fa2;">🎯 OFERTA EN RESERVA</strong>
+                            <span style="background:#7b1fa2; color:white; padding:2px 6px; border-radius:10px; font-size:0.7rem;">
+                                ${product.ofertas2 || product.ofertas1 || '0'}% OFF
+                            </span>
+                        </div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:0.7rem;">
+                            <div>Precio normal:</div>
+                            <div><strong>$${Math.round(product.price)}</strong></div>
+                            <div>Precio con oferta:</div>
+                            <div><strong style="color:#d50000;">$${Math.round(product.discountedPrice)}</strong></div>
+                        </div>
+                        <div style="margin-top:6px; text-align:center; font-size:0.65rem; color:#666;">
+                            Listo para rotar a secciones especiales
+                        </div>
                     </div>
                     
-                    <div class="product-image">
-                        <img src="${product.image}" 
-                             alt="${product.name}"
-                             onerror="handleImageError(this, '${product.name.replace(/'/g, "\\'")}')">
+                    <!-- PRECIO NORMAL (para mantener consistencia) -->
+                    <div class="product-price-container">
+                        <span class="product-price">$${Math.round(product.price)}</span>
                     </div>
-                    <div class="product-info">
-                        <div class="product-name">${product.name}</div>
-                        
-                        <!-- ✅ MOSTRAR PRECIO NORMAL -->
-                        <div class="product-price-container">
-                            <span class="product-price">$${Math.round(product.price)}</span>
-                            <small style="color: #666; font-size: 0.8rem;">
-                                (Oferta disponible para rotación)
-                            </small>
-                        </div>
-                        
-                        <div class="product-stock ${stockClass}">
-                            ${stockText}
-                        </div>
-                        ${addButton}
-                        
-                        <!-- Información para admin -->
-                        ${esAdmin ? `
-                            <div style="font-size: 0.7rem; color: #ff9800; margin-top: 5px; 
-                                      background: #fff3e0; padding: 5px; border-radius: 5px; 
-                                      border-left: 3px solid #ff9800;">
-                                <strong>🔄 EN RESERVA</strong><br>
-                                Oferta: ${product.ofertas2 || product.ofertas1}%<br>
-                                Disponible para rotación a destacadas/relámpago
-                            </div>
-                        ` : ''}
+                    
+                    <div class="product-stock ${stockClass}">
+                        ${stockText}
+                    </div>
+                    
+                    <!-- BOTÓN NORMAL (admin puede testear) -->
+                    ${addButton}
+                    
+                    <!-- CONTROLES DE ROTACIÓN (solo admin) -->
+                    <div style="margin-top:10px; display:flex; gap:6px; justify-content:center;">
+                        <button onclick="rotarADestacadas(${product.id})" 
+                                style="font-size:0.7rem; padding:6px 10px; background:#4CAF50; color:white; border:none; border-radius:6px; cursor:pointer; display:flex; align-items:center; gap:4px;">
+                            <span>🔄</span> Destacadas
+                        </button>
+                        <button onclick="rotarARelampago(${product.id})" 
+                                style="font-size:0.7rem; padding:6px 10px; background:#2196F3; color:white; border:none; border-radius:6px; cursor:pointer; display:flex; align-items:center; gap:4px;">
+                            <span>⚡</span> Relámpago
+                        </button>
+                    </div>
+                    
+                    <!-- INFO ADICIONAL ADMIN -->
+                    <div style="font-size:0.65rem; color:#666; text-align:center; margin-top:8px; padding-top:8px; border-top:1px dashed #ddd;">
+                        ID: ${product.id} | Stock: ${product.stockNumber} | ${product.ofertas2 ? 'Oferta2' : 'Oferta1'}
                     </div>
                 </div>
-            `;
-        } else {
+            </div>
+        `;
+    } else {
+        // ⚠️ ¡CLIENTE NORMAL NO VE NADA! Producto INVISIBLE en categorías.
+        // Esto devuelve un string vacío, el producto NO SE RENDERIZA
+        return '';
+    }
+} else {
             // PRODUCTO NORMAL (sin oferta)
             return `
                 <div class="product-card">
@@ -5509,6 +5540,118 @@ if (esAdmin) {
         actualizarContadorAdmin();
     }, 1000);
 }
+
+// ============================================
+// FUNCIONES DE ROTACIÓN PARA ADMIN
+// ============================================
+
+function rotarADestacadas(productId) {
+    if (!esAdmin) {
+        alert('❌ Solo modo ADMIN puede rotar productos');
+        return;
+    }
+    
+    console.log(`🔄 Rotando producto ${productId} a DESTACADAS...`);
+    
+    // Aquí iría la lógica para mover el producto de "reserva" a "destacadas"
+    // Por ahora, solo feedback visual
+    alert(`✅ Producto ID: ${productId} marcado para rotar a DESTACADAS\n\nNota: La rotación automática se implementará en la próxima versión.`);
+    
+    // Feedback visual en la página
+    const feedback = document.createElement('div');
+    feedback.innerHTML = `🔄 Producto rotado a DESTACADAS (ID: ${productId})`;
+    feedback.style.cssText = `
+        position: fixed;
+        top: 180px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #4CAF50;
+        color: white;
+        padding: 12px 24px;
+        border-radius: 25px;
+        z-index: 1005;
+        font-weight: 600;
+        animation: slideDown 0.3s ease;
+        border: 2px solid white;
+        box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4);
+    `;
+    document.body.appendChild(feedback);
+    setTimeout(() => feedback.remove(), 2000);
+}
+
+function rotarARelampago(productId) {
+    if (!esAdmin) {
+        alert('❌ Solo modo ADMIN puede rotar productos');
+        return;
+    }
+    
+    console.log(`⚡ Rotando producto ${productId} a RELÁMPAGO...`);
+    
+    // Aquí iría la lógica para mover el producto a "relámpago"
+    alert(`✅ Producto ID: ${productId} marcado para rotar a OFERTAS RELÁMPAGO\n\nNota: La rotación automática se implementará en la próxima versión.`);
+    
+    // Feedback visual
+    const feedback = document.createElement('div');
+    feedback.innerHTML = `⚡ Producto rotado a RELÁMPAGO (ID: ${productId})`;
+    feedback.style.cssText = `
+        position: fixed;
+        top: 180px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #ff9800;
+        color: white;
+        padding: 12px 24px;
+        border-radius: 25px;
+        z-index: 1005;
+        font-weight: 600;
+        animation: slideDown 0.3s ease;
+        border: 2px solid white;
+        box-shadow: 0 4px 15px rgba(255, 152, 0, 0.4);
+    `;
+    document.body.appendChild(feedback);
+    setTimeout(() => feedback.remove(), 2000);
+}
+
+// Función para actualizar contador de reservas en header admin
+function actualizarContadorReservasAdmin() {
+    if (!esAdmin) return;
+    
+    const productosEnReserva = window.products?.filter(p => 
+        p.hasPromo && 
+        !window.productosDestacadosIds?.includes(p.id) &&
+        !FLASH_SALES_SYSTEM.todaySelection?.some(fp => fp.id === p.id)
+    ).length || 0;
+    
+    let reservaElement = document.getElementById('adminReservaContador');
+    
+    if (!reservaElement && productosEnReserva > 0) {
+        reservaElement = document.createElement('span');
+        reservaElement.id = 'adminReservaContador';
+        reservaElement.style.cssText = `
+            background: #9c27b0;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.7rem;
+            margin-left: 5px;
+            font-weight: bold;
+            border: 1px solid white;
+        `;
+        
+        const contadorActual = document.getElementById('adminOfertasContador');
+        if (contadorActual && contadorActual.parentNode) {
+            contadorActual.parentNode.insertBefore(reservaElement, contadorActual.nextSibling);
+        }
+    }
+    
+    if (reservaElement) {
+        reservaElement.textContent = `📦 ${productosEnReserva} RESERVA`;
+        reservaElement.style.display = productosEnReserva > 0 ? 'inline-block' : 'none';
+    }
+}
+
+// Llamar esta función después de cargar productos
+setTimeout(actualizarContadorReservasAdmin, 1500);
     </script>
 </body>
 </html>
