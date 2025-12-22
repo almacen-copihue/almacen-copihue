@@ -1613,7 +1613,7 @@
 
     <script>
 // ========== VERSIÓN Y CONFIGURACIÓN ==========
-const APP_VERSION = '20241218-V123-FLASH-SALES-FIXED';
+const APP_VERSION = '20241219-SISTEMA-PERFECTO-OFERTAS';
 
 // ========== SISTEMA DE OFERTAS ==========
 const OFERTAS_SISTEMA = {
@@ -3633,27 +3633,19 @@ function clearSearch() {
     });
 }
 
+// ========== SISTEMA PERFECTO DE CATEGORÍAS ==========
 function renderCategories() {
     const categories = [...new Set(products.map(p => p.category))];
     
-    const ofertasPorCategoria = {};
-    products.forEach(p => {
-        if (p.hasPromo && (p.stock === "STOCK" || p.stockNumber > 0)) {
-            ofertasPorCategoria[p.category] = (ofertasPorCategoria[p.category] || 0) + 1;
-        }
-    });
+    // ⚠️ SIN CONTAR OFERTAS - NO HAY BADGES
+    // Las ofertas solo se muestran en secciones especiales
     
     categoriesContainer.innerHTML = categories.map(category => {
-        let badge = '';
-        
-        if (ofertasPorCategoria[category]) {
-            badge = `<span class="offer-count-badge">${ofertasPorCategoria[category]}🔥</span>`;
-        }
-        
         return `
             <button class="category-btn ${category === currentCategory ? 'active' : ''}" 
                     data-category="${category}">
-                ${category} ${badge}
+                ${category}
+                <!-- SIN BADGE DE FUEGO -->
             </button>
         `;
     }).join("");
@@ -3683,35 +3675,25 @@ function renderCategories() {
     });
 }
 
+// ========== SISTEMA PERFECTO PARA CATEGORÍAS ==========
 function renderProducts() {
-    console.log('🔍 renderProducts() llamado');
-    console.log('📁 Categoría actual:', currentCategory);
-    console.log('📊 Total productos:', products.length);
+    console.log('🔍 renderProducts() - MOSTRANDO SOLO PRODUCTOS SIN OFERTA EN CATEGORÍAS');
     
-    let filteredProducts;
-    
-    filteredProducts = products.filter(p => {
-        return p.category === currentCategory && 
-               (p.stock === "STOCK" || p.stockNumber > 0);
+    let filteredProducts = products.filter(p => {
+        // SOLO productos SIN oferta en categorías normales
+        const sinOferta = !p.hasPromo; // ← ¡ESTO ES CLAVE!
+        const enCategoriaCorrecta = p.category === currentCategory;
+        const tieneStock = p.stockNumber > 0;
+        
+        return sinOferta && enCategoriaCorrecta && tieneStock;
     });
     
-    console.log('🎯 Productos filtrados:', filteredProducts.length);
+    console.log('📦 Productos sin oferta en categoría:', filteredProducts.length);
     
-    if (window.productosDestacadosIds && window.productosDestacadosIds.length > 0) {
-        filteredProducts = filteredProducts.filter(p => 
-            !window.productosDestacadosIds.includes(p.id)
-        );
-    }
-    
-    if (FLASH_SALES_SYSTEM.isActive && FLASH_SALES_SYSTEM.todaySelection.length > 0) {
-        const flashProductIds = FLASH_SALES_SYSTEM.todaySelection.map(p => p.id);
-        filteredProducts = filteredProducts.filter(p => 
-            !flashProductIds.includes(p.id)
-        );
-    }
+    // NUNCA mostrar ofertas en categorías
+    // Ya están excluidas por el filtro anterior
     
     if (filteredProducts.length === 0) {
-        console.warn('⚠️ No hay productos para esta categoría');
         productsGrid.innerHTML = `
             <div class="loading" style="text-align: center; padding: 2rem;">
                 🛒 No hay productos disponibles en "${currentCategory}"
@@ -3720,13 +3702,9 @@ function renderProducts() {
         return;
     }
     
-    filteredProducts.sort((a, b) => {
-        if (a.hasPromo && !b.hasPromo) return -1;
-        if (!a.hasPromo && b.hasPromo) return 1;
-        return 0;
-    });
+    // Ordenar alfabéticamente o por precio
+    filteredProducts.sort((a, b) => a.name.localeCompare(b.name));
     
-    console.log('🎨 Renderizando', filteredProducts.length, 'productos');
     renderProductsFromArray(filteredProducts);
 }
 
@@ -3930,17 +3908,66 @@ function mostrarOfertasDestacadas() {
     }
 }
 
+// ========== SISTEMA PERFECTO PARA CATEGORÍAS NORMALES ==========
 function renderProductsFromArray(productsArray, searchTerm = '') {
     const productsToShow = productsArray;
     
     if (productsToShow.length === 0) {
-        let mensaje = '';
-        mensaje = '<div class="loading">No hay productos disponibles</div>';
-        productsGrid.innerHTML = mensaje;
+        productsGrid.innerHTML = '<div class="loading">No hay productos disponibles</div>';
         return;
     }
     
-    productsGrid.innerHTML = renderProductsToHTML(productsToShow);
+    // Renderizar SIN ofertas (badge de fuego)
+    productsGrid.innerHTML = productsToShow.map(product => {
+        const isOutOfStock = product.stockNumber === 0;
+        const stockText = obtenerTextoStock(product);
+        
+        let stockClass = '';
+        if (product.stockNumber === 0) {
+            stockClass = 'out-of-stock';
+        } else if (product.stockNumber > 0 && product.stockNumber <= 3) {
+            stockClass = 'low-stock';
+        } else {
+            stockClass = 'in-stock';
+        }
+        
+        const addButton = isOutOfStock 
+            ? `<button class="add-to-cart" disabled>❌ Sin Stock</button>`
+            : `<button class="add-to-cart" data-id="${product.id}">🛒 Agregar al Carrito</button>`;
+        
+        // ⚠️ SIN BADGE DE OFERTA - SIN TEXTO DE OFERTA
+        // ⚠️ SIN DESCUENTO - SOLO PRECIO NORMAL
+        
+        return `
+            <div class="product-card">
+                <!-- SIN offer-badge -->
+                <!-- SIN promo-badge -->
+                <div class="product-image">
+                    <img src="${product.image}" 
+                         alt="${product.name}"
+                         onerror="handleImageError(this, '${product.name.replace(/'/g, "\\'")}')">
+                </div>
+                <div class="product-info">
+                    <div class="product-name">${product.name}</div>
+                    
+                    <!-- SIN offer-description -->
+                    <!-- SIN detalleOferta -->
+                    
+                    <div class="product-price-container">
+                        <!-- SIN original-price (no hay descuento) -->
+                        <span class="product-price">$${Math.round(product.price)}</span>
+                        <!-- SIN discount-percent -->
+                    </div>
+                    
+                    <div class="product-stock ${stockClass}">
+                        ${stockText}
+                    </div>
+                    ${addButton}
+                    ${esAdmin ? mostrarInfoAdmin(product) : ''}
+                </div>
+            </div>
+        `;
+    }).join("");
     
     setTimeout(() => {
         addCartEventListeners();
@@ -4387,6 +4414,67 @@ function verificarStockBajo() {
             lowStockAlertSent = false;
         }, 10000);
     }
+}
+
+// ========== VERIFICACIÓN DEL SISTEMA PERFECTO ==========
+function verificarSistemaOfertasCompleto() {
+    console.log('🔍 VERIFICACIÓN COMPLETA DEL SISTEMA:');
+    console.log('========================================');
+    
+    if (!window.products) {
+        console.log('❌ No hay productos cargados');
+        return;
+    }
+    
+    const totalProductos = window.products.length;
+    console.log(`📊 Total productos en sistema: ${totalProductos}`);
+    
+    // Contar por tipo
+    const productosConOferta = window.products.filter(p => p.hasPromo).length;
+    const productosSinOferta = totalProductos - productosConOferta;
+    
+    console.log(`🔥 Productos CON oferta (en planilla): ${productosConOferta}`);
+    console.log(`📦 Productos SIN oferta: ${productosSinOferta}`);
+    
+    // Ofertas destacadas
+    const destacadasCount = window.productosDestacadosIds ? window.productosDestacadosIds.length : 0;
+    console.log(`🎯 Ofertas DESTACADAS (sección especial): ${destacadasCount}/9`);
+    
+    // Ofertas relámpago
+    const relampagoCount = FLASH_SALES_SYSTEM.todaySelection ? FLASH_SALES_SYSTEM.todaySelection.length : 0;
+    console.log(`⚡ Ofertas RELÁMPAGO (rotativas): ${relampagoCount}/3`);
+    
+    // Ofertas "ocultas" (en planilla pero no visibles)
+    const ofertasOcultas = productosConOferta - (destacadasCount + relampagoCount);
+    console.log(`🫥 Ofertas en RESERVA (no visibles): ${ofertasOcultas}`);
+    
+    // Verificar categorías
+    console.log('\n🏪 VERIFICANDO CATEGORÍAS:');
+    const categorias = [...new Set(window.products.map(p => p.category))];
+    
+    categorias.forEach(categoria => {
+        const productosEnCategoria = window.products.filter(p => p.category === categoria);
+        const ofertasEnCategoria = productosEnCategoria.filter(p => p.hasPromo).length;
+        
+        if (ofertasEnCategoria > 0) {
+            console.warn(`⚠️ PROBLEMA en "${categoria}": ${ofertasEnCategoria} ofertas visibles (deberían ser 0)`);
+            
+            // Mostrar cuáles son
+            productosEnCategoria.filter(p => p.hasPromo).forEach(p => {
+                console.log(`   • ${p.name} - ${p.ofertas2 || p.ofertas1}`);
+            });
+        } else {
+            console.log(`✅ "${categoria}": 0 ofertas (CORRECTO)`);
+        }
+    });
+    
+    console.log('\n🎯 RESUMEN ESTRATEGIA:');
+    console.log(`   Planilla: ${productosConOferta} productos con oferta`);
+    console.log(`   Visibles: ${destacadasCount + relampagoCount} ofertas`);
+    console.log(`   Ocultas: ${ofertasOcultas} ofertas en reserva`);
+    console.log(`   Categorías: SOLO productos sin oferta`);
+    
+    console.log('========================================');
 }
 
 // ========== INICIALIZACIÓN ==========
