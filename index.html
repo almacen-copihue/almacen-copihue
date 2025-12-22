@@ -5652,6 +5652,158 @@ function actualizarContadorReservasAdmin() {
 
 // Llamar esta función después de cargar productos
 setTimeout(actualizarContadorReservasAdmin, 1500);
+
+// ============================================
+// SISTEMA DE LIMPIEZA DE CACHE RELÁMPAGO
+// ============================================
+
+function resetearCacheRelampagoCompleto() {
+    if (!esAdmin) {
+        console.log('❌ Solo admin puede resetear cache');
+        mostrarFeedbackAdmin('❌ Solo MODO ADMIN', '#f44336');
+        return;
+    }
+    
+    console.log('🧹 INICIANDO LIMPIEZA DE CACHE RELÁMPAGO...');
+    
+    // 1. Eliminar todas las claves de flash_sales
+    const claves = [];
+    for (let i = 0; i < localStorage.length; i++) {
+        const clave = localStorage.key(i);
+        if (clave.includes('flash_sales')) {
+            claves.push(clave);
+            localStorage.removeItem(clave);
+        }
+    }
+    
+    // 2. Resetear sistema
+    FLASH_SALES_SYSTEM.todaySelection = [];
+    FLASH_SALES_SYSTEM.yesterdaySelection = [];
+    FLASH_SALES_SYSTEM.productPool = [];
+    
+    // 3. Forzar regeneración
+    FLASH_SALES_SYSTEM.loadProductPool();
+    FLASH_SALES_SYSTEM.generateDailySelection();
+    FLASH_SALES_SYSTEM.updateUI();
+    
+    // 4. Feedback
+    console.log('✅ Cache eliminado:', claves);
+    console.log('🔄 Regenerando ofertas del día...');
+    
+    mostrarFeedbackAdmin(
+        `🧹 Cache limpiado (${claves.length} registros)<br>🔄 Regenerando ofertas...`, 
+        '#4CAF50'
+    );
+    
+    // Recargar después de 2 segundos
+    setTimeout(() => {
+        location.reload();
+    }, 2000);
+}
+
+// Función específica para cuando stock = 0
+function limpiarSiStockCero() {
+    if (!window.products || !FLASH_SALES_SYSTEM.todaySelection) return;
+    
+    let hayStockCero = false;
+    const productosProblema = [];
+    
+    // Verificar cada oferta relámpago actual
+    FLASH_SALES_SYSTEM.todaySelection.forEach(productoFlash => {
+        const productoReal = window.products.find(p => p.id === productoFlash.id);
+        
+        if (productoReal && productoReal.stockNumber === 0) {
+            hayStockCero = true;
+            productosProblema.push({
+                nombre: productoReal.name,
+                stock: productoReal.stockNumber,
+                oferta: productoFlash.ofertas2
+            });
+        }
+    });
+    
+    if (hayStockCero) {
+        console.warn('⚠️ OFERTAS RELÁMPAGO CON STOCK CERO:', productosProblema);
+        
+        if (esAdmin) {
+            const mensaje = productosProblema.map(p => 
+                `• ${p.nombre} (Stock: ${p.stock})`
+            ).join('\n');
+            
+            if (confirm(`⚠️ ${productosProblema.length} oferta(s) relámpago sin stock:\n\n${mensaje}\n\n¿Resetear cache?`)) {
+                resetearCacheRelampagoCompleto();
+            }
+        }
+    }
+}
+
+// Panel de control visual para admin
+function crearPanelControlRelampago() {
+    if (!esAdmin) return;
+    
+    const panelHTML = `
+        <div id="panelControlRelampago" style="
+            position: fixed;
+            bottom: 180px;
+            right: 20px;
+            background: linear-gradient(135deg, #ff3d00, #d50000);
+            color: white;
+            padding: 15px;
+            border-radius: 15px;
+            box-shadow: 0 6px 20px rgba(255, 61, 0, 0.4);
+            z-index: 998;
+            font-size: 14px;
+            min-width: 250px;
+            border: 2px solid white;
+        ">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <strong>⚡ CONTROL RELÁMPAGO</strong>
+                <button onclick="document.getElementById('panelControlRelampago').remove()" 
+                        style="background:none; border:none; color:white; font-size:18px; cursor:pointer; padding:0 5px;">
+                    ×
+                </button>
+            </div>
+            
+            <div style="background: rgba(255,255,255,0.1); padding: 8px; border-radius: 8px; margin-bottom: 10px;">
+                <div>🔄 Ofertas hoy: <strong>${FLASH_SALES_SYSTEM.todaySelection?.length || 0}/3</strong></div>
+                <div>📦 Pool disponible: <strong>${FLASH_SALES_SYSTEM.productPool?.length || 0}</strong></div>
+                <div>⏰ Estado: <strong>${FLASH_SALES_SYSTEM.isActive ? 'ACTIVO' : 'INACTIVO'}</strong></div>
+            </div>
+            
+            <button onclick="resetearCacheRelampagoCompleto()" 
+                    style="width:100%; padding:10px; background:white; color:#ff3d00; border:none; border-radius:10px; font-weight:bold; cursor:pointer; margin-bottom:8px;">
+                🧹 LIMPIAR CACHE
+            </button>
+            
+            <button onclick="debugFlashSales()" 
+                    style="width:100%; padding:8px; background:rgba(255,255,255,0.2); color:white; border:1px solid white; border-radius:8px; cursor:pointer; font-size:12px;">
+                📊 DEBUG CONSOLA
+            </button>
+        </div>
+    `;
+    
+    // Eliminar panel anterior si existe
+    const panelAnterior = document.getElementById('panelControlRelampago');
+    if (panelAnterior) panelAnterior.remove();
+    
+    // Insertar nuevo panel
+    document.body.insertAdjacentHTML('beforeend', panelHTML);
+}
+
+// Auto-detección de stock cero (ejecutar periódicamente)
+setInterval(() => {
+    if (esAdmin && FLASH_SALES_SYSTEM.isActive) {
+        limpiarSiStockCero();
+    }
+}, 30000); // Revisar cada 30 segundos
+
+// Crear panel al cargar
+setTimeout(() => {
+    if (esAdmin) {
+        crearPanelControlRelampago();
+        console.log('🎮 Panel de control relámpago activado');
+    }
+}, 2000);
     </script>
 </body>
 </html>
