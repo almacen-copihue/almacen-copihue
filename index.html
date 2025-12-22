@@ -1435,6 +1435,7 @@
             <img src="iconos-pwa/android/android-launchericon-48-48.png" alt="Logo Almacén Copihue" class="logo-icon">
             Almacén Copihue
             <span id="adminBadge" class="admin-badge" style="display: none;">ADMIN</span>
+            <span id="adminOfertasContador" style="display: none;"></span>
         </div>
         <div class="cart-icon" id="cartIcon">
             🛒 <span class="cart-count" id="cartCount">0</span>
@@ -3947,98 +3948,325 @@ function renderProductsToHTML(productsArray) {
     }).join("");
 }
 
+// ============================================
+// SISTEMA HÍBRIDO DE OFERTAS DESTACADAS
+// ============================================
+
+// 🎯 CONFIGURACIÓN BASE - AUTOMÁTICA POR DÍA
+function getLimiteOfertasDestacadasAutomatico() {
+    const hoy = new Date();
+    const diaSemana = hoy.getDay(); // 0=domingo, 1=lunes...
+    const mes = hoy.getMonth() + 1; // 1=enero, 12=diciembre
+    const diaMes = hoy.getDate();
+    
+    let limiteBase = 9; // Default
+    
+    // 📅 LÓGICA POR DÍA DE SEMANA
+    switch(diaSemana) {
+        case 0: // Domingo
+            limiteBase = 9;
+            break;
+        case 1: // Lunes
+        case 2: // Martes
+        case 3: // Miércoles
+        case 4: // Jueves
+            limiteBase = 3;
+            break;
+        case 5: // Viernes
+        case 6: // Sábado
+            limiteBase = 9;
+            break;
+    }
+    
+    // 🎄 TEMPORADAS ESPECIALES (AUTO)
+    // Navidad: 15-31 diciembre
+    if (mes === 12 && diaMes >= 15 && diaMes <= 31) {
+        limiteBase = Math.max(limiteBase, 12); // Mínimo 12 en Navidad
+    }
+    
+    // Año Nuevo: 1-10 enero
+    if (mes === 1 && diaMes <= 10) {
+        limiteBase = Math.max(limiteBase, 12); // Mínimo 12 en Año Nuevo
+    }
+    
+    // Vacaciones de invierno (julio)
+    if (mes === 7 && diaMes >= 15 && diaMes <= 31) {
+        limiteBase = Math.max(limiteBase, 10); // Mínimo 10 en vacaciones
+    }
+    
+    // Vacaciones de verano (enero - febrero)
+    if (mes === 1 || mes === 2) {
+        limiteBase = Math.max(limiteBase, 8); // Mínimo 8 en verano
+    }
+    
+    return limiteBase;
+}
+
+// 👑 FUNCIÓN PRINCIPAL - OBTIENE LÍMITE (AUTO o MANUAL)
+function obtenerLimiteOfertasDestacadas() {
+    // 1. ¿Hay configuración MANUAL activa?
+    const configManual = localStorage.getItem('almacen_ofertas_manual');
+    
+    if (configManual && !isNaN(parseInt(configManual))) {
+        const manualValue = parseInt(configManual);
+        
+        // Verificar si expiró (24 horas)
+        const timestamp = localStorage.getItem('almacen_ofertas_timestamp');
+        if (timestamp) {
+            const ahora = new Date().getTime();
+            const diferenciaHoras = (ahora - parseInt(timestamp)) / (1000 * 60 * 60);
+            
+            if (diferenciaHoras > 24) {
+                // Configuración expirada, volver a automático
+                localStorage.removeItem('almacen_ofertas_manual');
+                localStorage.removeItem('almacen_ofertas_timestamp');
+                console.log('🔄 Configuración manual expirada (24h), volviendo a automático');
+                return getLimiteOfertasDestacadasAutomatico();
+            }
+        }
+        
+        console.log(`🎯 Usando configuración MANUAL: ${manualValue} ofertas`);
+        return Math.min(Math.max(1, manualValue), 15); // Limitado a 1-15
+    }
+    
+    // 2. Configuración AUTOMÁTICA
+    const limiteAuto = getLimiteOfertasDestacadasAutomatico();
+    console.log(`📅 Usando configuración AUTOMÁTICA: ${limiteAuto} ofertas`);
+    return limiteAuto;
+}
+
+// 🎮 FUNCIONES DE CONTROL MANUAL (solo admin)
+function configurarOfertas(cantidad) {
+    if (!esAdmin) {
+        console.log("❌ Solo modo ADMIN puede cambiar esto");
+        mostrarFeedbackAdmin("❌ Solo ADMIN puede cambiar ofertas", "#f44336");
+        return false;
+    }
+    
+    if (isNaN(cantidad) || cantidad < 1 || cantidad > 15) {
+        console.log("⚠️ Cantidad debe ser entre 1 y 15");
+        mostrarFeedbackAdmin("⚠️ Cantidad debe ser 1-15", "#ff9800");
+        return false;
+    }
+    
+    // Guardar configuración manual
+    localStorage.setItem('almacen_ofertas_manual', cantidad);
+    localStorage.setItem('almacen_ofertas_timestamp', new Date().getTime().toString());
+    
+    console.log(`✅ Ofertas destacadas cambiadas a: ${cantidad}`);
+    console.log(`📅 Efectivo por 24 horas (hasta mañana a esta hora)`);
+    
+    mostrarFeedbackAdmin(`✅ Ofertas cambiadas a ${cantidad} (24h)`, "#4CAF50");
+    
+    // Actualizar interfaz si es visible
+    if (window.productosDestacadosIds && window.productosDestacadosIds.length > 0) {
+        setTimeout(() => {
+            mostrarOfertasDestacadas();
+            actualizarContadorAdmin();
+        }, 500);
+    }
+    
+    return true;
+}
+
+function resetearOfertasAutomatico() {
+    if (!esAdmin) return;
+    
+    localStorage.removeItem('almacen_ofertas_manual');
+    localStorage.removeItem('almacen_ofertas_timestamp');
+    
+    console.log('🔄 Ofertas reseteadas a modo AUTOMÁTICO');
+    mostrarFeedbackAdmin("🔄 Volviendo a modo AUTOMÁTICO", "#2196F3");
+    
+    setTimeout(() => {
+        mostrarOfertasDestacadas();
+        actualizarContadorAdmin();
+    }, 500);
+}
+
+// 💬 FEEDBACK VISUAL PARA ADMIN
+function mostrarFeedbackAdmin(mensaje, color) {
+    // Eliminar feedbacks anteriores
+    document.querySelectorAll('.admin-feedback-ofertas').forEach(el => el.remove());
+    
+    const feedback = document.createElement('div');
+    feedback.className = 'admin-feedback-ofertas';
+    feedback.innerHTML = mensaje;
+    
+    feedback.style.cssText = `
+        position: fixed;
+        top: 160px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: ${color};
+        color: white;
+        padding: 12px 24px;
+        border-radius: 25px;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+        z-index: 1004;
+        font-weight: 600;
+        font-size: 14px;
+        animation: slideDown 0.3s ease;
+        border: 2px solid white;
+        text-align: center;
+        min-width: 300px;
+        max-width: 80%;
+    `;
+    
+    document.body.appendChild(feedback);
+    
+    setTimeout(() => {
+        if (feedback.parentNode) {
+            feedback.parentNode.removeChild(feedback);
+        }
+    }, 3000);
+}
+
+// 🔢 ACTUALIZAR CONTADOR VISUAL EN HEADER
+function actualizarContadorAdmin() {
+    if (!esAdmin) return;
+    
+    let contadorElement = document.getElementById('adminOfertasContador');
+    
+    // Crear si no existe
+    if (!contadorElement) {
+        contadorElement = document.createElement('span');
+        contadorElement.id = 'adminOfertasContador';
+        contadorElement.style.cssText = `
+            background: #2196F3;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.7rem;
+            margin-left: 5px;
+            font-weight: bold;
+            border: 1px solid white;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        `;
+        
+        const adminBadge = document.getElementById('adminBadge');
+        if (adminBadge && adminBadge.parentNode) {
+            adminBadge.parentNode.insertBefore(contadorElement, adminBadge.nextSibling);
+        }
+    }
+    
+    const limiteActual = obtenerLimiteOfertasDestacadas();
+    const esManual = localStorage.getItem('almacen_ofertas_manual') !== null;
+    
+    let texto = `OFERTAS: ${limiteActual}`;
+    if (esManual) {
+        texto += ' 📱';
+        
+        // Verificar tiempo restante
+        const timestamp = localStorage.getItem('almacen_ofertas_timestamp');
+        if (timestamp) {
+            const ahora = new Date().getTime();
+            const diferenciaHoras = (ahora - parseInt(timestamp)) / (1000 * 60 * 60);
+            const horasRestantes = Math.max(0, 24 - diferenciaHoras);
+            
+            if (horasRestantes < 6) {
+                texto += ` ⏳${Math.round(horasRestantes)}h`;
+                contadorElement.style.background = '#ff9800'; // Naranja alerta
+            } else {
+                contadorElement.style.background = '#4CAF50'; // Verde normal
+            }
+        }
+    } else {
+        contadorElement.style.background = '#2196F3'; // Azul automático
+    }
+    
+    contadorElement.textContent = texto;
+}
+
 function mostrarOfertasDestacadas() {
-    console.log('🔥 OFERTAS DESTACADAS - Iniciando búsqueda...');
+    console.log('🔥 OFERTAS DESTACADAS - Sistema híbrido...');
     
     if (!window.products || !Array.isArray(window.products) || window.products.length === 0) {
-        console.log('❌ ERROR: products array no disponible o vacío');
+        console.log('❌ ERROR: products array no disponible');
         if (featuredOffers) featuredOffers.style.display = 'none';
         return;
     }
     
+    // OBTENER LÍMITE (AUTO o MANUAL)
+    const limite = obtenerLimiteOfertasDestacadas();
+    
     console.log('📊 Total productos disponibles:', window.products.length);
     
-    const productosConOferta = [];
-    
-    window.products.forEach((p, index) => {
+    const productosConOferta = window.products.filter(p => {
         const tieneOferta1 = p.ofertas1 && p.ofertas1 !== '' && p.ofertas1 !== '0';
         const tieneOferta2 = p.ofertas2 && p.ofertas2 !== '' && p.ofertas2 !== '0';
         const tieneStock = p.stockNumber > 0;
         
-        if ((tieneOferta1 || tieneOferta2) && tieneStock) {
-            productosConOferta.push(p);
-            
-            if (productosConOferta.length <= 5) {
-                console.log(`🎯 Producto con oferta #${productosConOferta.length}:`, {
-                    nombre: p.name.substring(0, 30),
-                    oferta1: p.ofertas1,
-                    oferta2: p.ofertas2,
-                    hasPromo: p.hasPromo,
-                    stock: p.stockNumber,
-                    precioOriginal: p.price,
-                    precioConDescuento: p.discountedPrice,
-                    discountPercent: p.discountPercent
-                });
-            }
-        }
+        return (tieneOferta1 || tieneOferta2) && tieneStock;
     });
     
     console.log('📋 Total productos con ofertas y stock:', productosConOferta.length);
     
     if (productosConOferta.length === 0) {
-        console.log('🔍 DIAGNÓSTICO - ¿Por qué no hay ofertas?');
-        
-        const primeros5 = window.products.slice(0, 5);
-        primeros5.forEach((p, i) => {
-            console.log(`Producto ${i+1}: "${p.name.substring(0, 20)}..."`, {
-                ofertas1: `"${p.ofertas1}"`,
-                ofertas2: `"${p.ofertas2}"`,
-                hasPromo: p.hasPromo,
-                stockNumber: p.stockNumber,
-                price: p.price,
-                discountedPrice: p.discountedPrice
-            });
-        });
-        
-        const totalConOferta1 = window.products.filter(p => p.ofertas1 && p.ofertas1 !== '' && p.ofertas1 !== '0').length;
-        const totalConOferta2 = window.products.filter(p => p.ofertas2 && p.ofertas2 !== '' && p.ofertas2 !== '0').length;
-        const totalConHasPromo = window.products.filter(p => p.hasPromo === true).length;
-        const totalConStock = window.products.filter(p => p.stockNumber > 0).length;
-        
-        console.log('📊 ESTADÍSTICAS:', {
-            'Con oferta1': totalConOferta1,
-            'Con oferta2': totalConOferta2,
-            'Con hasPromo=true': totalConHasPromo,
-            'Con stock>0': totalConStock,
-            'Total productos': window.products.length
-        });
+        console.log('🔍 No hay ofertas disponibles');
         
         if (featuredOffers) featuredOffers.style.display = 'none';
         return;
     }
     
+    // ORDENAR por mejor descuento
     productosConOferta.sort((a, b) => {
         const descA = a.discountPercent || (a.ofertas2 ? parseInt(a.ofertas2) : 0);
         const descB = b.discountPercent || (b.ofertas2 ? parseInt(b.ofertas2) : 0);
         
         if (descB !== descA) return descB - descA;
-        
         return a.discountedPrice - b.discountedPrice;
     });
     
-    const productosDestacados = productosConOferta.slice(0, 9);
+    // TOMAR SOLO EL LÍMITE CALCULADO
+    const productosDestacados = productosConOferta.slice(0, limite);
     
-    console.log('🎯 Mostrando ofertas destacadas:', productosDestacados.length, 'productos');
+    console.log(`🎯 Mostrando ${productosDestacados.length} ofertas destacadas (de ${productosConOferta.length} disponibles)`);
+    
+    // INDICADOR PARA ADMIN
+    if (esAdmin) {
+        console.log(`📊 Límite: ${limite} | Manual: ${localStorage.getItem('almacen_ofertas_manual') ? 'SÍ' : 'NO'}`);
+        actualizarContadorAdmin();
+    }
     
     if (productosDestacados.length > 0 && featuredOffers && featuredProductsGrid) {
         featuredOffers.style.display = 'block';
         featuredProductsGrid.innerHTML = renderProductsToHTML(productosDestacados);
         
+        // Actualizar IDs para el sistema de reserva
         window.productosDestacadosIds = productosDestacados.map(p => p.id);
         
         console.log('✅ OFERTAS DESTACADAS VISIBLES');
+        
+        // Agregar indicador visual del modo
+        if (esAdmin) {
+            const existingIndicator = document.querySelector('.modo-indicator');
+            if (existingIndicator) existingIndicator.remove();
+            
+            const esManual = localStorage.getItem('almacen_ofertas_manual') !== null;
+            const indicator = document.createElement('div');
+            indicator.className = 'modo-indicator';
+            indicator.innerHTML = esManual ? 
+                '📱 <strong>MODO MANUAL</strong> (24h)' : 
+                '🤖 <strong>MODO AUTOMÁTICO</strong>';
+            
+            indicator.style.cssText = `
+                background: ${esManual ? '#4CAF50' : '#2196F3'};
+                color: white;
+                padding: 8px 15px;
+                border-radius: 20px;
+                font-size: 0.8rem;
+                margin-top: 10px;
+                display: inline-block;
+                box-shadow: 0 3px 10px rgba(0,0,0,0.2);
+            `;
+            
+            const titulo = featuredOffers.querySelector('.featured-title');
+            if (titulo) {
+                titulo.appendChild(indicator);
+            }
+        }
     } else {
-        console.log('⚠️ No se pudo mostrar ofertas (elementos DOM no encontrados)');
         if (featuredOffers) featuredOffers.style.display = 'none';
     }
 }
@@ -5064,125 +5292,6 @@ function toggleFlashSales(show) {
 
 // ============================================
 // BANNER FESTIVO AUTOMÁTICO (solo 24-25 dic y 1-7 ene)
-// ============================================
-function setupFestiveBanner() {
-    // No mostrar si ya está cerrado hoy
-    const todayKey = 'bannerClosed_' + new Date().toDateString();
-    if (localStorage.getItem(todayKey)) return;
-    
-    const bannerHTML = `
-        <div id="festive-banner" style="
-            display: none;
-            background: linear-gradient(90deg, #d32f2f, #f57c00, #d32f2f);
-            color: white;
-            text-align: center;
-            padding: 12px 0;
-            font-size: 18px;
-            font-weight: bold;
-            font-family: 'Arial', sans-serif;
-            text-shadow: 1px 1px 3px rgba(0,0,0,0.5);
-            box-shadow: 0 3px 15px rgba(0,0,0,0.2);
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            z-index: 9999;
-            animation: bannerPulse 1.5s infinite alternate;
-        ">
-            <span id="festive-message"></span>
-            <button onclick="closeFestiveBanner()" style="
-                background: rgba(255,255,255,0.2);
-                border: 2px solid white;
-                border-radius: 50%;
-                color: white;
-                width: 30px;
-                height: 30px;
-                font-size: 18px;
-                position: absolute;
-                right: 15px;
-                top: 50%;
-                transform: translateY(-50%);
-                cursor: pointer;
-                transition: all 0.3s;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                padding: 0;
-            " onmouseover="this.style.background='rgba(255,255,255,0.4)';this.style.transform='translateY(-50%) scale(1.1)'"
-            onmouseout="this.style.background='rgba(255,255,255,0.2)';this.style.transform='translateY(-50%)'">×</button>
-        </div>
-        <style>
-            @keyframes bannerPulse {
-                0% { background: linear-gradient(90deg, #d32f2f, #f57c00, #d32f2f); }
-                100% { background: linear-gradient(90deg, #f57c00, #d32f2f, #f57c00); }
-            }
-            body { padding-top: 50px !important; }
-        </style>
-    `;
-
-    // Insertar banner
-    document.body.insertAdjacentHTML('afterbegin', bannerHTML);
-    
-    // Verificar fechas
-    const today = new Date();
-    const currentYear = today.getFullYear();
-    const month = today.getMonth() + 1;
-    const day = today.getDate();
-    
-    let message = '';
-    let showBanner = false;
-    
-    // Navidad: 24-25 diciembre
-    if (month === 12 && (day === 24 || day === 25)) {
-        message = '🎄 ¡Feliz Navidad! 🎅 - Almacén Copihue te desea lo mejor';
-        showBanner = true;
-    }
-    // Año Nuevo: 1-7 enero
-    else if (month === 1 && day <= 7) {
-        message = `🎆 ¡Feliz Año Nuevo ${currentYear}! 🥂 - Que tengas un año de prosperidad`;
-        showBanner = true;
-    }
-    
-    // Mostrar banner si corresponde
-    if (showBanner && message) {
-        const banner = document.getElementById('festive-banner');
-        const messageElement = document.getElementById('festive-message');
-        
-        banner.style.display = 'block';
-        messageElement.textContent = message;
-    }
-}
-
-// Función global para cerrar banner
-window.closeFestiveBanner = function() {
-    const banner = document.getElementById('festive-banner');
-    if (banner) {
-        banner.style.opacity = '0';
-        banner.style.transition = 'opacity 0.5s';
-        
-        setTimeout(() => {
-            banner.style.display = 'none';
-            localStorage.setItem('bannerClosed_' + new Date().toDateString(), 'true');
-            document.body.style.paddingTop = '0';
-        }, 500);
-    }
-};
-
-// Inicializar banner cuando cargue la página
-document.addEventListener('DOMContentLoaded', function() {
-    // Esperar un poco para que el header se cargue
-    setTimeout(setupFestiveBanner, 1000);
-});
-
-// También ejecutar si la página ya está cargada
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', setupFestiveBanner);
-} else {
-    setTimeout(setupFestiveBanner, 1000);
-}
-
-// ============================================
-// BANNER FESTIVO AUTOMÁTICO (solo 24-25 dic y 1-7 ene)
 // CON MODO PRUEBA ACTIVADO
 // ============================================
 
@@ -5372,6 +5481,34 @@ setTimeout(() => {
         console.log('🔧 Botón de depuración agregado');
     }
 }, 1000);
+
+// 🎮 COMANDOS DISPONIBLES (solo modo admin):
+console.log(`
+🎮 COMANDOS DISPONIBLES (solo modo admin):
+
+configurarOfertas(5)    → Mostrar 5 ofertas (24 horas)
+configurarOfertas(12)   → ¡OFERTÓN! 12 ofertas
+resetearOfertasAutomatico() → Volver a automático
+
+💡 Ejemplos:
+• Lunes tranquilo: configurarOfertas(2)
+• Viernes con plata: configurarOfertas(12)
+• Navidad especial: configurarOfertas(15)
+• Reset: resetearOfertasAutomatico()
+
+📊 Sistema base automático:
+• Lunes-Jueves: 3 ofertas
+• Viernes-Domingo: 9 ofertas  
+• Navidad (15-31 dic): 12 ofertas
+• Año Nuevo (1-10 ene): 12 ofertas
+`);
+
+// 📱 INICIAR CONTADOR ADMIN
+if (esAdmin) {
+    setTimeout(() => {
+        actualizarContadorAdmin();
+    }, 1000);
+}
     </script>
 </body>
 </html>
