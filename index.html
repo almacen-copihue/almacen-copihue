@@ -182,21 +182,6 @@
         }
         
         /* ========== OFERTAS RELÁMPAGO ========== */
-        .relampago-limit-notification {
-            position: fixed;
-            top: 100px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: linear-gradient(135deg, #ff3d00, #d50000);
-            color: white;
-            padding: 12px 20px;
-            border-radius: 25px;
-            box-shadow: 0 4px 15px rgba(255, 61, 0, 0.4);
-            z-index: 1002;
-            font-weight: 500;
-            animation: slideDown 0.3s ease;
-            border: 2px solid white;
-        }
         .flash-sales-container {
             display: none;
             margin-bottom: 2rem;
@@ -1629,30 +1614,7 @@
 
     <script>
 // ========== VERSIÓN Y CONFIGURACIÓN ==========
-const APP_VERSION = '20241219-SISTEMA-PERFECTO-OFERTAS-' + Date.now();
-
-// ========== SISTEMA ANTI-CACHE AGGRESIVO ==========
-(function() {
-    console.log('🚀 Versión:', APP_VERSION);
-    console.log('🕐 Hora carga:', new Date().toLocaleTimeString());
-    
-    // Verificar si estamos cargando versión antigua
-    const urlParams = new URLSearchParams(window.location.search);
-    const versionParam = urlParams.get('v');
-    
-    if (versionParam && versionParam !== APP_VERSION.split('-')[2]) {
-        console.warn('⚠️ Versión desactualizada detectada');
-        console.warn('   URL tiene:', versionParam);
-        console.warn('   Actual es:', APP_VERSION.split('-')[2]);
-        
-        // Forzar recarga con nueva versión
-        const nuevaURL = window.location.pathname + '?v=' + Date.now() + '&t=' + Date.now();
-        setTimeout(() => {
-            console.log('🔄 Recargando con nueva versión...');
-            window.location.replace(nuevaURL);
-        }, 1000);
-    }
-})();
+const APP_VERSION = '20241219-SISTEMA-PERFECTO-OFERTAS';
 
 // ========== SISTEMA DE OFERTAS ==========
 const OFERTAS_SISTEMA = {
@@ -3145,23 +3107,22 @@ function searchProducts(searchTerm) {
 // ========== CARGAR PRODUCTOS ==========
 async function loadProductsFromAPI() {
     try {
-        console.log('🚀 INICIANDO CARGA DESDE API...');
+        console.log('🚀 INICIANDO CARGA DESDE TU SCRIPT...');
+        if (productsGrid) {
+            productsGrid.innerHTML = '<div class="loading">🔄 Contactando tu base de datos...</div>';
+        }
         
         const TU_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
         
-        // ⚡ AGREGAR PARÁMETROS ANTI-CACHE
-        const urlConCache = TU_APPS_SCRIPT_URL + '?v=' + APP_VERSION + '&t=' + Date.now() + '&nocache=' + Math.random();
+        console.log('📡 Conectando a tu Apps Script...');
         
-        console.log('📡 Conectando a:', urlConCache);
+        const urlConCache = TU_APPS_SCRIPT_URL + '?cache=' + Date.now();
         
         const respuesta = await fetch(urlConCache, {
             method: 'GET',
             headers: {
-                'Accept': 'application/json',
-                'Cache-Control': 'no-cache, no-store, must-revalidate',
-                'Pragma': 'no-cache'
-            },
-            cache: 'no-store' // ⚡ IMPORTANTE
+                'Accept': 'application/json'
+            }
         });
         
         console.log('📊 Estado de respuesta:', respuesta.status, respuesta.statusText);
@@ -4444,31 +4405,24 @@ function addToCart(productId) {
     const existingItem = cart.find(item => item.id === productId);
     const currentQuantityInCart = existingItem ? existingItem.quantity : 0;
     
-    // ✅ 1. Validar stock total
     if (currentQuantityInCart >= availableStock) {
         showStockError(product.name, availableStock);
         return;
     }
     
-    const newQuantity = currentQuantityInCart + 1;
-    
-    // ✅ 2. Validar límite de oferta 2 (descuento %)
     if (product.ofertas2) {
         const limiteOferta2 = obtenerLimiteOfertas2(product.ofertas2);
-        if (limiteOferta2 !== null && newQuantity > limiteOferta2) {
-            showLimitError(product.name, limiteOferta2, `${product.ofertas2}% OFF`);
-            return;
+        if (limiteOferta2 !== null) {
+            const newQuantity = currentQuantityInCart + 1;
+            if (newQuantity > limiteOferta2) {
+                showLimitError(product.name, limiteOferta2, `${product.ofertas2}% OFF`);
+                return;
+            }
         }
     }
     
-    // ✅ 3. Validar si es oferta relámpago (máx 3)
-    const esRelampago = FLASH_SALES_SYSTEM.todaySelection?.some(p => p.id === productId);
-    if (esRelampago && newQuantity > 3) {
-        showRelampagoLimitError(product.name);
-        return;
-    }
+    const newQuantity = currentQuantityInCart + 1;
     
-    // ✅ TODO OK - Agregar al carrito
     if (existingItem) {
         existingItem.quantity = newQuantity;
         existingItem.price = calcularPrecioConDescuento(
@@ -4495,8 +4449,7 @@ function addToCart(productId) {
             ofertas2: product.ofertas2,
             quantity: 1,
             maxStock: availableStock,
-            maxOferta2Limit: obtenerLimiteOfertas2(product.ofertas2),
-            esRelampago: esRelampago || false
+            maxOferta2Limit: obtenerLimiteOfertas2(product.ofertas2)
         });
         
         if (product.ofertas1 === '1') {
@@ -4733,7 +4686,6 @@ function updateCartQuantity(productId, change) {
     
     const newQuantity = item.quantity + change;
     
-    // ✅ PRIMERO: Verificar stock disponible
     if (newQuantity < 1) {
         cart.splice(itemIndex, 1);
         updateCartCount();
@@ -4741,13 +4693,11 @@ function updateCartQuantity(productId, change) {
         return;
     }
     
-    // ✅ SEGUNDO: Validar stock total
     if (newQuantity > product.stockNumber) {
         showStockError(product.name, product.stockNumber);
         return;
     }
     
-    // ✅ TERCERO: Validar límite de oferta 2
     if (product.ofertas2) {
         const limiteOferta2 = obtenerLimiteOfertas2(product.ofertas2);
         if (limiteOferta2 !== null && newQuantity > limiteOferta2) {
@@ -4756,15 +4706,8 @@ function updateCartQuantity(productId, change) {
         }
     }
     
-    // ✅ CUARTO: Validar si es oferta relámpago (máx 3)
-    const esRelampago = FLASH_SALES_SYSTEM.todaySelection?.some(p => p.id === productId);
-    if (esRelampago && newQuantity > 3) {
-        showRelampagoLimitError(product.name);
-        return;
-    }
-    
-    // ✅ TODO BIEN - Actualizar cantidad
     item.quantity = newQuantity;
+    
     item.price = calcularPrecioConDescuento(
         product.price, 
         product.ofertas1, 
@@ -4774,33 +4717,18 @@ function updateCartQuantity(productId, change) {
     
     updateCartCount();
     renderCartItems();
-}
-function showRelampagoLimitError(productName) {
-    const notification = document.createElement('div');
-    notification.className = 'relampago-limit-notification';
-    notification.innerHTML = `⚡ Límite oferta relámpago: Máximo 3 unidades por familia`;
     
-    notification.style.cssText = `
-        position: fixed;
-        top: 100px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: linear-gradient(135deg, #ff3d00, #d50000);
-        color: white;
-        padding: 12px 20px;
-        border-radius: 25px;
-        box-shadow: 0 4px 15px rgba(255, 61, 0, 0.4);
-        z-index: 1002;
-        font-weight: 500;
-        animation: slideDown 0.3s ease;
-        border: 2px solid white;
-    `;
+    const precioOriginal = product.price;
     
-    document.body.appendChild(notification);
-    
-    setTimeout(() => {
-        notification.remove();
-    }, 3000);
+    if (item.price < precioOriginal) {
+        const descuento = Math.round(((precioOriginal - item.price) / precioOriginal) * 100);
+        
+        if (product.ofertas1 === '1' && newQuantity >= 3) {
+            showAddToCartFeedback(product.name, 0, "3x2");
+        } else {
+            showAddToCartFeedback(product.name, descuento);
+        }
+    }
 }
 
 // ========== FUNCIÓN MEJORADA handleImageError ==========
@@ -4971,20 +4899,10 @@ function verificarSistemaOfertasCompleto() {
 // ========== INICIALIZACIÓN ==========
 function init() {
     console.log('🚀 Inicializando Almacén Copihue v' + APP_VERSION);
-    console.log('🔧 Cache busting activado');
+    console.log('📊 Conectando a tu API con 422 productos...');
     
     if (window.appInitialized) {
-        console.log('⚠️ App ya inicializada, limpiando y recargando...');
-        window.appInitialized = false;
-        
-        // Limpiar variables globales
-        window.products = [];
-        window.cart = [];
-        
-        // Recargar en 1 segundo
-        setTimeout(() => {
-            window.location.href = window.location.pathname + '?reload=' + Date.now();
-        }, 1000);
+        console.log('⚠️ App ya inicializada, saltando...');
         return;
     }
     window.appInitialized = true;
@@ -4995,8 +4913,11 @@ function init() {
     updateCartCount();
     initPWA();
     
-    // Cargar productos CON parámetro anti-cache
     loadProductsFromAPI();
+    
+    setTimeout(() => {
+        console.log('✅ Sistema listo. Botón 🏠 funcionando.');
+    }, 1000);
 }
 
 // Después de cargar los productos
@@ -5330,21 +5251,25 @@ document.addEventListener("DOMContentLoaded", function() {
         }
     }, 2000);
     
-// ✅✅✅ REEMPLAZA CON ESTO ✅✅✅
-const versionGuardada = localStorage.getItem('almacen_version');
-
-if (!versionGuardada) {
-    // Primera vez que visita, solo guardar versión
-    localStorage.setItem('almacen_version', APP_VERSION);
-    console.log('📱 Primera visita - Versión:', APP_VERSION);
-} else if (versionGuardada !== APP_VERSION) {
-    // Nueva versión, pero NO recargar automáticamente
-    console.log('🆕 Nueva versión disponible:', APP_VERSION);
-    console.log('💡 Los cambios se aplicarán en la próxima visita');
-    localStorage.setItem('almacen_version', APP_VERSION);
-} else {
-    console.log('✅ Versión actual:', APP_VERSION);
-}
+    const versionGuardada = localStorage.getItem('almacen_version');
+    
+    if (versionGuardada !== APP_VERSION) {
+        console.log('🔄 Detección de nueva versión:', APP_VERSION);
+        localStorage.setItem('almacen_version', APP_VERSION);
+        
+        if (versionGuardada && versionGuardada !== '') {
+            console.log('🔄 Recargando para aplicar cambios...');
+            setTimeout(() => {
+                window.location.href = window.location.href.split('?')[0] + 
+                                      '?v=' + APP_VERSION + 
+                                      '&t=' + Date.now() + 
+                                      '&cache=bust&force=true';
+            }, 1000);
+        }
+    } else {
+        console.log('✅ Versión actual:', APP_VERSION);
+    }
+});
 
 function isPWAInstalled() {
     return window.matchMedia('(display-mode: standalone)').matches || 
@@ -5879,33 +5804,6 @@ setTimeout(() => {
         console.log('🎮 Panel de control relámpago activado');
     }
 }, 2000);
-
-// Comando para desarrolladores
-window.recargaForzada = function() {
-    console.log('🔄 Ejecutando recarga forzada...');
-    localStorage.clear(); // Limpiar todo
-    sessionStorage.clear();
-    
-    // Eliminar service workers
-    if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.getRegistrations().then(registrations => {
-            registrations.forEach(registration => registration.unregister());
-        });
-    }
-    
-    // Eliminar cache
-    if ('caches' in window) {
-        caches.keys().then(cacheNames => {
-            cacheNames.forEach(cacheName => caches.delete(cacheName));
-        });
-    }
-    
-    // Recargar con parámetros anti-cache
-    window.location.href = window.location.pathname + '?force=' + Date.now() + '&v=' + Date.now();
-};
-
-// También disponible como atajo
-window.rf = window.recargaForzada;
     </script>
 </body>
 </html>
