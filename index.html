@@ -6,6 +6,7 @@
     <title>Almacén Copihue - Productos de calidad con la confianza de siempre</title>
     
     <!-- META TAGS PARA PWA -->
+    
     <meta name="theme-color" content="#2e7d32">
     <meta name="description" content="Almacén Copihue">
     <meta name="mobile-web-app-capable" content="yes">
@@ -1278,12 +1279,12 @@
         }
         /* Ocultar botón de Ver productos con oferta */
         #viewAllOffers {
-            display: none !important;
+        
         }
         /* Ocultar botón Ver productos con oferta en TODA la página */
         #viewAllOffers,
         .view-all-offers {
-            display: none !important;
+
         }
         /* Botón "Compartir esta OFERTA" (solo aparece en la mayor oferta) */
         .share-offer-btn {
@@ -1500,7 +1501,7 @@
         <section class="featured-offers" id="featuredOffers" style="display: none;">
             <div class="featured-header">
                 <div class="featured-title">
-                    🔥 OFERTAS "VIERNES Y SABADOS"
+                    🔥 OFERTAS FINDE
                 </div>
                 <button class="view-all-offers" id="viewAllOffers">
                     Ver todas las ofertas
@@ -1613,7 +1614,7 @@
 
     <script>
 // ========== VERSIÓN Y CONFIGURACIÓN ==========
-const APP_VERSION = '20241218-V123-FLASH-SALES-FIXED';
+const APP_VERSION = '20241218-V124-SEPARACION-ESTRICTA-OFERTAS';
 
 // ========== SISTEMA DE OFERTAS ==========
 const OFERTAS_SISTEMA = {
@@ -1706,6 +1707,52 @@ const OFERTAS_SISTEMA = {
         descuentoReal: 20
     }
 };
+
+function getDisplayProps(product, renderContext = 'grid') {
+  const isFlashActive = FLASH_SALES_SYSTEM?.isActive ?? false;
+  const isFeaturedActive = isValidFeaturedOffersTime?.() ?? false;
+
+  const inFlash =
+    isFlashActive &&
+    FLASH_SALES_SYSTEM.todaySelection?.some(p => p.id === product.id);
+
+  const inFeatured =
+    isFeaturedActive &&
+    window.productosDestacadosIds?.includes(product.id);
+
+  if (renderContext === 'grid' && (inFlash || inFeatured)) {
+    return null;
+  }
+
+  if (renderContext === 'flash' && inFlash) return { show: true };
+  if (renderContext === 'featured' && inFeatured) return { show: true };
+
+  return { show: true };
+}
+
+
+// ========== VALIDACIÓN HORARIO OFERTAS DESTACADAS ==========
+function isValidFeaturedOffersTime() {
+    const now = new Date();
+    const currentDay = now.getDay(); // 0=Domingo, 5=Viernes, 6=Sábado
+    const currentHour = now.getHours();
+    const currentMinutes = now.getMinutes();
+    
+    // Solo Viernes (5) y Sábados (6)
+    if (currentDay !== 5 && currentDay !== 6) {
+        console.log('📅 Ofertas Destacadas: Fuera de días válidos (solo Viernes y Sábados)');
+        return false;
+    }
+    
+    // Entre 18:00 y 23:00 inclusive
+    const isAfter18 = currentHour > 18 || (currentHour === 18 && currentMinutes >= 0);
+    const isBefore23 = currentHour < 23 || (currentHour === 23 && currentMinutes === 0);
+    
+    const isValid = isAfter18 && isBefore23;
+    
+    console.log(`📅 Ofertas Destacadas - Día: ${currentDay}, Hora: ${currentHour}:${currentMinutes}, Válido: ${isValid}`);
+    return isValid;
+}
 
 // ========== FUNCIONES DE OFERTAS ==========
 function redondearPrecioAlmacenCopihue(precio) {
@@ -1962,7 +2009,6 @@ function compartirMegaOferta(id) {
     );
 }
 
-
 function mostrarFeedbackWhatsApp() {
     try {
         // Eliminar feedbacks anteriores
@@ -2029,7 +2075,6 @@ if (!document.querySelector('style#pulse-animation')) {
     document.head.appendChild(style);
 }
 
-// Función para compartir por WhatsApp
 function compartirPorWhatsApp(mensaje) {
     const phoneNumber = "5492944907380";
     const encodedMessage = encodeURIComponent(mensaje);
@@ -2048,7 +2093,6 @@ function compartirPorWhatsApp(mensaje) {
     mostrarFeedbackCompartir();
 }
 
-// Función para mostrar feedback visual
 function mostrarFeedbackCompartir(productName = '') {
     try {
         // Eliminar notificaciones previas
@@ -2279,6 +2323,35 @@ function obtenerTipoDeVenta(nombreProducto) {
     return 'unidad';
 }
 
+// ========== DETECTAR ERRORES DE PLANILLA ==========
+/**
+ * Detecta y reporta errores de planilla (productos con ambas ofertas)
+ */
+function detectarErroresPlanilla() {
+    if (!window.products) return [];
+    
+    const errores = window.products.filter(product => {
+        const tieneOferta1 = product.ofertas1 && 
+                           product.ofertas1 !== '' && 
+                           product.ofertas1 !== '0';
+        
+        const tieneOferta2 = product.ofertas2 && 
+                           product.ofertas2 !== '' && 
+                           product.ofertas2 !== '0';
+        
+        return tieneOferta1 && tieneOferta2;
+    });
+    
+    if (errores.length > 0) {
+        console.error('❌ ERRORES DE PLANILLA DETECTADOS:', errores.length);
+        errores.forEach((p, i) => {
+            console.error(`${i+1}. ${p.name} - Ofertas1: ${p.ofertas1}, Ofertas2: ${p.ofertas2}`);
+        });
+    }
+    
+    return errores;
+}
+
 // ========== VARIABLES GLOBALES ==========
 let products = [];
 let cart = [];
@@ -2416,26 +2489,34 @@ const FLASH_SALES_SYSTEM = {
             return;
         }
         
+        // SOLO ofertas1 (NO ofertas2)
         const candidates = window.products.filter(product => {
-            const tieneOferta2 = product.ofertas2 && 
-                                product.ofertas2 !== '' && 
-                                product.ofertas2 !== '0' && 
-                                !isNaN(parseInt(product.ofertas2)) &&
-                                parseInt(product.ofertas2) > 0;
+            const tieneOferta1 = product.ofertas1 && 
+                               product.ofertas1 !== '' && 
+                               product.ofertas1 !== '0' &&
+                               OFERTAS_SISTEMA[product.ofertas1];
+            
+            // NO debe tener ofertas2 (error de planilla)
+            const noTieneOferta2 = !product.ofertas2 || 
+                                  product.ofertas2 === '' || 
+                                  product.ofertas2 === '0';
             
             const tieneStock = product.stockNumber > 0;
             const tieneDescripcion = product.descripcion || product.id;
             
-            return tieneOferta2 && tieneStock && tieneDescripcion;
+            return tieneOferta1 && noTieneOferta2 && tieneStock && tieneDescripcion;
         });
         
+        // Ordenar por tipo de oferta (prioridad 2x1, 3x2, etc.)
         candidates.sort((a, b) => {
-            const descA = parseInt(a.ofertas2);
-            const descB = parseInt(b.ofertas2);
-            return descB - descA;
+            const tipoA = parseInt(a.ofertas1) || 0;
+            const tipoB = parseInt(b.ofertas1) || 0;
+            return tipoA - tipoB; // Menor número = oferta mejor (2x1=1, 3x2=2, etc.)
         });
         
         this.productPool = candidates.slice(0, this.POOL_SIZE);
+        
+        console.log(`⚡ Ofertas Relámpago (solo ofertas1): ${candidates.length} candidatos, ${this.productPool.length} en pool`);
     },
     
     generateDailySelection: function() {
@@ -2478,11 +2559,11 @@ const FLASH_SALES_SYSTEM = {
                     ...product,
                     flashPrice: calcularPrecioConDescuento(
                         product.price,
-                        '',
-                        product.ofertas2,
+                        product.ofertas1, // SOLO ofertas1
+                        '', // NUNCA ofertas2 aquí
                         1
                     ),
-                    flashDiscount: parseInt(product.ofertas2),
+                    flashDiscount: product.ofertas1 ? OFERTAS_SISTEMA[product.ofertas1]?.descuentoReal || 0 : 0,
                     flashOriginalPrice: product.price,
                     flashId: product.descripcion || product.id
                 };
@@ -2512,13 +2593,11 @@ const FLASH_SALES_SYSTEM = {
         }
         
         container.innerHTML = this.todaySelection.map(product => {
-            const descripcionOferta = obtenerDescripcionOferta(
-                '', 
-                product.ofertas2,
-                product.price
-            );
+            if (!getDisplayProps(product, 'flash')) return '';
+            const oferta = OFERTAS_SISTEMA[product.ofertas1];
+            const descripcionOferta = oferta ? oferta.eslogan : '';
             
-            const textoLimiteOfertas2 = obtenerTextoLimiteOfertas2(product.ofertas2, product.name);
+            const textoLimiteOfertas2 = obtenerTextoLimiteOfertas2('', product.name);
             const stockText = obtenerTextoStock(product);
             
             return `
@@ -2543,7 +2622,7 @@ const FLASH_SALES_SYSTEM = {
                         <div class="product-price-container" style="margin: 10px 0;">
                             <span class="original-price" style="font-size: 1rem;">$${product.price}</span>
                             <span class="flash-price">$${Math.round(product.flashPrice)}</span>
-                            <span class="flash-discount">${product.ofertas2}% OFF</span>
+                            <span class="flash-discount">${oferta ? oferta.nombre : 'OFERTA'}</span>
                         </div>
                         
                         ${textoLimiteOfertas2 ? `
@@ -2595,11 +2674,11 @@ const FLASH_SALES_SYSTEM = {
         
         if (typeof addToCart === 'function') {
             addToCart(productId);
-            this.showFlashFeedback(product.name, product.ofertas2);
+            this.showFlashFeedback(product.name, product.ofertas1);
         }
     },
     
-    showFlashFeedback: function(productName, discount) {
+    showFlashFeedback: function(productName, oferta1) {
         const notification = document.createElement('div');
         notification.style.cssText = `
             position: fixed;
@@ -2620,9 +2699,12 @@ const FLASH_SALES_SYSTEM = {
             min-width: 250px;
         `;
         
+        const oferta = OFERTAS_SISTEMA[oferta1];
+        const textoOferta = oferta ? oferta.nombre : 'OFERTA';
+        
         notification.innerHTML = `
             ⚡ <strong>¡OFERTA RELÁMPAGO!</strong><br>
-            ${productName} - ${discount}% OFF
+            ${productName} - ${textoOferta}
         `;
         
         document.body.appendChild(notification);
@@ -2780,6 +2862,605 @@ const FLASH_SALES_SYSTEM = {
         yesterday.setDate(yesterday.getDate() - 1);
         return `${yesterday.getFullYear()}-${(yesterday.getMonth() + 1).toString().padStart(2, '0')}-${yesterday.getDate().toString().padStart(2, '0')}`;
     }
+};
+
+// ========== SISTEMA DE FILTRADO CENTRALIZADO ==========
+const ProductFilterSystem = {
+  /**
+   * Obtiene productos filtrados según el contexto actual
+   */
+  getFilteredProducts(options = {}) {
+    const {
+      category = currentCategory,
+      isSearchMode = isSearching,
+      searchTerm = '',
+      excludeFlashSales = true,
+      excludeFeaturedOffers = true,
+      onlyFlashSales = false,
+      onlyFeaturedOffers = false,
+      limit = null
+    } = options;
+
+    if (!window.products || !Array.isArray(window.products)) {
+      console.warn('⚠️ No hay productos disponibles para filtrar');
+      return [];
+    }
+
+    console.log(`🔍 FILTRANDO productos - Categoría: ${category}, Búsqueda: ${isSearchMode ? 'Sí' : 'No'}`);
+
+    let filtered = [...window.products];
+
+    if (onlyFlashSales) {
+      return this._getFlashSalesProducts();
+    }
+
+    if (onlyFeaturedOffers) {
+      return this._getFeaturedOffersProducts();
+    }
+
+    if (excludeFlashSales) {
+      filtered = this._excludeFlashSales(filtered);
+    }
+
+    if (excludeFeaturedOffers) {
+      filtered = this._excludeFeaturedOffers(filtered);
+    }
+
+    if (category !== 'ALL' && !isSearchMode) {
+      filtered = filtered.filter(p => p.category === category);
+    }
+
+    if (isSearchMode && searchTerm.trim().length >= 2) {
+      filtered = this._filterBySearchTerm(filtered, searchTerm);
+    }
+
+    filtered = filtered.filter(p => p.stockNumber > 0);
+    filtered = this._sortProducts(filtered);
+
+    // Excluir productos que están en cualquier sección especial
+    filtered = filtered.filter(p => {
+        const enRelampago = FLASH_SALES_SYSTEM?.todaySelection?.some(
+            flash => flash.id === p.id
+        ) || false;
+        
+        const enDestacadas = window.productosDestacadosIds?.includes(p.id) || false;
+        
+        return !enRelampago && !enDestacadas;
+    });
+
+    if (limit && limit > 0) {
+      filtered = filtered.slice(0, limit);
+    }
+
+    console.log(`✅ Filtrados ${filtered.length} productos`);
+    return filtered;
+  },
+
+  _getFlashSalesProducts() {
+    if (!FLASH_SALES_SYSTEM || !FLASH_SALES_SYSTEM.todaySelection) {
+      return [];
+    }
+    return FLASH_SALES_SYSTEM.todaySelection.filter(p => p.stockNumber > 0);
+  },
+
+  _getFeaturedOffersProducts() {
+    // SOLO ofertas2, NO ofertas1
+    const productosConOferta2 = window.products.filter(product => {
+        const tieneOferta2 = product.ofertas2 && 
+                           product.ofertas2 !== '' && 
+                           product.ofertas2 !== '0' && 
+                           !isNaN(parseInt(product.ofertas2));
+        
+        // NO debe tener ofertas1 (error de planilla)
+        const noTieneOferta1 = !product.ofertas1 || 
+                              product.ofertas1 === '' || 
+                              product.ofertas1 === '0';
+        
+        const tieneStock = product.stockNumber > 0;
+        
+        return tieneOferta2 && noTieneOferta1 && tieneStock;
+    });
+    
+    // Ordenar por % de descuento
+    return productosConOferta2
+      .sort((a, b) => {
+        const descA = parseInt(a.ofertas2);
+        const descB = parseInt(b.ofertas2);
+        return descB - descA;
+      })
+      .slice(0, 9);
+  },
+
+  _excludeFlashSales(productsArray) {
+    if (!FLASH_SALES_SYSTEM || !FLASH_SALES_SYSTEM.todaySelection) {
+      return productsArray;
+    }
+    
+    const flashIds = FLASH_SALES_SYSTEM.todaySelection.map(p => p.id);
+    return productsArray.filter(p => !flashIds.includes(p.id));
+  },
+
+  _excludeFeaturedOffers(productsArray) {
+    if (!window.productosDestacadosIds) {
+      return productsArray;
+    }
+    
+    return productsArray.filter(p => !window.productosDestacadosIds.includes(p.id));
+  },
+
+  _filterBySearchTerm(productsArray, searchTerm) {
+    const normalizedTerm = normalizeSearchTerm(searchTerm);
+    const expandedTerms = expandSearchTerms(searchTerm);
+    
+    return productsArray.filter(product => {
+      const productName = normalizeSearchTerm(product.name);
+      const hasStock = product.stockNumber > 0;
+      
+      if (!hasStock) return false;
+      
+      return expandedTerms.some(term => {
+        if (productName.includes(term) && term.length > 1) return true;
+        
+        if (term.length <= 3 && term.length > 1) {
+          const initials = productName.split(' ')
+            .map(word => word.charAt(0))
+            .join('');
+          return initials.includes(term);
+        }
+        
+        return false;
+      });
+    });
+  },
+
+  _sortProducts(productsArray) {
+    return [...productsArray].sort((a, b) => {
+      if (a.hasPromo && !b.hasPromo) return -1;
+      if (!a.hasPromo && b.hasPromo) return 1;
+      
+      if (a.stockNumber !== b.stockNumber) {
+        return b.stockNumber - a.stockNumber;
+      }
+      
+      return a.name.localeCompare(b.name);
+    });
+  },
+
+  getFilterStats() {
+    return {
+      totalProducts: window.products?.length || 0,
+      withStock: window.products?.filter(p => p.stockNumber > 0).length || 0,
+      withOffers1: window.products?.filter(p => p.ofertas1 && p.ofertas1 !== '' && p.ofertas1 !== '0').length || 0,
+      withOffers2: window.products?.filter(p => p.ofertas2 && p.ofertas2 !== '' && p.ofertas2 !== '0').length || 0,
+      flashSalesCount: FLASH_SALES_SYSTEM?.todaySelection?.length || 0,
+      currentCategory,
+      isSearching,
+      searchTerm: document.getElementById('productSearch')?.value || ''
+    };
+  }
+};
+
+// ========== SISTEMA DE RENDERIZADO ==========
+const ProductRenderer = {
+  /**
+   * Renderiza la grilla principal de productos
+   */
+renderMainProductsGrid(context = 'category') {
+  const productsGrid = document.getElementById('productsGrid');
+  if (!productsGrid) return;
+  
+  const options = {
+    category: currentCategory,
+    excludeFlashSales: true,
+    excludeFeaturedOffers: true
+  };
+  
+  if (isSearching) {
+    options.isSearchMode = true;
+    options.searchTerm = document.getElementById('productSearch')?.value || '';
+  }
+  
+  // 1️⃣ obtenemos todos los productos como siempre
+  const allProducts = ProductFilterSystem.getFilteredProducts(options);
+
+  // 2️⃣ filtramos SOLO los visibles según getDisplayProps
+  const products = allProducts.filter(
+    p => getDisplayProps(p, 'grid') !== null
+  );
+  
+  if (products.length === 0) {
+    this._renderEmptyState(productsGrid, context);
+    return;
+  }
+  
+  this._renderProductsGrid(productsGrid, products, context);
+},
+
+  /**
+   * Renderiza la sección de ofertas relámpago
+   */
+  renderFlashSalesSection() {
+    const container = document.getElementById('flashSalesContainer');
+    const grid = document.getElementById('flashProductsGrid');
+    
+    if (!container || !grid) return;
+    
+    if (FLASH_SALES_SYSTEM && FLASH_SALES_SYSTEM.renderFlashProducts) {
+      FLASH_SALES_SYSTEM.renderFlashProducts();
+    }
+  },
+
+  /**
+   * Renderiza la sección de ofertas destacadas
+   * SOLO con ofertas2, SOLO en horario Viernes/Sábados 18:00-23:00
+   */
+  renderFeaturedOffersSection() {
+    const container = document.getElementById('featuredOffers');
+    const grid = document.getElementById('featuredProductsGrid');
+    
+    if (!container || !grid) return;
+    
+    // 1. VALIDAR HORARIO (OBLIGATORIO)
+    if (!isValidFeaturedOffersTime()) {
+        container.style.display = 'none';
+        grid.innerHTML = '';
+        console.log('⏰ Ofertas Destacadas: Fuera de horario - Sección oculta');
+        return;
+    }
+    
+    // 2. FILTRAR PRODUCTOS EXCLUSIVAMENTE POR OFERTAS2
+    const featuredProducts = window.products?.filter(product => {
+        // SOLO ofertas2 (NO ofertas1)
+        const tieneOferta2 = product.ofertas2 && 
+                           product.ofertas2 !== '' && 
+                           product.ofertas2 !== '0' && 
+                           !isNaN(parseInt(product.ofertas2));
+        
+        // NO debe tener ofertas1 (error de planilla)
+        const noTieneOferta1 = !product.ofertas1 || 
+                              product.ofertas1 === '' || 
+                              product.ofertas1 === '0';
+        
+        // Stock válido
+        const tieneStock = product.stockNumber > 0;
+        
+        return tieneOferta2 && noTieneOferta1 && tieneStock;
+    }) || [];
+    
+    console.log(`🎯 Ofertas Destacadas (solo ofertas2): ${featuredProducts.length} productos`);
+    
+    // 3. MOSTRAR/OCULTAR SEGÚN RESULTADOS
+    if (featuredProducts.length === 0) {
+        container.style.display = 'none';
+        grid.innerHTML = '';
+        console.log('📭 Ofertas Destacadas: No hay productos válidos');
+        return;
+    }
+    
+    // 4. ORDENAR POR % DESCUENTO (ofertas2)
+    featuredProducts.sort((a, b) => {
+        const descA = parseInt(a.ofertas2);
+        const descB = parseInt(b.ofertas2);
+        return descB - descA; // Mayor a menor
+    });
+    
+    // 5. LIMITAR A 9 PRODUCTOS
+    const limitedProducts = featuredProducts.slice(0, 9);
+    
+    // 6. RENDERIZAR
+    container.style.display = 'block';
+    grid.innerHTML = limitedProducts.map(product => this._renderFeaturedProductCard(product)).join('');
+    
+    window.productosDestacadosIds = limitedProducts.map(p => p.id);
+    
+    // 7. AGREGAR EVENTOS (sin compartir lógica)
+    setTimeout(() => this._addCartEventListenersToFeatured(), 100);
+    
+    console.log(`✅ Ofertas Destacadas renderizadas: ${limitedProducts.length} productos`);
+  },
+
+  /**
+   * Renderiza tarjeta individual de oferta destacada
+   * Solo con datos de ofertas2
+   */
+  _renderFeaturedProductCard(product) {
+    const descuento = parseInt(product.ofertas2);
+    const precioConDescuento = calcularPrecioConDescuento(
+        product.price, 
+        '', // NUNCA usar ofertas1 aquí
+        product.ofertas2, 
+        1
+    );
+    
+    const stockText = obtenerTextoStock(product);
+    const textoLimite = obtenerTextoLimiteOfertas2(product.ofertas2, product.name);
+    
+    return `
+        <div class="product-card">
+            <div class="offer-badge" style="background: linear-gradient(135deg, #ff6f00, #f57c00);">
+                🔥 ${descuento}% OFF
+            </div>
+            
+            <div class="product-image">
+                <img src="${product.image}" 
+                     alt="${product.name}"
+                     onerror="handleImageError(this, '${product.name.replace(/'/g, "\\'")}')">
+            </div>
+            
+            <div class="product-info">
+                <div class="product-name">${product.name}</div>
+                
+                <div class="offer-description" style="color: #ff6f00; font-weight: bold;">
+                    ¡${descuento}% DE DESCUENTO!
+                </div>
+                
+                <div class="product-price-container">
+                    <span class="original-price">$${product.price}</span>
+                    <span class="product-price">$${Math.round(precioConDescuento)}</span>
+                    <span class="discount-percent">${descuento}% OFF</span>
+                </div>
+                
+                ${textoLimite ? `
+                    <div class="promo-limit" style="color: #ff6f00; font-weight: 500;">
+                        ${textoLimite}
+                    </div>
+                ` : ''}
+                
+                <div class="product-stock in-stock">
+                    ${stockText}
+                </div>
+                
+                <button class="add-to-cart" data-id="${product.id}">
+                    🛒 Agregar al Carrito
+                </button>
+                
+                <div style="font-size: 0.75rem; color: #666; margin-top: 8px; text-align: center;">
+                    ⭐ OFERTA DESTACADA - Viernes y Sábados 18:00-23:00
+                </div>
+            </div>
+        </div>
+    `;
+  },
+
+  /**
+   * Eventos exclusivos para destacadas (sin compartir)
+   */
+  _addCartEventListenersToFeatured() {
+    document.querySelectorAll('#featuredProductsGrid .add-to-cart').forEach(btn => {
+        btn.replaceWith(btn.cloneNode(true));
+    });
+    
+    document.querySelectorAll('#featuredProductsGrid .add-to-cart').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const productId = parseInt(this.getAttribute('data-id'));
+            addToCart(productId);
+        });
+    });
+  },
+
+  /**
+   * Renderiza resultados de búsqueda
+   */
+  renderSearchResults(searchTerm) {
+    const productsGrid = document.getElementById('productsGrid');
+    if (!productsGrid) return;
+    
+    const products = ProductFilterSystem.getFilteredProducts({
+      isSearchMode: true,
+      searchTerm: searchTerm,
+      excludeFlashSales: true,
+      excludeFeaturedOffers: false
+    });
+    
+    if (products.length === 0) {
+      this._renderEmptySearchState(productsGrid, searchTerm);
+      return;
+    }
+    
+    this._renderSearchResultsGrid(productsGrid, products, searchTerm);
+  },
+
+  /**
+   * Renderiza resultados de búsqueda móvil
+   */
+  renderMobileSearchResults(searchTerm) {
+    const resultsContainer = document.getElementById('mobileSearchResults');
+    if (!resultsContainer) return;
+    
+    const products = ProductFilterSystem.getFilteredProducts({
+      isSearchMode: true,
+      searchTerm: searchTerm,
+      excludeFlashSales: true,
+      excludeFeaturedOffers: false
+    });
+    
+    if (products.length === 0) {
+      resultsContainer.innerHTML = this._renderEmptyMobileSearch(searchTerm);
+      return;
+    }
+    
+    resultsContainer.innerHTML = this._renderMobileSearchResults(products);
+    setTimeout(() => this._addCartEventListeners(), 100);
+  },
+
+  // ========== MÉTODOS PRIVADOS DE RENDERIZADO ==========
+  _renderEmptyState(container, context) {
+    let message = '';
+    
+    switch(context) {
+      case 'search':
+        message = '🔍 No se encontraron productos para tu búsqueda';
+        break;
+      case 'category':
+        message = `🛒 No hay productos disponibles en "${currentCategory}"`;
+        break;
+      default:
+        message = '🛒 No hay productos disponibles';
+    }
+    
+    container.innerHTML = `
+      <div class="loading" style="text-align: center; padding: 3rem;">
+        <div style="font-size: 3rem; margin-bottom: 1rem;">😕</div>
+        <h3>${message}</h3>
+        ${context === 'search' ? `
+          <button onclick="clearSearch()" class="retry-btn" style="margin-top: 1rem;">
+            ✨ Ver todos los productos
+          </button>
+        ` : ''}
+      </div>
+    `;
+  },
+
+  _renderEmptySearchState(container, searchTerm) {
+    container.innerHTML = `
+      <div class="loading" style="text-align: center; padding: 3rem;">
+        <div style="font-size: 3rem; margin-bottom: 1rem;">🔍</div>
+        <h3>No se encontraron productos para "<strong>${searchTerm}</strong>"</h3>
+        <p style="color: #666; margin: 1rem 0;">Prueba con otros términos o revisa la ortografía</p>
+        <button onclick="clearSearch()" class="retry-btn" style="margin-top: 1rem;">
+          ✨ Ver todos los productos
+        </button>
+      </div>
+    `;
+  },
+
+
+  _renderProductsGrid(container, products, context) {
+    let header = '';
+    
+    if (context === 'search') {
+      const searchTerm = document.getElementById('productSearch')?.value || '';
+      header = `
+        <div class="search-results">
+          <strong>🔍 Búsqueda inteligente: "${searchTerm}"</strong>
+          <br>
+          <small>Encontraste ${products.length} producto(s)</small>
+          <button onclick="clearSearch()" style="margin-left: 10px; padding: 6px 12px; 
+                  background: #ff6f00; color: white; border: none; border-radius: 15px; 
+                  cursor: pointer; font-size: 0.8rem;">
+            ✖️ Limpiar búsqueda
+          </button>
+        </div>
+      `;
+    }
+    
+    // 🔥 FILTRAR productos que están en ofertas especiales
+    const filteredProducts = products.filter(p => getDisplayProps(p, 'grid') !== null);
+container.innerHTML = header + this._renderProductsToHTML(filteredProducts);
+setTimeout(() => this._addCartEventListeners(), 100);
+  },
+
+  _renderSearchResultsGrid(container, products, searchTerm) {
+    const header = `
+      <div class="search-results">
+        <strong>🔍 Búsqueda inteligente: "${searchTerm}"</strong>
+        <br>
+        <small>Encontraste ${products.length} producto(s)</small>
+        <button onclick="clearSearch()" style="margin-left: 10px; padding: 6px 12px; 
+                background: #ff6f00; color: white; border: none; border-radius: 15px; 
+                cursor: pointer; font-size: 0.8rem;">
+          ✖️ Limpiar búsqueda
+        </button>
+      </div>
+    `;
+    
+    container.innerHTML = header + this._renderProductsToHTML(products);
+    setTimeout(() => this._addCartEventListeners(), 100);
+  },
+
+  _renderProductsToHTML(productsArray) {
+    if (!productsArray || !Array.isArray(productsArray)) {
+      return '<div class="error-message">❌ Error al renderizar productos</div>';
+    }
+    
+    return productsArray.map(product => {
+      return renderProductsToHTML([product]);
+    }).join('');
+  },
+
+  _renderMobileSearchResults(products) {
+    return '<div style="display: grid; gap: 1rem;">' + 
+           products.map(product => this._renderMobileProductCard(product)).join('') + 
+           '</div>';
+  },
+
+  _renderMobileProductCard(product) {
+    const stockText = obtenerTextoStock(product);
+    const isOutOfStock = product.stockNumber === 0;
+    
+    const stockClass = isOutOfStock ? 'out-of-stock' : 
+                      product.stockNumber <= 3 ? 'low-stock' : 'in-stock';
+    
+    const addButton = isOutOfStock 
+      ? `<button class="add-to-cart" disabled>❌ Sin Stock</button>`
+      : `<button class="add-to-cart" data-id="${product.id}">🛒 Agregar al Carrito</button>`;
+    
+    const textoCortoOferta = obtenerTextoCortoOferta(product.ofertas1, product.ofertas2);
+    const offerBadge = textoCortoOferta 
+      ? `<div class="offer-badge">${textoCortoOferta}</div>`
+      : '';
+    
+    const descripcionOferta = obtenerDescripcionOferta(product.ofertas1, product.ofertas2, product.price);
+    const detalleOferta = product.ofertas1 ? 
+      obtenerDetalleOferta3x2(product.ofertas1, product.price, 1) : '';
+    
+    const textoLimiteOfertas2 = obtenerTextoLimiteOfertas2(product.ofertas2, product.name);
+    
+    return `
+      <div class="product-card" style="margin: 0;">
+        ${offerBadge}
+        <div class="product-image">
+          <img src="${product.image}" 
+               alt="${product.name}"
+               onerror="handleImageError(this, '${product.name.replace(/'/g, "\\'")}')">
+        </div>
+        <div class="product-info">
+          <div class="product-name">${product.name}</div>
+          ${descripcionOferta ? `<div class="offer-description">${descripcionOferta}</div>` : ''}
+          ${detalleOferta}
+          <div class="product-price-container">
+            ${product.hasPromo && product.discountedPrice < product.price ? 
+              `<span class="original-price">$${product.price}</span>` : ''}
+            <span class="product-price">$${Math.round(product.discountedPrice)}</span>
+            ${textoCortoOferta ? 
+              `<span class="discount-percent">${textoCortoOferta.replace('🔥 ', '').replace('🎯 ', '')}</span>` : ''}
+          </div>
+          ${textoLimiteOfertas2 ? `
+            <div class="promo-limit" style="color: #ff6f00; font-weight: 500;">
+              ${textoLimiteOfertas2}
+            </div>
+          ` : ''}
+          <div class="product-stock ${stockClass}">
+            ${stockText}
+          </div>
+          ${addButton}
+        </div>
+      </div>
+    `;
+  },
+
+  _renderEmptyMobileSearch(searchTerm) {
+    return `
+      <div style="text-align: center; padding: 2rem; color: #666;">
+        🔍 No se encontraron productos para "<strong>${searchTerm}</strong>"
+      </div>
+    `;
+  },
+
+  _addCartEventListeners() {
+    document.querySelectorAll(".add-to-cart").forEach(btn => {
+      btn.replaceWith(btn.cloneNode(true));
+    });
+    
+    document.querySelectorAll(".add-to-cart").forEach(btn => {
+      btn.addEventListener("click", function() {
+        const productId = parseInt(this.getAttribute("data-id"));
+        if (typeof addToCart === 'function') {
+          addToCart(productId);
+        }
+      });
+    });
+  }
 };
 
 // ========== ELEMENTOS DOM ==========
@@ -3103,6 +3784,136 @@ function searchProducts(searchTerm) {
     return results;
 }
 
+// ========== FUNCIONES DE INTERFAZ MEJORADAS ==========
+/**
+ * Filtra productos (para búsqueda desktop)
+ */
+function filterProducts(searchTerm) {
+  if (!products || products.length === 0) return;
+  
+  isSearching = true;
+  ProductRenderer.renderSearchResults(searchTerm);
+}
+
+/**
+ * Filtra productos (para búsqueda móvil)
+ */
+function filterMobileProducts(searchTerm) {
+  if (!products || products.length === 0) return;
+  
+  ProductRenderer.renderMobileSearchResults(searchTerm);
+}
+
+/**
+ * Renderiza productos según categoría actual
+ */
+function renderProductsByCategory() {
+  ProductRenderer.renderMainProductsGrid('category');
+}
+
+/**
+ * Renderiza HTML de productos (función original mejorada)
+ */
+function renderProductsToHTML(productsArray) {
+    return productsArray.map(product => {
+        const isOutOfStock = product.stockNumber === 0;
+        
+        const stockText = obtenerTextoStock(product);
+        
+        let stockClass = '';
+        if (product.stockNumber === 0) {
+            stockClass = 'out-of-stock';
+        } else if (product.stockNumber > 0 && product.stockNumber <= 3) {
+            stockClass = 'low-stock';
+        } else {
+            stockClass = 'in-stock';
+        }
+        
+        const addButton = isOutOfStock 
+            ? `<button class="add-to-cart" disabled>❌ Sin Stock</button>`
+            : `<button class="add-to-cart" data-id="${product.id}">🛒 Agregar al Carrito</button>`;
+        
+        // 🔥 EN GRILLA NORMAL: SIN badges, SIN precios tachados, SIN descuentos
+        
+        return `
+            <div class="product-card">
+                <div class="product-image">
+                    <img src="${product.image}" 
+                         alt="${product.name}"
+                         onerror="handleImageError(this, '${product.name.replace(/'/g, "\\'")}')">
+                </div>
+                <div class="product-info">
+                    <div class="product-name">${product.name}</div>
+                    
+                    <div class="product-price-container">
+                        <span class="product-price">$${product.price}</span>
+                    </div>
+                    
+                    <div class="product-stock ${stockClass}">
+                        ${stockText}
+                    </div>
+                    
+                    ${addButton}
+                    ${esAdmin ? mostrarInfoAdmin(product) : ''}
+                </div>
+            </div>
+        `;
+    }).join("");
+}
+
+/**
+ * Limpia búsqueda y vuelve a vista normal
+ */
+function clearSearch() {
+  const searchInput = document.getElementById('productSearch');
+  const mobileSearch = document.getElementById('mobileSearch');
+  
+  if (searchInput) searchInput.value = '';
+  if (mobileSearch) mobileSearch.value = '';
+  
+  isSearching = false;
+  
+  const clearButtons = document.querySelectorAll('.clear-search');
+  clearButtons.forEach(btn => btn.style.display = 'none');
+  
+  currentCategory = "ALMACEN";
+  
+  document.querySelectorAll('.category-btn').forEach(btn => {
+    btn.classList.toggle(
+      'active',
+      btn.getAttribute('data-category') === "ALMACEN"
+    );
+  });
+  
+  ProductRenderer.renderMainProductsGrid('category');
+}
+
+/**
+ * Ver todas las ofertas
+ */
+function verTodasLasOfertas() {
+  const categoriasConOfertas = [...new Set(products
+    .filter(p => p.hasPromo && p.stockNumber > 0)
+    .map(p => p.category)
+  )];
+  
+  if (categoriasConOfertas.length > 0) {
+    currentCategory = categoriasConOfertas[0];
+    
+    document.querySelectorAll(".category-btn").forEach(b => b.classList.remove("active"));
+    const ofertasBtn = document.querySelector(`[data-category="${categoriasConOfertas[0]}"]`);
+    if (ofertasBtn) {
+      ofertasBtn.classList.add("active");
+    }
+    
+    ProductRenderer.renderMainProductsGrid('category');
+    
+    document.querySelector('.products-grid')?.scrollIntoView({ behavior: 'smooth' });
+  } else {
+    alert("No hay ofertas disponibles en este momento");
+  }
+}
+
 // ========== CARGAR PRODUCTOS ==========
 async function loadProductsFromAPI() {
     try {
@@ -3281,9 +4092,8 @@ function processAPIData(apiData) {
         `;
     }
     
-    renderCategories();
-    mostrarOfertasDestacadas();
-    renderProducts();
+    // Inicializar sistema mejorado
+    initProductSystem();
     
     setTimeout(() => {
         if (typeof FLASH_SALES_SYSTEM !== 'undefined' && 
@@ -3301,6 +4111,65 @@ function simplificarNombre(nombre) {
         .replace(/\s+/g, '-')
         .replace(/-+/g, '-')
         .trim();
+}
+
+// ========== INICIALIZACIÓN MEJORADA ==========
+/**
+ * Inicializa el sistema de productos después de cargar desde API
+ */
+function initProductSystem() {
+  console.log('🔄 Inicializando sistema de productos mejorado...');
+  
+  // Renderizar categorías (función existente)
+  if (typeof renderCategories === 'function') {
+    renderCategories();
+  }
+  
+  // Renderizar secciones en orden (SIN CRUCE)
+  
+  // 1. Ofertas Destacadas (solo ofertas2, solo horario)
+  ProductRenderer.renderFeaturedOffersSection();
+  
+  // 2. Ofertas Relámpago (solo ofertas1, horario propio)
+  if (typeof FLASH_SALES_SYSTEM !== 'undefined' && FLASH_SALES_SYSTEM.init) {
+    FLASH_SALES_SYSTEM.init();
+  }
+  
+  // 3. Productos normales (sin ofertas destacadas ni relámpago)
+  ProductRenderer.renderMainProductsGrid('home');
+  
+  // 4. Detectar errores de planilla
+  detectarErroresPlanilla();
+  
+  console.log('✅ Sistema de productos inicializado');
+  console.log('📊 Estadísticas:', ProductFilterSystem.getFilterStats());
+}
+
+/**
+ * Actualiza todas las vistas (útil después de cambios)
+ */
+function refreshAllViews() {
+  console.log('🔄 Actualizando todas las vistas...');
+  
+  // 1. Destacadas (solo horario, solo ofertas2)
+  ProductRenderer.renderFeaturedOffersSection();
+  
+  // 2. Relámpago (horario propio, solo ofertas1)
+  if (typeof FLASH_SALES_SYSTEM !== 'undefined' && FLASH_SALES_SYSTEM.updateUI) {
+    FLASH_SALES_SYSTEM.updateUI();
+  }
+  
+  // 3. Productos normales (sin cruce)
+  ProductRenderer.renderMainProductsGrid('category');
+  
+  // 4. Si estamos en búsqueda, mantener resultados
+  if (isSearching) {
+    const searchTerm = document.getElementById('productSearch')?.value || 
+                       document.getElementById('mobileSearch')?.value || '';
+    if (searchTerm.length >= 2) {
+      ProductRenderer.renderSearchResults(searchTerm);
+    }
+  }
 }
 
 // ========== INTERFAZ ==========
@@ -3391,7 +4260,7 @@ function scrollToTop() {
     }
     
     setTimeout(() => {
-        renderProducts();
+        ProductRenderer.renderMainProductsGrid('category');
     }, 300);
     
     const mensajeFeedback = deberiaIrACategorias ? 
@@ -3505,134 +4374,6 @@ function clearMobileSearch() {
     clearMobileSearchBtn.style.display = 'none';
 }
 
-function filterProducts(searchTerm) {
-    if (!products || products.length === 0) return;
-    
-    isSearching = true;
-    const filtered = searchProducts(searchTerm);
-    renderFilteredProducts(filtered, searchTerm);
-}
-
-function filterMobileProducts(searchTerm) {
-    if (!products || products.length === 0) return;
-    
-    const filtered = searchProducts(searchTerm);
-    
-    if (filtered.length === 0) {
-        mobileSearchResults.innerHTML = `
-            <div style="text-align: center; padding: 1rem; color: #666;">
-                🔍 No se encontraron productos para "<strong>${searchTerm}</strong>"
-            </div>
-        `;
-        return;
-    }
-    
-    let resultsHTML = '<div style="display: grid; gap: 1rem;">';
-    
-    filtered.forEach(product => {
-        const stockText = obtenerTextoStock(product);
-        
-        let stockClass = '';
-        if (product.stockNumber === 0) {
-            stockClass = 'out-of-stock';
-        } else if (product.stockNumber > 0 && product.stockNumber <= 3) {
-            stockClass = 'low-stock';
-        } else {
-            stockClass = 'in-stock';
-        }
-        
-        const addButton = product.stockNumber === 0
-            ? `<button class="add-to-cart" disabled>❌ Sin Stock</button>`
-            : `<button class="add-to-cart" data-id="${product.id}">🛒 Agregar al Carrito</button>`;
-        
-        const textoCortoOferta = obtenerTextoCortoOferta(product.ofertas1, product.ofertas2);
-        const offerBadge = textoCortoOferta 
-            ? `<div class="offer-badge">${textoCortoOferta}</div>`
-            : '';
-        
-        const descripcionOferta = obtenerDescripcionOferta(product.ofertas1, product.ofertas2, product.price);
-        const detalleOferta = product.ofertas1 ? 
-            obtenerDetalleOferta3x2(product.ofertas1, product.price, 1) : '';
-        
-        const textoLimiteOfertas2 = obtenerTextoLimiteOfertas2(product.ofertas2, product.name);
-        
-        resultsHTML += `
-            <div class="product-card" style="margin: 0;">
-                ${offerBadge}
-                <div class="product-image">
-                    <img src="${product.image}" 
-                         alt="${product.name}"
-                         onerror="handleImageError(this, '${product.name.replace(/'/g, "\\'")}')">
-                </div>
-                <div class="product-info">
-                    <div class="product-name">${product.name}</div>
-                    ${descripcionOferta ? `<div class="offer-description">${descripcionOferta}</div>` : ''}
-                    ${detalleOferta}
-                    <div class="product-price-container">
-                        ${product.hasPromo && product.discountedPrice < product.price ? 
-                            `<span class="original-price">$${product.price}</span>` : ''}
-                        <span class="product-price">$${Math.round(product.discountedPrice)}</span>
-                        ${textoCortoOferta ? 
-                            `<span class="discount-percent">${textoCortoOferta.replace('🔥 ', '').replace('🎯 ', '')}</span>` : ''}
-                    </div>
-                    ${textoLimiteOfertas2 ? `
-                        <div class="promo-limit" style="color: #ff6f00; font-weight: 500;">
-                            ${textoLimiteOfertas2}
-                        </div>
-                    ` : ''}
-                    <div class="product-stock ${stockClass}">
-                        ${stockText}
-                    </div>
-                    ${addButton}
-                </div>
-            </div>
-        `;
-    });
-    
-    resultsHTML += '</div>';
-    mobileSearchResults.innerHTML = resultsHTML;
-    
-    setTimeout(() => {
-        addCartEventListeners();
-    }, 100);
-}
-
-function renderFilteredProducts(filteredProducts, searchTerm = '') {
-    if (filteredProducts.length === 0) {
-        productsGrid.innerHTML = `
-            <div class="loading" style="text-align: center; padding: 2rem;">
-                🔍 No se encontraron productos para "<strong>${searchTerm}</strong>"
-                <br><br>
-                <button onclick="clearSearch()" class="retry-btn">
-                    ✨ Ver todos los productos
-                </button>
-            </div>
-        `;
-        return;
-    }
-    
-    renderProductsFromArray(filteredProducts, searchTerm);
-}
-
-function clearSearch() {
-    productSearch.value = '';
-    mobileSearch.value = '';
-    isSearching = false;
-    clearSearchBtn.style.display = 'none';
-    clearMobileSearchBtn.style.display = 'none';
-
-    currentCategory = "ALMACEN";
-
-    renderProducts();
-
-    document.querySelectorAll('.category-btn').forEach(btn => {
-        btn.classList.toggle(
-            'active',
-            btn.getAttribute('data-category') === "ALMACEN"
-        );
-    });
-}
-
 function renderCategories() {
     const categories = [...new Set(products.map(p => p.category))];
 
@@ -3665,300 +4406,7 @@ function renderCategories() {
             currentCategory = this.getAttribute("data-category");
             document.querySelectorAll(".category-btn").forEach(b => b.classList.remove("active"));
             this.classList.add("active");
-            renderProducts();
-        });
-    });
-}
-
-function renderProducts() {
-    console.log('🔍 renderProducts() llamado');
-    console.log('📁 Categoría actual:', currentCategory);
-    console.log('📊 Total productos:', products.length);
-    
-    let filteredProducts;
-    
-    filteredProducts = products.filter(p => {
-        return p.category === currentCategory && 
-               (p.stock === "STOCK" || p.stockNumber > 0);
-    });
-    
-    console.log('🎯 Productos filtrados:', filteredProducts.length);
-    
-    if (window.productosDestacadosIds && window.productosDestacadosIds.length > 0) {
-        filteredProducts = filteredProducts.filter(p => 
-            !window.productosDestacadosIds.includes(p.id)
-        );
-    }
-    
-    if (FLASH_SALES_SYSTEM.isActive && FLASH_SALES_SYSTEM.todaySelection.length > 0) {
-        const flashProductIds = FLASH_SALES_SYSTEM.todaySelection.map(p => p.id);
-        filteredProducts = filteredProducts.filter(p => 
-            !flashProductIds.includes(p.id)
-        );
-    }
-    
-    if (filteredProducts.length === 0) {
-        console.warn('⚠️ No hay productos para esta categoría');
-        productsGrid.innerHTML = `
-            <div class="loading" style="text-align: center; padding: 2rem;">
-                🛒 No hay productos disponibles en "${currentCategory}"
-            </div>
-        `;
-        return;
-    }
-    
-    filteredProducts.sort((a, b) => {
-        if (a.hasPromo && !b.hasPromo) return -1;
-        if (!a.hasPromo && b.hasPromo) return 1;
-        return 0;
-    });
-    
-    console.log('🎨 Renderizando', filteredProducts.length, 'productos');
-    renderProductsFromArray(filteredProducts);
-}
-
-function verTodasLasOfertas() {
-    const categoriasConOfertas = [...new Set(products
-        .filter(p => p.hasPromo && (p.stock === "STOCK" || p.stockNumber > 0))
-        .map(p => p.category)
-    )];
-    
-    if (categoriasConOfertas.length > 0) {
-        currentCategory = categoriasConOfertas[0];
-        document.querySelectorAll(".category-btn").forEach(b => b.classList.remove("active"));
-        const ofertasBtn = document.querySelector(`[data-category="${categoriasConOfertas[0]}"]`);
-        if (ofertasBtn) {
-            ofertasBtn.classList.add("active");
-        }
-        renderProducts();
-        
-        document.querySelector('.products-grid').scrollIntoView({ behavior: 'smooth' });
-    } else {
-        alert("No hay ofertas disponibles en este momento");
-    }
-}
-
-function renderProductsToHTML(productsArray) {
-    return productsArray.map(product => {
-        const isOutOfStock = product.stockNumber === 0;
-        const mayorOferta = obtenerMayorOfertaDelDia();
-        const esMayorOferta = mayorOferta && mayorOferta.id === product.id;
-        const etiquetaOferta = obtenerEtiquetaOfertaDestacada(product.ofertas2);
-
-        const botonCompartir = esMayorOferta ? `
-            <button class="share-offer-btn" onclick="compartirMegaOferta(${product.id})">
-                🤝 Compartir esta OFERTA
-            </button>
-        ` : '';
-        
-        const stockText = obtenerTextoStock(product);
-        
-        let stockClass = '';
-        if (product.stockNumber === 0) {
-            stockClass = 'out-of-stock';
-        } else if (product.stockNumber > 0 && product.stockNumber <= 3) {
-            stockClass = 'low-stock';
-        } else {
-            stockClass = 'in-stock';
-        }
-        
-        const addButton = isOutOfStock 
-            ? `<button class="add-to-cart" disabled>❌ Sin Stock</button>`
-            : `<button class="add-to-cart" data-id="${product.id}">🛒 Agregar al Carrito</button>`;
-        
-        const textoCortoOferta = obtenerTextoCortoOferta(product.ofertas1, product.ofertas2);
-        const offerBadge = textoCortoOferta 
-            ? `<div class="offer-badge">${textoCortoOferta}</div>`
-            : '';
-        
-        const descripcionOferta = obtenerDescripcionOferta(
-            product.ofertas1, 
-            product.ofertas2,
-            product.price
-        );
-        
-        const detalleOferta = product.ofertas1 ? 
-            obtenerDetalleOferta3x2(product.ofertas1, product.price, 1) : '';
-        
-        const textoLimiteOfertas2 = obtenerTextoLimiteOfertas2(product.ofertas2, product.name);
-        
-        return `
-            <div class="product-card">
-                ${offerBadge}
-                ${esMayorOferta ? `<div class="promo-badge">🔥 MEGA OFERTA</div>` : ''}
-                <div class="product-image">
-                    <img src="${product.image}" 
-                         alt="${product.name}"
-                         onerror="handleImageError(this, '${product.name.replace(/'/g, "\\'")}')">
-                </div>
-                <div class="product-info">
-                    <div class="product-name">${product.name}</div>
-                    ${descripcionOferta ? `<div class="offer-description">${descripcionOferta}</div>` : ''}
-                    ${detalleOferta}
-                    ${etiquetaOferta ? `<div class="offer-description" style="color: #d50000; font-weight: bold;">${etiquetaOferta}</div>` : ''}
-                    ${esMayorOferta ? `<div class="offer-description" style="color: #d50000; font-weight: bold;">🎯 ¡LA MEJOR OFERTA DEL DÍA!</div>` : ''}
-                    <div class="product-price-container">
-                        ${product.discountedPrice < product.price ? 
-                            `<span class="original-price">$${product.price}</span>` : ''}
-                        <span class="product-price">$${Math.round(product.discountedPrice)}</span>
-                        ${textoCortoOferta ? 
-                            `<span class="discount-percent">${textoCortoOferta.replace('🔥 ', '').replace('🎯 ', '')}</span>` : ''}
-                    </div>
-                    ${textoLimiteOfertas2 ? `
-                        <div class="promo-limit" style="color: #ff6f00; font-weight: 500;">
-                            ${textoLimiteOfertas2}
-                        </div>
-                    ` : ''}
-                    <div class="product-stock ${stockClass}">
-                        ${stockText}
-                    </div>
-                    ${addButton}
-                    ${botonCompartir}
-                    ${esAdmin ? mostrarInfoAdmin(product) : ''}
-                </div>
-            </div>
-        `;
-    }).join("");
-}
-
-function mostrarOfertasDestacadas() {
-    console.log('🔥 OFERTAS DESTACADAS - Iniciando búsqueda...');
-    
-    if (!window.products || !Array.isArray(window.products) || window.products.length === 0) {
-        console.log('❌ ERROR: products array no disponible o vacío');
-        if (featuredOffers) featuredOffers.style.display = 'none';
-        return;
-    }
-    
-    console.log('📊 Total productos disponibles:', window.products.length);
-    
-    const productosConOferta = [];
-    
-    window.products.forEach((p, index) => {
-        const tieneOferta1 = p.ofertas1 && p.ofertas1 !== '' && p.ofertas1 !== '0';
-        const tieneOferta2 = p.ofertas2 && p.ofertas2 !== '' && p.ofertas2 !== '0';
-        const tieneStock = p.stockNumber > 0;
-        
-        if ((tieneOferta1 || tieneOferta2) && tieneStock) {
-            productosConOferta.push(p);
-            
-            if (productosConOferta.length <= 5) {
-                console.log(`🎯 Producto con oferta #${productosConOferta.length}:`, {
-                    nombre: p.name.substring(0, 30),
-                    oferta1: p.ofertas1,
-                    oferta2: p.ofertas2,
-                    hasPromo: p.hasPromo,
-                    stock: p.stockNumber,
-                    precioOriginal: p.price,
-                    precioConDescuento: p.discountedPrice,
-                    discountPercent: p.discountPercent
-                });
-            }
-        }
-    });
-    
-    console.log('📋 Total productos con ofertas y stock:', productosConOferta.length);
-    
-    if (productosConOferta.length === 0) {
-        console.log('🔍 DIAGNÓSTICO - ¿Por qué no hay ofertas?');
-        
-        const primeros5 = window.products.slice(0, 5);
-        primeros5.forEach((p, i) => {
-            console.log(`Producto ${i+1}: "${p.name.substring(0, 20)}..."`, {
-                ofertas1: `"${p.ofertas1}"`,
-                ofertas2: `"${p.ofertas2}"`,
-                hasPromo: p.hasPromo,
-                stockNumber: p.stockNumber,
-                price: p.price,
-                discountedPrice: p.discountedPrice
-            });
-        });
-        
-        const totalConOferta1 = window.products.filter(p => p.ofertas1 && p.ofertas1 !== '' && p.ofertas1 !== '0').length;
-        const totalConOferta2 = window.products.filter(p => p.ofertas2 && p.ofertas2 !== '' && p.ofertas2 !== '0').length;
-        const totalConHasPromo = window.products.filter(p => p.hasPromo === true).length;
-        const totalConStock = window.products.filter(p => p.stockNumber > 0).length;
-        
-        console.log('📊 ESTADÍSTICAS:', {
-            'Con oferta1': totalConOferta1,
-            'Con oferta2': totalConOferta2,
-            'Con hasPromo=true': totalConHasPromo,
-            'Con stock>0': totalConStock,
-            'Total productos': window.products.length
-        });
-        
-        if (featuredOffers) featuredOffers.style.display = 'none';
-        return;
-    }
-    
-    productosConOferta.sort((a, b) => {
-        const descA = a.discountPercent || (a.ofertas2 ? parseInt(a.ofertas2) : 0);
-        const descB = b.discountPercent || (b.ofertas2 ? parseInt(b.ofertas2) : 0);
-        
-        if (descB !== descA) return descB - descA;
-        
-        return a.discountedPrice - b.discountedPrice;
-    });
-    
-    const productosDestacados = productosConOferta.slice(0, 9);
-    
-    console.log('🎯 Mostrando ofertas destacadas:', productosDestacados.length, 'productos');
-    
-    if (productosDestacados.length > 0 && featuredOffers && featuredProductsGrid) {
-        featuredOffers.style.display = 'block';
-        featuredProductsGrid.innerHTML = renderProductsToHTML(productosDestacados);
-        
-        window.productosDestacadosIds = productosDestacados.map(p => p.id);
-        
-        console.log('✅ OFERTAS DESTACADAS VISIBLES');
-    } else {
-        console.log('⚠️ No se pudo mostrar ofertas (elementos DOM no encontrados)');
-        if (featuredOffers) featuredOffers.style.display = 'none';
-    }
-}
-
-function renderProductsFromArray(productsArray, searchTerm = '') {
-    const productsToShow = productsArray;
-    
-    if (productsToShow.length === 0) {
-        let mensaje = '';
-        mensaje = '<div class="loading">No hay productos disponibles</div>';
-        productsGrid.innerHTML = mensaje;
-        return;
-    }
-    
-    productsGrid.innerHTML = renderProductsToHTML(productsToShow);
-    
-    setTimeout(() => {
-        addCartEventListeners();
-    }, 100);
-    
-    if (searchTerm) {
-        const searchHeader = `
-            <div class="search-results">
-                <strong>🔍 Búsqueda inteligente: "${searchTerm}"</strong>
-                <br>
-                <small>Encontraste ${productsToShow.length} producto(s)</small>
-                <button onclick="clearSearch()" style="margin-left: 10px; padding: 6px 12px; 
-                        background: #ff6f00; color: white; border: none; border-radius: 15px; 
-                        cursor: pointer; font-size: 0.8rem;">
-                    ✖️ Limpiar búsqueda
-                </button>
-            </div>
-        `;
-        productsGrid.innerHTML = searchHeader + productsGrid.innerHTML;
-    }
-}
-
-function addCartEventListeners() {
-    document.querySelectorAll(".add-to-cart").forEach(btn => {
-        btn.replaceWith(btn.cloneNode(true));
-    });
-    
-    document.querySelectorAll(".add-to-cart").forEach(btn => {
-        btn.addEventListener("click", function() {
-            const productId = parseInt(this.getAttribute("data-id"));
-            addToCart(productId);
+            ProductRenderer.renderMainProductsGrid('category');
         });
     });
 }
@@ -3976,7 +4424,15 @@ function addToCart(productId) {
         return;
     }
     
-    if (product.ofertas2) {
+    // 🔥 VERIFICAR SI ESTÁ EN OFERTA ACTIVA
+    const enRelampago = (FLASH_SALES_SYSTEM?.isActive && 
+                        FLASH_SALES_SYSTEM?.todaySelection?.some(p => p.id === productId)) || false;
+    const enDestacadas = (isValidFeaturedOffersTime() && 
+                         window.productosDestacadosIds?.includes(productId)) || false;
+    const tieneOfertaActiva = enRelampago || enDestacadas;
+    
+    // 🔥 SOLO aplicar límites si tiene oferta activa
+    if (tieneOfertaActiva && product.ofertas2) {
         const limiteOferta2 = obtenerLimiteOfertas2(product.ofertas2);
         if (limiteOferta2 !== null) {
             const newQuantity = currentQuantityInCart + 1;
@@ -3991,45 +4447,50 @@ function addToCart(productId) {
     
     if (existingItem) {
         existingItem.quantity = newQuantity;
-        existingItem.price = calcularPrecioConDescuento(
-            product.price, 
-            product.ofertas1, 
-            product.ofertas2, 
-            newQuantity
-        );
+        
+        // 🔥 SOLO calcular descuento si tiene oferta activa
+        if (tieneOfertaActiva) {
+            existingItem.price = calcularPrecioConDescuento(
+                product.price, 
+                product.ofertas1, 
+                product.ofertas2, 
+                newQuantity
+            );
+        } else {
+            existingItem.price = product.price; // Precio normal
+        }
     } else {
-        const initialPrice = calcularPrecioConDescuento(
-            product.price, 
-            product.ofertas1, 
-            product.ofertas2, 
-            1
-        );
+        // 🔥 SOLO calcular descuento si tiene oferta activa
+        const initialPrice = tieneOfertaActiva 
+            ? calcularPrecioConDescuento(product.price, product.ofertas1, product.ofertas2, 1)
+            : product.price;
         
         cart.push({
             id: product.id,
             name: product.name,
             price: initialPrice,
             originalPrice: product.price,
-            hasPromo: product.hasPromo,
-            ofertas1: product.ofertas1,
-            ofertas2: product.ofertas2,
+            hasPromo: tieneOfertaActiva,
+            ofertas1: tieneOfertaActiva ? product.ofertas1 : '',
+            ofertas2: tieneOfertaActiva ? product.ofertas2 : '',
             quantity: 1,
             maxStock: availableStock,
-            maxOferta2Limit: obtenerLimiteOfertas2(product.ofertas2)
+            maxOferta2Limit: tieneOfertaActiva ? obtenerLimiteOfertas2(product.ofertas2) : null
         });
         
-        if (product.ofertas1 === '1') {
+        if (tieneOfertaActiva && product.ofertas1 === '1') {
             showAddToCartFeedback(product.name, 0, "3x2");
-        } else {
+        } else if (tieneOfertaActiva) {
             const initialDiscount = calcularDescuentoReal(product.price, initialPrice);
             showAddToCartFeedback(product.name, initialDiscount);
+        } else {
+            showAddToCartFeedback(product.name, 0);
         }
     }
     
     updateCartCount();
     renderCartItems();
 }
-
 function showAddToCartFeedback(productName, discount = 0, tipoOferta = '') {
     const notification = document.createElement('div');
     notification.style.cssText = `
@@ -4131,6 +4592,13 @@ function renderCartItems() {
         const product = products.find(p => p.id === item.id);
         if (!product) return;
         
+        // 🔥 VERIFICAR SI LA OFERTA ESTÁ ACTIVA
+        const enRelampago = (FLASH_SALES_SYSTEM?.isActive && 
+                            FLASH_SALES_SYSTEM?.todaySelection?.some(p => p.id === item.id)) || false;
+        const enDestacadas = (isValidFeaturedOffersTime() && 
+                             window.productosDestacadosIds?.includes(item.id)) || false;
+        const tieneOfertaActiva = enRelampago || enDestacadas;
+        
         const itemNormalPrice = product.price * item.quantity;
         const itemFinalPrice = item.price * item.quantity;
         const itemSavings = itemNormalPrice - itemFinalPrice;
@@ -4144,24 +4612,27 @@ function renderCartItems() {
         let tipoOferta = '';
         let detalleOferta = '';
         
-        if (product.ofertas2 && product.ofertas2 !== '0') {
-            tipoOferta = ` <small style="color: #4CAF50; font-weight: bold;">(${product.ofertas2}% OFF)</small>`;
-        } else if (product.ofertas1 && product.ofertas1 !== '0') {
-            if (OFERTAS_SISTEMA[product.ofertas1]) {
-                const oferta = OFERTAS_SISTEMA[product.ofertas1];
-                tipoOferta = ` <small style="color: #ff6f00; font-weight: bold;">(${oferta.nombre})</small>`;
-                
-                if (product.ofertas1 === '1' && item.quantity >= 3) {
-                    tiene3x2 = true;
-                    const grupos3x2 = Math.floor(item.quantity / 3);
-                    const sobrantes = item.quantity % 3;
+        // 🔥 SOLO mostrar badges si la oferta está activa
+        if (tieneOfertaActiva) {
+            if (product.ofertas2 && product.ofertas2 !== '0') {
+                tipoOferta = ` <small style="color: #4CAF50; font-weight: bold;">(${product.ofertas2}% OFF)</small>`;
+            } else if (product.ofertas1 && product.ofertas1 !== '0') {
+                if (OFERTAS_SISTEMA[product.ofertas1]) {
+                    const oferta = OFERTAS_SISTEMA[product.ofertas1];
+                    tipoOferta = ` <small style="color: #ff6f00; font-weight: bold;">(${oferta.nombre})</small>`;
                     
-                    detalleOferta = `<div style="font-size: 0.75rem; color: #666; margin-top: 2px;">
-                        📦 Incluye: ${grupos3x2} promo(s) 3x2`;
-                    if (sobrantes > 0) {
-                        detalleOferta += ` + ${sobrantes} unidad(es) normal(es)`;
+                    if (product.ofertas1 === '1' && item.quantity >= 3) {
+                        tiene3x2 = true;
+                        const grupos3x2 = Math.floor(item.quantity / 3);
+                        const sobrantes = item.quantity % 3;
+                        
+                        detalleOferta = `<div style="font-size: 0.75rem; color: #666; margin-top: 2px;">
+                            📦 Incluye: ${grupos3x2} promo(s) 3x2`;
+                        if (sobrantes > 0) {
+                            detalleOferta += ` + ${sobrantes} unidad(es) normal(es)`;
+                        }
+                        detalleOferta += `</div>`;
                     }
-                    detalleOferta += `</div>`;
                 }
             }
         }
@@ -4172,11 +4643,11 @@ function renderCartItems() {
                     <div class="cart-item-name">${item.name}${tipoOferta}</div>
                     ${detalleOferta}
                     <div class="cart-item-price">
-                        ${item.price < product.price 
+                        ${tieneOfertaActiva && item.price < product.price 
                             ? `<span style="text-decoration: line-through; color: #666; margin-right: 5px;">$${product.price}</span>` 
                             : ''}
                         $${Math.round(item.price)} c/u
-                        ${discountPercent > 0 
+                        ${tieneOfertaActiva && discountPercent > 0 
                             ? `<span style="background: #4CAF50; color: white; padding: 2px 6px; border-radius: 8px; font-size: 0.75rem; margin-left: 5px; font-weight: bold;">🔥 OFERTA</span>` 
                             : ''}
                     </div>
@@ -4264,7 +4735,14 @@ function updateCartQuantity(productId, change) {
         return;
     }
     
-    if (product.ofertas2) {
+    // 🔥 VERIFICAR SI ESTÁ EN OFERTA ACTIVA
+    const enRelampago = (FLASH_SALES_SYSTEM?.isActive && 
+                        FLASH_SALES_SYSTEM?.todaySelection?.some(p => p.id === productId)) || false;
+    const enDestacadas = (isValidFeaturedOffersTime() && 
+                         window.productosDestacadosIds?.includes(productId)) || false;
+    const tieneOfertaActiva = enRelampago || enDestacadas;
+    
+    if (tieneOfertaActiva && product.ofertas2) {
         const limiteOferta2 = obtenerLimiteOfertas2(product.ofertas2);
         if (limiteOferta2 !== null && newQuantity > limiteOferta2) {
             showLimitError(product.name, limiteOferta2, `${product.ofertas2}% OFF`);
@@ -4274,20 +4752,23 @@ function updateCartQuantity(productId, change) {
     
     item.quantity = newQuantity;
     
-    item.price = calcularPrecioConDescuento(
-        product.price, 
-        product.ofertas1, 
-        product.ofertas2, 
-        newQuantity
-    );
+    // 🔥 SOLO calcular descuento si tiene oferta activa
+    if (tieneOfertaActiva) {
+        item.price = calcularPrecioConDescuento(
+            product.price, 
+            product.ofertas1, 
+            product.ofertas2, 
+            newQuantity
+        );
+    } else {
+        item.price = product.price; // Precio normal
+    }
     
     updateCartCount();
     renderCartItems();
     
-    const precioOriginal = product.price;
-    
-    if (item.price < precioOriginal) {
-        const descuento = Math.round(((precioOriginal - item.price) / precioOriginal) * 100);
+    if (tieneOfertaActiva && item.price < product.price) {
+        const descuento = Math.round(((product.price - item.price) / product.price) * 100);
         
         if (product.ofertas1 === '1' && newQuantity >= 3) {
             showAddToCartFeedback(product.name, 0, "3x2");
@@ -4379,7 +4860,7 @@ function verificarStockBajo() {
 // ========== INICIALIZACIÓN ==========
 function init() {
     console.log('🚀 Inicializando Almacén Copihue v' + APP_VERSION);
-    console.log('📊 Conectando a tu API con 422 productos...');
+    console.log('📊 Sistema de SEPARACIÓN ESTRICTA activo');
     
     if (window.appInitialized) {
         console.log('⚠️ App ya inicializada, saltando...');
@@ -4396,7 +4877,7 @@ function init() {
     loadProductsFromAPI();
     
     setTimeout(() => {
-        console.log('✅ Sistema listo. Botón 🏠 funcionando.');
+        console.log('✅ Sistema mejorado listo. Botón 🏠 funcionando.');
     }, 1000);
 }
 
@@ -4673,8 +5154,8 @@ function loadDemoProducts() {
     `;
     
     renderCategories();
-    mostrarOfertasDestacadas();
-    renderProducts();
+    ProductRenderer.renderFeaturedOffersSection();
+    ProductRenderer.renderMainProductsGrid('category');
     
     setTimeout(() => {
         if (typeof FLASH_SALES_SYSTEM !== 'undefined' && 
@@ -4686,7 +5167,7 @@ function loadDemoProducts() {
 
 // ========== INICIALIZACIÓN FINAL ==========
 document.addEventListener("DOMContentLoaded", function() {
-    console.log('📱 DOM completamente cargado - Iniciando app...');
+    console.log('📱 DOM completamente cargado - Iniciando app mejorada...');
     
     init();
     
@@ -4760,12 +5241,12 @@ function debugFlashSales() {
     
     console.log('--- POOL ---');
     FLASH_SALES_SYSTEM.productPool.forEach((p, i) => {
-        console.log(`${i+1}. ${p.name} - ${p.ofertas2}% OFF (ID: ${p.descripcion})`);
+        console.log(`${i+1}. ${p.name} - ${p.ofertas1} (ID: ${p.descripcion})`);
     });
     
     console.log('--- SELECCIÓN HOY ---');
     FLASH_SALES_SYSTEM.todaySelection.forEach((p, i) => {
-        console.log(`${i+1}. ${p.name} - ${p.ofertas2}% OFF ($${p.flashPrice})`);
+        console.log(`${i+1}. ${p.name} - ${p.ofertas1} ($${p.flashPrice})`);
     });
     
     const historyData = localStorage.getItem('flash_sales_history');
@@ -4793,6 +5274,19 @@ function toggleFlashSales(show) {
         FLASH_SALES_SYSTEM.updateUI();
     }
 }
+
+// Exportar funciones para debugging
+window.ProductFilterSystem = ProductFilterSystem;
+window.ProductRenderer = ProductRenderer;
+window.refreshAllViews = refreshAllViews;
+window.renderProductsToHTML = renderProductsToHTML;
+window.renderProductsByCategory = renderProductsByCategory;
+window.filterProducts = filterProducts;
+window.filterMobileProducts = filterMobileProducts;
+window.clearSearch = clearSearch;
+window.verTodasLasOfertas = verTodasLasOfertas;
+
+console.log('🎯 Sistema de SEPARACIÓN ESTRICTA cargado - Sin cruce entre ofertas');
     </script>
 </body>
 </html>
