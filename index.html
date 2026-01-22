@@ -174,6 +174,26 @@
             font-weight: 500;
         }
 
+/* Agregar al CSS existente */
+.cart-item-info small {
+    display: block;
+    font-size: 0.8rem;
+    margin-top: 2px;
+    color: #4caf50 !important;
+    font-weight: bold;
+}
+
+.cart-item .oferta-badge {
+    background: #ffeb3b;
+    color: #d50000;
+    padding: 2px 6px;
+    border-radius: 8px;
+    font-size: 0.7rem;
+    font-weight: bold;
+    margin-left: 5px;
+    display: inline-block;
+}
+
         /* ========== CONTENEDOR GENÉRICO OFERTAS ========== */
         .ofertas-container {
             display: none;
@@ -1431,6 +1451,7 @@ function renderizarContenedorOfertas(tipo, productos) {
         let precioMostrar = product.price;
         let descuento = 0;
         let textoOferta = '';
+        let mostrarPrecioOriginal = false;
         
         if (tipo === 'relampago' && product.relampago) {
             const oferta = OFERTAS_RELAMPAGO_SISTEMA[product.relampago];
@@ -1439,9 +1460,17 @@ function renderizarContenedorOfertas(tipo, productos) {
                 descuento = oferta.descuentoReal;
             }
         } else if (tipo === 'destacadas' && product.destacada) {
-            precioMostrar = Math.round(product.price * (1 - product.destacada / 100));
+            // Destacadas ya tienen % en product.destacada
             descuento = product.destacada;
+            precioMostrar = Math.round(product.price * (1 - descuento / 100));
             textoOferta = `${descuento}% OFF`;
+            mostrarPrecioOriginal = true;
+        } else if (tipo === 'especiales' && product.especial) {
+            // ¡AQUÍ ESTÁ LA SOLUCIÓN! 10% FIJO para especiales
+            descuento = 10; // 10% fijo
+            precioMostrar = Math.round(product.price * 0.9); // 10% de descuento
+            textoOferta = `🎁 OFERTA ESPECIAL -10%`;
+            mostrarPrecioOriginal = true;
         }
         
         const badge = tipo === 'relampago' ? '⚡ RELÁMPAGO' :
@@ -1468,7 +1497,7 @@ function renderizarContenedorOfertas(tipo, productos) {
                     ` : ''}
                     
                     <div class="product-price-container">
-                        ${tipo === 'destacadas' ? `
+                        ${mostrarPrecioOriginal ? `
                             <span class="original-price">${product.price}</span>
                             <span class="product-price">${precioMostrar}</span>
                             <span class="discount-percent">${descuento}%</span>
@@ -1768,6 +1797,72 @@ function renderCategories() {
     });
 }
 
+// ========== FUNCIONES DE CÁLCULO DE OFERTAS ==========
+function calcularPrecioConOferta(product, cantidad) {
+    // Si no tiene oferta relámpago, precio normal
+    if (!product.relampago || product.relampago === 0) {
+        return product.price * cantidad;
+    }
+    
+    const oferta = OFERTAS_RELAMPAGO_SISTEMA[product.relampago];
+    if (!oferta) return product.price * cantidad;
+    
+    switch(oferta.tipo) {
+        case "2x1":
+            // 2x1: pagas 1 por cada 2 unidades
+            const pares2x1 = Math.floor(cantidad / 2);
+            const resto2x1 = cantidad % 2;
+            return (pares2x1 + resto2x1) * product.price;
+            
+        case "3x2":
+            // 3x2: pagas 2 por cada 3 unidades
+            const grupos3x2 = Math.floor(cantidad / 3);
+            const resto3x2 = cantidad % 3;
+            return (grupos3x2 * 2 + resto3x2) * product.price;
+            
+        case "4x3":
+            // 4x3: pagas 3 por cada 4 unidades
+            const grupos4x3 = Math.floor(cantidad / 4);
+            const resto4x3 = cantidad % 4;
+            return (grupos4x3 * 3 + resto4x3) * product.price;
+            
+        case "5x4":
+            // 5x4: pagas 4 por cada 5 unidades
+            const grupos5x4 = Math.floor(cantidad / 5);
+            const resto5x4 = cantidad % 5;
+            return (grupos5x4 * 4 + resto5x4) * product.price;
+            
+        case "6x5":
+            // 6x5: pagas 5 por cada 6 unidades
+            const grupos6x5 = Math.floor(cantidad / 6);
+            const resto6x5 = cantidad % 6;
+            return (grupos6x5 * 5 + resto6x5) * product.price;
+            
+        case "7x6":
+            // 7x6: pagas 6 por cada 7 unidades
+            const grupos7x6 = Math.floor(cantidad / 7);
+            const resto7x6 = cantidad % 7;
+            return (grupos7x6 * 6 + resto7x6) * product.price;
+            
+        case "2da50":
+            // 2da unidad 50% OFF
+            const pares2da50 = Math.floor(cantidad / 2);
+            const resto2da50 = cantidad % 2;
+            const totalPares2da50 = pares2da50 * (product.price * 1.5); // 1ra 100% + 2da 50% = 150%
+            const totalResto2da50 = resto2da50 * product.price;
+            return totalPares2da50 + totalResto2da50;
+            
+        default:
+            return product.price * cantidad;
+    }
+}
+
+function calcularAhorro(product, cantidad) {
+    const precioNormal = product.price * cantidad;
+    const precioConOferta = calcularPrecioConOferta(product, cantidad);
+    return precioNormal - precioConOferta;
+}
+
 // ========== CARRITO ==========
 function addToCart(productId) {
     const product = products.find(p => p.id === productId);
@@ -1781,6 +1876,21 @@ function addToCart(productId) {
         return;
     }
     
+    // Determinar si el producto está en alguna oferta activa
+    let ofertaActiva = null;
+    let esOfertaEspecial = false;
+    
+    // Verificar si está en productosEspeciales Y está en horario válido
+    if (productosEspeciales.some(p => p.id === productId) && validarHorario('especiales')) {
+        esOfertaEspecial = true;
+        ofertaActiva = {
+            nombre: "Especial",
+            tipo: "especial",
+            descuento: 10,
+            eslogan: "🎁 OFERTA ESPECIAL -10%"
+        };
+    }
+    
     if (existingItem) {
         existingItem.quantity++;
     } else {
@@ -1789,15 +1899,21 @@ function addToCart(productId) {
             name: product.name,
             price: product.price,
             quantity: 1,
-            maxStock: product.stockNumber
+            maxStock: product.stockNumber,
+            oferta: ofertaActiva,
+            esOfertaEspecial: esOfertaEspecial
         });
     }
     
     updateCartCount();
     renderCartItems();
-    showNotification(`✅ ${product.name} agregado`, 'success');
+    
+    const mensajeOferta = esOfertaEspecial 
+        ? `✅ ${product.name} (🎁 OFERTA ESPECIAL -10%)`
+        : `✅ ${product.name} agregado`;
+    
+    showNotification(mensajeOferta, 'success');
 }
-
 function updateCartCount() {
     const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
     document.getElementById('cartCount').textContent = totalItems;
@@ -1815,16 +1931,38 @@ function renderCartItems() {
     }
     
     let total = 0;
+    let totalAhorro = 0;
     
     cartItems.innerHTML = cart.map(item => {
-        const itemTotal = item.price * item.quantity;
-        total += itemTotal;
+        let precioUnitario = item.price;
+        let precioTotalItem = item.price * item.quantity;
+        let ahorroItem = 0;
+        let badgeOferta = '';
+        
+        // Aplicar descuento si es oferta especial
+        if (item.esOfertaEspecial && item.oferta) {
+            // Calcular precio con 10% de descuento
+            precioUnitario = Math.round(item.price * 0.9);
+            precioTotalItem = precioUnitario * item.quantity;
+            ahorroItem = (item.price * item.quantity) - precioTotalItem;
+            totalAhorro += ahorroItem;
+            badgeOferta = `<span class="oferta-badge">${item.oferta.nombre}</span>`;
+        }
+        
+        total += precioTotalItem;
         
         return `
             <div class="cart-item">
                 <div class="cart-item-info">
-                    <div class="cart-item-name">${item.name}</div>
-                    <div class="cart-item-price">${item.price} c/u</div>
+                    <div class="cart-item-name">
+                        ${item.name} ${badgeOferta}
+                    </div>
+                    <div class="cart-item-price">
+                        ${precioUnitario} c/u
+                        ${ahorroItem > 0 ? 
+                            `<br><small style="color: #4caf50;">✅ Ahorraste: ${ahorroItem}</small>` 
+                            : ''}
+                    </div>
                 </div>
                 <div class="cart-item-quantity">
                     <button class="quantity-btn decrease-btn" data-id="${item.id}">-</button>
@@ -1837,22 +1975,45 @@ function renderCartItems() {
     
     cartTotal.textContent = `TOTAL: ${total}`;
     
-    // Event listeners para cantidades
-    cartItems.querySelectorAll('.increase-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const productId = parseInt(btn.getAttribute('data-id'));
-            addToCart(productId);
-        });
-    });
+    // Mostrar ahorro total si hay ofertas especiales
+    if (totalAhorro > 0) {
+        const totalSavingsElement = document.querySelector('.total-savings');
+        if (!totalSavingsElement) {
+            const savingsHTML = `
+                <div class="total-savings" id="totalSavings">
+                    🎉 ¡AHORRASTE: ${totalAhorro}! 
+                    <small>(Precio normal: ${total + totalAhorro})</small>
+                </div>
+            `;
+            cartItems.insertAdjacentHTML('beforeend', savingsHTML);
+        } else {
+            totalSavingsElement.innerHTML = `
+                🎉 ¡AHORRASTE: ${totalAhorro}! 
+                <small>(Precio normal: ${total + totalAhorro})</small>
+            `;
+        }
+    } else {
+        const totalSavingsElement = document.getElementById('totalSavings');
+        if (totalSavingsElement) totalSavingsElement.remove();
+    }
     
-    cartItems.querySelectorAll('.decrease-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const productId = parseInt(btn.getAttribute('data-id'));
-            updateCartQuantity(productId, -1);
+    // Event listeners para cantidades
+    setTimeout(() => {
+        cartItems.querySelectorAll('.increase-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const productId = parseInt(btn.getAttribute('data-id'));
+                addToCart(productId);
+            });
         });
-    });
+        
+        cartItems.querySelectorAll('.decrease-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const productId = parseInt(btn.getAttribute('data-id'));
+                updateCartQuantity(productId, -1);
+            });
+        });
+    }, 100);
 }
-
 function updateCartQuantity(productId, change) {
     const itemIndex = cart.findIndex(item => item.id === productId);
     if (itemIndex === -1) return;
@@ -1879,12 +2040,31 @@ function sendOrderViaWhatsApp() {
     const phoneNumber = "5492944907380";
     
     let total = 0;
+    let totalNormal = 0;
     let orderLines = [];
+    let tieneOfertasEspeciales = false;
     
     cart.forEach(item => {
-        const itemTotal = item.price * item.quantity;
-        total += itemTotal;
-        orderLines.push(`✅ ${item.name}\n   ${item.quantity} × ${item.price} = ${itemTotal}`);
+        let precioItem = item.price * item.quantity;
+        let precioNormalItem = precioItem;
+        let ofertaInfo = '';
+        
+        // Calcular descuento si es oferta especial
+        if (item.esOfertaEspecial && item.oferta) {
+            const precioConDescuento = Math.round(item.price * 0.9);
+            precioItem = precioConDescuento * item.quantity;
+            precioNormalItem = item.price * item.quantity;
+            ofertaInfo = `\n   🎁 ${item.oferta.eslogan}`;
+            tieneOfertasEspeciales = true;
+        }
+        
+        total += precioItem;
+        totalNormal += precioNormalItem;
+        
+        const ahorroItem = precioNormalItem - precioItem;
+        const ahorroTexto = ahorroItem > 0 ? ` (🎉 Ahorro: ${ahorroItem})` : '';
+        
+        orderLines.push(`✅ ${item.name}${ofertaInfo}\n   ${item.quantity} × ${item.esOfertaEspecial ? Math.round(item.price * 0.9) : item.price} = ${precioItem}${ahorroTexto}`);
     });
     
     let message = `*🛒 PEDIDO ALMACÉN COPIHUE*\n`;
@@ -1892,8 +2072,18 @@ function sendOrderViaWhatsApp() {
     message += `📦 *TU COMPRA:*\n\n`;
     message += orderLines.join('\n\n');
     message += `\n\n━━━━━━━━━━━━━━━━━━━━━━━\n`;
-    message += `💵 *TOTAL A PAGAR:* ${total}\n`;
-    message += `━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    
+    if (tieneOfertasEspeciales) {
+        const ahorroTotal = totalNormal - total;
+        message += `💰 *SUBTOTAL (sin ofertas):* ${totalNormal}\n`;
+        message += `🎉 *AHORRO TOTAL:* ${ahorroTotal}\n`;
+        message += `💵 *TOTAL A PAGAR:* ${total}\n`;
+        message += `━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    } else {
+        message += `💵 *TOTAL A PAGAR:* ${total}\n`;
+        message += `━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    }
+    
     message += `📍 *Dirección:* Copihue 457\n`;
     message += `⏰ *Horario:* 11:30 a 23:30 hs\n`;
     message += `📱 *Confirmá por este WhatsApp*\n\n`;
@@ -1911,7 +2101,6 @@ function sendOrderViaWhatsApp() {
         window.open(whatsappURL, "_blank");
     }, 500);
 }
-
 // ========== BÚSQUEDA ==========
 function setupSearch() {
     const productSearch = document.getElementById('productSearch');
