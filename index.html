@@ -110,6 +110,12 @@
             100% { opacity: 1; }
         }
         
+.cart-item-price {
+display: flex;
+flex-direction: column;
+gap: 4px;
+}
+
         .cart-icon {
             position: relative;
             cursor: pointer;
@@ -2167,6 +2173,7 @@ function updateCartCount() {
     console.log('🛒 Carrito actualizado:', totalItems, 'productos');
 }
 
+// ========== MODIFICAR RENDERIZADO DEL CARRITO ==========
 function renderCartItems() {
     const cartItems = document.getElementById('cartItems');
     const cartTotal = document.getElementById('cartTotal');
@@ -2191,28 +2198,63 @@ function renderCartItems() {
         totalNormal += precioNormalTotal;
         
         let precioUnitario = product.price;
+        let precioOriginalUnitario = product.price;
         let precioTotalItem = precioNormalTotal;
         let ahorroItem = 0;
         let badgeOferta = '';
+        let precioHTML = '';
         
         // Aplicar ofertas
         if (item.esOfertaEspecial && item.oferta) {
             // Oferta especial -10%
+            precioOriginalUnitario = product.price;
             precioUnitario = Math.round(product.price * 0.9);
             precioTotalItem = precioUnitario * item.quantity;
             ahorroItem = precioNormalTotal - precioTotalItem;
             badgeOferta = `<span class="oferta-badge">${item.oferta.nombre}</span>`;
+            
+            // HTML con precio tachado
+            precioHTML = `
+                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 5px 0;">
+                    <span style="color: #757575; text-decoration: line-through; font-size: 0.85rem;">
+                        $${precioOriginalUnitario}
+                    </span>
+                    <span style="color: #2196f3; font-weight: bold; font-size: 1rem;">
+                        $${precioUnitario}
+                    </span>
+                </div>
+            `;
         } 
         else if (item.esOfertaDestacada && item.oferta) {
             // Oferta destacada (%)
             const descuento = item.oferta.descuento / 100;
+            precioOriginalUnitario = product.price;
             precioUnitario = Math.round(product.price * (1 - descuento));
             precioTotalItem = precioUnitario * item.quantity;
             ahorroItem = precioNormalTotal - precioTotalItem;
             badgeOferta = `<span class="oferta-badge">🔥 ${item.oferta.descuento}%</span>`;
+            
+            // HTML con precio tachado
+            precioHTML = `
+                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 5px 0;">
+                    <span style="color: #757575; text-decoration: line-through; font-size: 0.85rem;">
+                        $${precioOriginalUnitario}
+                    </span>
+                    <span style="color: #ff6f00; font-weight: bold; font-size: 1rem;">
+                        $${precioUnitario}
+                    </span>
+                    <span style="background: #ffeb3b; color: #333; padding: 2px 6px; border-radius: 8px; font-size: 0.7rem; font-weight: bold;">
+                        ${item.oferta.descuento}% OFF
+                    </span>
+                </div>
+                <div style="color: #4caf50; font-size: 0.8rem; font-weight: bold; margin-top: 2px;">
+                    💰 Ahorrás $${product.price - precioUnitario} c/u
+                </div>
+            `;
         }
         else if (item.esOfertaRelampago && item.oferta) {
             // Oferta relámpago (2x1, 3x2, etc)
+            precioOriginalUnitario = product.price;
             precioTotalItem = calcularPrecioConOferta(
                 product, 
                 item.quantity, 
@@ -2222,6 +2264,30 @@ function renderCartItems() {
             ahorroItem = precioNormalTotal - precioTotalItem;
             precioUnitario = Math.round(precioTotalItem / item.quantity);
             badgeOferta = `<span class="oferta-badge">⚡ ${item.oferta.nombre}</span>`;
+            
+            // Para ofertas relámpago, mostrar el cálculo especial
+            const cantidad = item.oferta.cantidad;
+            const pagas = item.oferta.pagas;
+            const totalGrupo = Math.round(product.price * pagas);
+            const precioPorUnidad = Math.round(totalGrupo / cantidad);
+            
+            precioHTML = `
+                <div style="font-weight: bold; color: #d50000; font-size: 0.9rem; margin: 5px 0;">
+                    ${item.oferta.eslogan}
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 5px 0;">
+                    <span style="color: #757575; text-decoration: line-through; font-size: 0.85rem;">
+                        $${precioOriginalUnitario} c/u
+                    </span>
+                    <span style="color: #d50000; font-weight: bold; font-size: 1rem;">
+                        $${precioPorUnidad} c/u
+                    </span>
+                </div>
+            `;
+        }
+        else {
+            // Sin oferta
+            precioHTML = `<span style="font-weight: bold; color: #333; font-size: 1rem;">$${precioUnitario} c/u</span>`;
         }
         
         total += precioTotalItem;
@@ -2234,9 +2300,11 @@ function renderCartItems() {
                         ${item.name} ${badgeOferta}
                     </div>
                     <div class="cart-item-price">
-                        ${precioUnitario} c/u
+                        ${precioHTML}
                         ${ahorroItem > 0 ? 
-                            `<br><small style="color: #4caf50;">✅ Ahorraste: $${ahorroItem}</small>` 
+                            `<div style="color: #4caf50; font-size: 0.8rem; margin-top: 3px;">
+                                ✅ Ahorraste: $${ahorroItem}
+                            </div>` 
                             : ''}
                     </div>
                 </div>
@@ -2258,14 +2326,14 @@ function renderCartItems() {
             const savingsHTML = `
                 <div class="total-savings" id="totalSavings">
                     🎉 ¡AHORRASTE: $${totalAhorro}! 
-                    <small>(Precio normal: $${totalNormal})</small>
+                    <span style="font-size: 0.9rem; opacity: 0.9;">(Precio normal: $${totalNormal})</span>
                 </div>
             `;
             cartItems.insertAdjacentHTML('beforeend', savingsHTML);
         } else {
             totalSavingsElement.innerHTML = `
                 🎉 ¡AHORRASTE: $${totalAhorro}! 
-                <small>(Precio normal: $${totalNormal})</small>
+                <span style="font-size: 0.9rem; opacity: 0.9;">(Precio normal: $${totalNormal})</span>
             `;
         }
     } else {
@@ -2322,6 +2390,7 @@ function updateCartQuantity(productId, change) {
     renderCartItems();
 }
 
+// ========== CORREGIR MENSAJE DE WHATSAPP ==========
 function sendOrderViaWhatsApp() {
     if (cart.length === 0) {
         showNotification("⚠️ Tu carrito está vacío", "warning");
@@ -2359,7 +2428,7 @@ function sendOrderViaWhatsApp() {
             const descuento = item.oferta.descuento / 100;
             precioUnitario = Math.round(product.price * (1 - descuento));
             precioItem = precioUnitario * item.quantity;
-            ofertaInfo = `\n   🔥 ${item.oferta.eslogan}`;
+            ofertaInfo = `\n   🔥 ${item.oferta.descuento}% OFF`;
             tieneOfertas = true;
         }
         else if (item.esOfertaRelampago && item.oferta) {
@@ -2378,10 +2447,16 @@ function sendOrderViaWhatsApp() {
         const ahorroItem = precioNormalItem - precioItem;
         const ahorroTexto = ahorroItem > 0 ? ` (🎉 Ahorro: $${ahorroItem})` : '';
         
-        orderLines.push(`✅ ${item.name}${ofertaInfo}\n   ${item.quantity} × $${precioUnitario} = $${precioItem}${ahorroTexto}`);
+        // Para productos con oferta, mostrar precio original tachado
+        let precioMostrar = `$${precioUnitario}`;
+        if (tieneOfertas && precioUnitario < product.price) {
+            precioMostrar = `~~$${product.price}~~ → $${precioUnitario}`;
+        }
+        
+        orderLines.push(`✅ ${item.name}${ofertaInfo}\n   ${item.quantity} × ${precioMostrar} = $${precioItem}${ahorroTexto}`);
     });
     
-    // Construir mensaje
+    // Construir mensaje con EMOJIS CORRECTOS
     let message = `*🛒 PEDIDO ALMACÉN COPIHUE*\n`;
     message += `━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
     message += `📦 *TU COMPRA:*\n\n`;
@@ -2405,6 +2480,7 @@ function sendOrderViaWhatsApp() {
     message += `⏳ *Pedido listo en 15-20 minutos*\n`;
     message += `🎉 *Gracias por elegir tu almacén de confianza*`;
     
+    // Codificar el mensaje para URL
     const encodedMessage = encodeURIComponent(message);
     const whatsappURL = `https://wa.me/${phoneNumber}?text=${encodedMessage}`;
     
