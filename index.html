@@ -853,6 +853,38 @@
             to { transform: translateY(0); opacity: 1; }
         }
 
+        /* ========== BOTÓN FLOTANTE HOME ========== */
+        .floating-home {
+            position: fixed;
+            bottom: 90px;
+            left: 20px;
+            background: linear-gradient(135deg, #9c27b0, #7b1fa2);
+            color: white;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            box-shadow: 0 6px 20px rgba(156, 39, 176, 0.4);
+            z-index: 997;
+            transition: all 0.3s ease;
+            font-size: 1.5rem;
+            display: none;
+        }
+
+        .floating-home:hover {
+            transform: scale(1.1);
+            box-shadow: 0 8px 25px rgba(156, 39, 176, 0.6);
+        }
+
+        @media (max-width: 767px) {
+            .floating-home {
+                display: flex;
+            }
+        }
+
         .floating-cart {
             position: fixed;
             bottom: 20px;
@@ -896,7 +928,7 @@
 
         .floating-search {
             position: fixed;
-            bottom: 90px;
+            bottom: 160px;
             right: 20px;
             background: linear-gradient(135deg, var(--primary), var(--primary-light));
             color: white;
@@ -1190,6 +1222,32 @@
             margin-left: 8px;
             font-weight: bold;
         }
+
+        /* Botón de scroll to top */
+        .scroll-top {
+            position: fixed;
+            bottom: 160px;
+            left: 20px;
+            background: linear-gradient(135deg, #ff9800, #f57c00);
+            color: white;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            display: none;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            box-shadow: 0 6px 20px rgba(255, 152, 0, 0.4);
+            z-index: 997;
+            transition: all 0.3s ease;
+            font-size: 1.5rem;
+        }
+
+        @media (min-width: 768px) {
+            .scroll-top {
+                display: flex;
+            }
+        }
     </style>
 </head>
 <body>
@@ -1297,7 +1355,7 @@
     <div class="search-container" id="desktopSearch">
         <div class="search-wrapper">
             <input type="text" id="productSearch" class="search-input" 
-                   placeholder="🔍 Buscar productos por nombre...">
+                   placeholder="🔍 Buscar productos por nombre... (Presiona Enter para buscar)">
             <button class="clear-search" id="clearSearchBtn">✖️</button>
         </div>
     </div>
@@ -1312,13 +1370,22 @@
 </div>
 
 <!-- BOTONES FLOTANTES -->
-<div class="floating-search" id="floatingSearch">
+<div class="floating-home" id="floatingHome" title="Volver al inicio">
+    🏠
+</div>
+
+<div class="floating-search" id="floatingSearch" title="Buscar productos">
     🔍
 </div>
 
-<div class="floating-cart" id="floatingCart">
+<div class="floating-cart" id="floatingCart" title="Ver carrito">
     🛒
     <span class="cart-count" id="floatingCartCount">0</span>
+</div>
+
+<!-- Botón para volver arriba (en desktop) -->
+<div class="scroll-top" id="scrollTop" title="Volver arriba">
+    ↑
 </div>
 
 <!-- Modal para compartir oferta -->
@@ -1368,7 +1435,7 @@
         </div>
         <div class="search-wrapper">
             <input type="text" id="mobileSearch" class="search-input" 
-                   placeholder="🔍 Escribe nombre...">
+                   placeholder="🔍 Escribe nombre... (Presiona Enter para buscar)">
             <button class="clear-search" id="clearMobileSearchBtn">✖️</button>
         </div>
         <div class="mobile-search-results" id="mobileSearchResults">
@@ -1400,7 +1467,7 @@
 
 <script>
 // ========== VERSIÓN Y CONFIGURACIÓN ==========
-const APP_VERSION = 'V2.2-SISTEMA-MENSAJERIA-CARRITO-SIMPLE';
+const APP_VERSION = 'V2.3-HOME-ENTER-CARRITO-FIX';
 
 // ========== MAPEO DE OFERTAS RELÁMPAGO ==========
 const OFERTAS_RELAMPAGO_SISTEMA = {
@@ -1765,7 +1832,7 @@ function renderizarContenedorOfertas(tipo, productos) {
                         ✅ Stock: ${product.stockNumber}
                     </div>
                     
-                    <button class="add-to-cart" data-id="${product.id}">
+                    <button class="add-to-cart" data-id="${product.id}" data-testid="add-to-cart-${product.id}">
                         🛒 Agregar al Carrito
                     </button>
                     
@@ -1868,7 +1935,7 @@ function renderizarProductosNormales() {
                 <div class="product-stock in-stock">
                     ✅ Stock: ${product.stockNumber}
                 </div>
-                <button class="add-to-cart" data-id="${product.id}">
+                <button class="add-to-cart" data-id="${product.id}" data-testid="add-to-cart-${product.id}">
                     🛒 Agregar al Carrito
                 </button>
             </div>
@@ -2037,6 +2104,9 @@ function renderCategories() {
             categoriesContainer.querySelectorAll('.category-btn').forEach(b => b.classList.remove('active'));
             this.classList.add('active');
             renderizarProductosNormales();
+            
+            // Mostrar botón de inicio
+            document.getElementById('floatingHome').style.display = 'flex';
         });
     });
 }
@@ -2119,7 +2189,19 @@ function calcularAhorro(producto, cantidad, esRelampago = false, ofertaRelampago
     return Math.max(0, precioNormal - precioConOferta);
 }
 
+// ========== FIX: CORREGIR AGREGAR AL CARRITO DUPLICADO ==========
+// Variable para controlar clics rápidos
+let clickEnProgreso = false;
+
 function addToCart(productId) {
+    // Prevenir clics rápidos duplicados
+    if (clickEnProgreso) return;
+    clickEnProgreso = true;
+    
+    setTimeout(() => {
+        clickEnProgreso = false;
+    }, 500);
+    
     const product = products.find(p => p.id === productId);
     if (!product) {
         showNotification("❌ Producto no encontrado", "error");
@@ -2422,7 +2504,7 @@ function updateCartQuantity(productId, change) {
     renderCartItems();
 }
 
-// ========== CORREGIR MENSAJE DE WHATSAPP ==========
+// ========== MENSAJE DE WHATSAPP MEJORADO CON "ES GANANCIA PARA VOS" ==========
 function sendOrderViaWhatsApp() {
     if (cart.length === 0) {
         showNotification("⚠️ Tu carrito está vacío", "warning");
@@ -2435,6 +2517,7 @@ function sendOrderViaWhatsApp() {
     let totalNormal = 0;
     let orderLines = [];
     let tieneOfertas = false;
+    let totalAhorro = 0;
     
     cart.forEach(item => {
         // Encontrar producto original
@@ -2456,6 +2539,7 @@ function sendOrderViaWhatsApp() {
             precioItem = precioUnitario * item.quantity;
             ofertaInfo = `\n   🎁 ${item.oferta.eslogan}`;
             tieneOfertas = true;
+            totalAhorro += (product.price - precioUnitario) * item.quantity;
         }
         else if (item.esOfertaDestacada && item.oferta) {
             const descuento = item.oferta.descuento / 100;
@@ -2463,6 +2547,7 @@ function sendOrderViaWhatsApp() {
             precioItem = precioUnitario * item.quantity;
             ofertaInfo = `\n   🔥 ${item.oferta.descuento}% OFF`;
             tieneOfertas = true;
+            totalAhorro += (product.price - precioUnitario) * item.quantity;
         }
         else if (item.esOfertaRelampago && item.oferta) {
             precioItem = calcularPrecioConOferta(
@@ -2487,6 +2572,7 @@ function sendOrderViaWhatsApp() {
             
             ofertaInfo = `\n   ⚡ ${item.oferta.eslogan}${detalleExtra}`;
             tieneOfertas = true;
+            totalAhorro += (product.price * item.quantity) - precioItem;
         }
         
         total += precioItem;
@@ -2502,19 +2588,20 @@ function sendOrderViaWhatsApp() {
         orderLines.push(`✅ ${item.name}${ofertaInfo}\n   ${item.quantity} × ${precioMostrar} = $${precioItem}${ahorroTexto}`);
     });
     
-    // Construir mensaje con EMOJIS CORRECTOS
+    // Construir mensaje con EMOJIS CORRECTOS Y FRASE ESPECIAL
     let message = `*🛒 PEDIDO ALMACÉN COPIHUE*\n`;
     message += `━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
     message += `📦 *TU COMPRA:*\n\n`;
     message += orderLines.join('\n\n');
     message += `\n\n━━━━━━━━━━━━━━━━━━━━━━━\n`;
     
-    // Totales
+    // Totales con mensaje especial
     if (tieneOfertas) {
-        const ahorroTotal = totalNormal - total;
         message += `💰 *SUBTOTAL (sin ofertas):* $${totalNormal}\n`;
-        message += `🎉 *AHORRO TOTAL:* $${ahorroTotal}\n`;
+        message += `🎉 *AHORRO TOTAL:* $${totalAhorro}\n`;
         message += `💵 *TOTAL A PAGAR:* $${total}\n`;
+        message += `\n🎁 *¿SABÉS CUÁNTO TE AHORRASTE?*\n`;
+        message += `   *¡ESO ES GANANCIA PARA VOS!* 🤑\n`;
     } else {
         message += `💵 *TOTAL A PAGAR:* $${total}\n`;
     }
@@ -2544,13 +2631,38 @@ function sendOrderViaWhatsApp() {
     }, 1000);
 }
 
-// ========== BÚSQUEDA ==========
+// ========== BÚSQUEDA MEJORADA CON ENTER ==========
 function setupSearch() {
     const productSearch = document.getElementById('productSearch');
     const mobileSearch = document.getElementById('mobileSearch');
     const clearSearchBtn = document.getElementById('clearSearchBtn');
     const clearMobileSearchBtn = document.getElementById('clearMobileSearchBtn');
     
+    // Función para realizar búsqueda
+    function performSearch(searchInput, isMobile = false) {
+        const searchTerm = searchInput.value.toLowerCase().trim();
+        
+        if (searchTerm === '') {
+            if (!isMobile) {
+                isSearching = false;
+                renderizarProductosNormales();
+            } else {
+                document.getElementById('mobileSearchResults').innerHTML = '';
+            }
+            return;
+        }
+        
+        if (searchTerm.length >= 2) {
+            if (!isMobile) {
+                isSearching = true;
+                filterProducts(searchTerm);
+            } else {
+                filterMobileProducts(searchTerm);
+            }
+        }
+    }
+    
+    // Event listeners para input
     productSearch.addEventListener('input', function(e) {
         const searchTerm = e.target.value.toLowerCase().trim();
         clearSearchBtn.style.display = searchTerm.length > 0 ? 'block' : 'none';
@@ -2578,6 +2690,21 @@ function setupSearch() {
         
         if (searchTerm.length >= 2) {
             filterMobileProducts(searchTerm);
+        }
+    });
+    
+    // Event listeners para Enter
+    productSearch.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            performSearch(this, false);
+        }
+    });
+    
+    mobileSearch.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            performSearch(this, true);
+            // Ocultar teclado virtual en móviles
+            this.blur();
         }
     });
     
@@ -2632,7 +2759,7 @@ function filterProducts(searchTerm) {
                 <div class="product-stock in-stock">
                     ✅ Stock: ${product.stockNumber}
                 </div>
-                <button class="add-to-cart" data-id="${product.id}">
+                <button class="add-to-cart" data-id="${product.id}" data-testid="add-to-cart-${product.id}">
                     🛒 Agregar al Carrito
                 </button>
             </div>
@@ -2673,21 +2800,12 @@ function filterMobileProducts(searchTerm) {
                     <div class="product-stock in-stock">
                         ✅ Stock: ${product.stockNumber}
                     </div>
-                    <button class="add-to-cart" data-id="${product.id}">
+                    <button class="add-to-cart" data-id="${product.id}" data-testid="add-to-cart-${product.id}">
                         🛒 Agregar al Carrito
                     </button>
                 </div>
             </div>
         `).join('') + '</div>';
-    
-    setTimeout(() => {
-        resultsContainer.querySelectorAll('.add-to-cart').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const productId = parseInt(btn.getAttribute('data-id'));
-                addToCart(productId);
-            });
-        });
-    }, 100);
 }
 
 function clearSearch() {
@@ -2721,6 +2839,64 @@ function openSearchModal() {
 function closeSearchModal() {
     document.getElementById('searchModal').style.display = "none";
     clearMobileSearch();
+}
+
+// ========== BOTÓN HOME ==========
+function goToHome() {
+    // Restaurar categoría inicial
+    currentCategory = "ALMACEN";
+    
+    // Limpiar búsqueda
+    document.getElementById('productSearch').value = '';
+    document.getElementById('clearSearchBtn').style.display = 'none';
+    isSearching = false;
+    
+    // Limpiar búsqueda móvil si está activa
+    document.getElementById('mobileSearch').value = '';
+    document.getElementById('clearMobileSearchBtn').style.display = 'none';
+    document.getElementById('mobileSearchResults').innerHTML = '';
+    
+    // Actualizar botones de categoría
+    document.querySelectorAll('.category-btn').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.getAttribute('data-category') === "ALMACEN") {
+            btn.classList.add('active');
+        }
+    });
+    
+    // Renderizar productos
+    renderizarProductosNormales();
+    
+    // Ocultar botón de inicio (opcional)
+    document.getElementById('floatingHome').style.display = 'none';
+    
+    // Scroll suave al inicio
+    window.scrollTo({
+        top: 0,
+        behavior: 'smooth'
+    });
+    
+    showNotification("🏠 Volviendo al inicio...", "success");
+}
+
+// ========== SCROLL TO TOP ==========
+function setupScrollToTop() {
+    const scrollTopBtn = document.getElementById('scrollTop');
+    
+    window.addEventListener('scroll', function() {
+        if (window.pageYOffset > 300) {
+            scrollTopBtn.style.display = 'flex';
+        } else {
+            scrollTopBtn.style.display = 'none';
+        }
+    });
+    
+    scrollTopBtn.addEventListener('click', function() {
+        window.scrollTo({
+            top: 0,
+            behavior: 'smooth'
+        });
+    });
 }
 
 // ========== UTILIDADES ==========
@@ -2982,7 +3158,7 @@ function detectarOfertaCompartida() {
     }
 }
 
-// ========== EVENT LISTENERS ==========
+// ========== EVENT LISTENERS MEJORADOS ==========
 function setupEventListeners() {
     // Carrito
     document.getElementById('cartIcon').addEventListener('click', openCart);
@@ -2992,6 +3168,9 @@ function setupEventListeners() {
     // Búsqueda
     document.getElementById('floatingSearch').addEventListener('click', openSearchModal);
     document.getElementById('closeSearch').addEventListener('click', closeSearchModal);
+    
+    // Home
+    document.getElementById('floatingHome').addEventListener('click', goToHome);
     
     // WhatsApp
     document.getElementById('sendOrder').addEventListener('click', sendOrderViaWhatsApp);
@@ -3005,7 +3184,7 @@ function setupEventListeners() {
         if (e.target === this) closeSearchModal();
     });
     
-    // EVENT DELEGATION PARA TODOS LOS BOTONES "AGREGAR AL CARRITO"
+    // EVENT DELEGATION MEJORADO PARA TODOS LOS BOTONES "AGREGAR AL CARRITO"
     document.addEventListener('click', function(e) {
         // Verificar si el clic fue en un botón "Agregar al Carrito" o en un elemento dentro
         const addToCartBtn = e.target.closest('.add-to-cart');
@@ -3013,6 +3192,8 @@ function setupEventListeners() {
             const productId = parseInt(addToCartBtn.getAttribute('data-id'));
             if (!isNaN(productId)) {
                 addToCart(productId);
+                e.stopPropagation(); // Prevenir propagación
+                e.preventDefault(); // Prevenir comportamiento por defecto
             }
         }
     });
@@ -3038,7 +3219,17 @@ function init() {
     setupEventListeners();
     setupShareListeners();
     setupSearch();
+    setupScrollToTop();
     updateCartCount();
+    
+    // Mostrar botón home si no estamos en inicio
+    window.addEventListener('scroll', function() {
+        if (window.pageYOffset > 300 || currentCategory !== "ALMACEN" || isSearching) {
+            document.getElementById('floatingHome').style.display = 'flex';
+        } else {
+            document.getElementById('floatingHome').style.display = 'none';
+        }
+    });
     
     loadProductsFromAPI();
     
@@ -3056,7 +3247,7 @@ function init() {
 
 document.addEventListener("DOMContentLoaded", init);
 
-console.log('🎯 Sistema de Mensajería Simplificada para Carrito - Versión ' + APP_VERSION);
+console.log('✅ Sistema mejorado con Home, Enter en búsqueda y fix carrito - Versión ' + APP_VERSION);
 </script>
 </body>
 </html>
