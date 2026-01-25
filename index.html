@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- 240126_1850 -->
+<!-- 240127_1425 -->
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -1207,7 +1207,7 @@
 
 <script>
 // ========== VERSIÓN Y CONFIGURACIÓN ==========
-const APP_VERSION = 'V2.3-HOME-ENTER-CARRITO-FIX';
+const APP_VERSION = 'V2.4-CACHE-FIX-250127';
 
 // ========== MAPEO DE OFERTAS RELÁMPAGO ==========
 const OFERTAS_RELAMPAGO_SISTEMA = {
@@ -2769,8 +2769,43 @@ function detectarAdmin() {
     }
 }
 
+// ========== FUNCIÓN PARA LIMPIAR CACHÉ VIEJO ==========
+function limpiarCacheViejo() {
+    const versionActual = APP_VERSION;
+    const versionGuardada = localStorage.getItem('app_version');
+    
+    if (versionGuardada !== versionActual) {
+        console.log('🧹 Detectada nueva versión, limpiando caché...');
+        
+        // Limpiar localStorage viejo (excepto datos de rotación)
+        const datosRotacion = {
+            rotacion_relampago: localStorage.getItem('rotacion_relampago'),
+            rotacion_relampago_lastIndex: localStorage.getItem('rotacion_relampago_lastIndex'),
+            rotacion_especiales: localStorage.getItem('rotacion_especiales'),
+            rotacion_especiales_lastIndex: localStorage.getItem('rotacion_especiales_lastIndex')
+        };
+        
+        localStorage.clear();
+        
+        // Restaurar datos de rotación
+        Object.keys(datosRotacion).forEach(key => {
+            if (datosRotacion[key]) {
+                localStorage.setItem(key, datosRotacion[key]);
+            }
+        });
+        
+        // Guardar nueva versión
+        localStorage.setItem('app_version', versionActual);
+        
+        console.log('✅ Caché limpiado, versión actualizada a: ' + versionActual);
+    }
+}
+
 function init() {
     console.log('🚀 Inicializando Almacén Copihue ' + APP_VERSION);
+    
+    // FORZAR LIMPIEZA DE CACHÉ AL CARGAR
+    limpiarCacheViejo();
     
     detectarAdmin();
     setupEventListeners();
@@ -2791,19 +2826,53 @@ function init() {
     
     loadProductsFromAPI();
     
-    // Service Worker
+    // Service Worker con versión forzada
     if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('./sw.js?v=' + APP_VERSION)
-            .then(registration => {
-                console.log('✅ Service Worker registrado');
-            })
-            .catch(error => {
-                console.error('❌ Error Service Worker:', error);
-            });
+        // IMPORTANTE: Primero desregistrar versiones antiguas
+        navigator.serviceWorker.getRegistrations().then(function(registrations) {
+            for(let registration of registrations) {
+                registration.unregister();
+                console.log('🗑️ Service Worker antiguo eliminado');
+            }
+            
+            // Luego registrar el nuevo
+            navigator.serviceWorker.register('./sw.js?v=' + APP_VERSION)
+                .then(registration => {
+                    console.log('✅ Service Worker registrado - Versión: ' + APP_VERSION);
+                    
+                    // Forzar actualización si hay uno nuevo
+                    registration.addEventListener('updatefound', () => {
+                        const newWorker = registration.installing;
+                        newWorker.addEventListener('statechange', () => {
+                            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                console.log('🔄 Nueva versión disponible - Recargando...');
+                                window.location.reload(true);
+                            }
+                        });
+                    });
+                })
+                .catch(error => {
+                    console.error('❌ Error Service Worker:', error);
+                });
+        });
     }
 }
 
+// AHORA
 document.addEventListener("DOMContentLoaded", init);
+
+// ========== DETECTOR DE ACTUALIZACIONES ==========
+// Verificar cada 5 minutos si hay nueva versión
+setInterval(() => {
+    fetch(window.location.href, {
+        method: 'HEAD',
+        cache: 'no-cache'
+    }).then(() => {
+        console.log('✅ Verificación de versión completada');
+    }).catch(err => {
+        console.warn('⚠️ Error verificando versión:', err);
+    });
+}, 300000); // 5 minutos
 
 console.log('✅ Sistema mejorado con Home, Enter en búsqueda y fix carrito - Versión ' + APP_VERSION);
 </script>
