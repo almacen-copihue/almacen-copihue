@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v2.4-250127';
+const CACHE_VERSION = 'v2.5-250127';
 const CACHE_NAME = `almacen-copihue-${CACHE_VERSION}`;
 
 // Archivos esenciales para cachear
@@ -58,6 +58,12 @@ self.addEventListener('activate', (event) => {
 // Fetch - Estrategia Network First con Cache Fallback
 self.addEventListener('fetch', (event) => {
     const url = event.request.url;
+    const method = event.request.method;
+    
+    // 🚫 IGNORAR métodos que no sean GET
+    if (method !== 'GET') {
+        return; // No hacer nada, pasar directo
+    }
     
     // 🚫 NUNCA cachear la API de Google Sheets
     if (url.includes('script.google.com') || 
@@ -73,9 +79,12 @@ self.addEventListener('fetch', (event) => {
             fetch(event.request)
                 .then(response => {
                     // Actualizar caché con nueva versión
-                    const responseClone = response.clone();
-                    caches.open(CACHE_NAME)
-                        .then(cache => cache.put(event.request, responseClone));
+                    if (response && response.status === 200) {
+                        const responseClone = response.clone();
+                        caches.open(CACHE_NAME)
+                            .then(cache => cache.put(event.request, responseClone))
+                            .catch(err => console.warn('No se pudo cachear:', err));
+                    }
                     return response;
                 })
                 .catch(() => {
@@ -93,9 +102,12 @@ self.addEventListener('fetch', (event) => {
                 .then(response => {
                     return response || fetch(event.request)
                         .then(fetchResponse => {
-                            const responseClone = fetchResponse.clone();
-                            caches.open(CACHE_NAME)
-                                .then(cache => cache.put(event.request, responseClone));
+                            if (fetchResponse && fetchResponse.status === 200) {
+                                const responseClone = fetchResponse.clone();
+                                caches.open(CACHE_NAME)
+                                    .then(cache => cache.put(event.request, responseClone))
+                                    .catch(err => console.warn('No se pudo cachear:', err));
+                            }
                             return fetchResponse;
                         });
                 })
@@ -109,10 +121,11 @@ self.addEventListener('fetch', (event) => {
             fetch(event.request)
                 .then(response => {
                     // Cachear la imagen si se carga bien
-                    if (response.ok) {
+                    if (response && response.ok) {
                         const responseClone = response.clone();
                         caches.open(CACHE_NAME)
-                            .then(cache => cache.put(event.request, responseClone));
+                            .then(cache => cache.put(event.request, responseClone))
+                            .catch(err => console.warn('No se pudo cachear imagen:', err));
                     }
                     return response;
                 })
