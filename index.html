@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- 280126_1605 -->
+<!-- 280126_1820 -->
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -139,6 +139,41 @@
             align-items: center;
             font-size: 0.8rem;
             font-weight: bold;
+        }
+        
+        /* Botón compartir discreto */
+        .share-btn {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: rgba(255, 255, 255, 0.7);
+            border: none;
+            border-radius: 50%;
+            width: 28px;
+            height: 28px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            opacity: 0;
+            transition: all 0.3s ease;
+            z-index: 10;
+            font-size: 0.9rem;
+            backdrop-filter: blur(5px);
+        }
+        
+        .product-card:hover .share-btn {
+            opacity: 0.6;
+        }
+        
+        .share-btn:hover {
+            opacity: 1 !important;
+            background: rgba(255, 255, 255, 0.95);
+            transform: scale(1.1);
+        }
+        
+        .share-btn:active {
+            transform: scale(0.95);
         }
         
         .container {
@@ -1614,6 +1649,110 @@ let poolRelampago = [];
 let poolDestacadas = [];
 let poolEspeciales = [];
 
+// ========== FUNCIONES DE COMPARTIR (SCOPE GLOBAL) ==========
+function compartirProducto(productId, event) {
+    if (event) {
+        event.stopPropagation();
+        event.preventDefault();
+    }
+    
+    const product = products.find(p => p.id == productId);
+    if (!product) {
+        console.error('Producto no encontrado:', productId);
+        return;
+    }
+    
+    const url = `${window.location.origin}${window.location.pathname}#producto/${productId}`;
+    const texto = `🛒 ${product.name} - $${product.price}`;
+    
+    console.log('📤 Compartiendo producto:', product.name, url);
+    
+    // Intentar usar la API nativa de compartir
+    if (navigator.share) {
+        navigator.share({
+            title: product.name,
+            text: texto,
+            url: url
+        }).then(() => {
+            showNotification('🔗 Link compartido', 'success');
+        }).catch((error) => {
+            if (error.name !== 'AbortError') {
+                copiarAlPortapapeles(url);
+            }
+        });
+    } else {
+        copiarAlPortapapeles(url);
+    }
+}
+
+function copiarAlPortapapeles(texto) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(texto).then(() => {
+            showNotification('🔗 Link copiado al portapapeles', 'success');
+        }).catch(() => {
+            showNotification('❌ No se pudo copiar el link', 'error');
+        });
+    } else {
+        // Fallback para navegadores viejos
+        const textarea = document.createElement('textarea');
+        textarea.value = texto;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+            document.execCommand('copy');
+            showNotification('🔗 Link copiado al portapapeles', 'success');
+        } catch (err) {
+            showNotification('❌ No se pudo copiar el link', 'error');
+        }
+        document.body.removeChild(textarea);
+    }
+}
+
+function manejarDeepLink() {
+    const hash = window.location.hash;
+    
+    // Formato: #producto/ID
+    if (hash.startsWith('#producto/')) {
+        const productId = hash.replace('#producto/', '');
+        console.log('🔗 Deep link detectado para producto:', productId);
+        
+        // Esperar a que los productos estén cargados
+        const intentarMostrar = () => {
+            const product = products.find(p => p.id == productId);
+            if (product) {
+                // Simular click en el producto para abrir el detalle
+                showNotification(`📦 Mostrando: ${product.name}`, 'info');
+                
+                // Cambiar a la categoría del producto
+                currentCategory = product.category;
+                renderizarProductosNormales();
+                
+                // Scroll al producto después de renderizar
+                setTimeout(() => {
+                    const productCard = document.querySelector(`[data-id="${productId}"]`);
+                    if (productCard) {
+                        productCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        productCard.style.animation = 'pulse 1s ease-in-out 3';
+                    }
+                }, 300);
+            } else {
+                console.warn('⚠️ Producto no encontrado:', productId);
+                showNotification('Producto no encontrado', 'error');
+                window.location.hash = '';
+            }
+        };
+        
+        if (products.length > 0) {
+            intentarMostrar();
+        } else {
+            setTimeout(intentarMostrar, 1500);
+        }
+    }
+}
+
+
 // Productos activos en cada sección
 let productosRelampago = [];
 let productosDestacadas = [];
@@ -2009,6 +2148,7 @@ function renderizarProductosNormales() {
         return `
             <div class="product-card promo-card out-of-stock" style="opacity:0.6;filter:grayscale(0.7);">
                 <div class="product-image">
+                    <button class="share-btn" onclick="compartirProducto('${product.id}', event)" title="Compartir">🔗</button>
                     <img src="${product.image}" 
                          alt="${product.name}"
                          onerror="handleImageError(this, '${product.name.replace(/'/g, "\\'")}')">
@@ -2035,6 +2175,7 @@ function renderizarProductosNormales() {
     return `
         <div class="product-card ${clasePromo} ${claseActiva} ${claseAgotada}">
             <div class="product-image">
+                <button class="share-btn" onclick="compartirProducto('${product.id}', event)" title="Compartir">🔗</button>
                 <img src="${product.image}" 
                      alt="${product.name}"
                      onerror="handleImageError(this, '${product.name.replace(/'/g, "\\'")}')">
@@ -3302,6 +3443,11 @@ function init() {
     
     limpiarCacheViejo();
     detectarAdmin();
+    
+    // Detectar deep links (compartir productos)
+    manejarDeepLink();
+    window.addEventListener('hashchange', manejarDeepLink);
+    
     setupEventListeners();
     setupSearch();
     updateCartCount();
