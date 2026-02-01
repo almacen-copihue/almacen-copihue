@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- 300126_0315_PRECIO_ANTES_AHORA_FINAL -->
+<!-- 010226_0415_PRECIO_ANTES_AHORA_FINAL -->
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -1740,29 +1740,56 @@ function compartirProducto(productId, event) {
         event.preventDefault();
     }
     
-    // URL de la página principal
-    const url = 'https://almacen-copihue.vercel.app';
-    const texto = `🛒 Almacén Copihue\nOfertas en diferentes horarios: 10%, 15%, 20%, 2x1, 3x2 y más. ¡Aprovechá!\n\n📍 Copihue 457\n🕒 11:30 a 23:30 hs`;
+    const product = products.find(p => p.id == productId);
+    if (!product) {
+        console.error('Producto no encontrado:', productId);
+        return;
+    }
     
-    console.log('📤 Compartiendo Almacén Copihue');
+    const texto = `${product.name}\n$${product.price}`;
+    const imageUrl = `${window.location.origin}/${product.image}`;
     
-    // Intentar usar la API nativa de compartir
-    if (navigator.share) {
-        navigator.share({
-            title: 'Almacén Copihue',
-            text: texto,
-            url: url
-        }).then(() => {
-            showNotification('🔗 Link compartido', 'success');
-        }).catch((error) => {
-            if (error.name !== 'AbortError') {
-                copiarAlPortapapeles(url);
-            }
-        });
+    console.log('📤 Compartiendo producto:', product.name);
+    
+    // En móvil: usar API nativa (incluye WhatsApp en opciones)
+    if (navigator.share && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+        fetch(product.image)
+            .then(response => response.blob())
+            .then(blob => {
+                const file = new File([blob], `${product.name}.jpg`, { type: 'image/jpeg' });
+                
+                if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                    navigator.share({
+                        text: texto,
+                        files: [file]
+                    }).then(() => {
+                        showNotification('📤 Producto compartido', 'success');
+                    }).catch((error) => {
+                        if (error.name !== 'AbortError') {
+                            console.error('Error compartiendo:', error);
+                            compartirPorWhatsApp(texto);
+                        }
+                    });
+                } else {
+                    compartirPorWhatsApp(texto);
+                }
+            })
+            .catch(() => {
+                compartirPorWhatsApp(texto);
+            });
     } else {
-        copiarAlPortapapeles(url);
+        // En desktop: abrir WhatsApp directamente
+        compartirPorWhatsApp(texto);
     }
 }
+
+function compartirPorWhatsApp(texto) {
+    const mensajeEncoded = encodeURIComponent(texto);
+    const whatsappUrl = `https://wa.me/?text=${mensajeEncoded}`;
+    window.open(whatsappUrl, '_blank');
+    showNotification('📤 Abriendo WhatsApp...', 'success');
+}
+
 
 function copiarAlPortapapeles(texto) {
     if (navigator.clipboard && navigator.clipboard.writeText) {
