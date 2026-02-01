@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- 300126_0315_PRECIO_ANTES_AHORA_FINAL -->
+<!-- 010226_1245_PRECIO_ANTES_AHORA_FINAL -->
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -162,8 +162,19 @@
             backdrop-filter: blur(5px);
         }
         
-        .product-card:hover .share-btn {
+        /* Desktop: hover para mostrar */
+        .product-card:hover .share-btn,
+        .promo-card:hover .share-btn,
+        .ofertas-product-card:hover .share-btn {
             opacity: 0.6;
+        }
+        
+        /* Móvil: sutilmente visible siempre */
+        @media (max-width: 768px) {
+            .share-btn {
+                opacity: 0.7;
+                background: rgba(255, 255, 255, 0.9);
+            }
         }
         
         .share-btn:hover {
@@ -510,10 +521,10 @@
         }
 
         .category-btn {
-            background: #29B6F6;
-            border: 2px solid #0288D1;
+            background: #FF9800;
+            border: 2px solid #F57C00;
             color: #FFFFFF;
-            box-shadow: 0 2px 6px rgba(2, 136, 209, 0.2);
+            box-shadow: 0 2px 6px rgba(245, 124, 0, 0.3);
             font-weight: 600;
             padding: 0.8rem 1rem;
             border-radius: 25px;
@@ -528,23 +539,23 @@
         }
 
         .category-btn.active {
-            background: #0288D1;
-            border-color: #29B6F6;
+            background: #F57C00;
+            border-color: #FF9800;
             color: #FFFFFF;
-            box-shadow: 0 4px 12px rgba(41, 182, 246, 0.3);
+            box-shadow: 0 4px 12px rgba(255, 152, 0, 0.4);
             transform: translateY(-1px);
         }
 
         @media (hover: hover) {
             .category-btn:hover:not(.active) {
-                background: #03A9F4;
-                border-color: #0277BD;
+                background: #FB8C00;
+                border-color: #EF6C00;
                 transform: translateY(-1px);
-                box-shadow: 0 3px 8px rgba(2, 119, 189, 0.25);
+                box-shadow: 0 3px 8px rgba(239, 108, 0, 0.35);
             }
             .category-btn.active:hover {
-                background: #0277BD;
-                border-color: #4FC3F7;
+                background: #EF6C00;
+                border-color: #FFB74D;
             }
         }
 
@@ -1736,28 +1747,79 @@ function compartirProducto(productId, event) {
         return;
     }
     
-    const url = `${window.location.origin}${window.location.pathname}#producto/${productId}`;
-    const texto = `🛒 ${product.name} - $${product.price}`;
+    // Calcular precio real según ofertas activas
+    let precioFinal = product.price;
+    let infoOferta = '';
     
-    console.log('📤 Compartiendo producto:', product.name, url);
+    // 1. COMBO (PROMOS)
+    if (product.category === 'PROMOS' && product.normal && product.normal > product.price) {
+        precioFinal = product.price;
+        const ahorro = product.normal - product.price;
+        const porcentaje = Math.round((ahorro / product.normal) * 100);
+        infoOferta = ` (-${porcentaje}% OFF)`;
+    }
+    // 2. OFERTAS RELÁMPAGO (3x2, 2x1, etc.) - SIN validar horario
+    else if (product.relampago > 0) {
+        const ofertaConfig = OFERTAS_RELAMPAGO_SISTEMA[product.relampago];
+        if (ofertaConfig) {
+            infoOferta = ` (${ofertaConfig.nombre.toUpperCase()})`;
+            // Precio unitario sin cambio, pero indicar la oferta
+        }
+    }
+    // 3. OFERTAS DESTACADAS (ej: -15%) - SIN validar horario
+    else if (product.destacada && product.destacada > 0) {
+        precioFinal = Math.round(product.price * (1 - product.destacada / 100));
+        infoOferta = ` (-${product.destacada}% OFF)`;
+    }
+    // 4. OFERTAS ESPECIALES (-10%) - SIN validar horario
+    else if (product.especial === 1) {
+        precioFinal = Math.round(product.price * 0.9);
+        infoOferta = ' (-10% OFF)';
+    }
     
-    // Intentar usar la API nativa de compartir
-    if (navigator.share) {
-        navigator.share({
-            title: product.name,
-            text: texto,
-            url: url
-        }).then(() => {
-            showNotification('🔗 Link compartido', 'success');
-        }).catch((error) => {
-            if (error.name !== 'AbortError') {
-                copiarAlPortapapeles(url);
-            }
-        });
+    const texto = `${product.name}${infoOferta}\n$${precioFinal}\n\n📍 Almacén Copihue\nhttps://almacen-copihue.vercel.app`;
+    
+    console.log('📤 Compartiendo producto:', product.name, '- Precio:', precioFinal);
+    
+    // En móvil: usar API nativa (incluye WhatsApp en opciones)
+    if (navigator.share && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+        fetch(product.image)
+            .then(response => response.blob())
+            .then(blob => {
+                const file = new File([blob], `${product.name}.jpg`, { type: 'image/jpeg' });
+                
+                if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                    navigator.share({
+                        text: texto,
+                        files: [file]
+                    }).then(() => {
+                        showNotification('📤 Producto compartido', 'success');
+                    }).catch((error) => {
+                        if (error.name !== 'AbortError') {
+                            console.error('Error compartiendo:', error);
+                            compartirPorWhatsApp(texto);
+                        }
+                    });
+                } else {
+                    compartirPorWhatsApp(texto);
+                }
+            })
+            .catch(() => {
+                compartirPorWhatsApp(texto);
+            });
     } else {
-        copiarAlPortapapeles(url);
+        // En desktop: abrir WhatsApp directamente
+        compartirPorWhatsApp(texto);
     }
 }
+
+function compartirPorWhatsApp(texto) {
+    const mensajeEncoded = encodeURIComponent(texto);
+    const whatsappUrl = `https://wa.me/?text=${mensajeEncoded}`;
+    window.open(whatsappUrl, '_blank');
+    showNotification('📤 Abriendo WhatsApp...', 'success');
+}
+
 
 function copiarAlPortapapeles(texto) {
     if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -2108,6 +2170,7 @@ function renderizarContenedorOfertas(tipo, productos) {
                 <div class="ofertas-exclusive-badge">${badgeTexto}</div>
                 
                 <div class="product-image">
+                    <button class="share-btn" onclick="compartirProducto('${product.id}', event)" title="Compartir">🔗</button>
                     <img src="${product.image}" 
                          alt="${product.name}"
                          onerror="handleImageError(this, '${product.name.replace(/'/g, "\\'")}')">
@@ -3205,6 +3268,7 @@ function filterProducts(searchTerm) {
     ` + results.map(product => `
         <div class="product-card">
             <div class="product-image">
+                <button class="share-btn" onclick="compartirProducto('${product.id}', event)" title="Compartir">🔗</button>
                 <img src="${product.image}" 
                      alt="${product.name}"
                      onerror="handleImageError(this, '${product.name.replace(/'/g, "\\'")}')">
@@ -3246,6 +3310,7 @@ function filterMobileProducts(searchTerm) {
         results.map(product => `
             <div class="product-card" style="margin: 0;">
                 <div class="product-image">
+                    <button class="share-btn" onclick="compartirProducto('${product.id}', event)" title="Compartir">🔗</button>
                     <img src="${product.image}" 
                          alt="${product.name}"
                          onerror="handleImageError(this, '${product.name.replace(/'/g, "\\'")}')">
