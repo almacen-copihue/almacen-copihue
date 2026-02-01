@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- 010226_0415_PRECIO_ANTES_AHORA_FINAL -->
+<!-- 300126_0315_PRECIO_ANTES_AHORA_FINAL -->
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -164,6 +164,7 @@
         
         /* Desktop: hover para mostrar */
         .product-card:hover .share-btn,
+        .promo-card:hover .share-btn,
         .ofertas-product-card:hover .share-btn {
             opacity: 0.6;
         }
@@ -1746,10 +1747,41 @@ function compartirProducto(productId, event) {
         return;
     }
     
-    const texto = `${product.name}\n$${product.price}`;
-    const imageUrl = `${window.location.origin}/${product.image}`;
+    // Calcular precio real según ofertas activas
+    let precioFinal = product.price;
+    let infoOferta = '';
     
-    console.log('📤 Compartiendo producto:', product.name);
+    // 1. COMBO (PROMOS)
+    if (product.category === 'PROMOS' && product.normal && product.normal > product.price) {
+        precioFinal = product.price;
+        const ahorro = product.normal - product.price;
+        const porcentaje = Math.round((ahorro / product.normal) * 100);
+        infoOferta = ` (-${porcentaje}% OFF)`;
+    }
+    // 2. OFERTAS ESPECIALES (-10%)
+    else if (productosEspeciales.some(p => p.id === productId) && validarHorario('especiales')) {
+        precioFinal = Math.round(product.price * 0.9);
+        infoOferta = ' (OFERTA ESPECIAL -10%)';
+    }
+    // 3. OFERTAS DESTACADAS (ej: -15%)
+    else if (productosDestacadas.some(p => p.id === productId) && validarHorario('destacadas')) {
+        if (product.destacada && product.destacada > 0) {
+            precioFinal = Math.round(product.price * (1 - product.destacada / 100));
+            infoOferta = ` (OFERTA -${product.destacada}%)`;
+        }
+    }
+    // 4. OFERTAS RELÁMPAGO (3x2, 2x1, etc.)
+    else if (productosRelampago.some(p => p.id === productId) && validarHorario('relampago')) {
+        const ofertaConfig = OFERTAS_RELAMPAGO_SISTEMA[product.relampago];
+        if (ofertaConfig) {
+            infoOferta = ` (${ofertaConfig.nombre.toUpperCase()})`;
+            // Precio unitario sin cambio, pero indicar la oferta
+        }
+    }
+    
+    const texto = `${product.name}${infoOferta}\n$${precioFinal}\n\n📍 Almacén Copihue\nhttps://almacen-copihue.vercel.app`;
+    
+    console.log('📤 Compartiendo producto:', product.name, '- Precio:', precioFinal);
     
     // En móvil: usar API nativa (incluye WhatsApp en opciones)
     if (navigator.share && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
