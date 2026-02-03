@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- 300126_0315_PRECIO_ANTES_AHORA_FINAL -->
+<!-- 030226_0115_PRECIO_ANTES_AHORA_FINAL -->
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -1505,7 +1505,7 @@
         <div class="info-item">
             <strong>⏰ Horario:</strong> 11:30 a 23:30 hrs.
         </div>
-    </section>
+</section>
 
     <!-- ========== OFERTAS RELÁMPAGO ========== -->
     <div class="ofertas-container relampago" id="ofertasRelampago">
@@ -1614,6 +1614,9 @@
     <h3>🔧 PANEL ADMIN</h3>
     <button class="admin-btn" id="btnMostrarTodasOfertas" onclick="toggleMostrarTodasOfertas()">
         👀 Ver Todas las Ofertas
+    </button>
+    <button class="admin-btn" id="btnMostrarTodasEspeciales" onclick="toggleMostrarTodasEspeciales()">
+        👁️ Ver Todas las Especiales
     </button>
     <div id="adminStatus" style="font-size: 0.75rem; text-align: center; margin-top: 0.5rem; opacity: 0.8;">
         <!-- Estado admin -->
@@ -1734,260 +1737,6 @@ let poolRelampago = [];
 let poolDestacadas = [];
 let poolEspeciales = [];
 
-function compartirProducto(productId, event) {
-    if (event) {
-        event.stopPropagation();
-        event.preventDefault();
-    }
-    
-    const product = products.find(p => p.id == productId);
-    if (!product) {
-        console.error('Producto no encontrado:', productId);
-        return;
-    }
-    
-    // DEBUG: Verificar ofertas activas
-    console.log('🔍 DEBUG compartirProducto:', {
-        id: product.id,
-        name: product.name,
-        especial: product.especial,
-        relampago: product.relampago,
-        destacada: product.destacada,
-        normal: product.normal,
-        price: product.price,
-        enProductosEspeciales: productosEspeciales.some(p => p.id === productId),
-        enProductosRelampago: productosRelampago.some(p => p.id === productId),
-        enProductosDestacadas: productosDestacadas.some(p => p.id === productId),
-        horarioEspecialValido: validarHorario('especiales'),
-        horarioRelampagoValido: validarHorario('relampago'),
-        horarioDestacadasValido: validarHorario('destacadas')
-    });
-    
-    // === LÓGICA UNIFICADA DE PRECIOS (igual que carrito y visualización) ===
-    let precioFinal = product.price;
-    let infoOferta = '';
-    let precioNormalMostrar = product.normal || product.price;
-
-    // Variable para controlar si estamos en modo admin mostrando todas las ofertas
-    const esAdminMostrandoTodas = esAdmin && modoMostrarTodasOfertas;
-
-    // 1. OFERTAS RELÁMPAGO (si está activa o si admin las está mostrando)
-    if (product.relampago > 0 && 
-        ((productosRelampago.some(p => p.id === productId) && validarHorario('relampago')) || 
-         esAdminMostrandoTodas)) {
-        
-        const ofertaConfig = OFERTAS_RELAMPAGO_SISTEMA[product.relampago];
-        if (ofertaConfig) {
-            infoOferta = ` (${ofertaConfig.nombre.toUpperCase()})`;
-            // Para relámpago mostramos precio unitario
-            precioFinal = product.price;
-        }
-    }
-    // 2. OFERTAS DESTACADAS (si está activa)
-    else if (product.destacada > 0 && productosDestacadas.some(p => p.id === productId) && validarHorario('destacadas')) {
-        precioFinal = Math.round(product.price * (1 - product.destacada / 100));
-        infoOferta = ` (-${product.destacada}% OFF)`;
-    }
-    // 3. OFERTAS ESPECIALES (si está activa)
-    else if (product.especial === 1 && productosEspeciales.some(p => p.id === productId) && validarHorario('especiales')) {
-        precioFinal = Math.round(product.price * 0.9);
-        infoOferta = ' (-10% OFF)';
-        console.log('✅ Especial activo para compartir:', product.name, 'precioFinal:', precioFinal);
-    }
-    // 4. PRECIO NORMAL EN COLUMNA K (para ofertas espontáneas)
-    else if (product.normal && product.normal > product.price) {
-        precioNormalMostrar = product.normal;
-        const ahorro = product.normal - product.price;
-        const porcentaje = Math.round((ahorro / product.normal) * 100);
-        infoOferta = ` (-${porcentaje}% OFF)`;
-        precioFinal = product.price;
-    }
-    
-    // Formatear texto para compartir
-    let texto = '';
-    
-    // === MÓVIL: Incluir precio con formato claro ===
-    if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
-        // Si es oferta relámpago
-        if (product.relampago > 0 && (productosRelampago.some(p => p.id === productId) || esAdminMostrandoTodas)) {
-            const ofertaConfig = OFERTAS_RELAMPAGO_SISTEMA[product.relampago];
-            if (ofertaConfig) {
-                texto = `${product.name}\n\n` +
-                       `🎁 OFERTA: ${ofertaConfig.nombre.toUpperCase()}\n` +
-                       `💰 ${ofertaConfig.eslogan}\n` +
-                       `💵 Precio unitario: $${product.price}\n\n` +
-                       `📍 Almacén Copihue\n` +
-                       `🌐 https://almacen-copihue.vercel.app`;
-            } else {
-                texto = `${product.name}\n\n` +
-                       `💰 PRECIO: $${precioFinal}\n\n` +
-                       `📍 Almacén Copihue\n` +
-                       `🌐 https://almacen-copihue.vercel.app`;
-            }
-        }
-        else if (product.normal && product.normal > product.price) {
-            // Formato oferta: Antes/Ahora
-            const ahorro = product.normal - product.price;
-            const porcentaje = Math.round((ahorro / product.normal) * 100);
-            texto = `${product.name}\n\n` +
-                   `💰 ANTES: $${product.normal}\n` +
-                   `🔥 AHORA: $${product.price}\n` +
-                   `✅ ${porcentaje}% DE DESCUENTO\n\n` +
-                   `📍 Almacén Copihue\n` +
-                   `🌐 https://almacen-copihue.vercel.app`;
-        } 
-        else if (product.especial === 1 && productosEspeciales.some(p => p.id === productId) && validarHorario('especiales')) {
-            // Formato ESPECIAL -10%
-            const precioNormal = product.price;
-            const precioConDescuento = Math.round(product.price * 0.9);
-            const ahorro = precioNormal - precioConDescuento;
-            texto = `${product.name}\n\n` +
-                   `⭐ OFERTA ESPECIAL -10%\n` +
-                   `💰 NORMAL: $${precioNormal}\n` +
-                   `🔥 OFERTA: $${precioConDescuento}\n` +
-                   `✅ Ahorrás: $${ahorro}\n\n` +
-                   `📍 Almacén Copihue\n` +
-                   `🌐 https://almacen-copihue.vercel.app`;
-        }
-        else if (infoOferta) {
-            // Formato oferta especial
-            texto = `${product.name}${infoOferta}\n\n` +
-                   `💰 PRECIO: $${precioFinal}\n\n` +
-                   `📍 Almacén Copihue\n` +
-                   `🌐 https://almacen-copihue.vercel.app`;
-        } else {
-            // Sin oferta
-            texto = `${product.name}\n\n` +
-                   `💰 PRECIO: $${product.price}\n\n` +
-                   `📍 Almacén Copihue\n` +
-                   `🌐 https://almacen-copihue.vercel.app`;
-        }
-    } 
-    // === ESCRITORIO: Mantener formato actual (con foto del local) ===
-    else {
-        texto = `${product.name}${infoOferta}\n` +
-               `$${precioFinal}\n\n` +
-               `📍 Almacén Copihue\n` +
-               `https://almacen-copihue.vercel.app`;
-    }
-    
-    console.log('📤 Compartiendo producto:', {
-        nombre: product.name,
-        precioFinal,
-        infoOferta,
-        esMobile: /Android|iPhone|iPad|iPod/i.test(navigator.userAgent),
-        esAdminMostrandoTodas
-    });
-    
-    // === COMPARTIR NATIVO (MÓVIL) ===
-    if (navigator.share && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
-        fetch(product.image)
-            .then(response => response.blob())
-            .then(blob => {
-                const file = new File([blob], `${product.name}.jpg`, { type: 'image/jpeg' });
-                
-                if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                    navigator.share({
-                        text: texto,
-                        files: [file]
-                    }).then(() => {
-                        showNotification('📤 Producto compartido', 'success');
-                    }).catch((error) => {
-                        if (error.name !== 'AbortError') {
-                            console.error('Error compartiendo:', error);
-                            compartirPorWhatsApp(texto);
-                        }
-                    });
-                } else {
-                    compartirPorWhatsApp(texto);
-                }
-            })
-            .catch(() => {
-                compartirPorWhatsApp(texto);
-            });
-    } 
-    // === ESCRITORIO: WhatsApp directo ===
-    else {
-        compartirPorWhatsApp(texto);
-    }
-}
-
-function compartirPorWhatsApp(texto) {
-    const mensajeEncoded = encodeURIComponent(texto);
-    const whatsappUrl = `https://wa.me/?text=${mensajeEncoded}`;
-    window.open(whatsappUrl, '_blank');
-    showNotification('📤 Abriendo WhatsApp...', 'success');
-}
-
-
-function copiarAlPortapapeles(texto) {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(texto).then(() => {
-            showNotification('🔗 Link copiado al portapapeles', 'success');
-        }).catch(() => {
-            showNotification('❌ No se pudo copiar el link', 'error');
-        });
-    } else {
-        // Fallback para navegadores viejos
-        const textarea = document.createElement('textarea');
-        textarea.value = texto;
-        textarea.style.position = 'fixed';
-        textarea.style.opacity = '0';
-        document.body.appendChild(textarea);
-        textarea.select();
-        try {
-            document.execCommand('copy');
-            showNotification('🔗 Link copiado al portapapeles', 'success');
-        } catch (err) {
-            showNotification('❌ No se pudo copiar el link', 'error');
-        }
-        document.body.removeChild(textarea);
-    }
-}
-
-function manejarDeepLink() {
-    const hash = window.location.hash;
-    
-    // Formato: #producto/ID
-    if (hash.startsWith('#producto/')) {
-        const productId = hash.replace('#producto/', '');
-        console.log('🔗 Deep link detectado para producto:', productId);
-        
-        // Esperar a que los productos estén cargados
-        const intentarMostrar = () => {
-            const product = products.find(p => p.id == productId);
-            if (product) {
-                // Simular click en el producto para abrir el detalle
-                showNotification(`📦 Mostrando: ${product.name}`, 'info');
-                
-                // Cambiar a la categoría del producto
-                currentCategory = product.category;
-                renderizarProductosNormales();
-                
-                // Scroll al producto después de renderizar
-                setTimeout(() => {
-                    const productCard = document.querySelector(`[data-id="${productId}"]`);
-                    if (productCard) {
-                        productCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        productCard.style.animation = 'pulse 1s ease-in-out 3';
-                    }
-                }, 300);
-            } else {
-                console.warn('⚠️ Producto no encontrado:', productId);
-                showNotification('Producto no encontrado', 'error');
-                window.location.hash = '';
-            }
-        };
-        
-        if (products.length > 0) {
-            intentarMostrar();
-        } else {
-            setTimeout(intentarMostrar, 1500);
-        }
-    }
-}
-
-
 // Productos activos en cada sección
 let productosRelampago = [];
 let productosDestacadas = [];
@@ -1998,6 +1747,7 @@ let idsEnOfertas = new Set();
 
 // MODO ADMIN: Mostrar todas las ofertas
 let modoMostrarTodasOfertas = false;
+let modoMostrarTodasEspeciales = false;
 
 // ========== SISTEMA DE ROTACIÓN DIARIA ==========
 const ROTACION_SISTEMA = {
@@ -2136,12 +1886,9 @@ function seleccionarProductosOfertas() {
         productosRelampago = poolRelampago; // TODOS
         productosRelampago.forEach(p => idsEnOfertas.add(p.id));
         console.log(`⚡ [ADMIN] Mostrando TODOS los productos relámpago: ${productosRelampago.length}`);
-        return; // No procesar otras ofertas en modo admin
     }
-    
-    // MODO NORMAL: 
-    // 1. RELÁMPAGO (prioridad máxima)
-    if (validarHorario('relampago')) {
+    // MODO NORMAL: RELÁMPAGO (prioridad máxima)
+    else if (validarHorario('relampago')) {
         productosRelampago = ROTACION_SISTEMA.selectRotatedProducts(
             poolRelampago, 
             3, 
@@ -2159,16 +1906,26 @@ function seleccionarProductosOfertas() {
         console.log(`🔥 Destacadas activo: ${productosDestacadas.length} productos`);
     }
     
-    // 3. ESPECIALES (solo si NO hay destacadas)
-    if (validarHorario('especiales') && productosDestacadas.length === 0) {
+    // 3. ESPECIALES (solo si NO hay destacadas O si admin fuerza)
+    if ((validarHorario('especiales') && productosDestacadas.length === 0) || 
+        (esAdmin && modoMostrarTodasEspeciales)) {
+        
         const poolFiltrado = poolEspeciales.filter(p => !idsEnOfertas.has(p.id));
-        productosEspeciales = ROTACION_SISTEMA.selectRotatedProducts(
-            poolFiltrado, 
-            2, 
-            'rotacion_especiales'
-        );
+        
+        // Si admin fuerza mostrar todas, mostrar TODAS
+        if (esAdmin && modoMostrarTodasEspeciales) {
+            productosEspeciales = poolFiltrado; // TODAS las especiales
+            console.log(`⭐ [ADMIN] Mostrando TODAS las especiales: ${productosEspeciales.length} productos`);
+        } else {
+            productosEspeciales = ROTACION_SISTEMA.selectRotatedProducts(
+                poolFiltrado, 
+                2, 
+                'rotacion_especiales'
+            );
+            console.log(`⭐ Especiales activo: ${productosEspeciales.length} productos`);
+        }
+        
         productosEspeciales.forEach(p => idsEnOfertas.add(p.id));
-        console.log(`⭐ Especiales activo: ${productosEspeciales.length} productos`);
     }
 }
 
@@ -2789,8 +2546,9 @@ function addToCart(productId) {
         esPromo = true;
     }
     
-    // 1. Verificar ESPECIALES
-    if (productosEspeciales.some(p => p.id === productId) && validarHorario('especiales')) {
+    // 1. Verificar ESPECIALES (si está activa O si admin las fuerza)
+    if ((productosEspeciales.some(p => p.id === productId) && validarHorario('especiales')) ||
+        (esAdmin && modoMostrarTodasEspeciales)) {
         esOfertaEspecial = true;
         ofertaConfig = {
             nombre: "Especial",
@@ -2801,7 +2559,7 @@ function addToCart(productId) {
         console.log('✅ Producto tiene oferta ESPECIAL');
     } 
     // 2. Verificar DESTACADAS
-    else if (productosDestacadas.some(p => p.id === productId) && validarHorario('destacadas')) {
+    else if (product.destacada > 0 && productosDestacadas.some(p => p.id === productId) && validarHorario('destacadas')) {
         esOfertaDestacada = true;
         ofertaConfig = {
             nombre: "Destacada",
@@ -2812,7 +2570,8 @@ function addToCart(productId) {
         console.log('✅ Producto tiene oferta DESTACADA:', product.destacada + '%');
     }
     // 3. Verificar RELÁMPAGO
-    else if (productosRelampago.some(p => p.id === productId) && validarHorario('relampago')) {
+    else if (product.relampago > 0 && (productosRelampago.some(p => p.id === productId) && validarHorario('relampago') || 
+             (esAdmin && modoMostrarTodasOfertas))) {
         esOfertaRelampago = true;
         const configRelampago = OFERTAS_RELAMPAGO_SISTEMA[product.relampago];
         if (configRelampago) {
@@ -2824,21 +2583,6 @@ function addToCart(productId) {
                 pagas: configRelampago.pagas
             };
             console.log('✅ Producto tiene oferta RELÁMPAGO:', configRelampago.nombre);
-        }
-    }
-    // 4. SI ESTÁS EN MODO ADMIN CON "MOSTRAR TODAS", también validar
-    else if (modoMostrarTodasOfertas && esAdmin && product.relampago > 0) {
-        esOfertaRelampago = true;
-        const configRelampago = OFERTAS_RELAMPAGO_SISTEMA[product.relampago];
-        if (configRelampago) {
-            ofertaConfig = {
-                nombre: configRelampago.nombre,
-                tipo: configRelampago.tipo,
-                eslogan: configRelampago.eslogan,
-                cantidad: configRelampago.cantidad,
-                pagas: configRelampago.pagas
-            };
-            console.log('✅ [ADMIN] Producto tiene oferta RELÁMPAGO:', configRelampago.nombre);
         }
     }
     
@@ -3499,95 +3243,248 @@ function goToHome() {
     showNotification("🏠 Volviendo al inicio...", "success");
 }
 
-// ========== UTILIDADES ==========
-function handleImageError(img, productName) {
-    const colors = ['#e8f5e9', '#f1f8e9', '#f9fbe7', '#fffde7', '#fff3e0'];
-    const randomColor = colors[Math.floor(Math.random() * colors.length)];
+// ========== FUNCIÓN COMPARTIR PRODUCTO CORREGIDA ==========
+function compartirProducto(productId, event) {
+    if (event) {
+        event.stopPropagation();
+        event.preventDefault();
+    }
     
-    img.src = '';
-    img.onerror = null;
+    const product = products.find(p => p.id == productId);
+    if (!product) {
+        console.error('Producto no encontrado:', productId);
+        return;
+    }
     
-    const container = img.parentElement;
-    container.style.background = `linear-gradient(135deg, ${randomColor}, #c8e6c9)`;
-    container.style.display = 'flex';
-    container.style.justifyContent = 'center';
-    container.style.alignItems = 'center';
-    
-    const icon = document.createElement('div');
-    icon.innerHTML = '🛒';
-    icon.style.fontSize = '3rem';
-    icon.style.opacity = '0.5';
-    
-    const text = document.createElement('div');
-    text.textContent = productName.length > 20 ? productName.substring(0, 20) + '...' : productName;
-    text.style.position = 'absolute';
-    text.style.bottom = '10px';
-    text.style.fontSize = '0.7rem';
-    text.style.color = '#666';
-    text.style.padding = '0 10px';
-    text.style.textAlign = 'center';
-    
-    container.innerHTML = '';
-    container.appendChild(icon);
-    container.appendChild(text);
-}
+    // === LÓGICA UNIFICADA DE PRECIOS (igual que carrito y visualización) ===
+    let precioFinal = product.price;
+    let infoOferta = '';
+    let precioNormalMostrar = product.normal || product.price;
 
-function showNotification(message, type = 'success') {
-    const notification = document.createElement('div');
-    notification.className = 'stock-notification';
-    notification.style.background = type === 'success' ? '#4CAF50' : '#ff9800';
-    notification.textContent = message;
-    
-    document.body.appendChild(notification);
-    
-    setTimeout(() => {
-        if (notification.parentNode) {
-            notification.parentNode.removeChild(notification);
+    // Variable para controlar si estamos en modo admin mostrando todas las ofertas
+    const esAdminMostrandoTodas = esAdmin && modoMostrarTodasOfertas;
+    const esAdminMostrandoTodasEspeciales = esAdmin && modoMostrarTodasEspeciales;
+
+    // 1. OFERTAS RELÁMPAGO (si está activa o si admin las está mostrando)
+    if (product.relampago > 0 && 
+        ((productosRelampago.some(p => p.id === productId) && validarHorario('relampago')) || 
+         esAdminMostrandoTodas)) {
+        
+        const ofertaConfig = OFERTAS_RELAMPAGO_SISTEMA[product.relampago];
+        if (ofertaConfig) {
+            infoOferta = ` (${ofertaConfig.nombre.toUpperCase()})`;
+            // Para relámpago mostramos precio unitario
+            precioFinal = product.price;
         }
-    }, 2000);
-}
-
-// ========== EVENT LISTENERS MEJORADOS ==========
-function setupEventListeners() {
-    // Carrito
-    document.getElementById('cartIcon').addEventListener('click', openCart);
-    document.getElementById('floatingCart').addEventListener('click', openCart);
-    document.getElementById('closeCart').addEventListener('click', closeCartModal);
+    }
+    // 2. OFERTAS DESTACADAS (si está activa)
+    else if (product.destacada > 0 && productosDestacadas.some(p => p.id === productId) && validarHorario('destacadas')) {
+        precioFinal = Math.round(product.price * (1 - product.destacada / 100));
+        infoOferta = ` (-${product.destacada}% OFF)`;
+    }
+    // 3. OFERTAS ESPECIALES (si está activa O si admin las fuerza)
+    else if (product.especial === 1 && 
+             ((productosEspeciales.some(p => p.id === productId) && validarHorario('especiales')) ||
+              esAdminMostrandoTodasEspeciales)) {
+        
+        precioFinal = Math.round(product.price * 0.9);
+        infoOferta = ' (-10% OFF)';
+        console.log('✅ Especial activo para compartir:', product.name, 'precioFinal:', precioFinal);
+    }
+    // 4. PRECIO NORMAL EN COLUMNA K (para ofertas espontáneas)
+    else if (product.normal && product.normal > product.price) {
+        precioNormalMostrar = product.normal;
+        const ahorro = product.normal - product.price;
+        const porcentaje = Math.round((ahorro / product.normal) * 100);
+        infoOferta = ` (-${porcentaje}% OFF)`;
+        precioFinal = product.price;
+    }
     
-    // Búsqueda
-    document.getElementById('floatingSearch').addEventListener('click', openSearchModal);
-    document.getElementById('closeSearch').addEventListener('click', closeSearchModal);
+    // Formatear texto para compartir
+    let texto = '';
     
-    // Home
-    document.getElementById('floatingHome').addEventListener('click', goToHome);
-    
-    // WhatsApp
-    document.getElementById('sendOrder').addEventListener('click', sendOrderViaWhatsApp);
-    
-    // Modales
-    document.getElementById('cartModal').addEventListener('click', function(e) {
-        if (e.target === this) closeCartModal();
-    });
-    
-    document.getElementById('searchModal').addEventListener('click', function(e) {
-        if (e.target === this) closeSearchModal();
-    });
-    
-    // EVENT DELEGATION MEJORADO PARA TODOS LOS BOTONES "AGREGAR AL CARRITO"
-    document.addEventListener('click', function(e) {
-        // Verificar si el clic fue en un botón "Agregar al Carrito" o en un elemento dentro
-        const addToCartBtn = e.target.closest('.add-to-cart');
-        if (addToCartBtn) {
-            const productId = parseInt(addToCartBtn.getAttribute('data-id'));
-            if (!isNaN(productId)) {
-                addToCart(productId);
-                e.stopPropagation(); // Prevenir propagación
-                e.preventDefault(); // Prevenir comportamiento por defecto
+    // === MÓVIL: Incluir precio con formato claro ===
+    if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+        // Si es oferta relámpago
+        if (product.relampago > 0 && (productosRelampago.some(p => p.id === productId) || esAdminMostrandoTodas)) {
+            const ofertaConfig = OFERTAS_RELAMPAGO_SISTEMA[product.relampago];
+            if (ofertaConfig) {
+                texto = `${product.name}\n\n` +
+                       `🎁 OFERTA: ${ofertaConfig.nombre.toUpperCase()}\n` +
+                       `💰 ${ofertaConfig.eslogan}\n` +
+                       `💵 Precio unitario: $${product.price}\n\n` +
+                       `📍 Almacén Copihue\n` +
+                       `🌐 https://almacen-copihue.vercel.app`;
+            } else {
+                texto = `${product.name}\n\n` +
+                       `💰 PRECIO: $${precioFinal}\n\n` +
+                       `📍 Almacén Copihue\n` +
+                       `🌐 https://almacen-copihue.vercel.app`;
             }
         }
+        else if (product.normal && product.normal > product.price) {
+            // Formato oferta: Antes/Ahora
+            const ahorro = product.normal - product.price;
+            const porcentaje = Math.round((ahorro / product.normal) * 100);
+            texto = `${product.name}\n\n` +
+                   `💰 ANTES: $${product.normal}\n` +
+                   `🔥 AHORA: $${product.price}\n` +
+                   `✅ ${porcentaje}% DE DESCUENTO\n\n` +
+                   `📍 Almacén Copihue\n` +
+                   `🌐 https://almacen-copihue.vercel.app`;
+        } 
+        else if (product.especial === 1 && (productosEspeciales.some(p => p.id === productId) || esAdminMostrandoTodasEspeciales)) {
+            // Formato ESPECIAL -10%
+            const precioNormal = product.price;
+            const precioConDescuento = Math.round(product.price * 0.9);
+            const ahorro = precioNormal - precioConDescuento;
+            texto = `${product.name}\n\n` +
+                   `⭐ OFERTA ESPECIAL -10%\n` +
+                   `💰 NORMAL: $${precioNormal}\n` +
+                   `🔥 OFERTA: $${precioConDescuento}\n` +
+                   `✅ Ahorrás: $${ahorro}\n\n` +
+                   `📍 Almacén Copihue\n` +
+                   `🌐 https://almacen-copihue.vercel.app`;
+        }
+        else if (infoOferta) {
+            // Formato oferta especial
+            texto = `${product.name}${infoOferta}\n\n` +
+                   `💰 PRECIO: $${precioFinal}\n\n` +
+                   `📍 Almacén Copihue\n` +
+                   `🌐 https://almacen-copihue.vercel.app`;
+        } else {
+            // Sin oferta
+            texto = `${product.name}\n\n` +
+                   `💰 PRECIO: $${product.price}\n\n` +
+                   `📍 Almacén Copihue\n` +
+                   `🌐 https://almacen-copihue.vercel.app`;
+        }
+    } 
+    // === ESCRITORIO: Mantener formato actual (con foto del local) ===
+    else {
+        texto = `${product.name}${infoOferta}\n` +
+               `$${precioFinal}\n\n` +
+               `📍 Almacén Copihue\n` +
+               `https://almacen-copihue.vercel.app`;
+    }
+    
+    console.log('📤 Compartiendo producto:', {
+        nombre: product.name,
+        precioFinal,
+        infoOferta,
+        esMobile: /Android|iPhone|iPad|iPod/i.test(navigator.userAgent),
+        esAdminMostrandoTodas
     });
+    
+    // === COMPARTIR NATIVO (MÓVIL) ===
+    if (navigator.share && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+        fetch(product.image)
+            .then(response => response.blob())
+            .then(blob => {
+                const file = new File([blob], `${product.name}.jpg`, { type: 'image/jpeg' });
+                
+                if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                    navigator.share({
+                        text: texto,
+                        files: [file]
+                    }).then(() => {
+                        showNotification('📤 Producto compartido', 'success');
+                    }).catch((error) => {
+                        if (error.name !== 'AbortError') {
+                            console.error('Error compartiendo:', error);
+                            compartirPorWhatsApp(texto);
+                        }
+                    });
+                } else {
+                    compartirPorWhatsApp(texto);
+                }
+            })
+            .catch(() => {
+                compartirPorWhatsApp(texto);
+            });
+    } 
+    // === ESCRITORIO: WhatsApp directo ===
+    else {
+        compartirPorWhatsApp(texto);
+    }
 }
 
+function compartirPorWhatsApp(texto) {
+    const mensajeEncoded = encodeURIComponent(texto);
+    const whatsappUrl = `https://wa.me/?text=${mensajeEncoded}`;
+    window.open(whatsappUrl, '_blank');
+    showNotification('📤 Abriendo WhatsApp...', 'success');
+}
+
+
+function copiarAlPortapapeles(texto) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(texto).then(() => {
+            showNotification('🔗 Link copiado al portapapeles', 'success');
+        }).catch(() => {
+            showNotification('❌ No se pudo copiar el link', 'error');
+        });
+    } else {
+        // Fallback para navegadores viejos
+        const textarea = document.createElement('textarea');
+        textarea.value = texto;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+            document.execCommand('copy');
+            showNotification('🔗 Link copiado al portapapeles', 'success');
+        } catch (err) {
+            showNotification('❌ No se pudo copiar el link', 'error');
+        }
+        document.body.removeChild(textarea);
+    }
+}
+
+function manejarDeepLink() {
+    const hash = window.location.hash;
+    
+    // Formato: #producto/ID
+    if (hash.startsWith('#producto/')) {
+        const productId = hash.replace('#producto/', '');
+        console.log('🔗 Deep link detectado para producto:', productId);
+        
+        // Esperar a que los productos estén cargados
+        const intentarMostrar = () => {
+            const product = products.find(p => p.id == productId);
+            if (product) {
+                // Simular click en el producto para abrir el detalle
+                showNotification(`📦 Mostrando: ${product.name}`, 'info');
+                
+                // Cambiar a la categoría del producto
+                currentCategory = product.category;
+                renderizarProductosNormales();
+                
+                // Scroll al producto después de renderizar
+                setTimeout(() => {
+                    const productCard = document.querySelector(`[data-id="${productId}"]`);
+                    if (productCard) {
+                        productCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        productCard.style.animation = 'pulse 1s ease-in-out 3';
+                    }
+                }, 300);
+            } else {
+                console.warn('⚠️ Producto no encontrado:', productId);
+                showNotification('Producto no encontrado', 'error');
+                window.location.hash = '';
+            }
+        };
+        
+        if (products.length > 0) {
+            intentarMostrar();
+        } else {
+            setTimeout(intentarMostrar, 1500);
+        }
+    }
+}
+
+// ========== UTILIDADES ==========
 function handleImageError(img, productName) {
     const colors = ['#e8f5e9', '#f1f8e9', '#f9fbe7', '#fffde7', '#fff3e0'];
     const randomColor = colors[Math.floor(Math.random() * colors.length)];
@@ -3648,6 +3545,62 @@ function handleImageError(img, productName) {
     }
 }
 
+function showNotification(message, type = 'success') {
+    const notification = document.createElement('div');
+    notification.className = 'stock-notification';
+    notification.style.background = type === 'success' ? '#4CAF50' : '#ff9800';
+    notification.textContent = message;
+    
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+        if (notification.parentNode) {
+            notification.parentNode.removeChild(notification);
+        }
+    }, 2000);
+}
+
+// ========== EVENT LISTENERS MEJORADOS ==========
+function setupEventListeners() {
+    // Carrito
+    document.getElementById('cartIcon').addEventListener('click', openCart);
+    document.getElementById('floatingCart').addEventListener('click', openCart);
+    document.getElementById('closeCart').addEventListener('click', closeCartModal);
+    
+    // Búsqueda
+    document.getElementById('floatingSearch').addEventListener('click', openSearchModal);
+    document.getElementById('closeSearch').addEventListener('click', closeSearchModal);
+    
+    // Home
+    document.getElementById('floatingHome').addEventListener('click', goToHome);
+    
+    // WhatsApp
+    document.getElementById('sendOrder').addEventListener('click', sendOrderViaWhatsApp);
+    
+    // Modales
+    document.getElementById('cartModal').addEventListener('click', function(e) {
+        if (e.target === this) closeCartModal();
+    });
+    
+    document.getElementById('searchModal').addEventListener('click', function(e) {
+        if (e.target === this) closeSearchModal();
+    });
+    
+    // EVENT DELEGATION MEJORADO PARA TODOS LOS BOTONES "AGREGAR AL CARRITO"
+    document.addEventListener('click', function(e) {
+        // Verificar si el clic fue en un botón "Agregar al Carrito" o en un elemento dentro
+        const addToCartBtn = e.target.closest('.add-to-cart');
+        if (addToCartBtn) {
+            const productId = parseInt(addToCartBtn.getAttribute('data-id'));
+            if (!isNaN(productId)) {
+                addToCart(productId);
+                e.stopPropagation(); // Prevenir propagación
+                e.preventDefault(); // Prevenir comportamiento por defecto
+            }
+        }
+    });
+}
+
 function detectarAdmin() {
     const urlParams = new URLSearchParams(window.location.search);
     esAdmin = urlParams.has('admin');
@@ -3668,12 +3621,24 @@ function actualizarEstadoAdmin() {
     
     const totalRelampago = poolRelampago.length;
     const visiblesRelampago = productosRelampago.length;
+    const totalEspeciales = poolEspeciales.length;
+    const visiblesEspeciales = productosEspeciales.length;
+    
+    let statusText = '';
     
     if (modoMostrarTodasOfertas) {
-        statusElement.innerHTML = `✅ Mostrando ${visiblesRelampago}/${totalRelampago} ofertas`;
+        statusText += `⚡ Mostrando ${visiblesRelampago}/${totalRelampago} relámpago<br>`;
     } else {
-        statusElement.innerHTML = `🔒 Modo normal: ${visiblesRelampago}/${totalRelampago}`;
+        statusText += `⚡ Normal: ${visiblesRelampago}/${totalRelampago}<br>`;
     }
+    
+    if (modoMostrarTodasEspeciales) {
+        statusText += `⭐ Mostrando ${visiblesEspeciales}/${totalEspeciales} especiales`;
+    } else {
+        statusText += `⭐ Normal: ${visiblesEspeciales}/${totalEspeciales}`;
+    }
+    
+    statusElement.innerHTML = statusText;
 }
 
 function toggleAdminPanel() {
@@ -3703,6 +3668,25 @@ function toggleMostrarTodasOfertas() {
         btn.classList.remove('active');
         btn.textContent = '👀 Ver Todas las Ofertas';
         showNotification('🔧 ADMIN: Modo normal restaurado', 'info');
+    }
+    
+    actualizarTodasLasVistas();
+    actualizarEstadoAdmin();
+}
+
+// ========== FUNCIÓN TOGGLE MOSTRAR TODAS ESPECIALES ==========
+function toggleMostrarTodasEspeciales() {
+    modoMostrarTodasEspeciales = !modoMostrarTodasEspeciales;
+    
+    const btn = document.getElementById('btnMostrarTodasEspeciales');
+    if (modoMostrarTodasEspeciales) {
+        btn.classList.add('active');
+        btn.textContent = '✅ Mostrando Todas Especiales';
+        showNotification('🔧 ADMIN: Mostrando TODAS las ofertas especiales', 'success');
+    } else {
+        btn.classList.remove('active');
+        btn.textContent = '👁️ Ver Todas las Especiales';
+        showNotification('🔧 ADMIN: Modo normal especiales', 'info');
     }
     
     actualizarTodasLasVistas();
@@ -3818,7 +3802,6 @@ setInterval(() => {
     });
 }, 300000); // 5 minutos
 
-// ========== MONITOR DE STOCK PROMOS ==========
 // ========== MONITOR DE STOCK PROMOS ==========
 function monitorearStockPromos() {
     setInterval(() => {
