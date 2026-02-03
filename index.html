@@ -1734,7 +1734,6 @@ let poolRelampago = [];
 let poolDestacadas = [];
 let poolEspeciales = [];
 
-// ========== FUNCIONES DE COMPARTIR (SCOPE GLOBAL) ==========
 function compartirProducto(productId, event) {
     if (event) {
         event.stopPropagation();
@@ -1747,46 +1746,108 @@ function compartirProducto(productId, event) {
         return;
     }
     
-    // Calcular precio real según ofertas activas
+    // === LÓGICA UNIFICADA DE PRECIOS (igual que carrito y visualización) ===
     let precioFinal = product.price;
     let infoOferta = '';
-    
-    console.log('🔍 Compartiendo:', product.name);
-    console.log('   - productosEspeciales:', productosEspeciales.length, productosEspeciales.map(p => p.id));
-    console.log('   - Este producto ID:', productId, 'especial:', product.especial);
-    console.log('   - Está en array?', productosEspeciales.some(p => p.id === productId));
-    
-    // 1. COMBO (PROMOS) - Siempre activos
-    if (product.category === 'PROMOS' && product.normal && product.normal > product.price) {
-        precioFinal = product.price;
-        const ahorro = product.normal - product.price;
-        const porcentaje = Math.round((ahorro / product.normal) * 100);
-        infoOferta = ` (-${porcentaje}% OFF)`;
-    }
-    // 2. OFERTAS RELÁMPAGO - Solo si están activas
-    else if (product.relampago > 0 && productosRelampago.some(p => p.id === productId)) {
+    let precioNormalMostrar = product.normal || product.price;
+
+    // Variable para controlar si estamos en modo admin mostrando todas las ofertas
+    const esAdminMostrandoTodas = esAdmin && modoMostrarTodasOfertas;
+
+    // 1. OFERTAS RELÁMPAGO (si está activa o si admin las está mostrando)
+    if (product.relampago > 0 && 
+        ((productosRelampago.some(p => p.id === productId) && validarHorario('relampago')) || 
+         esAdminMostrandoTodas)) {
+        
         const ofertaConfig = OFERTAS_RELAMPAGO_SISTEMA[product.relampago];
         if (ofertaConfig) {
             infoOferta = ` (${ofertaConfig.nombre.toUpperCase()})`;
+            // Para relámpago mostramos precio unitario
+            precioFinal = product.price;
         }
     }
-    // 3. OFERTAS DESTACADAS - Solo si están activas
-    else if (product.destacada > 0 && productosDestacadas.some(p => p.id === productId)) {
+    // 2. OFERTAS DESTACADAS (si está activa)
+    else if (product.destacada > 0 && productosDestacadas.some(p => p.id === productId) && validarHorario('destacadas')) {
         precioFinal = Math.round(product.price * (1 - product.destacada / 100));
         infoOferta = ` (-${product.destacada}% OFF)`;
     }
-    // 4. OFERTAS ESPECIALES - Solo si están activas
-    else if (product.especial === 1 && productosEspeciales.some(p => p.id === productId)) {
+    // 3. OFERTAS ESPECIALES (si está activa)
+    else if (product.especial === 1 && productosEspeciales.some(p => p.id === productId) && validarHorario('especiales')) {
         precioFinal = Math.round(product.price * 0.9);
         infoOferta = ' (-10% OFF)';
-        console.log('✅ Detectado ESPECIAL');
+    }
+    // 4. PRECIO NORMAL EN COLUMNA K (para ofertas espontáneas)
+    else if (product.normal && product.normal > product.price) {
+        precioNormalMostrar = product.normal;
+        const ahorro = product.normal - product.price;
+        const porcentaje = Math.round((ahorro / product.normal) * 100);
+        infoOferta = ` (-${porcentaje}% OFF)`;
+        precioFinal = product.price;
     }
     
-    const texto = `${product.name}${infoOferta}\n$${precioFinal}\n\n📍 Almacén Copihue\nhttps://almacen-copihue.vercel.app`;
+    // Formatear texto para compartir
+    let texto = '';
     
-    console.log('📤 Compartiendo producto:', product.name, '- Precio:', precioFinal);
+    // === MÓVIL: Incluir precio con formato claro ===
+    if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+        // Si es oferta relámpago
+        if (product.relampago > 0 && (productosRelampago.some(p => p.id === productId) || esAdminMostrandoTodas)) {
+            const ofertaConfig = OFERTAS_RELAMPAGO_SISTEMA[product.relampago];
+            if (ofertaConfig) {
+                texto = `${product.name}\n\n` +
+                       `🎁 OFERTA: ${ofertaConfig.nombre.toUpperCase()}\n` +
+                       `💰 ${ofertaConfig.eslogan}\n` +
+                       `💵 Precio unitario: $${product.price}\n\n` +
+                       `📍 Almacén Copihue\n` +
+                       `🌐 https://almacen-copihue.vercel.app`;
+            } else {
+                texto = `${product.name}\n\n` +
+                       `💰 PRECIO: $${precioFinal}\n\n` +
+                       `📍 Almacén Copihue\n` +
+                       `🌐 https://almacen-copihue.vercel.app`;
+            }
+        }
+        else if (product.normal && product.normal > product.price) {
+            // Formato oferta: Antes/Ahora
+            const ahorro = product.normal - product.price;
+            const porcentaje = Math.round((ahorro / product.normal) * 100);
+            texto = `${product.name}\n\n` +
+                   `💰 ANTES: $${product.normal}\n` +
+                   `🔥 AHORA: $${product.price}\n` +
+                   `✅ ${porcentaje}% DE DESCUENTO\n\n` +
+                   `📍 Almacén Copihue\n` +
+                   `🌐 https://almacen-copihue.vercel.app`;
+        } else if (infoOferta) {
+            // Formato oferta especial
+            texto = `${product.name}${infoOferta}\n\n` +
+                   `💰 PRECIO: $${precioFinal}\n\n` +
+                   `📍 Almacén Copihue\n` +
+                   `🌐 https://almacen-copihue.vercel.app`;
+        } else {
+            // Sin oferta
+            texto = `${product.name}\n\n` +
+                   `💰 PRECIO: $${product.price}\n\n` +
+                   `📍 Almacén Copihue\n` +
+                   `🌐 https://almacen-copihue.vercel.app`;
+        }
+    } 
+    // === ESCRITORIO: Mantener formato actual (con foto del local) ===
+    else {
+        texto = `${product.name}${infoOferta}\n` +
+               `$${precioFinal}\n\n` +
+               `📍 Almacén Copihue\n` +
+               `https://almacen-copihue.vercel.app`;
+    }
     
-    // En móvil: usar API nativa (incluye WhatsApp en opciones)
+    console.log('📤 Compartiendo producto:', {
+        nombre: product.name,
+        precioFinal,
+        infoOferta,
+        esMobile: /Android|iPhone|iPad|iPod/i.test(navigator.userAgent),
+        esAdminMostrandoTodas
+    });
+    
+    // === COMPARTIR NATIVO (MÓVIL) ===
     if (navigator.share && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
         fetch(product.image)
             .then(response => response.blob())
@@ -1812,8 +1873,9 @@ function compartirProducto(productId, event) {
             .catch(() => {
                 compartirPorWhatsApp(texto);
             });
-    } else {
-        // En desktop: abrir WhatsApp directamente
+    } 
+    // === ESCRITORIO: WhatsApp directo ===
+    else {
         compartirPorWhatsApp(texto);
     }
 }
