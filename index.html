@@ -1752,31 +1752,39 @@ let modoMostrarTodasEspeciales = false;
 // ========== SISTEMA DE ROTACIÓN DIARIA ==========
 const ROTACION_SISTEMA = {
     getDateKey() {
-        // Hora de Argentina - TODOS ven lo mismo
+        // Usar hora de Argentina (UTC-3) centralizada
+        // Esto asegura que TODOS los dispositivos vean los mismos productos
         const now = new Date();
         const argentinaTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
         return `${argentinaTime.getFullYear()}-${(argentinaTime.getMonth() + 1).toString().padStart(2, '0')}-${argentinaTime.getDate().toString().padStart(2, '0')}`;
     },
     
     getRotationIndex(poolSize, visibleCount, storageKey) {
-        // Calcular SIEMPRE desde la fecha - NO localStorage
         const dateKey = this.getDateKey();
+        const savedData = localStorage.getItem(storageKey);
         
-        // Convertir fecha a número (ej: "2026-01-12" -> 20260112)
-        const dateNumber = parseInt(dateKey.replace(/-/g, ''));
+        if (savedData) {
+            try {
+                const data = JSON.parse(savedData);
+                if (data.date === dateKey) {
+                    return data.index;
+                }
+            } catch (e) {
+                console.warn('Error leyendo rotación:', e);
+            }
+        }
         
-        // Generar índice: mismo día = mismo índice para TODOS
-        const index = dateNumber % poolSize;
+        // Nueva rotación
+        const lastIndex = parseInt(localStorage.getItem(`${storageKey}_lastIndex`)) || 0;
+        const newIndex = (lastIndex + visibleCount) % poolSize;
         
-        console.log(`🔄 Rotación ${storageKey}:`, {
-            fecha: dateKey,
-            seed: dateNumber,
-            index: index,
-            total: poolSize,
-            muestra: visibleCount
-        });
+        localStorage.setItem(storageKey, JSON.stringify({
+            date: dateKey,
+            index: newIndex
+        }));
+        localStorage.setItem(`${storageKey}_lastIndex`, newIndex);
         
-        return index;
+        return newIndex;
     },
     
     selectRotatedProducts(pool, visibleCount, storageKey) {
@@ -1786,13 +1794,10 @@ const ROTACION_SISTEMA = {
         const startIndex = this.getRotationIndex(pool.length, visibleCount, storageKey);
         const selected = [];
         
-        // Seleccionar productos consecutivos desde startIndex
         for (let i = 0; i < visibleCount; i++) {
             const index = (startIndex + i) % pool.length;
             selected.push(pool[index]);
         }
-        
-        console.log(`✅ Seleccionados ${selected.length} productos desde índice ${startIndex}`);
         
         return selected;
     }
