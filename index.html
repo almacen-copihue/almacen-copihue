@@ -1752,36 +1752,31 @@ let modoMostrarTodasEspeciales = false;
 // ========== SISTEMA DE ROTACIÓN DIARIA ==========
 const ROTACION_SISTEMA = {
     getDateKey() {
+        // Hora de Argentina - TODOS ven lo mismo
         const now = new Date();
-        return `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}`;
+        const argentinaTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+        return `${argentinaTime.getFullYear()}-${(argentinaTime.getMonth() + 1).toString().padStart(2, '0')}-${argentinaTime.getDate().toString().padStart(2, '0')}`;
     },
     
     getRotationIndex(poolSize, visibleCount, storageKey) {
+        // Calcular SIEMPRE desde la fecha - NO localStorage
         const dateKey = this.getDateKey();
-        const savedData = localStorage.getItem(storageKey);
         
-        if (savedData) {
-            try {
-                const data = JSON.parse(savedData);
-                if (data.date === dateKey) {
-                    return data.index;
-                }
-            } catch (e) {
-                console.warn('Error leyendo rotación:', e);
-            }
-        }
+        // Convertir fecha a número (ej: "2026-01-12" -> 20260112)
+        const dateNumber = parseInt(dateKey.replace(/-/g, ''));
         
-        // Nueva rotación
-        const lastIndex = parseInt(localStorage.getItem(`${storageKey}_lastIndex`)) || 0;
-        const newIndex = (lastIndex + visibleCount) % poolSize;
+        // Generar índice: mismo día = mismo índice para TODOS
+        const index = dateNumber % poolSize;
         
-        localStorage.setItem(storageKey, JSON.stringify({
-            date: dateKey,
-            index: newIndex
-        }));
-        localStorage.setItem(`${storageKey}_lastIndex`, newIndex);
+        console.log(`🔄 Rotación ${storageKey}:`, {
+            fecha: dateKey,
+            seed: dateNumber,
+            index: index,
+            total: poolSize,
+            muestra: visibleCount
+        });
         
-        return newIndex;
+        return index;
     },
     
     selectRotatedProducts(pool, visibleCount, storageKey) {
@@ -1791,10 +1786,13 @@ const ROTACION_SISTEMA = {
         const startIndex = this.getRotationIndex(pool.length, visibleCount, storageKey);
         const selected = [];
         
+        // Seleccionar productos consecutivos desde startIndex
         for (let i = 0; i < visibleCount; i++) {
             const index = (startIndex + i) % pool.length;
             selected.push(pool[index]);
         }
+        
+        console.log(`✅ Seleccionados ${selected.length} productos desde índice ${startIndex}`);
         
         return selected;
     }
@@ -1826,10 +1824,12 @@ const HORARIOS = {
 };
 
 function validarHorario(tipo) {
+    // Usar hora de Argentina centralizada
     const now = new Date();
-    const dia = now.getDay();
-    const hora = now.getHours();
-    const min = now.getMinutes();
+    const argentinaTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+    const dia = argentinaTime.getDay();
+    const hora = argentinaTime.getHours();
+    const min = argentinaTime.getMinutes();
     
     const config = HORARIOS[tipo];
     if (!config) return false;
@@ -2066,16 +2066,17 @@ function iniciarCountdown(tipo) {
     
     const updateCountdown = () => {
         const now = new Date();
-        const endTime = new Date();
+        const argentinaTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+        const endTime = new Date(argentinaTime);
         
         endTime.setHours(config.horaFin, config.minFin, 0, 0);
         
-        if (now >= endTime) {
+        if (argentinaTime >= endTime) {
             countdownElement.textContent = '00:00:00';
             return;
         }
         
-        const diff = endTime - now;
+        const diff = endTime - argentinaTime;
         const hours = Math.floor(diff / (1000 * 60 * 60));
         const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
         const seconds = Math.floor((diff % (1000 * 60)) / 1000);
