@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Copihue — Punto de Venta</title>
+    <meta name="theme-color" content="#1b5e20">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Copihue Venta">
+    <link rel="manifest" href="manifest-venta.json">
+    <link rel="icon" href="iconos-pwa/android/android-launchericon-48-48.png">
+    <link rel="apple-touch-icon" href="iconos-pwa/ios/180.png">
+
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+
+        :root {
+            --verde: #2e7d32;
+            --verde-claro: #4caf50;
+            --verde-oscuro: #1b5e20;
+            --naranja: #ff6f00;
+            --rojo: #d32f2f;
+            --gris: #f5f5f5;
+            --texto: #212121;
+            --subtexto: #757575;
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: #f0f4f0;
+            color: var(--texto);
+            height: 100dvh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        /* ===== HEADER ===== */
+        .header {
+            background: linear-gradient(135deg, var(--verde-oscuro), var(--verde));
+            color: white;
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        }
+        .header-titulo {
+            font-size: 1.1rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .btn-resumen {
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.4);
+            color: white;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .indicador-carga {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            background: #ff5252;
+            flex-shrink: 0;
+        }
+        .indicador-carga.ok { background: #69f0ae; }
+
+        /* ===== BUSCADOR ===== */
+        .buscador-wrap {
+            background: white;
+            padding: 12px 16px;
+            border-bottom: 1px solid #ddd;
+            flex-shrink: 0;
+        }
+        .buscador-input {
+            width: 100%;
+            padding: 14px 18px;
+            font-size: 1.1rem;
+            border: 2px solid var(--verde);
+            border-radius: 30px;
+            outline: none;
+            background: #f9fffe;
+            color: var(--texto);
+        }
+        .buscador-input:focus {
+            border-color: var(--verde-oscuro);
+            box-shadow: 0 0 0 3px rgba(46,125,50,0.15);
+        }
+
+        /* ===== RESULTADOS ===== */
+        .resultados {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+            display: none;
+        }
+        .resultados.visible { display: block; }
+
+        .resultado-item {
+            background: white;
+            border-radius: 12px;
+            padding: 12px 14px;
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+            cursor: pointer;
+            transition: transform 0.1s, box-shadow 0.1s;
+            border: 2px solid transparent;
+        }
+        .resultado-item:active { transform: scale(0.98); }
+        .resultado-item.sin-stock { opacity: 0.45; pointer-events: none; }
+
+        .resultado-img {
+            width: 52px; height: 52px;
+            border-radius: 8px;
+            object-fit: cover;
+            background: #e8f5e9;
+            flex-shrink: 0;
+        }
+        .resultado-img-placeholder {
+            width: 52px; height: 52px;
+            border-radius: 8px;
+            background: linear-gradient(135deg, #e8f5e9, #c8e6c9);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.5rem;
+            flex-shrink: 0;
+        }
+        .resultado-info { flex: 1; min-width: 0; }
+        .resultado-nombre {
+            font-weight: 600;
+            font-size: 0.9rem;
+            line-height: 1.3;
+            color: var(--texto);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .resultado-stock {
+            font-size: 0.75rem;
+            color: var(--subtexto);
+            margin-top: 2px;
+        }
+        .resultado-stock.bajo { color: #f57c00; }
+        .resultado-precio {
+            font-size: 1.2rem;
+            font-weight: 900;
+            color: var(--verde-oscuro);
+            flex-shrink: 0;
+        }
+        .btn-agregar {
+            background: var(--verde);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 36px; height: 36px;
+            font-size: 1.4rem;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+            transition: background 0.2s;
+        }
+        .btn-agregar:active { background: var(--verde-oscuro); }
+
+        /* ===== VENTA ACTUAL (parte inferior) ===== */
+        .panel-venta {
+            background: white;
+            border-top: 2px solid #e0e0e0;
+            flex-shrink: 0;
+            max-height: 55vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .panel-venta-header {
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid #f0f0f0;
+            background: #fafafa;
+        }
+        .panel-venta-titulo {
+            font-weight: 700;
+            font-size: 0.9rem;
+            color: var(--subtexto);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .btn-limpiar {
+            background: none;
+            border: 1px solid #ddd;
+            border-radius: 20px;
+            padding: 4px 12px;
+            font-size: 0.8rem;
+            color: var(--rojo);
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .items-venta {
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .venta-vacia {
+            text-align: center;
+            padding: 20px;
+            color: #bbb;
+            font-size: 0.9rem;
+        }
+
+        .item-venta {
+            display: flex;
+            align-items: center;
+            padding: 10px 16px;
+            border-bottom: 1px solid #f5f5f5;
+            gap: 10px;
+        }
+        .item-venta-nombre {
+            flex: 1;
+            font-size: 0.88rem;
+            font-weight: 500;
+            line-height: 1.3;
+            color: var(--texto);
+        }
+        .item-venta-controles {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        .btn-cant {
+            background: #f0f4f0;
+            border: none;
+            border-radius: 50%;
+            width: 30px; height: 30px;
+            font-size: 1.1rem;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 700;
+            color: var(--verde-oscuro);
+        }
+        .btn-cant:active { background: #c8e6c9; }
+        .item-cant {
+            font-weight: 700;
+            font-size: 1rem;
+            min-width: 20px;
+            text-align: center;
+        }
+        .item-subtotal {
+            font-weight: 700;
+            font-size: 0.9rem;
+            color: var(--verde-oscuro);
+            min-width: 70px;
+            text-align: right;
+        }
+
+        /* ===== FOOTER TOTAL + CONFIRMAR ===== */
+        .panel-total {
+            background: var(--verde-oscuro);
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-shrink: 0;
+        }
+        .total-label {
+            color: rgba(255,255,255,0.8);
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        .total-monto {
+            color: white;
+            font-size: 1.6rem;
+            font-weight: 900;
+            flex: 1;
+        }
+        .btn-confirmar {
+            background: #69f0ae;
+            color: var(--verde-oscuro);
+            border: none;
+            border-radius: 14px;
+            padding: 14px 20px;
+            font-size: 1rem;
+            font-weight: 800;
+            cursor: pointer;
+            transition: transform 0.1s;
+            white-space: nowrap;
+        }
+        .btn-confirmar:active { transform: scale(0.96); }
+        .btn-confirmar:disabled {
+            background: #555;
+            color: #999;
+            cursor: not-allowed;
+        }
+
+        /* ===== MODAL RESUMEN DEL DÍA ===== */
+        .modal-bg {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.6);
+            z-index: 1000;
+            align-items: flex-end;
+            justify-content: center;
+        }
+        .modal-bg.open { display: flex; }
+        .modal-sheet {
+            background: white;
+            border-radius: 24px 24px 0 0;
+            width: 100%;
+            max-width: 540px;
+            max-height: 85vh;
+            overflow-y: auto;
+            padding: 0 0 30px;
+            animation: slideUp 0.3s ease;
+        }
+        @keyframes slideUp {
+            from { transform: translateY(60px); opacity: 0; }
+            to   { transform: translateY(0);    opacity: 1; }
+        }
+        .modal-handle {
+            width: 40px; height: 4px;
+            background: #ddd; border-radius: 4px;
+            margin: 12px auto 0;
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px 12px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        .modal-titulo { font-weight: 700; font-size: 1.1rem; color: var(--verde-oscuro); }
+        .modal-cerrar {
+            background: #f5f5f5; border: none;
+            border-radius: 50%; width: 32px; height: 32px;
+            font-size: 1rem; cursor: pointer; color: #555;
+        }
+        .resumen-card {
+            margin: 16px 20px 0;
+            background: linear-gradient(135deg, #e8f5e9, #f1f8e9);
+            border-radius: 14px;
+            padding: 16px;
+            border-left: 4px solid var(--verde);
+        }
+        .resumen-stat {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(0,0,0,0.06);
+        }
+        .resumen-stat:last-child { border-bottom: none; }
+        .resumen-stat-label { font-size: 0.9rem; color: var(--subtexto); }
+        .resumen-stat-valor { font-size: 1rem; font-weight: 700; color: var(--verde-oscuro); }
+        .resumen-stat-valor.grande { font-size: 1.4rem; }
+
+        .resumen-ventas-lista {
+            margin: 12px 20px 0;
+        }
+        .resumen-venta-item {
+            background: #fafafa;
+            border-radius: 10px;
+            padding: 10px 14px;
+            margin-bottom: 8px;
+            border-left: 3px solid var(--verde-claro);
+        }
+        .resumen-venta-hora { font-size: 0.75rem; color: #999; }
+        .resumen-venta-detalle { font-size: 0.85rem; color: var(--texto); margin-top: 2px; }
+        .resumen-venta-total { font-weight: 700; color: var(--verde-oscuro); font-size: 0.95rem; }
+
+        .btn-cerrar-dia {
+            margin: 16px 20px 0;
+            width: calc(100% - 40px);
+            padding: 14px;
+            background: #ffebee;
+            color: var(--rojo);
+            border: 2px solid #ffcdd2;
+            border-radius: 12px;
+            font-size: 0.95rem;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        /* ===== MODAL CONFIRMACIÓN VENTA ===== */
+        .modal-confirmacion .modal-sheet {
+            padding-bottom: 20px;
+        }
+        .confirm-producto {
+            padding: 16px 20px 0;
+        }
+        .confirm-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 0.9rem;
+        }
+        .confirm-total-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 14px 0 0;
+            font-size: 1.2rem;
+            font-weight: 800;
+            color: var(--verde-oscuro);
+        }
+        .confirm-acciones {
+            padding: 16px 20px 0;
+            display: flex;
+            gap: 10px;
+        }
+        .btn-cancelar-confirm {
+            flex: 1;
+            padding: 14px;
+            background: white;
+            color: #555;
+            border: 2px solid #ddd;
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .btn-ok-confirm {
+            flex: 2;
+            padding: 14px;
+            background: var(--verde);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .btn-ok-confirm:disabled {
+            background: #aaa;
+        }
+
+        /* ===== TOAST ===== */
+        .toast {
+            position: fixed;
+            bottom: 90px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #333;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            z-index: 2000;
+            opacity: 0;
+            transition: opacity 0.3s;
+            white-space: nowrap;
+            pointer-events: none;
+        }
+        .toast.visible { opacity: 1; }
+        .toast.verde { background: var(--verde); }
+        .toast.rojo { background: var(--rojo); }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+    <div class="header-titulo">
+        🏪 Copihue
+        <div class="indicador-carga" id="indicadorCarga" title="Cargando..."></div>
+    </div>
+    <div class="header-right">
+        <button class="btn-resumen" onclick="abrirResumen()">📊 Hoy</button>
+    </div>
+</div>
+
+<!-- BUSCADOR -->
+<div class="buscador-wrap">
+    <input type="text" class="buscador-input" id="buscador"
+           placeholder="🔍 Buscar producto..."
+           autocomplete="off" autocorrect="off" spellcheck="false">
+</div>
+
+<!-- RESULTADOS BÚSQUEDA -->
+<div class="resultados" id="resultados"></div>
+
+<!-- PANEL VENTA ACTUAL -->
+<div class="panel-venta" id="panelVenta">
+    <div class="panel-venta-header">
+        <span class="panel-venta-titulo">🛒 Venta actual</span>
+        <button class="btn-limpiar" onclick="limpiarVenta()">🗑 Limpiar</button>
+    </div>
+    <div class="items-venta" id="itemsVenta">
+        <div class="venta-vacia">Sin productos aún</div>
+    </div>
+</div>
+
+<!-- TOTAL + CONFIRMAR -->
+<div class="panel-total">
+    <div>
+        <div class="total-label">TOTAL</div>
+        <div class="total-monto" id="totalMonto">$0</div>
+    </div>
+    <button class="btn-confirmar" id="btnConfirmar" onclick="abrirConfirmacion()" disabled>
+        ✅ Cobrar
+    </button>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<!-- MODAL RESUMEN DEL DÍA -->
+<div class="modal-bg" id="modalResumen" onclick="cerrarModalResumen(event)">
+    <div class="modal-sheet">
+        <div class="modal-handle"></div>
+        <div class="modal-header">
+            <span class="modal-titulo">📊 Resumen del día</span>
+            <button class="modal-cerrar" onclick="cerrarResumen()">✕</button>
+        </div>
+        <div class="resumen-card" id="resumenCard"><!-- se llena dinámico --></div>
+        <div class="resumen-ventas-lista" id="resumenLista"><!-- se llena dinámico --></div>
+        <button class="btn-cerrar-dia" onclick="cerrarDia()">🔒 Cerrar día y resetear</button>
+    </div>
+</div>
+
+<!-- MODAL CONFIRMACIÓN VENTA -->
+<div class="modal-bg modal-confirmacion" id="modalConfirm" onclick="cerrarModalConfirm(event)">
+    <div class="modal-sheet">
+        <div class="modal-handle"></div>
+        <div class="modal-header">
+            <span class="modal-titulo">Confirmar venta</span>
+            <button class="modal-cerrar" onclick="cerrarConfirm()">✕</button>
+        </div>
+        <div class="confirm-producto" id="confirmDetalle"><!-- dinámico --></div>
+        <div class="confirm-acciones">
+            <button class="btn-cancelar-confirm" onclick="cerrarConfirm()">Cancelar</button>
+            <button class="btn-ok-confirm" id="btnOkConfirm" onclick="confirmarVenta()">
+                ✅ Confirmar cobro
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+// ========== CONFIG ==========
+const API_URL = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
+
+let productos = [];
+let ventaActual = []; // [{id, name, price, qty, stockDisponible}]
+
+// ========== CARGA DE PRODUCTOS ==========
+async function cargarProductos() {
+    try {
+        const r = await fetch(API_URL + '?cache=' + Date.now());
+        const data = await r.json();
+        const arr = data.productos || data;
+        productos = arr
+            .filter(p => p.name && p.price > 0)
+            .map(p => ({
+                id: p.id,
+                name: String(p.name).trim(),
+                price: parseInt(p.price) || 0,
+                stock: parseInt(p.stock) || 0,
+                image: `imagenes-productos/${simplificarNombre(String(p.name).trim())}.jpg`
+            }));
+        document.getElementById('indicadorCarga').classList.add('ok');
+        document.getElementById('indicadorCarga').title = `${productos.length} productos cargados`;
+        console.log(`✅ ${productos.length} productos cargados`);
+    } catch(e) {
+        mostrarToast('❌ Error al cargar productos', 'rojo');
+        console.error(e);
+    }
+}
+
+function simplificarNombre(nombre) {
+    return nombre.toLowerCase()
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9 ]/g, "")
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .trim();
+}
+
+// ========== BUSCADOR ==========
+let searchTimeout;
+document.getElementById('buscador').addEventListener('input', function() {
+    clearTimeout(searchTimeout);
+    const term = this.value.trim();
+    if (term.length < 2) {
+        ocultarResultados();
+        return;
+    }
+    searchTimeout = setTimeout(() => buscar(term), 200);
+});
+
+document.getElementById('buscador').addEventListener('focus', function() {
+    if (this.value.trim().length >= 2) mostrarResultados();
+});
+
+function buscar(term) {
+    const termLower = term.toLowerCase();
+    const results = productos
+        .filter(p => p.name.toLowerCase().includes(termLower))
+        .sort((a, b) => {
+            // Priorizar los que tienen stock
+            if (a.stock > 0 && b.stock === 0) return -1;
+            if (a.stock === 0 && b.stock > 0) return 1;
+            return 0;
+        })
+        .slice(0, 20);
+
+    const contenedor = document.getElementById('resultados');
+
+    if (results.length === 0) {
+        contenedor.innerHTML = `<div style="text-align:center;padding:2rem;color:#bbb;">Sin resultados para "${term}"</div>`;
+        mostrarResultados();
+        return;
+    }
+
+    contenedor.innerHTML = results.map(p => {
+        const sinStock = p.stock === 0;
+        const stockBajo = p.stock > 0 && p.stock <= 3;
+        const stockTexto = sinStock ? '❌ Sin stock' :
+                          stockBajo ? `⚠️ Últimas ${p.stock}` :
+                          `✅ Stock: ${p.stock}`;
+        const stockClase = stockBajo ? 'bajo' : '';
+
+        return `
+        <div class="resultado-item ${sinStock ? 'sin-stock' : ''}" onclick="agregarProducto(${p.id})">
+            <img class="resultado-img" src="${p.image}"
+                 onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"
+                 alt="${p.name}">
+            <div class="resultado-img-placeholder" style="display:none;">🛒</div>
+            <div class="resultado-info">
+                <div class="resultado-nombre">${p.name}</div>
+                <div class="resultado-stock ${stockClase}">${stockTexto}</div>
+            </div>
+            <div class="resultado-precio">$${p.price.toLocaleString('es-AR')}</div>
+            <button class="btn-agregar" onclick="event.stopPropagation();agregarProducto(${p.id})">+</button>
+        </div>`;
+    }).join('');
+
+    mostrarResultados();
+}
+
+function mostrarResultados() {
+    document.getElementById('resultados').classList.add('visible');
+    document.getElementById('panelVenta').style.display = 'none';
+    document.querySelector('.panel-total').style.display = 'none';
+}
+
+function ocultarResultados() {
+    document.getElementById('resultados').classList.remove('visible');
+    document.getElementById('panelVenta').style.display = 'flex';
+    document.querySelector('.panel-total').style.display = 'flex';
+}
+
+// Cerrar resultados al tocar fuera
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('.resultados') && !e.target.closest('.buscador-wrap')) {
+        ocultarResultados();
+        document.getElementById('buscador').value = '';
+    }
+});
+
+// ========== AGREGAR PRODUCTO ==========
+function agregarProducto(id) {
+    const producto = productos.find(p => p.id === id);
+    if (!producto || producto.stock === 0) return;
+
+    const existente = ventaActual.find(i => i.id === id);
+    if (existente) {
+        if (existente.qty >= producto.stock) {
+            mostrarToast(`⚠️ Stock máximo: ${producto.stock}`, 'rojo');
+            return;
+        }
+        existente.qty++;
+    } else {
+        ventaActual.push({
+            id: producto.id,
+            name: producto.name,
+            price: producto.price,
+            qty: 1,
+            stockDisponible: producto.stock
+        });
+    }
+
+    // Cerrar buscador y mostrar venta
+    document.getElementById('buscador').value = '';
+    ocultarResultados();
+    document.getElementById('buscador').blur();
+
+    renderVenta();
+    mostrarToast(`✅ ${producto.name.substring(0, 30)}`, 'verde');
+}
+
+function cambiarCantidad(id, delta) {
+    const item = ventaActual.find(i => i.id === id);
+    if (!item) return;
+
+    const nuevaCant = item.qty + delta;
+    if (nuevaCant <= 0) {
+        ventaActual = ventaActual.filter(i => i.id !== id);
+    } else if (nuevaCant > item.stockDisponible) {
+        mostrarToast(`⚠️ Stock máximo: ${item.stockDisponible}`, 'rojo');
+        return;
+    } else {
+        item.qty = nuevaCant;
+    }
+    renderVenta();
+}
+
+function limpiarVenta() {
+    if (ventaActual.length === 0) return;
+    ventaActual = [];
+    renderVenta();
+}
+
+// ========== RENDER VENTA ==========
+function renderVenta() {
+    const contenedor = document.getElementById('itemsVenta');
+    const btnConfirmar = document.getElementById('btnConfirmar');
+    const totalEl = document.getElementById('totalMonto');
+
+    if (ventaActual.length === 0) {
+        contenedor.innerHTML = '<div class="venta-vacia">Sin productos aún</div>';
+        totalEl.textContent = '$0';
+        btnConfirmar.disabled = true;
+        return;
+    }
+
+    const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
+    totalEl.textContent = '$' + total.toLocaleString('es-AR');
+    btnConfirmar.disabled = false;
+
+    contenedor.innerHTML = ventaActual.map(item => `
+        <div class="item-venta">
+            <div class="item-venta-nombre">${item.name}</div>
+            <div class="item-venta-controles">
+                <button class="btn-cant" onclick="cambiarCantidad(${item.id}, -1)">−</button>
+                <span class="item-cant">${item.qty}</span>
+                <button class="btn-cant" onclick="cambiarCantidad(${item.id}, +1)">+</button>
+            </div>
+            <div class="item-subtotal">$${(item.price * item.qty).toLocaleString('es-AR')}</div>
+        </div>
+    `).join('');
+}
+
+// ========== CONFIRMACIÓN Y COBRO ==========
+function abrirConfirmacion() {
+    if (ventaActual.length === 0) return;
+
+    const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
+
+    const detalleHTML = ventaActual.map(item => `
+        <div class="confirm-item">
+            <span>${item.qty}× ${item.name.substring(0, 35)}</span>
+            <span style="font-weight:700;">$${(item.price * item.qty).toLocaleString('es-AR')}</span>
+        </div>
+    `).join('') + `
+        <div class="confirm-total-row">
+            <span>TOTAL</span>
+            <span>$${total.toLocaleString('es-AR')}</span>
+        </div>`;
+
+    document.getElementById('confirmDetalle').innerHTML = detalleHTML;
+    document.getElementById('btnOkConfirm').disabled = false;
+    document.getElementById('btnOkConfirm').textContent = '✅ Confirmar cobro';
+    document.getElementById('modalConfirm').classList.add('open');
+}
+
+async function confirmarVenta() {
+    const btn = document.getElementById('btnOkConfirm');
+    btn.disabled = true;
+    btn.textContent = '⏳ Procesando...';
+
+    const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
+    const hora = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+
+    // Intentar rebajar stock en Apps Script
+    let stockOk = false;
+    try {
+        const ventaData = ventaActual.map(i => ({ id: i.id, name: i.name, qty: i.qty }));
+        const url = API_URL + '?action=vender&data=' + encodeURIComponent(JSON.stringify(ventaData));
+        const r = await fetch(url);
+        const resp = await r.json();
+        stockOk = resp.success === true;
+    } catch(e) {
+        console.warn('No se pudo conectar con Apps Script para rebajar stock:', e);
+    }
+
+    // Guardar en historial local del día pase lo que pase
+    guardarVentaDia({ items: [...ventaActual], total, hora, stockRebajado: stockOk });
+
+    // Actualizar stock local para no vender más de lo que hay
+    ventaActual.forEach(item => {
+        const p = productos.find(pr => pr.id === item.id);
+        if (p) p.stock = Math.max(0, p.stock - item.qty);
+    });
+
+    cerrarConfirm();
+    ventaActual = [];
+    renderVenta();
+
+    mostrarToast(stockOk ? '✅ Venta confirmada' : '✅ Venta registrada (stock manual)', 'verde');
+}
+
+function cerrarConfirm() {
+    document.getElementById('modalConfirm').classList.remove('open');
+}
+function cerrarModalConfirm(e) {
+    if (e.target === document.getElementById('modalConfirm')) cerrarConfirm();
+}
+
+// ========== RESUMEN DEL DÍA ==========
+const HOY_KEY = 'copihue_ventas_' + new Date().toISOString().slice(0, 10);
+
+function guardarVentaDia(venta) {
+    const ventas = JSON.parse(localStorage.getItem(HOY_KEY) || '[]');
+    ventas.push(venta);
+    localStorage.setItem(HOY_KEY, JSON.stringify(ventas));
+}
+
+function abrirResumen() {
+    const ventas = JSON.parse(localStorage.getItem(HOY_KEY) || '[]');
+    const totalDia = ventas.reduce((s, v) => s + v.total, 0);
+    const cantVentas = ventas.length;
+    const ticketPromedio = cantVentas > 0 ? Math.round(totalDia / cantVentas) : 0;
+
+    document.getElementById('resumenCard').innerHTML = `
+        <div class="resumen-stat">
+            <span class="resumen-stat-label">💰 Total del día</span>
+            <span class="resumen-stat-valor grande">$${totalDia.toLocaleString('es-AR')}</span>
+        </div>
+        <div class="resumen-stat">
+            <span class="resumen-stat-label">🛒 Ventas realizadas</span>
+            <span class="resumen-stat-valor">${cantVentas}</span>
+        </div>
+        <div class="resumen-stat">
+            <span class="resumen-stat-label">🎯 Ticket promedio</span>
+            <span class="resumen-stat-valor">$${ticketPromedio.toLocaleString('es-AR')}</span>
+        </div>`;
+
+    if (ventas.length === 0) {
+        document.getElementById('resumenLista').innerHTML =
+            '<div style="text-align:center;padding:1.5rem;color:#bbb;">Sin ventas registradas hoy</div>';
+    } else {
+        document.getElementById('resumenLista').innerHTML =
+            '<div style="font-size:0.75rem;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.5px;padding:12px 0 6px;">Detalle de ventas</div>' +
+            [...ventas].reverse().map(v => `
+                <div class="resumen-venta-item">
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <span class="resumen-venta-hora">🕐 ${v.hora}</span>
+                        <span class="resumen-venta-total">$${v.total.toLocaleString('es-AR')}</span>
+                    </div>
+                    <div class="resumen-venta-detalle">
+                        ${v.items.map(i => `${i.qty}× ${i.name.substring(0, 30)}`).join(' · ')}
+                    </div>
+                    ${!v.stockRebajado ? '<div style="font-size:0.7rem;color:#f57c00;margin-top:3px;">⚠️ Stock pendiente de rebaja manual</div>' : ''}
+                </div>
+            `).join('');
+    }
+
+    document.getElementById('modalResumen').classList.add('open');
+}
+
+function cerrarResumen() {
+    document.getElementById('modalResumen').classList.remove('open');
+}
+function cerrarModalResumen(e) {
+    if (e.target === document.getElementById('modalResumen')) cerrarResumen();
+}
+
+function cerrarDia() {
+    if (!confirm('¿Cerrar el día? Esto borra el historial local de ventas de hoy.')) return;
+    localStorage.removeItem(HOY_KEY);
+    cerrarResumen();
+    mostrarToast('🔒 Día cerrado', 'verde');
+}
+
+// ========== TOAST ==========
+let toastTimeout;
+function mostrarToast(msg, tipo = '') {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = 'toast visible ' + tipo;
+    clearTimeout(toastTimeout);
+    toastTimeout = setTimeout(() => t.classList.remove('visible'), 2500);
+}
+
+// ========== INIT ==========
+cargarProductos();
+renderVenta();
+</script>
+</body>
+</html>
