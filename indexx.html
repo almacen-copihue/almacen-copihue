@@ -1656,7 +1656,10 @@
 
 <div class="container">
     <div id="adminNotification" class="admin-notification" style="display: none;">
-        <strong>🔐 MODO ADMIN ACTIVADO</strong> - Recibirás alertas de stock bajo
+        <strong>🔐 MODO ADMIN</strong> · 
+        <button onclick="abrirListaCompras()" style="background:white;color:#1b5e20;border:none;border-radius:8px;padding:4px 12px;font-weight:700;cursor:pointer;font-size:0.85rem;">
+            🛒 Lista de compras
+        </button>
     </div>
 
     <section class="hero">
@@ -2625,7 +2628,8 @@ function processAPIData(apiData) {
             relampago: relampago,
             destacada: destacada,
             especial: especial,
-            normal: normal
+            normal: normal,
+            proveedor: String(item.proveedor || item.supermercado || '').trim().toUpperCase()
         };
         
         products.push(product);
@@ -3313,6 +3317,152 @@ function sendOrderViaWhatsApp() {
     }, 500);
 }
 
+
+// ========== LISTA DE COMPRAS ADMIN ==========
+let lcProveedorSeleccionado = '';
+
+function abrirListaCompras() {
+    const modal = document.getElementById('listaComprasModal');
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    
+    // Generar botones de proveedores únicos
+    const proveedores = [...new Set(
+        products
+            .map(p => p.proveedor)
+            .filter(p => p && p.length > 0)
+    )].sort();
+    
+    const contenedor = document.getElementById('lcProveedores');
+    
+    if (proveedores.length === 0) {
+        contenedor.innerHTML = `
+            <div style="color:#e53935;font-size:0.85rem;padding:8px;background:#ffebee;border-radius:8px;width:100%;">
+                ⚠️ No hay columna "proveedor" en la planilla todavía.<br>
+                Agregá una columna llamada <strong>proveedor</strong> con el nombre del supermercado en cada fila.
+            </div>`;
+        return;
+    }
+    
+    contenedor.innerHTML = proveedores.map(p => `
+        <button onclick="seleccionarProveedor('${p}')"
+                id="lcBtn_${p.replace(/\s/g,'_')}"
+                style="padding:8px 14px;border-radius:20px;border:2px solid #2e7d32;background:white;color:#2e7d32;font-weight:600;cursor:pointer;font-size:0.85rem;transition:all 0.2s;">
+            🏪 ${p}
+        </button>
+    `).join('');
+    
+    // Reset
+    lcProveedorSeleccionado = '';
+    document.getElementById('lcProductos').innerHTML = '<div style="text-align:center;color:#aaa;padding:2rem;font-size:0.9rem;">Seleccioná un proveedor para ver los productos</div>';
+    document.getElementById('lcBtnWA').style.display = 'none';
+    document.getElementById('lcSubtitulo').textContent = 'Seleccioná el supermercado';
+}
+
+function seleccionarProveedor(proveedor) {
+    lcProveedorSeleccionado = proveedor;
+    
+    // Resaltar botón activo
+    document.querySelectorAll('#lcProveedores button').forEach(btn => {
+        btn.style.background = 'white';
+        btn.style.color = '#2e7d32';
+    });
+    const btnId = 'lcBtn_' + proveedor.replace(/\s/g,'_');
+    const btnActivo = document.getElementById(btnId);
+    if (btnActivo) {
+        btnActivo.style.background = '#2e7d32';
+        btnActivo.style.color = 'white';
+    }
+    
+    // Filtrar productos de ese proveedor
+    const lista = products.filter(p => p.proveedor === proveedor && p.stockNumber > 0);
+    const sinStock = products.filter(p => p.proveedor === proveedor && p.stockNumber === 0);
+    
+    document.getElementById('lcSubtitulo').textContent = `${proveedor} · ${lista.length} productos`;
+    
+    if (lista.length === 0 && sinStock.length === 0) {
+        document.getElementById('lcProductos').innerHTML = '<div style="text-align:center;color:#aaa;padding:2rem;">No hay productos de este proveedor</div>';
+        document.getElementById('lcBtnWA').style.display = 'none';
+        return;
+    }
+    
+    const filas = (arr, agotado) => arr.map(p => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #f5f5f5;${agotado ? 'opacity:0.45;' : ''}">
+            <div>
+                <div style="font-weight:600;font-size:0.9rem;color:#222;">${p.name}</div>
+                <div style="font-size:0.75rem;color:#888;">${p.category}${agotado ? ' · ⚠️ SIN STOCK' : ` · Stock: ${p.stockNumber}`}</div>
+            </div>
+            <div style="font-weight:700;color:#2e7d32;font-size:0.95rem;">$${p.price}</div>
+        </div>
+    `).join('');
+    
+    document.getElementById('lcProductos').innerHTML = `
+        <div style="margin-top:4px;">
+            ${lista.length > 0 ? `
+                <div style="font-size:0.75rem;font-weight:700;color:#555;margin:8px 0 4px;text-transform:uppercase;letter-spacing:0.5px;">✅ Con stock (${lista.length})</div>
+                ${filas(lista, false)}
+            ` : ''}
+            ${sinStock.length > 0 ? `
+                <div style="font-size:0.75rem;font-weight:700;color:#bbb;margin:14px 0 4px;text-transform:uppercase;letter-spacing:0.5px;">🔴 Sin stock (${sinStock.length}) — para reponer</div>
+                ${filas(sinStock, true)}
+            ` : ''}
+        </div>
+    `;
+    
+    document.getElementById('lcBtnWA').style.display = 'block';
+}
+
+function enviarListaWhatsApp() {
+    if (!lcProveedorSeleccionado) return;
+    
+    const lista = products.filter(p => p.proveedor === lcProveedorSeleccionado);
+    const conStock = lista.filter(p => p.stockNumber > 0);
+    const sinStock = lista.filter(p => p.stockNumber === 0);
+    
+    const hoy = new Date().toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long' });
+    
+    let msg = `🛒 *LISTA DE COMPRAS – ${lcProveedorSeleccionado}*
+`;
+    msg += `📅 ${hoy.charAt(0).toUpperCase() + hoy.slice(1)}
+`;
+    msg += `━━━━━━━━━━━━━━━━━━━━
+
+`;
+    
+    if (conStock.length > 0) {
+        msg += `✅ *CON STOCK (revisar precio):*
+`;
+        conStock.forEach(p => {
+            msg += `• ${p.name} — $${p.price}
+`;
+        });
+        msg += `
+`;
+    }
+    
+    if (sinStock.length > 0) {
+        msg += `🔴 *SIN STOCK (reponer):*
+`;
+        sinStock.forEach(p => {
+            msg += `• ${p.name} — $${p.price} (último precio)
+`;
+        });
+    }
+    
+    msg += `
+━━━━━━━━━━━━━━━━━━━━
+`;
+    msg += `📦 Total productos: ${lista.length}`;
+    
+    const url = `https://wa.me/5492944907380?text=${encodeURIComponent(msg)}`;
+    window.open(url, '_blank');
+    showNotification('📲 Abriendo WhatsApp con la lista...', 'success');
+}
+
+function cerrarListaCompras() {
+    document.getElementById('listaComprasModal').style.display = 'none';
+    document.body.style.overflow = '';
+}
 
 // ========== PRECIO TÉCNICO ADMIN ==========
 function calcularPrecioTecnico() {
@@ -4371,6 +4521,45 @@ function monitorearStockPromos() {
 
 console.log('✅ Sistema mejorado con Home, Enter en búsqueda y fix carrito - Versión ' + APP_VERSION);
 </script>
+<!-- ========== MODAL LISTA DE COMPRAS ADMIN ========== -->
+<div id="listaComprasModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.75);z-index:9998;justify-content:center;align-items:flex-end;">
+    <div style="background:white;border-radius:24px 24px 0 0;width:100%;max-width:540px;margin:0 auto;max-height:90vh;overflow-y:auto;padding-bottom:30px;">
+        <div style="width:40px;height:4px;background:#ddd;border-radius:4px;margin:12px auto 0;"></div>
+        
+        <!-- Header -->
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px 12px;border-bottom:1px solid #f0f0f0;">
+            <div>
+                <div style="font-weight:700;font-size:1.1rem;color:#1b5e20;">🛒 Lista de Compras</div>
+                <div style="font-size:0.8rem;color:#888;" id="lcSubtitulo">Seleccioná el supermercado</div>
+            </div>
+            <button onclick="cerrarListaCompras()" style="background:#f5f5f5;border:none;border-radius:50%;width:32px;height:32px;font-size:1.1rem;cursor:pointer;">✕</button>
+        </div>
+
+        <!-- Selector de proveedor -->
+        <div style="padding:14px 20px 10px;">
+            <div style="font-size:0.8rem;color:#666;margin-bottom:8px;font-weight:600;">SUPERMERCADO / PROVEEDOR:</div>
+            <div id="lcProveedores" style="display:flex;flex-wrap:wrap;gap:8px;">
+                <!-- Se genera dinámicamente -->
+            </div>
+        </div>
+
+        <!-- Lista de productos -->
+        <div id="lcProductos" style="padding:0 20px;">
+            <div style="text-align:center;color:#aaa;padding:2rem;font-size:0.9rem;">
+                Seleccioná un proveedor para ver los productos
+            </div>
+        </div>
+
+        <!-- Botón WhatsApp -->
+        <div style="padding:0 20px;margin-top:10px;" id="lcAcciones" style="display:none;">
+            <button onclick="enviarListaWhatsApp()" id="lcBtnWA" 
+                    style="display:none;width:100%;padding:15px;background:linear-gradient(135deg,#25d366,#128c7e);color:white;border:none;border-radius:14px;font-size:1rem;font-weight:700;cursor:pointer;">
+                📲 Enviar lista por WhatsApp
+            </button>
+        </div>
+    </div>
+</div>
+
 <!-- ========== MODAL DEEP LINK PRODUCTO ========== -->
 <div id="deepLinkModal" onclick="cerrarDeepLinkModal(event)">
     <div class="deeplink-sheet" id="deepLinkSheet">
