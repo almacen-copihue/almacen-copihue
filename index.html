@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- 140226_0200_PRECIO_ANTES_AHORA_FINAL -->
+<!-- 20/02/2026_2350_PRECIO_ANTES_AHORA_FINAL -->
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -1656,7 +1656,10 @@
 
 <div class="container">
     <div id="adminNotification" class="admin-notification" style="display: none;">
-        <strong>🔐 MODO ADMIN ACTIVADO</strong> - Recibirás alertas de stock bajo
+        <strong>🔐 MODO ADMIN</strong> · 
+        <button onclick="abrirListaCompras()" style="background:white;color:#1b5e20;border:none;border-radius:8px;padding:4px 12px;font-weight:700;cursor:pointer;font-size:0.85rem;">
+            🛒 Lista de compras
+        </button>
     </div>
 
     <section class="hero">
@@ -1790,6 +1793,33 @@
     <div id="adminStatus" style="font-size: 0.75rem; text-align: center; margin-top: 0.5rem; opacity: 0.8;">
         <!-- Estado admin -->
     </div>
+    
+    <!-- CALCULADORA PRECIO TÉCNICO -->
+    <div style="margin-top:0.8rem;background:rgba(255,255,255,0.15);border-radius:10px;padding:10px;">
+        <div style="font-size:0.75rem;font-weight:bold;margin-bottom:6px;text-align:center;">💰 PRECIO TÉCNICO</div>
+        <div style="display:flex;gap:5px;margin-bottom:6px;">
+            <input id="ptPrecio" type="number" placeholder="Precio $" 
+                   style="flex:1;padding:5px 8px;border-radius:7px;border:none;font-size:0.85rem;width:70px;"
+                   oninput="calcularPrecioTecnico()">
+            <select id="ptTipo" onchange="calcularPrecioTecnico()"
+                    style="flex:1;padding:5px 4px;border-radius:7px;border:none;font-size:0.75rem;">
+                <option value="">Tipo oferta</option>
+                <option value="2x1">⚡ 2x1</option>
+                <option value="3x2">⚡ 3x2</option>
+                <option value="4x3">⚡ 4x3</option>
+                <option value="5x4">⚡ 5x4</option>
+                <option value="6x5">⚡ 6x5</option>
+                <option value="7x6">⚡ 7x6</option>
+                <option value="2da50">⚡ 2da50</option>
+                <option value="esp10">⭐ Especial -10%</option>
+                <option value="dest15">🔥 Destacada -15%</option>
+                <option value="dest20">🔥 Destacada -20%</option>
+                <option value="dest25">🔥 Destacada -25%</option>
+                <option value="dest30">🔥 Destacada -30%</option>
+            </select>
+        </div>
+        <div id="ptResultado" style="font-size:0.8rem;text-align:center;min-height:18px;color:#fff;"></div>
+    </div>
 </div>
 
 <div class="search-modal" id="searchModal">
@@ -1819,6 +1849,9 @@
             <!-- Items del carrito -->
         </div>
         <div class="cart-total" id="cartTotal">Total: $0</div>
+        <button id="repeatOrderBtn" onclick="repetirUltimoPedido()" style="display:none;width:100%;padding:12px;margin-bottom:10px;background:white;color:#2e7d32;border:2px solid #2e7d32;border-radius:12px;font-size:0.95rem;font-weight:600;cursor:pointer;">
+            🔄 Repetir último pedido
+        </button>
         <button class="send-order" id="sendOrder">Enviar Pedido por WhatsApp</button>
     </div>
 </div>
@@ -2595,7 +2628,8 @@ function processAPIData(apiData) {
             relampago: relampago,
             destacada: destacada,
             especial: especial,
-            normal: normal
+            normal: normal,
+            proveedor: String(item.Proveedor || item.proveedor || item.supermercado || '').trim().toUpperCase()
         };
         
         products.push(product);
@@ -2606,8 +2640,21 @@ function processAPIData(apiData) {
     renderCategories();
     actualizarTodasLasVistas();
     
-    // Actualizar cada minuto
-    setInterval(actualizarTodasLasVistas, 60000);
+    // Actualizar solo las secciones de ofertas cada minuto (UNA sola instancia)
+    if (window._intervaloActualizacion) {
+        clearInterval(window._intervaloActualizacion);
+    }
+    window._intervaloActualizacion = setInterval(actualizarSoloOfertas, 60000);
+}
+
+function actualizarSoloOfertas() {
+    // Reconstruye pools y secciones de ofertas SIN tocar el grid principal del usuario
+    construirPools();
+    seleccionarProductosOfertas();
+    renderizarContenedorOfertas('relampago', productosRelampago);
+    renderizarContenedorOfertas('destacadas', productosDestacadas);
+    renderizarContenedorOfertas('especiales', productosEspeciales);
+    // NO llama a renderizarProductosNormales() para no interrumpir al usuario
 }
 
 function simplificarNombre(nombre) {
@@ -2899,12 +2946,34 @@ function updateCartCount() {
 function renderCartItems() {
     const cartItems = document.getElementById('cartItems');
     const cartTotal = document.getElementById('cartTotal');
+    const repeatBtn = document.getElementById('repeatOrderBtn');
     
     if (cart.length === 0) {
-        cartItems.innerHTML = "<p style='text-align: center; padding: 2rem; color: #666;'>Tu carrito está vacío</p>";
+        // Verificar si hay pedido anterior guardado
+        const ultimoPedido = obtenerInfoUltimoPedido();
+        if (ultimoPedido) {
+            const resumenItems = ultimoPedido.items.map(i => i.name).join(', ');
+            const preview = resumenItems.length > 60 ? resumenItems.substring(0, 60) + '...' : resumenItems;
+            cartItems.innerHTML = `
+                <div style="text-align:center;padding:1.5rem 1rem;">
+                    <div style="font-size:2.5rem;margin-bottom:0.5rem;">🛒</div>
+                    <p style="color:#666;margin-bottom:1.2rem;">Tu carrito está vacío</p>
+                    <div style="background:#f1f8f1;border:1px dashed #4caf50;border-radius:12px;padding:14px;text-align:left;">
+                        <div style="font-size:0.75rem;color:#888;margin-bottom:4px;">📋 Último pedido · ${ultimoPedido.fecha} ${ultimoPedido.hora}</div>
+                        <div style="font-size:0.85rem;color:#333;line-height:1.4;">${preview}</div>
+                    </div>
+                </div>`;
+            if (repeatBtn) repeatBtn.style.display = 'block';
+        } else {
+            cartItems.innerHTML = "<p style='text-align: center; padding: 2rem; color: #666;'>Tu carrito está vacío</p>";
+            if (repeatBtn) repeatBtn.style.display = 'none';
+        }
         cartTotal.textContent = "Total: $0";
         return;
     }
+    
+    // Carrito con items: ocultar botón repetir
+    if (repeatBtn) repeatBtn.style.display = 'none';
     
     let total = 0;
     let totalNormal = 0;
@@ -3233,6 +3302,9 @@ function sendOrderViaWhatsApp() {
     const encodedMessage = encodeURIComponent(message);
     const whatsappURL = `https://wa.me/${phoneNumber}?text=${encodedMessage}`;
 
+    // Guardar último pedido antes de limpiar
+    guardarUltimoPedido();
+
     // Limpiar carrito
     cart = [];
     updateCartCount();
@@ -3246,7 +3318,256 @@ function sendOrderViaWhatsApp() {
 }
 
 
-// ========== BÚSQUEDA MEJORADA CON ENTER ==========
+// ========== LISTA DE COMPRAS ADMIN ==========
+let lcProveedorSeleccionado = '';
+
+function abrirListaCompras() {
+    const modal = document.getElementById('listaComprasModal');
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    
+    // Generar botones de proveedores únicos
+    const proveedores = [...new Set(
+        products
+            .map(p => p.proveedor)
+            .filter(p => p && p.length > 0)
+    )].sort();
+    
+    const contenedor = document.getElementById('lcProveedores');
+    
+    if (proveedores.length === 0) {
+        contenedor.innerHTML = `
+            <div style="color:#e53935;font-size:0.85rem;padding:8px;background:#ffebee;border-radius:8px;width:100%;">
+                ⚠️ No hay columna "proveedor" en la planilla todavía.<br>
+                Agregá una columna llamada <strong>proveedor</strong> con el nombre del supermercado en cada fila.
+            </div>`;
+        return;
+    }
+    
+    contenedor.innerHTML = proveedores.map(p => `
+        <button onclick="seleccionarProveedor('${p}')"
+                id="lcBtn_${p.replace(/\s/g,'_')}"
+                style="padding:8px 14px;border-radius:20px;border:2px solid #2e7d32;background:white;color:#2e7d32;font-weight:600;cursor:pointer;font-size:0.85rem;transition:all 0.2s;">
+            🏪 ${p}
+        </button>
+    `).join('');
+    
+    // Reset
+    lcProveedorSeleccionado = '';
+    document.getElementById('lcProductos').innerHTML = '<div style="text-align:center;color:#aaa;padding:2rem;font-size:0.9rem;">Seleccioná un proveedor para ver los productos</div>';
+    document.getElementById('lcBtnWA').style.display = 'none';
+    document.getElementById('lcSubtitulo').textContent = 'Seleccioná el supermercado';
+}
+
+function seleccionarProveedor(proveedor) {
+    lcProveedorSeleccionado = proveedor;
+    
+    // Resaltar botón activo
+    document.querySelectorAll('#lcProveedores button').forEach(btn => {
+        btn.style.background = 'white';
+        btn.style.color = '#2e7d32';
+    });
+    const btnId = 'lcBtn_' + proveedor.replace(/\s/g,'_');
+    const btnActivo = document.getElementById(btnId);
+    if (btnActivo) {
+        btnActivo.style.background = '#2e7d32';
+        btnActivo.style.color = 'white';
+    }
+    
+    // Filtrar productos de ese proveedor
+    const lista = products.filter(p => p.proveedor === proveedor && p.stockNumber > 0);
+    const sinStock = products.filter(p => p.proveedor === proveedor && p.stockNumber === 0);
+    
+    document.getElementById('lcSubtitulo').textContent = `${proveedor} · ${lista.length} productos`;
+    
+    if (lista.length === 0 && sinStock.length === 0) {
+        document.getElementById('lcProductos').innerHTML = '<div style="text-align:center;color:#aaa;padding:2rem;">No hay productos de este proveedor</div>';
+        document.getElementById('lcBtnWA').style.display = 'none';
+        return;
+    }
+    
+    const filas = (arr, agotado) => arr.map(p => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #f5f5f5;${agotado ? 'opacity:0.45;' : ''}">
+            <div>
+                <div style="font-weight:600;font-size:0.9rem;color:#222;">${p.name}</div>
+                <div style="font-size:0.75rem;color:#888;">${p.category}${agotado ? ' · ⚠️ SIN STOCK' : ` · Stock: ${p.stockNumber}`}</div>
+            </div>
+            <div style="font-weight:700;color:#2e7d32;font-size:0.95rem;">$${p.price}</div>
+        </div>
+    `).join('');
+    
+    document.getElementById('lcProductos').innerHTML = `
+        <div style="margin-top:4px;">
+            ${lista.length > 0 ? `
+                <div style="font-size:0.75rem;font-weight:700;color:#555;margin:8px 0 4px;text-transform:uppercase;letter-spacing:0.5px;">✅ Con stock (${lista.length})</div>
+                ${filas(lista, false)}
+            ` : ''}
+            ${sinStock.length > 0 ? `
+                <div style="font-size:0.75rem;font-weight:700;color:#bbb;margin:14px 0 4px;text-transform:uppercase;letter-spacing:0.5px;">🔴 Sin stock (${sinStock.length}) — para reponer</div>
+                ${filas(sinStock, true)}
+            ` : ''}
+        </div>
+    `;
+    
+    document.getElementById('lcBtnWA').style.display = 'block';
+}
+
+function enviarListaWhatsApp() {
+    if (!lcProveedorSeleccionado) return;
+    
+    const lista = products.filter(p => p.proveedor === lcProveedorSeleccionado);
+    const conStock = lista.filter(p => p.stockNumber > 0);
+    const sinStock = lista.filter(p => p.stockNumber === 0);
+    
+    const hoy = new Date().toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long' });
+    
+    let msg = `🛒 *LISTA DE COMPRAS – ${lcProveedorSeleccionado}*
+`;
+    msg += `📅 ${hoy.charAt(0).toUpperCase() + hoy.slice(1)}
+`;
+    msg += `━━━━━━━━━━━━━━━━━━━━
+
+`;
+    
+    if (conStock.length > 0) {
+        msg += `✅ *CON STOCK (revisar precio):*
+`;
+        conStock.forEach(p => {
+            msg += `• ${p.name} — $${p.price}
+`;
+        });
+        msg += `
+`;
+    }
+    
+    if (sinStock.length > 0) {
+        msg += `🔴 *SIN STOCK (reponer):*
+`;
+        sinStock.forEach(p => {
+            msg += `• ${p.name} — $${p.price} (último precio)
+`;
+        });
+    }
+    
+    msg += `
+━━━━━━━━━━━━━━━━━━━━
+`;
+    msg += `📦 Total productos: ${lista.length}`;
+    
+    const url = `https://wa.me/5492944907380?text=${encodeURIComponent(msg)}`;
+    window.open(url, '_blank');
+    showNotification('📲 Abriendo WhatsApp con la lista...', 'success');
+}
+
+function cerrarListaCompras() {
+    document.getElementById('listaComprasModal').style.display = 'none';
+    document.body.style.overflow = '';
+}
+
+// ========== PRECIO TÉCNICO ADMIN ==========
+function calcularPrecioTecnico() {
+    const precio = parseFloat(document.getElementById('ptPrecio').value);
+    const tipo = document.getElementById('ptTipo').value;
+    const resultado = document.getElementById('ptResultado');
+    
+    if (!precio || !tipo) {
+        resultado.innerHTML = '';
+        return;
+    }
+    
+    let precioTecnico = 0;
+    let descuentoReal = 0;
+    let detalle = '';
+    
+    switch(tipo) {
+        case '2x1':   precioTecnico = precio * 1/2;   break;
+        case '3x2':   precioTecnico = precio * 2/3;   break;
+        case '4x3':   precioTecnico = precio * 3/4;   break;
+        case '5x4':   precioTecnico = precio * 4/5;   break;
+        case '6x5':   precioTecnico = precio * 5/6;   break;
+        case '7x6':   precioTecnico = precio * 6/7;   break;
+        case '2da50': precioTecnico = precio * 1.5/2; break;
+        case 'esp10': precioTecnico = precio * 0.90;  break;
+        case 'dest15': precioTecnico = precio * 0.85; break;
+        case 'dest20': precioTecnico = precio * 0.80; break;
+        case 'dest25': precioTecnico = precio * 0.75; break;
+        case 'dest30': precioTecnico = precio * 0.70; break;
+    }
+    
+    precioTecnico = Math.round(precioTecnico);
+    descuentoReal = Math.round(((precio - precioTecnico) / precio) * 100);
+    
+    resultado.innerHTML = `
+        <span style="background:rgba(255,235,59,0.3);padding:3px 8px;border-radius:6px;">
+            💵 <strong>$${precioTecnico}</strong>/u real · -${descuentoReal}% efectivo
+        </span>`;
+}
+
+// ========== REPETIR ÚLTIMO PEDIDO ==========
+
+function guardarUltimoPedido() {
+    if (cart.length === 0) return;
+    
+    // Guardar solo lo esencial: id y cantidad (los precios se recalculan en vivo)
+    const pedidoSimplificado = cart.map(item => ({
+        id: item.id,
+        quantity: item.quantity,
+        name: item.name
+    }));
+    
+    const pedidoGuardado = {
+        items: pedidoSimplificado,
+        fecha: new Date().toLocaleDateString('es-AR'),
+        hora: new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
+    };
+    
+    localStorage.setItem('ultimo_pedido', JSON.stringify(pedidoGuardado));
+    console.log('💾 Último pedido guardado:', pedidoGuardado);
+}
+
+function repetirUltimoPedido() {
+    const guardado = localStorage.getItem('ultimo_pedido');
+    if (!guardado) {
+        showNotification('⚠️ No hay pedido anterior guardado', 'warning');
+        return;
+    }
+    
+    const pedido = JSON.parse(guardado);
+    let agregados = 0;
+    let sinStock = [];
+    
+    pedido.items.forEach(item => {
+        const product = products.find(p => p.id == item.id);
+        if (product && product.stockNumber > 0) {
+            // Agregar la cantidad exacta del pedido anterior
+            for (let i = 0; i < item.quantity; i++) {
+                addToCart(product.id);
+            }
+            agregados++;
+        } else {
+            sinStock.push(item.name);
+        }
+    });
+    
+    if (agregados > 0) {
+        showNotification(`✅ ${agregados} producto${agregados > 1 ? 's' : ''} agregado${agregados > 1 ? 's' : ''} al carrito`, 'success');
+    }
+    if (sinStock.length > 0) {
+        setTimeout(() => {
+            showNotification(`⚠️ Sin stock: ${sinStock.join(', ').substring(0, 40)}...`, 'warning');
+        }, 1500);
+    }
+    
+    renderCartItems();
+}
+
+function obtenerInfoUltimoPedido() {
+    const guardado = localStorage.getItem('ultimo_pedido');
+    if (!guardado) return null;
+    return JSON.parse(guardado);
+}
+
+
 function setupSearch() {
     const productSearch = document.getElementById('productSearch');
     const mobileSearch = document.getElementById('mobileSearch');
@@ -4200,6 +4521,45 @@ function monitorearStockPromos() {
 
 console.log('✅ Sistema mejorado con Home, Enter en búsqueda y fix carrito - Versión ' + APP_VERSION);
 </script>
+<!-- ========== MODAL LISTA DE COMPRAS ADMIN ========== -->
+<div id="listaComprasModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.75);z-index:9998;justify-content:center;align-items:flex-end;">
+    <div style="background:white;border-radius:24px 24px 0 0;width:100%;max-width:540px;margin:0 auto;max-height:90vh;overflow-y:auto;padding-bottom:30px;">
+        <div style="width:40px;height:4px;background:#ddd;border-radius:4px;margin:12px auto 0;"></div>
+        
+        <!-- Header -->
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px 12px;border-bottom:1px solid #f0f0f0;">
+            <div>
+                <div style="font-weight:700;font-size:1.1rem;color:#1b5e20;">🛒 Lista de Compras</div>
+                <div style="font-size:0.8rem;color:#888;" id="lcSubtitulo">Seleccioná el supermercado</div>
+            </div>
+            <button onclick="cerrarListaCompras()" style="background:#f5f5f5;border:none;border-radius:50%;width:32px;height:32px;font-size:1.1rem;cursor:pointer;">✕</button>
+        </div>
+
+        <!-- Selector de proveedor -->
+        <div style="padding:14px 20px 10px;">
+            <div style="font-size:0.8rem;color:#666;margin-bottom:8px;font-weight:600;">SUPERMERCADO / PROVEEDOR:</div>
+            <div id="lcProveedores" style="display:flex;flex-wrap:wrap;gap:8px;">
+                <!-- Se genera dinámicamente -->
+            </div>
+        </div>
+
+        <!-- Lista de productos -->
+        <div id="lcProductos" style="padding:0 20px;">
+            <div style="text-align:center;color:#aaa;padding:2rem;font-size:0.9rem;">
+                Seleccioná un proveedor para ver los productos
+            </div>
+        </div>
+
+        <!-- Botón WhatsApp -->
+        <div style="padding:0 20px;margin-top:10px;" id="lcAcciones" style="display:none;">
+            <button onclick="enviarListaWhatsApp()" id="lcBtnWA" 
+                    style="display:none;width:100%;padding:15px;background:linear-gradient(135deg,#25d366,#128c7e);color:white;border:none;border-radius:14px;font-size:1rem;font-weight:700;cursor:pointer;">
+                📲 Enviar lista por WhatsApp
+            </button>
+        </div>
+    </div>
+</div>
+
 <!-- ========== MODAL DEEP LINK PRODUCTO ========== -->
 <div id="deepLinkModal" onclick="cerrarDeepLinkModal(event)">
     <div class="deeplink-sheet" id="deepLinkSheet">
