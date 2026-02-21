@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- 20/02/2026_2350_PRECIO_ANTES_AHORA_FINAL -->
+<!-- 140226_0200_PRECIO_ANTES_AHORA_FINAL -->
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -1785,7 +1785,10 @@
 <div class="admin-panel" id="adminPanel">
     <h3>🔧 PANEL ADMIN</h3>
     <button class="admin-btn" id="btnMostrarTodasOfertas" onclick="toggleMostrarTodasOfertas()">
-        👀 Ver Todas las Ofertas
+        ⚡ Ver Ofertas Relámpago
+    </button>
+    <button class="admin-btn" id="btnMostrarTodasDestacadas" onclick="toggleMostrarTodasDestacadas()">
+        🔥 Ver Todas las Destacadas
     </button>
     <button class="admin-btn" id="btnMostrarTodasEspeciales" onclick="toggleMostrarTodasEspeciales()">
         👁️ Ver Todas las Especiales
@@ -1953,6 +1956,7 @@ let idsEnOfertas = new Set();
 
 // MODO ADMIN: Mostrar todas las ofertas
 let modoMostrarTodasOfertas = false;
+let modoMostrarTodasDestacadas = false;
 let modoMostrarTodasEspeciales = false;
 
 // ========== SISTEMA DE ROTACIÓN DIARIA ==========
@@ -2114,11 +2118,16 @@ function seleccionarProductosOfertas() {
     }
     
     // 2. DESTACADAS (segunda prioridad)
-    if (validarHorario('destacadas')) {
+    if (validarHorario('destacadas') || (esAdmin && modoMostrarTodasDestacadas)) {
         const poolFiltrado = poolDestacadas.filter(p => !idsEnOfertas.has(p.id));
         
+        // MODO ADMIN: mostrar TODAS
+        if (esAdmin && modoMostrarTodasDestacadas) {
+            productosDestacadas = poolFiltrado;
+            console.log(`🔥 [ADMIN] Mostrando TODAS las destacadas: ${productosDestacadas.length}`);
+        }
         // Si hay más de 9, rotar; si no, mostrar todos
-        if (poolFiltrado.length > 9) {
+        else if (poolFiltrado.length > 9) {
             productosDestacadas = ROTACION_SISTEMA.selectRotatedProducts(
                 poolFiltrado, 
                 9, 
@@ -2590,6 +2599,11 @@ function processAPIData(apiData) {
         }
     });
     console.log('✅ Adaptación completada');
+    // DEBUG: mostrar todas las keys del primer producto para ver nombres exactos
+    if (productosArray.length > 0) {
+        console.log('🔍 COLUMNAS QUE LLEGAN DE LA API:', Object.keys(productosArray[0]));
+        console.log('🔍 PRIMER PRODUCTO COMPLETO:', productosArray[0]);
+    }
     // ========== FIN ADAPTADOR ==========
     
     products = [];
@@ -2629,7 +2643,11 @@ function processAPIData(apiData) {
             destacada: destacada,
             especial: especial,
             normal: normal,
-            proveedor: String(item.Proveedor || item.proveedor || item.supermercado || '').trim().toUpperCase()
+            proveedor: (() => {
+                // Buscar la columna proveedor sin importar mayúsculas/minúsculas
+                const key = Object.keys(item).find(k => k.toLowerCase().trim() === 'proveedor');
+                return key ? String(item[key]).trim().toUpperCase() : '';
+            })()
         };
         
         products.push(product);
@@ -3648,101 +3666,115 @@ function setupSearch() {
     clearMobileSearchBtn.addEventListener('click', clearMobileSearch);
 }
 
+// ========== HELPER: TARJETA DE BÚSQUEDA CON OFERTAS Y COMPARTIR ==========
+function generarTarjetaBusqueda(product) {
+    const esAdminTodas = esAdmin && modoMostrarTodasOfertas;
+    const esAdminTodasEsp = esAdmin && modoMostrarTodasEspeciales;
+    const esPromo = product.category === 'PROMOS';
+
+    let precioHTML = '';
+    let badgeOferta = '';
+
+    if (product.relampago > 0 && (validarHorario('relampago') || esAdminTodas)) {
+        const oferta = OFERTAS_RELAMPAGO_SISTEMA[product.relampago];
+        if (oferta) {
+            badgeOferta = `<div style="position:absolute;top:8px;left:8px;background:linear-gradient(135deg,#ff3d00,#d50000);color:white;padding:4px 8px;border-radius:8px;font-size:0.75rem;font-weight:bold;z-index:10;">⚡ ${oferta.nombre}</div>`;
+            precioHTML = `<div style="font-size:0.9rem;color:#555;">$${product.price} c/u</div>
+                <div style="background:#fff3e0;color:#ff6f00;padding:5px 8px;border-radius:8px;font-size:0.8rem;font-weight:bold;margin-top:4px;">${oferta.eslogan}</div>`;
+        }
+    } else if (product.destacada > 0 && validarHorario('destacadas')) {
+        const po = Math.round(product.price * (1 - product.destacada / 100));
+        badgeOferta = `<div style="position:absolute;top:8px;left:8px;background:linear-gradient(135deg,#ff6f00,#f57c00);color:white;padding:4px 8px;border-radius:8px;font-size:0.75rem;font-weight:bold;z-index:10;">🔥 -${product.destacada}%</div>`;
+        precioHTML = `<div style="text-decoration:line-through;color:#999;font-size:0.85rem;">$${product.price}</div>
+            <div style="font-size:1.2rem;font-weight:900;color:#ff6f00;">$${po}</div>
+            <div style="font-size:0.75rem;color:#4caf50;">Ahorrás $${product.price - po}</div>`;
+    } else if (product.especial === 1 && (validarHorario('especiales') || esAdminTodasEsp)) {
+        const po = Math.round(product.price * 0.9);
+        badgeOferta = `<div style="position:absolute;top:8px;left:8px;background:linear-gradient(135deg,#2196f3,#1976d2);color:white;padding:4px 8px;border-radius:8px;font-size:0.75rem;font-weight:bold;z-index:10;">⭐ -10%</div>`;
+        precioHTML = `<div style="text-decoration:line-through;color:#999;font-size:0.85rem;">$${product.price}</div>
+            <div style="font-size:1.2rem;font-weight:900;color:#2196f3;">$${po}</div>
+            <div style="font-size:0.75rem;color:#4caf50;">Ahorrás $${product.price - po}</div>`;
+    } else if (esPromo && product.normal && product.normal > product.price) {
+        const pct = Math.round(((product.normal - product.price) / product.normal) * 100);
+        badgeOferta = `<div style="position:absolute;top:8px;left:8px;background:linear-gradient(135deg,#ff9800,#ff5722);color:white;padding:4px 8px;border-radius:8px;font-size:0.75rem;font-weight:bold;z-index:10;">🎯 COMBO -${pct}%</div>`;
+        precioHTML = `<div style="text-decoration:line-through;color:#999;font-size:0.85rem;">ANTES $${product.normal}</div>
+            <div style="font-size:1.2rem;font-weight:900;color:#ff5722;">AHORA $${product.price}</div>
+            <div style="font-size:0.75rem;color:#4caf50;">Ahorrás $${product.normal - product.price}</div>`;
+    } else {
+        precioHTML = `<span class="product-price">$${product.price}</span>`;
+    }
+
+    const stockClass = product.stockNumber > 5 ? 'in-stock' : 'low-stock';
+    const stockIcon = product.stockNumber > 5 ? '✅' : '⚠️';
+    const badgePrecioPromo = (esPromo && product.normal && product.normal > product.price) ? `
+        <div class="price-badge-promo">
+            <span class="antes">ANTES $${product.normal}</span>
+            <span class="ahora">AHORA<br>$${product.price}</span>
+            <span class="ahorro">-${Math.round(((product.normal - product.price) / product.normal) * 100)}%</span>
+        </div>` : '';
+
+    return `
+        <div class="product-card${esPromo ? ' promo-card' : ''}">
+            <div class="product-image">
+                <button class="share-btn" onclick="compartirProducto('${product.id}', event)" title="Compartir">📤</button>
+                ${badgeOferta}
+                <img src="${product.image}"
+                     alt="${product.name}"
+                     onerror="handleImageError(this, '${product.name.replace(/'/g, "\'")}')">
+            </div>
+            ${badgePrecioPromo}
+            <div class="product-info">
+                <div class="product-name">${product.name}</div>
+                <div class="product-price-container">${precioHTML}</div>
+                <div class="product-stock ${stockClass}">${stockIcon} Stock: ${product.stockNumber}</div>
+                <button class="add-to-cart" data-id="${product.id}" data-testid="add-to-cart-${product.id}">
+                    🛒 Agregar al Carrito
+                </button>
+            </div>
+        </div>`;
+}
+
 function filterProducts(searchTerm) {
     const productsGrid = document.getElementById('productsGrid');
-    
-    const results = products.filter(p => 
-        p.name.toLowerCase().includes(searchTerm) && 
-        p.stockNumber > 0
-    );
-    
+    const results = products.filter(p => p.name.toLowerCase().includes(searchTerm) && p.stockNumber > 0);
+
     if (results.length === 0) {
         productsGrid.innerHTML = `
             <div class="loading">
                 <div style="font-size: 3rem; margin-bottom: 1rem;">🔍</div>
                 <h3>No se encontraron productos para "${searchTerm}"</h3>
-                <button onclick="clearSearch()" class="retry-btn">
-                    ✨ Ver todos los productos
-                </button>
-            </div>
-        `;
+                <button onclick="clearSearch()" class="retry-btn">✨ Ver todos los productos</button>
+            </div>`;
         return;
     }
-    
+
     productsGrid.innerHTML = `
-        <div class="search-results">
-            <strong>🔍 Búsqueda: "${searchTerm}"</strong>
-            <br>
+        <div class="search-results" style="grid-column:1/-1;">
+            <strong>🔍 Búsqueda: "${searchTerm}"</strong><br>
             <small>Encontraste ${results.length} producto(s)</small>
-            <button onclick="clearSearch()" style="margin-left: 10px; padding: 6px 12px; 
-                    background: #ff6f00; color: white; border: none; border-radius: 15px; 
-                    cursor: pointer; font-size: 0.8rem;">
+            <button onclick="clearSearch()" style="margin-left:10px;padding:6px 12px;background:#ff6f00;color:white;border:none;border-radius:15px;cursor:pointer;font-size:0.8rem;">
                 ✖️ Limpiar búsqueda
             </button>
         </div>
-    ` + results.map(product => `
-        <div class="product-card">
-            <div class="product-image">
-                <img src="${product.image}" 
-                     alt="${product.name}"
-                     onerror="handleImageError(this, '${product.name.replace(/'/g, "\\'")}')">
-            </div>
-            <div class="product-info">
-                <div class="product-name">${product.name}</div>
-                <div class="product-price-container">
-                    <span class="product-price">$${product.price}</span>
-                </div>
-                <div class="product-stock in-stock">
-                    ✅ Stock: ${product.stockNumber}
-                </div>
-                <button class="add-to-cart" data-id="${product.id}" data-testid="add-to-cart-${product.id}">
-                    🛒 Agregar al Carrito
-                </button>
-            </div>
-        </div>
-    `).join('');
+    ` + results.map(p => generarTarjetaBusqueda(p)).join('');
 }
 
 function filterMobileProducts(searchTerm) {
     const resultsContainer = document.getElementById('mobileSearchResults');
-    
-    const results = products.filter(p => 
-        p.name.toLowerCase().includes(searchTerm) && 
-        p.stockNumber > 0
-    );
-    
+    const results = products.filter(p => p.name.toLowerCase().includes(searchTerm) && p.stockNumber > 0);
+
     if (results.length === 0) {
         resultsContainer.innerHTML = `
-            <div style="text-align: center; padding: 2rem; color: #666;">
+            <div style="text-align:center;padding:2rem;color:#666;">
                 🔍 No se encontraron productos para "<strong>${searchTerm}</strong>"
-            </div>
-        `;
+            </div>`;
         return;
     }
-    
-    resultsContainer.innerHTML = '<div style="display: grid; gap: 1rem;">' + 
-        results.map(product => `
-            <div class="product-card" style="margin: 0;">
-                <div class="product-image">
-                    <img src="${product.image}" 
-                         alt="${product.name}"
-                         onerror="handleImageError(this, '${product.name.replace(/'/g, "\\'")}')">
-                </div>
-                <div class="product-info">
-                    <div class="product-name">${product.name}</div>
-                    <div class="product-price-container">
-                        <span class="product-price">$${product.price}</span>
-                    </div>
-                    <div class="product-stock in-stock">
-                        ✅ Stock: ${product.stockNumber}
-                    </div>
-                    <button class="add-to-cart" data-id="${product.id}" data-testid="add-to-cart-${product.id}">
-                        🛒 Agregar al Carrito
-                    </button>
-                </div>
-            </div>
-        `).join('') + '</div>';
+
+    resultsContainer.innerHTML = '<div style="display:grid;gap:1rem;">' +
+        results.map(p => generarTarjetaBusqueda(p)).join('') + '</div>';
 }
+
 
 function clearSearch() {
     document.getElementById('productSearch').value = '';
@@ -4304,6 +4336,8 @@ function actualizarEstadoAdmin() {
     
     const totalRelampago = poolRelampago.length;
     const visiblesRelampago = productosRelampago.length;
+    const totalDestacadas = poolDestacadas.length;
+    const visiblesDestacadas = productosDestacadas.length;
     const totalEspeciales = poolEspeciales.length;
     const visiblesEspeciales = productosEspeciales.length;
     
@@ -4313,6 +4347,12 @@ function actualizarEstadoAdmin() {
         statusText += `⚡ Mostrando ${visiblesRelampago}/${totalRelampago} relámpago<br>`;
     } else {
         statusText += `⚡ Normal: ${visiblesRelampago}/${totalRelampago}<br>`;
+    }
+    
+    if (modoMostrarTodasDestacadas) {
+        statusText += `🔥 Mostrando ${visiblesDestacadas}/${totalDestacadas} destacadas<br>`;
+    } else {
+        statusText += `🔥 Normal: ${visiblesDestacadas}/${totalDestacadas}<br>`;
     }
     
     if (modoMostrarTodasEspeciales) {
@@ -4345,12 +4385,31 @@ function toggleMostrarTodasOfertas() {
     const btn = document.getElementById('btnMostrarTodasOfertas');
     if (modoMostrarTodasOfertas) {
         btn.classList.add('active');
-        btn.textContent = '✅ Mostrando Todas';
+        btn.textContent = '✅ Mostrando Relámpago';
         showNotification('🔧 ADMIN: Mostrando TODAS las ofertas relámpago', 'success');
     } else {
         btn.classList.remove('active');
-        btn.textContent = '👀 Ver Todas las Ofertas';
+        btn.textContent = '⚡ Ver Ofertas Relámpago';
         showNotification('🔧 ADMIN: Modo normal restaurado', 'info');
+    }
+    
+    actualizarTodasLasVistas();
+    actualizarEstadoAdmin();
+}
+
+// ========== FUNCIÓN TOGGLE MOSTRAR TODAS DESTACADAS ==========
+function toggleMostrarTodasDestacadas() {
+    modoMostrarTodasDestacadas = !modoMostrarTodasDestacadas;
+    
+    const btn = document.getElementById('btnMostrarTodasDestacadas');
+    if (modoMostrarTodasDestacadas) {
+        btn.classList.add('active');
+        btn.textContent = '✅ Mostrando Todas Destacadas';
+        showNotification('🔧 ADMIN: Mostrando TODAS las destacadas', 'success');
+    } else {
+        btn.classList.remove('active');
+        btn.textContent = '🔥 Ver Todas las Destacadas';
+        showNotification('🔧 ADMIN: Modo normal destacadas', 'info');
     }
     
     actualizarTodasLasVistas();
