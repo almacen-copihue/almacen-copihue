@@ -474,6 +474,69 @@
         .toast.verde { background: var(--verde); }
         .toast.rojo { background: var(--rojo); }
 
+        /* ===== FORMULARIO NUEVO PRODUCTO ===== */
+        .form-grupo {
+            margin-bottom: 14px;
+        }
+        .form-label {
+            display: block;
+            font-size: 0.78rem;
+            font-weight: 700;
+            color: var(--subtexto);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+        .form-input {
+            width: 100%;
+            padding: 12px 14px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 1rem;
+            color: var(--texto);
+            background: white;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .form-input:focus { border-color: var(--verde); }
+        .form-input.requerido:invalid { border-color: #ffcdd2; }
+        .form-row { display: flex; gap: 10px; }
+        .form-row .form-grupo { flex: 1; }
+        .btn-guardar-producto {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, var(--verde), var(--verde-claro));
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+            margin-top: 4px;
+        }
+        .btn-guardar-producto:disabled { background: #aaa; }
+        .categorias-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+        .cat-btn {
+            padding: 7px 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 20px;
+            background: white;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            color: var(--subtexto);
+            transition: all 0.15s;
+        }
+        .cat-btn.activo {
+            border-color: var(--verde);
+            background: var(--verde);
+            color: white;
+        }
+
         /* Scrollbar */
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 4px; }
@@ -488,6 +551,7 @@
         <div class="indicador-carga" id="indicadorCarga" title="Cargando..."></div>
     </div>
     <div class="header-right">
+        <button class="btn-resumen" onclick="abrirNuevoProducto()" style="background:rgba(255,152,0,0.3);border-color:rgba(255,152,0,0.6);">➕ Nuevo</button>
         <button class="btn-resumen" onclick="abrirResumen()">📊 Hoy</button>
     </div>
 </div>
@@ -522,6 +586,66 @@
     <button class="btn-confirmar" id="btnConfirmar" onclick="abrirConfirmacion()" disabled>
         ✅ Cobrar
     </button>
+</div>
+
+<!-- MODAL NUEVO PRODUCTO -->
+<div class="modal-bg" id="modalNuevoProducto" onclick="cerrarModalNuevo(event)">
+    <div class="modal-sheet" style="padding-bottom:20px;">
+        <div class="modal-handle"></div>
+        <div class="modal-header">
+            <span class="modal-titulo">➕ Nuevo producto</span>
+            <button class="modal-cerrar" onclick="cerrarNuevoProducto()">✕</button>
+        </div>
+        <div style="padding:16px 20px 0;overflow-y:auto;max-height:70vh;">
+
+            <div class="form-grupo">
+                <label class="form-label">Nombre del producto *</label>
+                <input type="text" class="form-input" id="npNombre"
+                       placeholder="Ej: COCA COLA 2.25L"
+                       autocomplete="off" autocorrect="off"
+                       style="text-transform:uppercase;">
+            </div>
+
+            <div class="form-row">
+                <div class="form-grupo">
+                    <label class="form-label">Precio venta *</label>
+                    <input type="number" class="form-input" id="npPrecio"
+                           placeholder="$0" min="1">
+                </div>
+                <div class="form-grupo">
+                    <label class="form-label">Stock inicial</label>
+                    <input type="number" class="form-input" id="npStock"
+                           placeholder="0" min="0" value="0">
+                </div>
+            </div>
+
+            <div class="form-grupo">
+                <label class="form-label">Categoría *</label>
+                <div class="categorias-grid" id="npCatGrid">
+                    <!-- se genera dinámico -->
+                </div>
+                <input type="hidden" id="npCategoria" value="">
+            </div>
+
+            <div class="form-grupo">
+                <label class="form-label">Proveedor</label>
+                <input type="text" class="form-input" id="npProveedor"
+                       placeholder="Ej: MAXICONSUMO"
+                       style="text-transform:uppercase;">
+            </div>
+
+            <div class="form-grupo">
+                <label class="form-label">📅 Fecha de vencimiento</label>
+                <input type="date" class="form-input" id="npVencimiento">
+            </div>
+
+            <div id="npError" style="color:#d32f2f;font-size:0.85rem;margin-bottom:10px;display:none;"></div>
+
+            <button class="btn-guardar-producto" id="npBtnGuardar" onclick="guardarNuevoProducto()">
+                💾 Guardar en planilla
+            </button>
+        </div>
+    </div>
 </div>
 
 <!-- TOAST -->
@@ -908,6 +1032,120 @@ function mostrarToast(msg, tipo = '') {
     t.className = 'toast visible ' + tipo;
     clearTimeout(toastTimeout);
     toastTimeout = setTimeout(() => t.classList.remove('visible'), 2500);
+}
+
+// ========== NUEVO PRODUCTO ==========
+const CATEGORIAS = [
+    'ALMACEN','BEBIDAS','GOLOSINAS','LIMPIEZA','HELADERA',
+    'FRUTAS Y VERDURAS','CONDIMENTOS','ELECTRONICA','PROMOS','OTROS'
+];
+
+let npCategoriaSeleccionada = '';
+
+function abrirNuevoProducto() {
+    // Resetear formulario
+    ['npNombre','npPrecio','npStock','npProveedor','npVencimiento'].forEach(id => {
+        document.getElementById(id).value = '';
+    });
+    document.getElementById('npStock').value = '0';
+    document.getElementById('npCategoria').value = '';
+    document.getElementById('npError').style.display = 'none';
+    document.getElementById('npBtnGuardar').disabled = false;
+    document.getElementById('npBtnGuardar').textContent = '💾 Guardar en planilla';
+    npCategoriaSeleccionada = '';
+
+    // Generar categorías únicas de los productos existentes + fijas
+    const catsDePlanilla = [...new Set(productos.map(p => p.category).filter(Boolean))];
+    const todasCats = [...new Set([...CATEGORIAS, ...catsDePlanilla])].sort();
+
+    document.getElementById('npCatGrid').innerHTML = todasCats.map(cat => `
+        <button class="cat-btn" onclick="seleccionarCategoria('${cat}')" id="catBtn_${cat.replace(/\s/g,'_')}">
+            ${cat}
+        </button>
+    `).join('');
+
+    document.getElementById('modalNuevoProducto').classList.add('open');
+    setTimeout(() => document.getElementById('npNombre').focus(), 300);
+}
+
+function seleccionarCategoria(cat) {
+    npCategoriaSeleccionada = cat;
+    document.getElementById('npCategoria').value = cat;
+    document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('activo'));
+    const btn = document.getElementById('catBtn_' + cat.replace(/\s/g,'_'));
+    if (btn) btn.classList.add('activo');
+}
+
+async function guardarNuevoProducto() {
+    const nombre = document.getElementById('npNombre').value.trim().toUpperCase();
+    const precio = parseInt(document.getElementById('npPrecio').value) || 0;
+    const stock = parseInt(document.getElementById('npStock').value) || 0;
+    const categoria = npCategoriaSeleccionada;
+    const proveedor = document.getElementById('npProveedor').value.trim().toUpperCase();
+    const vencimiento = document.getElementById('npVencimiento').value;
+    const errorEl = document.getElementById('npError');
+
+    // Validaciones
+    if (!nombre) { mostrarErrorNP('El nombre es obligatorio'); return; }
+    if (precio <= 0) { mostrarErrorNP('El precio debe ser mayor a 0'); return; }
+    if (!categoria) { mostrarErrorNP('Seleccioná una categoría'); return; }
+
+    // Verificar duplicado local
+    const existe = productos.find(p => p.name.toUpperCase() === nombre);
+    if (existe) {
+        mostrarErrorNP(`Ya existe: "${existe.name}"`);
+        return;
+    }
+
+    const btn = document.getElementById('npBtnGuardar');
+    btn.disabled = true;
+    btn.textContent = '⏳ Guardando...';
+    errorEl.style.display = 'none';
+
+    try {
+        const datos = { name: nombre, price: precio, stock, category: categoria, proveedor, vencimiento };
+        const url = API_URL + '?action=agregar&data=' + encodeURIComponent(JSON.stringify(datos));
+        const r = await fetch(url, { redirect: 'follow' });
+        const resp = await r.json();
+
+        if (resp.success) {
+            // Agregar al array local para poder venderlo en seguida
+            productos.push({
+                id: resp.id,
+                name: nombre,
+                price: precio,
+                stock: stock,
+                category: categoria,
+                proveedor: proveedor,
+                vencimiento: vencimiento,
+                image: `imagenes-productos/${simplificarNombre(nombre)}.jpg`
+            });
+
+            cerrarNuevoProducto();
+            mostrarToast(`✅ "${nombre.substring(0,30)}" guardado`, 'verde');
+        } else {
+            mostrarErrorNP(resp.mensaje || 'Error al guardar');
+            btn.disabled = false;
+            btn.textContent = '💾 Guardar en planilla';
+        }
+    } catch(e) {
+        mostrarErrorNP('Error de conexión. Verificá el internet.');
+        btn.disabled = false;
+        btn.textContent = '💾 Guardar en planilla';
+    }
+}
+
+function mostrarErrorNP(msg) {
+    const el = document.getElementById('npError');
+    el.textContent = '⚠️ ' + msg;
+    el.style.display = 'block';
+}
+
+function cerrarNuevoProducto() {
+    document.getElementById('modalNuevoProducto').classList.remove('open');
+}
+function cerrarModalNuevo(e) {
+    if (e.target === document.getElementById('modalNuevoProducto')) cerrarNuevoProducto();
 }
 
 // ========== INIT ==========
