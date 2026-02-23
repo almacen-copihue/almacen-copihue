@@ -563,6 +563,15 @@
            autocomplete="off" autocorrect="off" spellcheck="false">
 </div>
 
+<!-- BANNER VENTA PENDIENTE -->
+<div id="bannerPendiente" style="display:none;background:#ff6f00;color:white;padding:10px 16px;font-size:0.9rem;font-weight:600;display:none;align-items:center;justify-content:space-between;flex-shrink:0;">
+    <span>⚠️ Tenés una venta pendiente</span>
+    <div style="display:flex;gap:8px;">
+        <button onclick="recuperarVenta()" style="background:white;color:#ff6f00;border:none;border-radius:8px;padding:5px 12px;font-weight:700;cursor:pointer;">Recuperar</button>
+        <button onclick="descartarVentaPendiente()" style="background:rgba(0,0,0,0.2);color:white;border:none;border-radius:8px;padding:5px 10px;cursor:pointer;">✕</button>
+    </div>
+</div>
+
 <!-- RESULTADOS BÚSQUEDA -->
 <div class="resultados" id="resultados"></div>
 
@@ -833,6 +842,7 @@ function agregarProducto(id) {
     document.getElementById('buscador').blur();
 
     renderVenta();
+    guardarCarritoPendiente();
     mostrarToast(`✅ ${producto.name.substring(0, 30)}`, 'verde');
 }
 
@@ -850,11 +860,13 @@ function cambiarCantidad(id, delta) {
         item.qty = nuevaCant;
     }
     renderVenta();
+    guardarCarritoPendiente();
 }
 
 function limpiarVenta() {
     if (ventaActual.length === 0) return;
     ventaActual = [];
+    guardarCarritoPendiente();
     renderVenta();
 }
 
@@ -946,6 +958,7 @@ async function confirmarVenta() {
 
     cerrarConfirm();
     ventaActual = [];
+    localStorage.removeItem(CARRITO_KEY);
     renderVenta();
 
     mostrarToast(stockOk ? '✅ Venta confirmada' : '✅ Venta registrada (stock manual)', 'verde');
@@ -1148,8 +1161,73 @@ function cerrarModalNuevo(e) {
     if (e.target === document.getElementById('modalNuevoProducto')) cerrarNuevoProducto();
 }
 
+// ========== CARRITO PERSISTENTE ==========
+const CARRITO_KEY = 'copihue_carrito_pendiente';
+
+function guardarCarritoPendiente() {
+    if (ventaActual.length === 0) {
+        localStorage.removeItem(CARRITO_KEY);
+        return;
+    }
+    localStorage.setItem(CARRITO_KEY, JSON.stringify(ventaActual));
+}
+
+function recuperarVenta() {
+    const guardado = localStorage.getItem(CARRITO_KEY);
+    if (!guardado) return;
+    
+    try {
+        const items = JSON.parse(guardado);
+        // Validar que los productos siguen existiendo y tienen stock
+        ventaActual = items.filter(item => {
+            const p = productos.find(pr => pr.id === item.id);
+            return p && p.stock > 0;
+        }).map(item => {
+            const p = productos.find(pr => pr.id === item.id);
+            return { ...item, price: p.price, stockDisponible: p.stock };
+        });
+        
+        ocultarBannerPendiente();
+        renderVenta();
+        
+        const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
+        mostrarToast(`✅ Carrito recuperado — $${total.toLocaleString('es-AR')}`, 'verde');
+    } catch(e) {
+        localStorage.removeItem(CARRITO_KEY);
+    }
+}
+
+function descartarVentaPendiente() {
+    localStorage.removeItem(CARRITO_KEY);
+    ocultarBannerPendiente();
+    mostrarToast('🗑 Venta pendiente descartada', '');
+}
+
+function verificarVentaPendiente() {
+    const guardado = localStorage.getItem(CARRITO_KEY);
+    if (!guardado) return;
+    try {
+        const items = JSON.parse(guardado);
+        if (items && items.length > 0) {
+            const total = items.reduce((s, i) => s + i.price * i.qty, 0);
+            const banner = document.getElementById('bannerPendiente');
+            banner.style.display = 'flex';
+            banner.querySelector('span').textContent = 
+                `⚠️ Venta pendiente: ${items.length} producto(s) — $${total.toLocaleString('es-AR')}`;
+        }
+    } catch(e) {
+        localStorage.removeItem(CARRITO_KEY);
+    }
+}
+
+function ocultarBannerPendiente() {
+    document.getElementById('bannerPendiente').style.display = 'none';
+}
+
 // ========== INIT ==========
-cargarProductos();
+cargarProductos().then(() => {
+    verificarVentaPendiente();
+});
 renderVenta();
 </script>
 </body>
