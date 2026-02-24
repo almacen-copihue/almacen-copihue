@@ -537,6 +537,33 @@
             color: white;
         }
 
+        /* ===== MÉTODO DE PAGO ===== */
+        .metodo-pago-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            padding: 16px 20px 8px;
+        }
+        .metodo-btn {
+            border: 2px solid #e0e0e0;
+            border-radius: 14px;
+            padding: 14px 8px;
+            background: white;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.15s;
+        }
+        .metodo-btn:active { transform: scale(0.97); }
+        .metodo-btn.seleccionado.efectivo { border-color: #2e7d32; background: #e8f5e9; }
+        .metodo-btn.seleccionado.posnet  { border-color: #1565c0; background: #e3f2fd; }
+        .metodo-btn.seleccionado.transf  { border-color: #6a1b9a; background: #f3e5f5; }
+        .metodo-emoji { font-size: 1.8rem; }
+        .metodo-label { font-size: 0.78rem; font-weight: 700; color: var(--subtexto); text-transform: uppercase; }
+        .metodo-btn.seleccionado .metodo-label { color: var(--texto); }
+
         /* ===== MODAL PESO ===== */
         .peso-display {
             text-align: center;
@@ -773,6 +800,26 @@
             <button class="modal-cerrar" onclick="cerrarConfirm()">✕</button>
         </div>
         <div class="confirm-producto" id="confirmDetalle"><!-- dinámico --></div>
+
+        <!-- MÉTODO DE PAGO -->
+        <div style="padding:8px 20px 0;font-size:0.78rem;font-weight:700;color:var(--subtexto);text-transform:uppercase;letter-spacing:0.5px;">
+            Método de pago
+        </div>
+        <div class="metodo-pago-grid">
+            <button class="metodo-btn efectivo seleccionado" id="btnEfectivo" onclick="seleccionarMetodo('efectivo')">
+                <span class="metodo-emoji">💵</span>
+                <span class="metodo-label">Efectivo</span>
+            </button>
+            <button class="metodo-btn posnet" id="btnPosnet" onclick="seleccionarMetodo('posnet')">
+                <span class="metodo-emoji">💳</span>
+                <span class="metodo-label">Posnet</span>
+            </button>
+            <button class="metodo-btn transf" id="btnTransf" onclick="seleccionarMetodo('transferencia')">
+                <span class="metodo-emoji">📱</span>
+                <span class="metodo-label">Transferencia</span>
+            </button>
+        </div>
+
         <div class="confirm-acciones">
             <button class="btn-cancelar-confirm" onclick="cerrarConfirm()">Cancelar</button>
             <button class="btn-ok-confirm" id="btnOkConfirm" onclick="confirmarVenta()">
@@ -788,6 +835,7 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6
 
 let productos = [];
 let ventaActual = []; // [{id, name, price, qty, stockDisponible}]
+let metodoPagoActual = 'efectivo'; // efectivo | posnet | transferencia
 
 // ========== CARGA DE PRODUCTOS ==========
 async function cargarProductos() {
@@ -1025,6 +1073,8 @@ function abrirConfirmacion() {
     document.getElementById('confirmDetalle').innerHTML = detalleHTML;
     document.getElementById('btnOkConfirm').disabled = false;
     document.getElementById('btnOkConfirm').textContent = '✅ Confirmar cobro';
+    // Resetear método de pago a efectivo
+    seleccionarMetodo('efectivo');
     document.getElementById('modalConfirm').classList.add('open');
 }
 
@@ -1040,14 +1090,16 @@ async function confirmarVenta() {
     let stockOk = false;
     try {
         const ventaData = ventaActual.map(i => ({
-            id: i.esPeso ? i.idOriginal : i.id,  // para peso usar ID original del producto
+            id: i.esPeso ? i.idOriginal : i.id,
             name: i.name,
             qty: i.qty,
             esPeso: i.esPeso || false,
             gramos: i.gramos || 0,
             precioVenta: i.price
         }));
-        const dataEncoded = encodeURIComponent(JSON.stringify(ventaData));
+        // Agregar método de pago al request
+        const ventaPayload = { items: ventaData, metodoPago: metodoPagoActual };
+        const dataEncoded = encodeURIComponent(JSON.stringify(ventaPayload));
         const url = API_URL + '?action=vender&data=' + dataEncoded;
         const r = await fetch(url, { redirect: 'follow' });
         const resp = await r.json();
@@ -1060,7 +1112,7 @@ async function confirmarVenta() {
     }
 
     // Guardar en historial local del día pase lo que pase
-    guardarVentaDia({ items: [...ventaActual], total, hora, stockRebajado: stockOk });
+    guardarVentaDia({ items: [...ventaActual], total, hora, stockRebajado: stockOk, metodoPago: metodoPagoActual });
 
     // Actualizar stock local para no vender más de lo que hay
     ventaActual.forEach(item => {
@@ -1410,6 +1462,20 @@ function confirmarPeso() {
     renderVenta();
     guardarCarritoPendiente();
     mostrarToast(`✅ ${gramos}gr — $${precioCalculado.toLocaleString('es-AR')}`, 'verde');
+}
+
+// ========== MÉTODO DE PAGO ==========
+function seleccionarMetodo(metodo) {
+    metodoPagoActual = metodo;
+    ['efectivo','posnet','transferencia'].forEach(m => {
+        const btn = document.getElementById('btn' + m.charAt(0).toUpperCase() + m.slice(1));
+        if (btn) {
+            btn.classList.remove('seleccionado');
+        }
+    });
+    const mapId = { efectivo: 'btnEfectivo', posnet: 'btnPosnet', transferencia: 'btnTransf' };
+    const btn = document.getElementById(mapId[metodo]);
+    if (btn) btn.classList.add('seleccionado');
 }
 
 // ========== SERVICE WORKER ==========
