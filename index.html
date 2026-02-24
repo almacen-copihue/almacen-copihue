@@ -2644,9 +2644,12 @@ function processAPIData(apiData) {
             especial: especial,
             normal: normal,
             proveedor: (() => {
-                // Buscar la columna proveedor sin importar mayúsculas/minúsculas
                 const key = Object.keys(item).find(k => k.toLowerCase().trim() === 'proveedor');
                 return key ? String(item[key]).trim().toUpperCase() : '';
+            })(),
+            stockMin: (() => {
+                const key = Object.keys(item).find(k => k.toLowerCase().replace(/[_\s]/g,'') === 'stockminpopup' || k.toLowerCase() === 'stock_min_popup');
+                return key ? parseInt(item[key]) || 0 : 0;
             })()
         };
         
@@ -3377,6 +3380,21 @@ function abrirListaCompras() {
     document.getElementById('lcSubtitulo').textContent = 'Seleccioná el supermercado';
 }
 
+// Semáforo de stock: 0=rojo, 1=amarillo, 2=verde
+function semaforoStock(p) {
+    if (p.stockNumber === 0) return 0; // rojo
+    const min = p.stockMin > 0 ? p.stockMin : 3; // mínimo por defecto = 3
+    if (p.stockNumber <= min) return 1; // amarillo
+    return 2; // verde
+}
+
+function semaforoEmoji(p) {
+    const s = semaforoStock(p);
+    if (s === 0) return '🔴';
+    if (s === 1) return '🟡';
+    return '🟢';
+}
+
 function seleccionarProveedor(proveedor) {
     lcProveedorSeleccionado = proveedor;
     
@@ -3392,38 +3410,45 @@ function seleccionarProveedor(proveedor) {
         btnActivo.style.color = 'white';
     }
     
-    // Filtrar productos de ese proveedor
-    const lista = products.filter(p => p.proveedor === proveedor && p.stockNumber > 0);
-    const sinStock = products.filter(p => p.proveedor === proveedor && p.stockNumber === 0);
-    
-    document.getElementById('lcSubtitulo').textContent = `${proveedor} · ${lista.length} productos`;
-    
-    if (lista.length === 0 && sinStock.length === 0) {
+    // Filtrar y ordenar por semáforo: rojo → amarillo → verde
+    const todosProveedor = products.filter(p => p.proveedor === proveedor);
+    const rojos    = todosProveedor.filter(p => semaforoStock(p) === 0).sort((a,b) => a.name.localeCompare(b.name));
+    const amarillos = todosProveedor.filter(p => semaforoStock(p) === 1).sort((a,b) => a.stockNumber - b.stockNumber);
+    const verdes   = todosProveedor.filter(p => semaforoStock(p) === 2).sort((a,b) => a.name.localeCompare(b.name));
+
+    document.getElementById('lcSubtitulo').textContent = `${proveedor} · ${todosProveedor.length} productos · 🔴${rojos.length} 🟡${amarillos.length} 🟢${verdes.length}`;
+
+    if (todosProveedor.length === 0) {
         document.getElementById('lcProductos').innerHTML = '<div style="text-align:center;color:#aaa;padding:2rem;">No hay productos de este proveedor</div>';
         document.getElementById('lcBtnWA').style.display = 'none';
         return;
     }
-    
-    const filas = (arr, agotado) => arr.map(p => `
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #f5f5f5;${agotado ? 'opacity:0.45;' : ''}">
-            <div>
-                <div style="font-weight:600;font-size:0.9rem;color:#222;">${p.name}</div>
-                <div style="font-size:0.75rem;color:#888;">${p.category}${agotado ? ' · ⚠️ SIN STOCK' : ` · Stock: ${p.stockNumber}`}</div>
+
+    const fila = (p) => {
+        const s = semaforoStock(p);
+        const color = s === 0 ? '#e53935' : s === 1 ? '#f57c00' : '#2e7d32';
+        const bg = s === 0 ? '#fff5f5' : s === 1 ? '#fff8f0' : 'white';
+        const stockTxt = p.stockNumber === 0 ? 'SIN STOCK' : `Stock: ${p.stockNumber}${p.stockMin > 0 ? ' (mín: '+p.stockMin+')' : ''}`;
+        return `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-bottom:1px solid #f5f5f5;background:${bg};border-radius:6px;margin-bottom:2px;">
+            <div style="flex:1;">
+                <div style="font-weight:600;font-size:0.9rem;color:#222;">${semaforoEmoji(p)} ${p.name}</div>
+                <div style="font-size:0.75rem;color:${color};font-weight:600;">${stockTxt}</div>
             </div>
-            <div style="font-weight:700;color:#2e7d32;font-size:0.95rem;">$${p.price}</div>
-        </div>
-    `).join('');
-    
+            <div style="font-weight:700;color:#2e7d32;font-size:0.95rem;margin-left:8px;">$${p.price}</div>
+        </div>`;
+    };
+
+    const seccion = (arr, titulo, color) => arr.length === 0 ? '' : `
+        <div style="font-size:0.75rem;font-weight:700;color:${color};margin:12px 0 4px;text-transform:uppercase;letter-spacing:0.5px;">${titulo} (${arr.length})</div>
+        ${arr.map(fila).join('')}
+    `;
+
     document.getElementById('lcProductos').innerHTML = `
         <div style="margin-top:4px;">
-            ${lista.length > 0 ? `
-                <div style="font-size:0.75rem;font-weight:700;color:#555;margin:8px 0 4px;text-transform:uppercase;letter-spacing:0.5px;">✅ Con stock (${lista.length})</div>
-                ${filas(lista, false)}
-            ` : ''}
-            ${sinStock.length > 0 ? `
-                <div style="font-size:0.75rem;font-weight:700;color:#bbb;margin:14px 0 4px;text-transform:uppercase;letter-spacing:0.5px;">🔴 Sin stock (${sinStock.length}) — para reponer</div>
-                ${filas(sinStock, true)}
-            ` : ''}
+            ${seccion(rojos, '🔴 Sin stock — reponer urgente', '#e53935')}
+            ${seccion(amarillos, '🟡 Stock bajo — reponer pronto', '#f57c00')}
+            ${seccion(verdes, '🟢 Stock ok', '#2e7d32')}
         </div>
     `;
     
@@ -3434,43 +3459,33 @@ function enviarListaWhatsApp() {
     if (!lcProveedorSeleccionado) return;
     
     const lista = products.filter(p => p.proveedor === lcProveedorSeleccionado);
-    const conStock = lista.filter(p => p.stockNumber > 0);
-    const sinStock = lista.filter(p => p.stockNumber === 0);
-    
-    const hoy = new Date().toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long' });
-    
-    let msg = `🛒 *LISTA DE COMPRAS – ${lcProveedorSeleccionado}*
-`;
-    msg += `📅 ${hoy.charAt(0).toUpperCase() + hoy.slice(1)}
-`;
-    msg += `━━━━━━━━━━━━━━━━━━━━
+    const rojos = lista.filter(p => semaforoStock(p) === 0);
+    const amarillos = lista.filter(p => semaforoStock(p) === 1).sort((a,b) => a.stockNumber - b.stockNumber);
+    const verdes = lista.filter(p => semaforoStock(p) === 2);
 
-`;
-    
-    if (conStock.length > 0) {
-        msg += `✅ *CON STOCK (revisar precio):*
-`;
-        conStock.forEach(p => {
-            msg += `• ${p.name} — $${p.price}
-`;
-        });
-        msg += `
-`;
+    const hoy = new Date().toLocaleDateString('es-AR', { weekday:'long', day:'numeric', month:'long' });
+
+    let msg = '🛒 *LISTA DE COMPRAS – ' + lcProveedorSeleccionado + '*\n';
+    msg += '📅 ' + hoy.charAt(0).toUpperCase() + hoy.slice(1) + '\n';
+    msg += '━━━━━━━━━━━━━━━━━━━━\n\n';
+
+    if (rojos.length > 0) {
+        msg += '🔴 *SIN STOCK (reponer urgente):*\n';
+        rojos.forEach(p => { msg += '• ' + p.name + ' — $' + p.price + '\n'; });
+        msg += '\n';
     }
-    
-    if (sinStock.length > 0) {
-        msg += `🔴 *SIN STOCK (reponer):*
-`;
-        sinStock.forEach(p => {
-            msg += `• ${p.name} — $${p.price} (último precio)
-`;
-        });
+    if (amarillos.length > 0) {
+        msg += '🟡 *STOCK BAJO (reponer pronto):*\n';
+        amarillos.forEach(p => { msg += '• ' + p.name + ' — Stock: ' + p.stockNumber + ' · $' + p.price + '\n'; });
+        msg += '\n';
     }
-    
-    msg += `
-━━━━━━━━━━━━━━━━━━━━
-`;
-    msg += `📦 Total productos: ${lista.length}`;
+    if (verdes.length > 0) {
+        msg += '🟢 *STOCK OK (revisar precio):*\n';
+        verdes.forEach(p => { msg += '• ' + p.name + ' — $' + p.price + '\n'; });
+    }
+
+    msg += '\n━━━━━━━━━━━━━━━━━━━━\n';
+    msg += '📦 Total: ' + lista.length + ' · 🔴' + rojos.length + ' 🟡' + amarillos.length + ' 🟢' + verdes.length;
     
     const url = `https://wa.me/5492944907380?text=${encodeURIComponent(msg)}`;
     window.open(url, '_blank');
