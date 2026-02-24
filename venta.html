@@ -635,6 +635,7 @@
     </div>
     <div class="header-right">
         <button class="btn-resumen" onclick="abrirNuevoProducto()" style="background:rgba(255,152,0,0.3);border-color:rgba(255,152,0,0.6);">➕ Nuevo</button>
+        <button class="btn-resumen" onclick="abrirIngreso()" style="background:rgba(33,150,243,0.3);border-color:rgba(33,150,243,0.6);">📦 Ingresar</button>
         <button class="btn-resumen" onclick="abrirResumen()">📊 Hoy</button>
     </div>
 </div>
@@ -678,6 +679,71 @@
     <button class="btn-confirmar" id="btnConfirmar" onclick="abrirConfirmacion()" disabled>
         ✅ Cobrar
     </button>
+</div>
+
+<!-- MODAL INGRESO MERCADERÍA -->
+<div class="modal-bg" id="modalIngreso" onclick="cerrarModalIngreso(event)">
+    <div class="modal-sheet" style="padding-bottom:20px;">
+        <div class="modal-handle"></div>
+        <div class="modal-header">
+            <span class="modal-titulo">📦 Ingresar mercadería</span>
+            <button class="modal-cerrar" onclick="cerrarIngreso()">✕</button>
+        </div>
+        <div style="padding:16px 20px 0;overflow-y:auto;max-height:75vh;">
+
+            <div class="form-grupo">
+                <label class="form-label">Producto *</label>
+                <input type="text" class="form-input" id="ingProducto"
+                       placeholder="Buscar producto..."
+                       autocomplete="off" autocorrect="off"
+                       oninput="buscarProductoIngreso()"
+                       style="text-transform:uppercase;">
+                <div id="ingResultados" style="background:white;border:1px solid #ddd;border-radius:8px;margin-top:4px;max-height:150px;overflow-y:auto;display:none;"></div>
+                <div id="ingInfo" style="background:#e8f5e9;border-left:3px solid #4caf50;padding:8px 10px;border-radius:6px;font-size:0.85rem;margin-top:6px;display:none;"></div>
+            </div>
+
+            <div class="form-grupo">
+                <label class="form-label">Cantidad a ingresar *</label>
+                <input type="number" class="form-input" id="ingCantidad"
+                       placeholder="1" min="1" value="1">
+            </div>
+
+            <div class="form-grupo">
+                <label class="form-label">Precio de COSTO unitario</label>
+                <input type="number" class="form-input" id="ingCosto"
+                       placeholder="Opcional" min="0"
+                       oninput="calcularSugeridoIngreso()">
+                <div id="ingSugerido" style="background:#fff3e0;border-left:3px solid #ff9800;padding:8px 10px;border-radius:6px;font-size:0.85rem;margin-top:6px;display:none;">
+                    💡 Precio sugerido (+50%): <strong id="ingSugeridoMonto">$0</strong>
+                </div>
+            </div>
+
+            <div class="form-grupo">
+                <label class="form-label">Precio de VENTA</label>
+                <input type="number" class="form-input" id="ingVenta"
+                       placeholder="Dejar vacío para mantener actual" min="0">
+            </div>
+
+            <div class="form-grupo">
+                <label class="form-label">Proveedor</label>
+                <input type="text" class="form-input" id="ingProveedor"
+                       placeholder="Opcional"
+                       style="text-transform:uppercase;">
+            </div>
+
+            <div class="form-grupo">
+                <label class="form-label">📅 Vencimiento</label>
+                <input type="date" class="form-input" id="ingVencimiento">
+            </div>
+
+            <div id="ingError" style="color:#d32f2f;font-size:0.85rem;margin-bottom:10px;display:none;"></div>
+
+            <button class="btn-guardar-producto" id="ingBtnGuardar" onclick="guardarIngreso()"
+                    style="background:linear-gradient(135deg,#1976d2,#1565c0);">
+                📦 Guardar ingreso
+            </button>
+        </div>
+    </div>
 </div>
 
 <!-- MODAL NUEVO PRODUCTO -->
@@ -1476,6 +1542,134 @@ function seleccionarMetodo(metodo) {
     const mapId = { efectivo: 'btnEfectivo', posnet: 'btnPosnet', transferencia: 'btnTransf' };
     const btn = document.getElementById(mapId[metodo]);
     if (btn) btn.classList.add('seleccionado');
+}
+
+// ========== INGRESO DE MERCADERÍA ==========
+let productoIngresoSeleccionado = null;
+
+function abrirIngreso() {
+    productoIngresoSeleccionado = null;
+    document.getElementById('ingProducto').value = '';
+    document.getElementById('ingCantidad').value = '1';
+    document.getElementById('ingCosto').value = '';
+    document.getElementById('ingVenta').value = '';
+    document.getElementById('ingProveedor').value = '';
+    document.getElementById('ingVencimiento').value = '';
+    document.getElementById('ingInfo').style.display = 'none';
+    document.getElementById('ingSugerido').style.display = 'none';
+    document.getElementById('ingResultados').style.display = 'none';
+    document.getElementById('ingError').style.display = 'none';
+    document.getElementById('modalIngreso').classList.add('open');
+    setTimeout(() => document.getElementById('ingProducto').focus(), 300);
+}
+
+function cerrarIngreso() {
+    document.getElementById('modalIngreso').classList.remove('open');
+}
+
+function cerrarModalIngreso(e) {
+    if (e.target === document.getElementById('modalIngreso')) cerrarIngreso();
+}
+
+function buscarProductoIngreso() {
+    const q = document.getElementById('ingProducto').value.toUpperCase().trim();
+    const resultadosDiv = document.getElementById('ingResultados');
+    const infoDiv = document.getElementById('ingInfo');
+    productoIngresoSeleccionado = null;
+    infoDiv.style.display = 'none';
+
+    if (q.length < 2) { resultadosDiv.style.display = 'none'; return; }
+
+    const matches = productos.filter(p => p.name.includes(q)).slice(0, 8);
+
+    if (matches.length === 0) {
+        resultadosDiv.style.display = 'none';
+        infoDiv.style.display = 'block';
+        infoDiv.style.background = '#fff3e0';
+        infoDiv.style.borderLeftColor = '#ff9800';
+        infoDiv.innerHTML = '⚠️ No encontrado — se creará como producto nuevo';
+        return;
+    }
+
+    resultadosDiv.innerHTML = matches.map(p => `
+        <div onclick="seleccionarProductoIngreso(${p.id})"
+             style="padding:10px 12px;cursor:pointer;border-bottom:1px solid #f0f0f0;font-size:0.9rem;">
+            <div style="font-weight:600;">${p.name}</div>
+            <div style="color:#666;font-size:0.8rem;">Stock: ${p.stock} · $${p.price.toLocaleString('es-AR')}</div>
+        </div>
+    `).join('');
+    resultadosDiv.style.display = 'block';
+}
+
+function seleccionarProductoIngreso(id) {
+    const p = productos.find(pr => pr.id === id);
+    if (!p) return;
+    productoIngresoSeleccionado = p;
+    document.getElementById('ingProducto').value = p.name;
+    document.getElementById('ingResultados').style.display = 'none';
+    const infoDiv = document.getElementById('ingInfo');
+    infoDiv.style.display = 'block';
+    infoDiv.style.background = '#e8f5e9';
+    infoDiv.style.borderLeftColor = '#4caf50';
+    infoDiv.innerHTML = '✅ <strong>' + p.name + '</strong><br>Stock actual: <strong>' + p.stock + '</strong> · Precio venta: <strong>$' + p.price.toLocaleString('es-AR') + '</strong>';
+    if (!document.getElementById('ingVenta').value) {
+        document.getElementById('ingVenta').value = p.price;
+    }
+}
+
+function calcularSugeridoIngreso() {
+    const costo = parseFloat(document.getElementById('ingCosto').value) || 0;
+    const div = document.getElementById('ingSugerido');
+    if (costo > 0) {
+        const sug = Math.ceil(costo * 1.5);
+        document.getElementById('ingSugeridoMonto').textContent = '$' + sug.toLocaleString('es-AR');
+        div.style.display = 'block';
+    } else {
+        div.style.display = 'none';
+    }
+}
+
+async function guardarIngreso() {
+    const nombre = document.getElementById('ingProducto').value.trim().toUpperCase();
+    const cantidad = parseInt(document.getElementById('ingCantidad').value) || 0;
+    const costo = parseFloat(document.getElementById('ingCosto').value) || null;
+    const venta = parseFloat(document.getElementById('ingVenta').value) || null;
+    const proveedor = document.getElementById('ingProveedor').value.trim().toUpperCase() || null;
+    const vencimiento = document.getElementById('ingVencimiento').value || null;
+    const errDiv = document.getElementById('ingError');
+    errDiv.style.display = 'none';
+
+    if (!nombre) { errDiv.textContent = '⚠️ Ingresá el nombre del producto'; errDiv.style.display = 'block'; return; }
+    if (cantidad <= 0) { errDiv.textContent = '⚠️ La cantidad debe ser mayor a 0'; errDiv.style.display = 'block'; return; }
+
+    const btn = document.getElementById('ingBtnGuardar');
+    btn.disabled = true;
+    btn.textContent = '⏳ Guardando...';
+
+    try {
+        const datos = { producto: nombre, cantidad, precioCosto: costo, precioVenta: venta, proveedor, fechaVencimiento: vencimiento };
+        const url = API_URL + '?action=ingresar&data=' + encodeURIComponent(JSON.stringify(datos));
+        const r = await fetch(url, { redirect: 'follow' });
+        const resp = await r.json();
+
+        if (resp.success) {
+            mostrarToast(resp.esNuevo ? '🆕 Producto nuevo creado' : '📦 Ingreso guardado', 'verde');
+            if (productoIngresoSeleccionado) {
+                const p = productos.find(pr => pr.id === productoIngresoSeleccionado.id);
+                if (p) p.stock = resp.nuevoStock;
+            }
+            cerrarIngreso();
+        } else {
+            errDiv.textContent = '❌ ' + resp.mensaje;
+            errDiv.style.display = 'block';
+        }
+    } catch(e) {
+        errDiv.textContent = '❌ Error de conexión';
+        errDiv.style.display = 'block';
+    }
+
+    btn.disabled = false;
+    btn.textContent = '📦 Guardar ingreso';
 }
 
 // ========== SERVICE WORKER ==========
