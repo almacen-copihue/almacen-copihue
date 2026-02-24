@@ -636,6 +636,7 @@
     <div class="header-right">
         <button class="btn-resumen" onclick="abrirNuevoProducto()" style="background:rgba(255,152,0,0.3);border-color:rgba(255,152,0,0.6);">➕ Nuevo</button>
         <button class="btn-resumen" onclick="abrirIngreso()" style="background:rgba(33,150,243,0.3);border-color:rgba(33,150,243,0.6);">📦 Ingresar</button>
+        <button class="btn-resumen" onclick="abrirAjuste()" style="background:rgba(233,30,99,0.3);border-color:rgba(233,30,99,0.6);">✏️ Ajuste</button>
         <button class="btn-resumen" onclick="abrirResumen()">📊 Hoy</button>
     </div>
 </div>
@@ -679,6 +680,39 @@
     <button class="btn-confirmar" id="btnConfirmar" onclick="abrirConfirmacion()" disabled>
         ✅ Cobrar
     </button>
+</div>
+
+<!-- MODAL AJUSTE RÁPIDO DE STOCK -->
+<div class="modal-bg" id="modalAjuste" onclick="if(event.target===this)cerrarAjuste()">
+    <div class="modal-sheet" style="padding-bottom:20px;">
+        <div class="modal-handle"></div>
+        <div class="modal-header">
+            <span class="modal-titulo">✏️ Ajuste rápido</span>
+            <button class="modal-cerrar" onclick="cerrarAjuste()">✕</button>
+        </div>
+        <div style="padding:12px 20px 0;">
+            <input type="text" class="form-input" id="ajusteQ"
+                   placeholder="Buscar producto..."
+                   oninput="buscarAjuste()"
+                   autocomplete="off" autocorrect="off"
+                   style="text-transform:uppercase;font-size:1rem;">
+            <div id="ajusteResultados" style="background:white;border:1px solid #ddd;border-radius:8px;margin-top:4px;max-height:200px;overflow-y:auto;display:none;"></div>
+
+            <div id="ajustePanel" style="display:none;margin-top:16px;text-align:center;">
+                <div id="ajusteNombre" style="font-weight:700;font-size:1rem;color:#222;margin-bottom:4px;"></div>
+                <div id="ajusteStockActual" style="font-size:0.85rem;color:#666;margin-bottom:16px;"></div>
+                <div style="display:flex;align-items:center;justify-content:center;gap:16px;">
+                    <button onclick="cambiarAjuste(-1)" style="width:52px;height:52px;border-radius:50%;border:none;background:#ffebee;color:#e53935;font-size:1.6rem;font-weight:700;cursor:pointer;">−</button>
+                    <div id="ajusteNuevo" style="font-size:2.2rem;font-weight:900;color:#1976d2;min-width:60px;"></div>
+                    <button onclick="cambiarAjuste(+1)" style="width:52px;height:52px;border-radius:50%;border:none;background:#e8f5e9;color:#2e7d32;font-size:1.6rem;font-weight:700;cursor:pointer;">+</button>
+                </div>
+                <button onclick="guardarAjuste()" id="ajusteBtn"
+                        style="margin-top:20px;width:100%;padding:14px;border:none;border-radius:12px;background:#1976d2;color:white;font-size:1rem;font-weight:700;cursor:pointer;">
+                    ✅ Guardar
+                </button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- MODAL INGRESO MERCADERÍA -->
@@ -1670,6 +1704,88 @@ async function guardarIngreso() {
 
     btn.disabled = false;
     btn.textContent = '📦 Guardar ingreso';
+}
+
+// ========== AJUSTE RÁPIDO DE STOCK ==========
+let ajusteProducto = null;
+let ajusteValor = 0;
+
+function abrirAjuste() {
+    ajusteProducto = null;
+    ajusteValor = 0;
+    document.getElementById('ajusteQ').value = '';
+    document.getElementById('ajusteResultados').style.display = 'none';
+    document.getElementById('ajustePanel').style.display = 'none';
+    document.getElementById('modalAjuste').classList.add('open');
+    setTimeout(() => document.getElementById('ajusteQ').focus(), 300);
+}
+
+function cerrarAjuste() {
+    document.getElementById('modalAjuste').classList.remove('open');
+}
+
+function buscarAjuste() {
+    const q = document.getElementById('ajusteQ').value.toUpperCase().trim();
+    const div = document.getElementById('ajusteResultados');
+    document.getElementById('ajustePanel').style.display = 'none';
+    if (q.length < 2) { div.style.display = 'none'; return; }
+    const matches = productos.filter(p => p.name.includes(q)).slice(0, 8);
+    if (matches.length === 0) { div.style.display = 'none'; return; }
+    div.innerHTML = matches.map(p => `
+        <div onclick="seleccionarAjuste(${p.id})"
+             style="padding:10px 12px;cursor:pointer;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-weight:600;font-size:0.9rem;">${p.name}</span>
+            <span style="color:#666;font-size:0.85rem;font-weight:700;">Stock: ${p.stock}</span>
+        </div>
+    `).join('');
+    div.style.display = 'block';
+}
+
+function seleccionarAjuste(id) {
+    const p = productos.find(pr => pr.id === id);
+    if (!p) return;
+    ajusteProducto = p;
+    ajusteValor = p.stock;
+    document.getElementById('ajusteQ').value = p.name;
+    document.getElementById('ajusteResultados').style.display = 'none';
+    document.getElementById('ajusteNombre').textContent = p.name;
+    document.getElementById('ajusteStockActual').textContent = 'Stock actual: ' + p.stock;
+    document.getElementById('ajusteNuevo').textContent = ajusteValor;
+    document.getElementById('ajustePanel').style.display = 'block';
+}
+
+function cambiarAjuste(delta) {
+    ajusteValor = Math.max(0, ajusteValor + delta);
+    document.getElementById('ajusteNuevo').textContent = ajusteValor;
+}
+
+async function guardarAjuste() {
+    if (!ajusteProducto) return;
+    const btn = document.getElementById('ajusteBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Guardando...';
+    try {
+        const datos = {
+            producto: ajusteProducto.name,
+            cantidad: ajusteValor - ajusteProducto.stock, // diferencia (puede ser negativa)
+            precioVenta: null, precioCosto: null, proveedor: null, fechaVencimiento: null,
+            stockDirecto: ajusteValor // stock final exacto
+        };
+        const url = API_URL + '?action=ingresar&data=' + encodeURIComponent(JSON.stringify(datos));
+        const r = await fetch(url, { redirect: 'follow' });
+        const resp = await r.json();
+        if (resp.success) {
+            ajusteProducto.stock = ajusteValor;
+            mostrarToast('✅ Stock ajustado a ' + ajusteValor, 'verde');
+            cerrarAjuste();
+        } else {
+            mostrarToast('❌ ' + resp.mensaje, 'rojo');
+        }
+    } catch(e) {
+        mostrarToast('❌ Error de conexión', 'rojo');
+    }
+    btn.disabled = false;
+    btn.textContent = '✅ Guardar';
 }
 
 // ========== SERVICE WORKER ==========
