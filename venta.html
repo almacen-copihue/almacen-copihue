@@ -536,6 +536,22 @@
             color: white;
         }
 
+        /* ===== PRECIO EDITABLE CARRITO ===== */
+        .item-precio-editable {
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--verde-oscuro);
+            cursor: pointer;
+            border-bottom: 2px dashed var(--verde-oscuro);
+            padding: 2px 4px;
+            border-radius: 4px;
+        }
+        .item-precio-editable.modificado {
+            color: #e65100;
+            border-color: #e65100;
+        }
+        .item-subtotal { font-weight: 700; color: var(--verde-oscuro); min-width: 70px; text-align: right; }
+
         /* ===== VENCIMIENTO ===== */
         .badge-vence {
             display: inline-block;
@@ -742,15 +758,27 @@
 
             <div id="ajustePanel" style="display:none;margin-top:16px;text-align:center;">
                 <div id="ajusteNombre" style="font-weight:700;font-size:1rem;color:#222;margin-bottom:4px;"></div>
-                <div id="ajusteStockActual" style="font-size:0.85rem;color:#666;margin-bottom:16px;"></div>
-                <div style="display:flex;align-items:center;justify-content:center;gap:16px;">
+                <div id="ajusteStockActual" style="font-size:0.85rem;color:#666;margin-bottom:12px;"></div>
+
+                <!-- STOCK -->
+                <div style="font-size:0.72rem;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">📦 Stock</div>
+                <div style="display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:20px;">
                     <button onclick="cambiarAjuste(-1)" style="width:52px;height:52px;border-radius:50%;border:none;background:#ffebee;color:#e53935;font-size:1.6rem;font-weight:700;cursor:pointer;">−</button>
                     <div id="ajusteNuevo" style="font-size:2.2rem;font-weight:900;color:#1976d2;min-width:60px;"></div>
                     <button onclick="cambiarAjuste(+1)" style="width:52px;height:52px;border-radius:50%;border:none;background:#e8f5e9;color:#2e7d32;font-size:1.6rem;font-weight:700;cursor:pointer;">+</button>
                 </div>
+
+                <!-- PRECIO -->
+                <div style="font-size:0.72rem;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">💰 Precio de venta</div>
+                <div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:20px;">
+                    <span style="font-size:1.4rem;font-weight:700;color:#555;">$</span>
+                    <input type="number" id="ajustePrecioNuevo" min="0"
+                           style="font-size:1.8rem;font-weight:900;color:#2e7d32;width:140px;border:2px solid #e0e0e0;border-radius:10px;padding:6px 10px;text-align:center;">
+                </div>
+
                 <button onclick="guardarAjuste()" id="ajusteBtn"
-                        style="margin-top:20px;width:100%;padding:14px;border:none;border-radius:12px;background:#1976d2;color:white;font-size:1rem;font-weight:700;cursor:pointer;">
-                    ✅ Guardar
+                        style="width:100%;padding:14px;border:none;border-radius:12px;background:#1976d2;color:white;font-size:1rem;font-weight:700;cursor:pointer;">
+                    ✅ Guardar en planilla
                 </button>
             </div>
         </div>
@@ -1201,6 +1229,11 @@ function renderVenta() {
                     <button class="btn-cant" onclick="cambiarCantidad('${item.id}', +1)">+</button>
                 `}
             </div>
+            <span class="item-precio-editable ${item.precioModificado ? 'modificado' : ''}"
+                  onclick="editarPrecioCarrito('${item.id}')"
+                  title="Tocar para cambiar precio de esta venta">
+                $${item.price.toLocaleString('es-AR')}
+            </span>
             <div class="item-subtotal">$${(item.price * item.qty).toLocaleString('es-AR')}</div>
         </div>
     `).join('');
@@ -1248,7 +1281,9 @@ async function confirmarVenta() {
             qty: i.qty,
             esPeso: i.esPeso || false,
             gramos: i.gramos || 0,
-            precioVenta: i.price
+            precioVenta: i.price,
+            precioModificado: i.precioModificado || false,
+            precioOriginal: i.precioOriginal || 0
         }));
         // Agregar método de pago al request
         const ventaPayload = { items: ventaData, metodoPago: metodoPagoActual, vendedor: vendedorActual };
@@ -1759,6 +1794,42 @@ async function guardarIngreso() {
     btn.textContent = '📦 Guardar ingreso';
 }
 
+// ========== PRECIO TEMPORAL EN CARRITO ==========
+function editarPrecioCarrito(id) {
+    const item = ventaActual.find(i => String(i.id) === String(id));
+    if (!item) return;
+
+    const precioActual = item.price;
+    const nuevo = prompt(
+        item.name.substring(0,40) + '\n' +
+        'Precio actual: $' + precioActual.toLocaleString('es-AR') + '\n\n' +
+        'Ingresá el nuevo precio (solo para esta venta):',
+        precioActual
+    );
+
+    if (nuevo === null) return; // canceló
+    const precioNuevo = parseInt(nuevo);
+    if (isNaN(precioNuevo) || precioNuevo < 0) {
+        mostrarToast('⚠️ Precio inválido', 'rojo');
+        return;
+    }
+
+    item.precioOriginal = item.precioModificado ? item.precioOriginal : precioActual;
+    item.price = precioNuevo;
+    item.precioModificado = precioNuevo !== item.precioOriginal;
+
+    renderVenta();
+    guardarCarritoPendiente();
+
+    if (precioNuevo === 0) {
+        mostrarToast('🎁 ' + item.name.substring(0,25) + ' — REGALO', 'verde');
+    } else if (precioNuevo < (item.precioOriginal || precioActual)) {
+        mostrarToast('💸 Descuento aplicado — $' + precioNuevo.toLocaleString('es-AR'), 'verde');
+    } else {
+        mostrarToast('💰 Precio actualizado', 'verde');
+    }
+}
+
 // ========== AJUSTE RÁPIDO DE STOCK ==========
 let ajusteProducto = null;
 let ajusteValor = 0;
@@ -1802,8 +1873,9 @@ function seleccionarAjuste(id) {
     document.getElementById('ajusteQ').value = p.name;
     document.getElementById('ajusteResultados').style.display = 'none';
     document.getElementById('ajusteNombre').textContent = p.name;
-    document.getElementById('ajusteStockActual').textContent = 'Stock actual: ' + p.stock;
+    document.getElementById('ajusteStockActual').textContent = 'Stock: ' + p.stock + ' · Precio actual: $' + p.price.toLocaleString('es-AR');
     document.getElementById('ajusteNuevo').textContent = ajusteValor;
+    document.getElementById('ajustePrecioNuevo').value = p.price;
     document.getElementById('ajustePanel').style.display = 'block';
 }
 
@@ -1817,19 +1889,26 @@ async function guardarAjuste() {
     const btn = document.getElementById('ajusteBtn');
     btn.disabled = true;
     btn.textContent = '⏳ Guardando...';
+    const precioNuevo = parseInt(document.getElementById('ajustePrecioNuevo').value) || ajusteProducto.price;
     try {
         const datos = {
             producto: ajusteProducto.name,
-            cantidad: ajusteValor - ajusteProducto.stock, // diferencia (puede ser negativa)
-            precioVenta: null, precioCosto: null, proveedor: null, fechaVencimiento: null,
-            stockDirecto: ajusteValor // stock final exacto
+            cantidad: ajusteValor - ajusteProducto.stock,
+            precioVenta: precioNuevo !== ajusteProducto.price ? precioNuevo : null,
+            precioCosto: null, proveedor: null, fechaVencimiento: null,
+            stockDirecto: ajusteValor
         };
         const url = API_URL + '?action=ingresar&data=' + encodeURIComponent(JSON.stringify(datos));
         const r = await fetch(url, { redirect: 'follow' });
         const resp = await r.json();
         if (resp.success) {
             ajusteProducto.stock = ajusteValor;
-            mostrarToast('✅ Stock ajustado a ' + ajusteValor, 'verde');
+            if (precioNuevo !== ajusteProducto.price) {
+                ajusteProducto.price = precioNuevo;
+                mostrarToast('✅ Stock y precio actualizados', 'verde');
+            } else {
+                mostrarToast('✅ Stock ajustado a ' + ajusteValor, 'verde');
+            }
             cerrarAjuste();
         } else {
             mostrarToast('❌ ' + resp.mensaje, 'rojo');
@@ -1838,7 +1917,7 @@ async function guardarAjuste() {
         mostrarToast('❌ Error de conexión', 'rojo');
     }
     btn.disabled = false;
-    btn.textContent = '✅ Guardar';
+    btn.textContent = '✅ Guardar en planilla';
 }
 
 // ========== VENDEDOR ==========
