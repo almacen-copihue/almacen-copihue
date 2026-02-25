@@ -628,9 +628,10 @@
 
 <!-- HEADER -->
 <div class="header">
-    <div class="header-titulo">
+    <div class="header-titulo" onclick="cambiarVendedor()" style="cursor:pointer;" title="Tocar para cambiar vendedor">
         🏪 Copihue
         <div class="indicador-carga" id="indicadorCarga" title="Cargando..."></div>
+        <span id="vendedorBadge" style="font-size:0.65rem;background:rgba(255,255,255,0.2);padding:2px 7px;border-radius:10px;font-weight:600;margin-left:4px;"></span>
     </div>
     <div class="header-right">
         <button class="btn-resumen" onclick="abrirNuevoProducto()" style="background:rgba(255,152,0,0.3);border-color:rgba(255,152,0,0.6);">➕ Nuevo</button>
@@ -679,6 +680,30 @@
     <button class="btn-confirmar" id="btnConfirmar" onclick="abrirConfirmacion()" disabled>
         ✅ Cobrar
     </button>
+</div>
+
+<!-- MODAL VENDEDOR -->
+<div class="modal-bg" id="modalVendedor">
+    <div class="modal-sheet" style="padding-bottom:24px;">
+        <div class="modal-handle"></div>
+        <div class="modal-header">
+            <span class="modal-titulo">👤 ¿Quién está vendiendo?</span>
+        </div>
+        <div style="padding:16px 20px 0;">
+            <p style="color:#666;font-size:0.9rem;margin:0 0 16px;">Esto queda guardado en este celular.</p>
+            <div id="vendedorOpciones" style="display:flex;flex-direction:column;gap:10px;"></div>
+            <div style="margin-top:16px;display:flex;gap:8px;">
+                <input type="text" class="form-input" id="vendedorNuevoNombre"
+                       placeholder="Otro nombre..."
+                       style="flex:1;text-transform:capitalize;"
+                       onkeydown="if(event.key==='Enter')agregarVendedor()">
+                <button onclick="agregarVendedor()"
+                        style="padding:12px 16px;border:none;border-radius:12px;background:var(--verde);color:white;font-weight:700;cursor:pointer;white-space:nowrap;">
+                    ➕ Agregar
+                </button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- MODAL AJUSTE RÁPIDO DE STOCK -->
@@ -1201,7 +1226,7 @@ async function confirmarVenta() {
             precioVenta: i.price
         }));
         // Agregar método de pago al request
-        const ventaPayload = { items: ventaData, metodoPago: metodoPagoActual };
+        const ventaPayload = { items: ventaData, metodoPago: metodoPagoActual, vendedor: vendedorActual };
         const dataEncoded = encodeURIComponent(JSON.stringify(ventaPayload));
         const url = API_URL + '?action=vender&data=' + dataEncoded;
         const r = await fetch(url, { redirect: 'follow' });
@@ -1791,6 +1816,86 @@ async function guardarAjuste() {
     btn.textContent = '✅ Guardar';
 }
 
+// ========== VENDEDOR ==========
+const VENDEDOR_KEY = 'copihue_vendedor';
+const VENDEDORES_KEY = 'copihue_vendedores';
+let vendedorActual = '';
+
+const VENDEDORES_DEFAULT = ['Diego', 'Valentín'];
+
+function getVendedores() {
+    try {
+        const v = localStorage.getItem(VENDEDORES_KEY);
+        return v ? JSON.parse(v) : [...VENDEDORES_DEFAULT];
+    } catch(e) { return [...VENDEDORES_DEFAULT]; }
+}
+
+function setVendedores(arr) {
+    localStorage.setItem(VENDEDORES_KEY, JSON.stringify(arr));
+}
+
+function inicializarVendedor() {
+    const guardado = localStorage.getItem(VENDEDOR_KEY);
+    if (guardado) {
+        vendedorActual = guardado;
+        actualizarBadgeVendedor();
+    } else {
+        // Primera vez — mostrar selector
+        setTimeout(() => abrirSelectorVendedor(false), 800);
+    }
+}
+
+function actualizarBadgeVendedor() {
+    const badge = document.getElementById('vendedorBadge');
+    if (badge) badge.textContent = vendedorActual || '';
+}
+
+function abrirSelectorVendedor(puedeCerrar) {
+    const vendedores = getVendedores();
+    const div = document.getElementById('vendedorOpciones');
+    div.innerHTML = vendedores.map(v => `
+        <button onclick="seleccionarVendedor('${v}')"
+                style="padding:14px;border:2px solid ${v === vendedorActual ? 'var(--verde)' : '#e0e0e0'};
+                       border-radius:12px;background:${v === vendedorActual ? '#e8f5e9' : 'white'};
+                       font-size:1rem;font-weight:700;cursor:pointer;text-align:left;color:#222;">
+            👤 ${v} ${v === vendedorActual ? '✅' : ''}
+        </button>
+    `).join('');
+    
+    const modal = document.getElementById('modalVendedor');
+    modal.classList.add('open');
+    // Solo se puede cerrar si ya hay vendedor seleccionado
+    modal.onclick = puedeCerrar ? (e) => { if (e.target === modal) cerrarVendedor(); } : null;
+}
+
+function cerrarVendedor() {
+    document.getElementById('modalVendedor').classList.remove('open');
+}
+
+function seleccionarVendedor(nombre) {
+    vendedorActual = nombre;
+    localStorage.setItem(VENDEDOR_KEY, nombre);
+    actualizarBadgeVendedor();
+    cerrarVendedor();
+    mostrarToast('👤 Vendiendo como ' + nombre, 'verde');
+}
+
+function agregarVendedor() {
+    const nombre = document.getElementById('vendedorNuevoNombre').value.trim();
+    if (!nombre) return;
+    const vendedores = getVendedores();
+    if (!vendedores.includes(nombre)) {
+        vendedores.push(nombre);
+        setVendedores(vendedores);
+    }
+    document.getElementById('vendedorNuevoNombre').value = '';
+    seleccionarVendedor(nombre);
+}
+
+function cambiarVendedor() {
+    abrirSelectorVendedor(true);
+}
+
 // ========== SERVICE WORKER ==========
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
@@ -1801,6 +1906,7 @@ if ('serviceWorker' in navigator) {
 }
 
 // ========== INIT ==========
+inicializarVendedor();
 cargarProductos().then(() => {
     // Primero verificar si hay venta pendiente y recuperarla silenciosamente
     const guardado = localStorage.getItem(CARRITO_KEY);
