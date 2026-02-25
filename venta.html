@@ -536,6 +536,23 @@
             color: white;
         }
 
+        /* ===== VENCIMIENTO ===== */
+        .badge-vence {
+            display: inline-block;
+            font-size: 0.7rem;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 10px;
+            margin-top: 3px;
+        }
+        .vence-vencido { background: #d32f2f; color: white; animation: parpadeo 0.8s infinite; }
+        .vence-hoy     { background: #ff6f00; color: white; animation: parpadeo 1s infinite; }
+        .vence-pronto  { background: #fff176; color: #555; border: 1px solid #f9a825; }
+        @keyframes parpadeo {
+            0%, 100% { opacity: 1; }
+            50%       { opacity: 0.3; }
+        }
+
         /* ===== MÉTODO DE PAGO ===== */
         .metodo-pago-grid {
             display: grid;
@@ -975,7 +992,9 @@ async function cargarProductos() {
                 name: String(p.name).trim(),
                 price: parseInt(p.price) || 0,
                 stock: parseInt(p.stock) || 0,
-                image: `imagenes-productos/${simplificarNombre(String(p.name).trim())}.jpg`
+                image: `imagenes-productos/${simplificarNombre(String(p.name).trim())}.jpg`,
+                rotacion: parseInt(p.rotacion) || 3,
+                vencimiento: p.vencimiento || 
             }));
         document.getElementById('indicadorCarga').classList.add('ok');
         document.getElementById('indicadorCarga').title = `${productos.length} productos cargados`;
@@ -1046,7 +1065,7 @@ function buscar(term) {
                  alt="${p.name}">
             <div class="resultado-img-placeholder" style="display:none;">🛒</div>
             <div class="resultado-info">
-                <div class="resultado-nombre">${p.name}</div>
+                <div class="resultado-nombre">${p.name} ${badgeVencimiento(p)}</div>
                 <div class="resultado-stock ${stockClase}">${stockTexto}</div>
             </div>
             <div class="resultado-precio">$${p.price.toLocaleString('es-AR')}</div>
@@ -1110,7 +1129,9 @@ function agregarProducto(id) {
             name: producto.name,
             price: producto.price,
             qty: 1,
-            stockDisponible: producto.stock
+            stockDisponible: producto.stock,
+            vencimiento: producto.vencimiento || '',
+            rotacion: producto.rotacion || 3
         });
     }
 
@@ -1167,7 +1188,10 @@ function renderVenta() {
 
     contenedor.innerHTML = ventaActual.map(item => `
         <div class="item-venta">
-            <div class="item-venta-nombre">${item.name}</div>
+            <div class="item-venta-nombre">
+                ${item.name}
+                ${item.vencimiento ? badgeVencimiento(item) : ''}
+            </div>
             <div class="item-venta-controles">
                 ${item.esPeso ? `
                     <button class="btn-cant" onclick="cambiarCantidad('${item.id}', -99)" style="background:#ffebee;color:#e53935;">🗑</button>
@@ -1822,7 +1846,7 @@ const VENDEDOR_KEY = 'copihue_vendedor';
 const VENDEDORES_KEY = 'copihue_vendedores';
 let vendedorActual = '';
 
-const VENDEDORES_DEFAULT = ['Diego', 'Valentín'];
+const VENDEDORES_DEFAULT = ['Víctor', 'Sebastián'];
 
 function getVendedores() {
     try {
@@ -1854,13 +1878,22 @@ function actualizarBadgeVendedor() {
 function abrirSelectorVendedor(puedeCerrar) {
     const vendedores = getVendedores();
     const div = document.getElementById('vendedorOpciones');
+    const defaultVendedores = VENDEDORES_DEFAULT;
     div.innerHTML = vendedores.map(v => `
-        <button onclick="seleccionarVendedor('${v}')"
-                style="padding:14px;border:2px solid ${v === vendedorActual ? 'var(--verde)' : '#e0e0e0'};
-                       border-radius:12px;background:${v === vendedorActual ? '#e8f5e9' : 'white'};
-                       font-size:1rem;font-weight:700;cursor:pointer;text-align:left;color:#222;">
-            👤 ${v} ${v === vendedorActual ? '✅' : ''}
-        </button>
+        <div style="display:flex;gap:8px;align-items:center;">
+            <button onclick="seleccionarVendedor('${v}')"
+                    style="flex:1;padding:14px;border:2px solid ${v === vendedorActual ? 'var(--verde)' : '#e0e0e0'};
+                           border-radius:12px;background:${v === vendedorActual ? '#e8f5e9' : 'white'};
+                           font-size:1rem;font-weight:700;cursor:pointer;text-align:left;color:#222;">
+                👤 ${v} ${v === vendedorActual ? '✅' : ''}
+            </button>
+            ${!defaultVendedores.includes(v) ? `
+            <button onclick="borrarVendedor('${v}')"
+                    style="padding:12px 14px;border:2px solid #ffcdd2;border-radius:12px;background:#fff5f5;
+                           font-size:1rem;cursor:pointer;color:#e53935;flex-shrink:0;">
+                🗑
+            </button>` : ''}
+        </div>
     `).join('');
     
     const modal = document.getElementById('modalVendedor');
@@ -1881,6 +1914,19 @@ function seleccionarVendedor(nombre) {
     mostrarToast('👤 Vendiendo como ' + nombre, 'verde');
 }
 
+function borrarVendedor(nombre) {
+    const vendedores = getVendedores();
+    const nuevos = vendedores.filter(v => v !== nombre);
+    setVendedores(nuevos);
+    if (vendedorActual === nombre) {
+        vendedorActual = '';
+        localStorage.removeItem(VENDEDOR_KEY);
+        actualizarBadgeVendedor();
+    }
+    abrirSelectorVendedor(true);
+    mostrarToast('🗑 ' + nombre + ' eliminado', 'rojo');
+}
+
 function agregarVendedor() {
     const nombre = document.getElementById('vendedorNuevoNombre').value.trim();
     if (!nombre) return;
@@ -1895,6 +1941,35 @@ function agregarVendedor() {
 
 function cambiarVendedor() {
     abrirSelectorVendedor(true);
+}
+
+// ========== ALERTA VENCIMIENTO ==========
+function diasParaVencer(fechaStr) {
+    if (!fechaStr) return null;
+    try {
+        const hoy = new Date();
+        hoy.setHours(0,0,0,0);
+        const vence = new Date(fechaStr);
+        vence.setHours(0,0,0,0);
+        return Math.round((vence - hoy) / 86400000);
+    } catch(e) { return null; }
+}
+
+function umbralAlerta(rotacion) {
+    // Rotación 1-2 lento: 14 días, 3 medio: 7 días, 4-5 rápido: 2 días
+    if (rotacion <= 2) return 14;
+    if (rotacion === 3) return 7;
+    return 2;
+}
+
+function badgeVencimiento(producto) {
+    const dias = diasParaVencer(producto.vencimiento);
+    if (dias === null) return '';
+    const umbral = umbralAlerta(producto.rotacion);
+    if (dias < 0) return '<span class="badge-vence vence-vencido">❌ VENCIDO</span>';
+    if (dias === 0) return '<span class="badge-vence vence-hoy">⚠️ VENCE HOY</span>';
+    if (dias <= umbral) return '<span class="badge-vence vence-pronto">🟡 Vence en ' + dias + 'd</span>';
+    return '';
 }
 
 // ========== SERVICE WORKER ==========
