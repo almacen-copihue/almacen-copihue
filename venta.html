@@ -1095,6 +1095,8 @@ async function cargarProductos() {
         console.log(`✅ ${productos.length} productos cargados`);
         // Alertas del día al terminar de cargar
         setTimeout(verificarAlertasDelDia, 800);
+        // Sugerencia relámpago (después de alertas)
+        setTimeout(sugerirRelampago, 2000);
     } catch(e) {
         mostrarToast('❌ Error al cargar productos', 'rojo');
         console.error(e);
@@ -2163,6 +2165,172 @@ function verificarAlertasDelDia() {
             </div>
         </div>`;
     document.body.appendChild(overlay);
+}
+
+// ========== RELÁMPAGO INTELIGENTE ==========
+function calcularDescuentoSugerido(diasParaVencer) {
+    if (diasParaVencer <= 7)  return { tipo: 14, pct: 25 };
+    if (diasParaVencer <= 15) return { tipo: 13, pct: 20 };
+    if (diasParaVencer <= 30) return { tipo: 12, pct: 15 };
+    return { tipo: 11, pct: 10 };
+}
+
+function calcularPuntajeCandidato(p) {
+    // No aplica si no tiene vencimiento o no tiene stock
+    if (!p.vencimiento || p.stock <= 0) return -1;
+    
+    const hoy = new Date();
+    const vence = new Date(p.vencimiento);
+    const dias = Math.ceil((vence - hoy) / (1000 * 60 * 60 * 24));
+    
+    // Solo candidatos con menos de 45 días para vencer
+    if (dias < 0 || dias > 45) return -1;
+    
+    // Puntaje: más alto = más urgente
+    // Días cercanos + rotación lenta = más puntaje
+    const urgenciaDias = Math.max(0, 45 - dias);   // 0-45
+    const pesoRotacion = (6 - (p.rotacion || 3));   // 5 si es lento, 1 si es rápido
+    return urgenciaDias * 2 + pesoRotacion * 5;
+}
+
+function sugerirRelampago() {
+    // Verificar si ya hay uno activo hoy
+    const hoyKey = new Date().toISOString().split('T')[0];
+    const yaActivado = localStorage.getItem('relampago_activado_' + hoyKey);
+    if (yaActivado) return; // ya se activó hoy
+
+    const candidatos = productos
+        .map(p => ({ p, score: calcularPuntajeCandidato(p) }))
+        .filter(x => x.score > 0)
+        .sort((a, b) => b.score - a.score);
+
+    if (candidatos.length === 0) return;
+
+    const mejor = candidatos[0].p;
+    const hoy2 = new Date();
+    const vence = new Date(mejor.vencimiento);
+    const dias = Math.ceil((vence - hoy2) / (1000 * 60 * 60 * 24));
+    const desc = calcularDescuentoSugerido(dias);
+    const precioOferta = Math.round(mejor.price * (1 - desc.pct / 100));
+
+    // Otros candidatos para "ver otro"
+    const alternativos = candidatos.slice(1, 4);
+    let indiceAlternativo = 0;
+
+    function mostrarModal(producto, diasP, descP, alternativosP) {
+        const diasTexto = diasP <= 7 ? `<span style="color:#c62828;font-weight:900;">⚠️ Vence en ${diasP} días</span>` :
+                          diasP <= 15 ? `<span style="color:#e65100;">Vence en ${diasP} días</span>` :
+                          `Vence en ${diasP} días`;
+
+        const existing = document.getElementById('modalRelampago');
+        if (existing) existing.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'modalRelampago';
+        overlay.innerHTML = `
+            <div style="position:fixed;inset:0;background:rgba(0,0,0,0.75);
+                        display:flex;align-items:flex-end;justify-content:center;
+                        z-index:9999;padding:0;">
+                <div style="background:white;border-radius:24px 24px 0 0;
+                            width:100%;max-width:540px;padding-bottom:20px;
+                            animation:slideUp 0.3s ease;">
+                    <div style="background:linear-gradient(135deg,#e65100,#ff6f00);
+                                padding:16px 20px;border-radius:24px 24px 0 0;
+                                display:flex;align-items:center;gap:10px;">
+                        <span style="font-size:1.4rem;">⚡</span>
+                        <div>
+                            <div style="color:white;font-weight:900;font-size:1rem;">
+                                Sugerencia Relámpago del día
+                            </div>
+                            <div style="color:rgba(255,255,255,0.85);font-size:0.8rem;">
+                                El sistema encontró un candidato ideal
+                            </div>
+                        </div>
+                        <button onclick="document.getElementById('modalRelampago').remove()"
+                                style="margin-left:auto;background:rgba(255,255,255,0.2);
+                                       border:none;color:white;width:32px;height:32px;
+                                       border-radius:50%;cursor:pointer;font-size:1rem;">✕</button>
+                    </div>
+
+                    <div style="padding:16px 20px;">
+                        <div style="font-weight:700;font-size:1rem;color:#212121;
+                                    margin-bottom:4px;">${producto.name}</div>
+                        <div style="font-size:0.85rem;color:#666;margin-bottom:12px;">
+                            ${diasTexto} · Stock: ${producto.stock} unidades
+                        </div>
+
+                        <div style="background:#fff8f0;border:2px solid #ff6f00;
+                                    border-radius:14px;padding:14px;margin-bottom:14px;
+                                    display:flex;justify-content:space-between;align-items:center;">
+                            <div>
+                                <div style="color:#999;font-size:0.8rem;text-decoration:line-through;">
+                                    Precio normal: $${producto.price.toLocaleString('es-AR')}
+                                </div>
+                                <div style="color:#e65100;font-weight:900;font-size:1.4rem;">
+                                    $${Math.round(producto.price * (1 - descP.pct / 100)).toLocaleString('es-AR')}
+                                </div>
+                            </div>
+                            <div style="background:#e65100;color:white;font-weight:900;
+                                        font-size:1.2rem;padding:10px 16px;border-radius:12px;">
+                                -${descP.pct}%
+                            </div>
+                        </div>
+
+                        <div style="display:flex;gap:10px;margin-bottom:10px;">
+                            <button onclick="confirmarRelampago(${producto.id},'${producto.name}',${descP.tipo})"
+                                    style="flex:1;padding:14px;border:none;border-radius:14px;
+                                           background:linear-gradient(135deg,#e65100,#ff6f00);
+                                           color:white;font-weight:900;font-size:1rem;cursor:pointer;">
+                                ⚡ Activar relámpago
+                            </button>
+                        </div>
+                        <div style="display:flex;gap:10px;">
+                            ${alternativosP.length > 0 ? `
+                            <button onclick="verOtroRelampago()"
+                                    style="flex:1;padding:12px;border:1px solid #ddd;border-radius:14px;
+                                           background:white;color:#666;font-weight:700;cursor:pointer;">
+                                🔄 Ver otro
+                            </button>` : ''}
+                            <button onclick="document.getElementById('modalRelampago').remove()"
+                                    style="flex:1;padding:12px;border:1px solid #ddd;border-radius:14px;
+                                           background:white;color:#666;font-weight:700;cursor:pointer;">
+                                Hoy no
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+    }
+
+    window.verOtroRelampago = function() {
+        if (indiceAlternativo >= alternativos.length) return;
+        const alt = alternativos[indiceAlternativo].p;
+        indiceAlternativo++;
+        const diasAlt = Math.ceil((new Date(alt.vencimiento) - new Date()) / (1000 * 60 * 60 * 24));
+        const descAlt = calcularDescuentoSugerido(diasAlt);
+        mostrarModal(alt, diasAlt, descAlt, alternativos.slice(indiceAlternativo));
+    };
+
+    window.confirmarRelampago = async function(id, nombre, tipo) {
+        document.getElementById('modalRelampago').remove();
+        try {
+            const datos = { productoId: id, tipo: tipo };
+            const url = API_URL + '?action=relampago&data=' + encodeURIComponent(JSON.stringify(datos));
+            const r = await fetch(url);
+            const res = await r.json();
+            if (res.success) {
+                localStorage.setItem('relampago_activado_' + hoyKey, nombre);
+                mostrarToast('⚡ Relámpago activado: ' + nombre, 'verde');
+            } else {
+                mostrarToast('❌ Error al activar', 'rojo');
+            }
+        } catch(e) {
+            mostrarToast('❌ Error de conexión', 'rojo');
+        }
+    };
+
+    mostrarModal(mejor, dias, desc, alternativos);
 }
 
 // ========== ALERTA VENCIMIENTO ==========
