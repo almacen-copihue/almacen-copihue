@@ -1086,11 +1086,15 @@ async function cargarProductos() {
                 stock: parseInt(p.stock) || 0,
                 image: `imagenes-productos/${simplificarNombre(String(p.name).trim())}.jpg`,
                 rotacion: parseInt(p.rotacion) || 3,
-                vencimiento: p.vencimiento || ''
+                vencimiento: p.vencimiento || '',
+                diaCritico: (p.diaCritico || '').toLowerCase().trim(),
+                stockMin: parseInt(p.stockMin) || 0
             }));
         document.getElementById('indicadorCarga').classList.add('ok');
         document.getElementById('indicadorCarga').title = `${productos.length} productos cargados`;
         console.log(`✅ ${productos.length} productos cargados`);
+        // Alertas del día al terminar de cargar
+        setTimeout(verificarAlertasDelDia, 800);
     } catch(e) {
         mostrarToast('❌ Error al cargar productos', 'rojo');
         console.error(e);
@@ -2100,6 +2104,65 @@ function agregarVendedor() {
 
 function cambiarVendedor() {
     abrirSelectorVendedor(true);
+}
+
+// ========== ALERTAS DEL DIA ==========
+function verificarAlertasDelDia() {
+    if (!productos || productos.length === 0) return;
+
+    const diasES = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+    const hoy = diasES[new Date().getDay()];
+
+    const alertas = productos.filter(p => {
+        if (!p.diaCritico) return false;
+        const minimo = p.stockMin > 0 ? p.stockMin : 3;
+        return p.diaCritico === hoy && p.stock <= minimo;
+    });
+
+    if (alertas.length === 0) return;
+
+    // Modal de alerta
+    const lista = alertas.map(p => {
+        const min = p.stockMin > 0 ? p.stockMin : 3;
+        const color = p.stock === 0 ? '#e53935' : '#e65100';
+        return `<div style="display:flex;justify-content:space-between;align-items:center;
+                            padding:10px 0;border-bottom:1px solid #f0f0f0;">
+                    <span style="font-weight:600;font-size:0.9rem;">${p.name}</span>
+                    <span style="color:${color};font-weight:700;font-size:0.85rem;margin-left:10px;white-space:nowrap;">
+                        ${p.stock === 0 ? '❌ SIN STOCK' : '⚠️ Stock: ' + p.stock}
+                        <span style="color:#999;font-weight:400;">(mín ${min})</span>
+                    </span>
+                </div>`;
+    }).join('');
+
+    const overlay = document.createElement('div');
+    overlay.innerHTML = `
+        <div style="position:fixed;inset:0;background:rgba(0,0,0,0.75);
+                    display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px;">
+            <div style="background:white;border-radius:20px;width:100%;max-width:420px;
+                        box-shadow:0 8px 32px rgba(0,0,0,0.3);overflow:hidden;">
+                <div style="background:linear-gradient(135deg,#e53935,#c62828);
+                            padding:20px 24px;color:white;">
+                    <div style="font-size:1.5rem;margin-bottom:4px;">🚨 Reposición urgente</div>
+                    <div style="opacity:0.9;font-size:0.9rem;">
+                        Hoy es <strong>${hoy.charAt(0).toUpperCase() + hoy.slice(1)}</strong> — 
+                        ${alertas.length} producto${alertas.length > 1 ? 's' : ''} bajo mínimo
+                    </div>
+                </div>
+                <div style="padding:16px 20px;max-height:50vh;overflow-y:auto;">
+                    ${lista}
+                </div>
+                <div style="padding:16px 20px;border-top:1px solid #f0f0f0;">
+                    <button onclick="this.closest('div').parentElement.parentElement.parentElement.remove()"
+                            style="width:100%;padding:14px;border:none;border-radius:12px;
+                                   background:#1b5e20;color:white;font-size:1rem;
+                                   font-weight:700;cursor:pointer;">
+                        ✅ Entendido
+                    </button>
+                </div>
+            </div>
+        </div>`;
+    document.body.appendChild(overlay);
 }
 
 // ========== ALERTA VENCIMIENTO ==========
