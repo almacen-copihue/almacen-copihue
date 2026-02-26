@@ -3390,27 +3390,38 @@ function abrirListaCompras() {
 // Semáforo de stock: 0=rojo, 1=amarillo, 2=verde
 function semaforoStock(p) {
     const stock = p.stockNumber || 0;
-    const rotacion = p.rotacion || 3; // 1=lento, 5=rapido
+    const rotacion = p.rotacion || 0;
     const minManual = p.stockMin > 0 ? p.stockMin : 0;
 
-    // Mínimo efectivo: manual si existe, sino según rotación
-    let min;
+    // Stock 0 siempre es rojo sin excepción
+    if (stock === 0) return 0; // 🔴
+
+    // Mínimo manual tiene prioridad absoluta
     if (minManual > 0) {
-        min = minManual;
-    } else {
-        if (rotacion >= 4) min = 4;       // rápido: alerta desde 4u
-        else if (rotacion === 3) min = 3; // medio: alerta desde 3u
-        else min = 1;                     // lento: alerta solo en 1u
+        if (stock <= minManual) return 0;       // 🔴
+        if (stock <= minManual + 1) return 1;   // 🟡
+        return 2;                               // 🟢
     }
 
-    if (stock === 0) return 0; // 🔴 siempre
+    // Sin mínimo manual: la rotación define todo
+    // Rotación 5 → 🔴 en stock 1, 🟡 en stock 2
+    // Rotación 4 → 🔴 en stock 1, 🟡 en stock 2
+    // Rotación 3 → 🟡 en stock 1, verde en 2+
+    // Rotación 1-2 → verde siempre (solo rojo en 0, ya cubierto)
+    // Rotación 0 o sin dato → verde siempre (solo rojo en 0)
 
-    // Rotación rápida (4-5): rojo si stock <= min (urge reponer)
-    if (rotacion >= 4 && stock <= min) return 0; // 🔴
+    if (rotacion >= 4) {
+        if (stock <= 1) return 0; // 🔴 comprar ya
+        if (stock <= 2) return 1; // 🟡 vigilar
+        return 2;                 // 🟢
+    }
 
-    // Cualquier rotación: amarillo si stock <= min
-    if (stock <= min) return 1; // 🟡
+    if (rotacion === 3) {
+        if (stock <= 1) return 1; // 🟡 vigilar
+        return 2;                 // 🟢
+    }
 
+    // Rotación 0, 1, 2 → verde (rojo solo en stock 0, ya cubierto)
     return 2; // 🟢
 }
 
