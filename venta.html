@@ -59,17 +59,20 @@
         .header-right {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 5px;
+            flex-wrap: nowrap;
+            overflow: hidden;
         }
         .btn-resumen {
             background: rgba(255,255,255,0.2);
             border: 1px solid rgba(255,255,255,0.4);
             color: white;
-            padding: 6px 12px;
+            padding: 6px 8px;
             border-radius: 20px;
             font-size: 0.8rem;
             font-weight: 600;
             cursor: pointer;
+            flex-shrink: 0;
         }
         .indicador-carga {
             width: 10px; height: 10px;
@@ -1411,6 +1414,7 @@ async function confirmarVenta() {
     ventaActual = [];
     localStorage.removeItem(CARRITO_KEY);
     renderVenta();
+    seleccionarMetodo('efectivo'); // resetear método de pago
 
     mostrarToast(stockOk ? '✅ Venta confirmada' : '✅ Venta registrada (stock manual)', 'verde');
 }
@@ -2022,7 +2026,12 @@ async function guardarAjuste() {
         if (resp.success) {
             ajusteProducto.stock = ajusteValor;
             const nombreNuevoLocal = document.getElementById('ajusteNombreNuevo').value.trim().toUpperCase();
-            if (nombreNuevoLocal && nombreNuevoLocal !== ajusteProducto.name) ajusteProducto.name = nombreNuevoLocal;
+            if (nombreNuevoLocal && nombreNuevoLocal !== ajusteProducto.name) {
+                // Generar .bat para renombrar la foto en GitHub
+                const nombreViejo = ajusteProducto.name;
+                ajusteProducto.name = nombreNuevoLocal;
+                generarBatRenombrarFoto(nombreViejo, nombreNuevoLocal);
+            }
             if (precioNuevo !== ajusteProducto.price) {
                 ajusteProducto.price = precioNuevo;
                 mostrarToast('✅ Producto actualizado', 'verde');
@@ -2038,6 +2047,43 @@ async function guardarAjuste() {
     }
     btn.disabled = false;
     btn.textContent = '✅ Guardar en planilla';
+}
+
+// ========== RENOMBRAR FOTO (BAT) ==========
+function simplificarNombreFoto(nombre) {
+    return nombre.toLowerCase()
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9 ]/g, "")
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .trim() + '.jpg';
+}
+
+function generarBatRenombrarFoto(nombreViejo, nombreNuevo) {
+    const archivoViejo = simplificarNombreFoto(nombreViejo);
+    const archivoNuevo = simplificarNombreFoto(nombreNuevo);
+    if (archivoViejo === archivoNuevo) return; // mismo nombre de archivo, no hace falta
+
+    const contenido = `@echo off
+REM Renombrar foto: ${nombreViejo} -> ${nombreNuevo}
+REM Ejecutar en la carpeta: imagenes-productos/
+
+if exist "${archivoViejo}" (
+    rename "${archivoViejo}" "${archivoNuevo}"
+    echo OK: ${archivoViejo} -> ${archivoNuevo}
+) else (
+    echo NO ENCONTRADO: ${archivoViejo}
+)
+pause`;
+
+    const blob = new Blob([contenido], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `renombrar-foto-${archivoNuevo.replace('.jpg','')}.bat`;
+    a.click();
+    URL.revokeObjectURL(url);
+    mostrarToast('📁 .bat descargado — ejecutalo en imagenes-productos/', 'verde');
 }
 
 // ========== VENDEDOR ==========
