@@ -1125,6 +1125,8 @@ async function cargarProductos() {
         setTimeout(verificarAlertasDelDia, 800);
         // Sugerencia relámpago (después de alertas)
         setTimeout(sugerirRelampago, 2000);
+        // Ofertas automáticas por vencimiento (después del relámpago)
+        setTimeout(verificarOfertasAutomaticas, 3500);
     } catch(e) {
         mostrarToast('❌ Error al cargar productos', 'rojo');
         console.error(e);
@@ -2421,6 +2423,163 @@ function sugerirRelampago() {
     };
 
     mostrarModal(mejor, dias, desc, alternativos);
+}
+
+// ========== OFERTAS AUTOMÁTICAS POR VENCIMIENTO ==========
+async function verificarOfertasAutomaticas() {
+    const hoyKey = new Date().toISOString().split('T')[0];
+    const yaRevisado = localStorage.getItem('ofertas_auto_' + hoyKey);
+    if (yaRevisado) return;
+
+    const hoy = new Date();
+    const candidatos = productos.filter(p => {
+        if (!p.vencimiento || p.stock <= 0) return false;
+        if (p.relampago && p.relampago > 0) return false; // ya tiene oferta
+        const dias = Math.ceil((new Date(p.vencimiento) - hoy) / (1000 * 60 * 60 * 24));
+        return dias >= 0 && dias < 7;
+    });
+
+    if (candidatos.length === 0) {
+        localStorage.setItem('ofertas_auto_' + hoyKey, '1');
+        return;
+    }
+
+    // Matriz inteligente: Rotación × Stock vs Mínimo → Descuento
+    function calcularDescuentoAuto(p) {
+        const rotacion = p.rotacion || 3;
+        const stock = p.stock || 0;
+        const minimo = p.stockMin > 0 ? p.stockMin : 3;
+        const ratio = stock / minimo; // cuántas veces el mínimo tiene en stock
+
+        if (rotacion >= 4) {
+            // Alta rotación: rota solo, descuento según exceso de stock
+            if (ratio >= 3) return { pct: 25, tipo: 14 }; // mucho stock → descuento fuerte
+            if (ratio >= 1.5) return { pct: 20, tipo: 13 };
+            return { pct: 10, tipo: 11 };                  // poco stock → descuento suave
+        } else if (rotacion <= 2) {
+            // Baja rotación: no rota, riesgo real de pérdida
+            if (ratio >= 3) return { pct: 25, tipo: 14 }; // mucho stock → descuento fuerte
+            return { pct: 15, tipo: 12 };                  // poco stock → descuento moderado
+        } else {
+            // Rotación media (3)
+            if (ratio >= 3) return { pct: 20, tipo: 13 };
+            return { pct: 15, tipo: 12 };
+        }
+    }
+
+    function tipoDesdeDescuento(pct) {
+        if (pct >= 25) return 14;
+        if (pct >= 20) return 13;
+        if (pct >= 15) return 12;
+        return 11;
+    }
+
+    const existing = document.getElementById('modalOfertasAuto');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'modalOfertasAuto';
+
+    const filas = candidatos.map(p => {
+        const dias = Math.ceil((new Date(p.vencimiento) - hoy) / (1000 * 60 * 60 * 24));
+        const desc = calcularDescuentoAuto(p);
+        const precioOferta = Math.round(p.price * (1 - desc.pct / 100));
+        const diasLabel = dias === 0 ? '<span style="color:#c62828;font-weight:900;">Vence HOY</span>'
+                        : `<span style="color:#e65100;">Vence en ${dias} día${dias > 1 ? 's' : ''}</span>`;
+        return `
+        <div style="display:flex;align-items:center;justify-content:space-between;
+                    padding:12px 0;border-bottom:1px solid #f0f0f0;gap:10px;"
+             id="fila_auto_${p.id}">
+            <div style="flex:1;min-width:0;">
+                <div style="font-weight:700;font-size:0.9rem;color:#212121;
+                            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${p.name}</div>
+                <div style="font-size:0.78rem;margin-top:2px;">${diasLabel} · Stock: ${p.stock} · Rot: ${p.rotacion || '?'}</div>
+                <div style="font-size:0.8rem;color:#999;text-decoration:line-through;">$${p.price.toLocaleString('es-AR')}</div>
+                <div style="font-size:1rem;font-weight:900;color:#e65100;">$${precioOferta.toLocaleString('es-AR')} <span style="background:#e65100;color:white;padding:1px 6px;border-radius:6px;font-size:0.75rem;">-${desc.pct}%</span></div>
+            </div>
+            <button onclick="activarOfertaAuto(${p.id}, ${desc.tipo})"
+                    id="btn_auto_${p.id}"
+                    style="background:linear-gradient(135deg,#e65100,#ff6f00);color:white;
+                           border:none;border-radius:12px;padding:10px 14px;font-weight:900;
+                           cursor:pointer;font-size:0.85rem;flex-shrink:0;">
+                ⚡ Activar
+            </button>
+        </div>`;
+    }).join('');
+
+    overlay.innerHTML = `
+        <div style="position:fixed;inset:0;background:rgba(0,0,0,0.75);
+                    display:flex;align-items:flex-end;justify-content:center;z-index:9998;">
+            <div style="background:white;border-radius:24px 24px 0 0;
+                        width:100%;max-width:540px;padding-bottom:20px;
+                        animation:slideUp 0.3s ease;max-height:80vh;display:flex;flex-direction:column;">
+                <div style="background:linear-gradient(135deg,#b71c1c,#e53935);
+                            padding:14px 20px;border-radius:24px 24px 0 0;flex-shrink:0;">
+                    <div style="color:white;font-weight:900;font-size:1rem;">
+                        🕐 Ofertas automáticas por vencimiento
+                    </div>
+                    <div style="color:rgba(255,255,255,0.85);font-size:0.8rem;margin-top:2px;">
+                        ${candidatos.length} producto${candidatos.length > 1 ? 's' : ''} cerca de vencer — activá la oferta antes de vender
+                    </div>
+                </div>
+                <div style="padding:0 20px;overflow-y:auto;flex:1;">
+                    ${filas}
+                </div>
+                <div style="padding:16px 20px 0;flex-shrink:0;display:flex;gap:10px;">
+                    <button onclick="activarTodasOfertasAuto()"
+                            style="flex:1;padding:12px;border:none;border-radius:14px;
+                                   background:linear-gradient(135deg,#b71c1c,#e53935);
+                                   color:white;font-weight:900;cursor:pointer;">
+                        ⚡ Activar todas
+                    </button>
+                    <button onclick="cerrarOfertasAuto()"
+                            style="flex:1;padding:12px;border:1px solid #ddd;border-radius:14px;
+                                   background:white;color:#666;font-weight:700;cursor:pointer;">
+                        Después
+                    </button>
+                </div>
+            </div>
+        </div>`;
+    document.body.appendChild(overlay);
+
+    window._candidatosAuto = candidatos;
+
+    window.activarOfertaAuto = async function(id, tipo) {
+        const btn = document.getElementById('btn_auto_' + id);
+        if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+        try {
+            const url = API_URL + '?action=relampago&data=' + encodeURIComponent(JSON.stringify({ productoId: id, tipo, limpiarOfertas: true }));
+            const r = await fetch(url);
+            const res = await r.json();
+            if (res.success) {
+                const p = productos.find(x => x.id === id);
+                if (p) p.relampago = tipo;
+                if (btn) { btn.textContent = '✅'; btn.style.background = '#388e3c'; }
+                const fila = document.getElementById('fila_auto_' + id);
+                if (fila) fila.style.opacity = '0.5';
+            } else {
+                if (btn) { btn.disabled = false; btn.textContent = '⚡ Activar'; }
+                mostrarToast('❌ Error: ' + res.mensaje, 'rojo');
+            }
+        } catch(e) {
+            if (btn) { btn.disabled = false; btn.textContent = '⚡ Activar'; }
+            mostrarToast('❌ Error de conexión', 'rojo');
+        }
+    };
+
+    window.activarTodasOfertasAuto = async function() {
+        for (const p of window._candidatosAuto) {
+            if (p.relampago && p.relampago > 0) continue;
+            const tipo = calcularDescuentoAuto(p).tipo;
+            await activarOfertaAuto(p.id, tipo);
+        }
+        setTimeout(cerrarOfertasAuto, 800);
+    };
+
+    window.cerrarOfertasAuto = function() {
+        localStorage.setItem('ofertas_auto_' + hoyKey, '1');
+        document.getElementById('modalOfertasAuto')?.remove();
+    };
 }
 
 // ========== ALERTA VENCIMIENTO ==========
