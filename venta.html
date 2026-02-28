@@ -1093,6 +1093,16 @@
                 ✅ Confirmar cobro
             </button>
         </div>
+        <!-- Ticket WhatsApp (aparece después de confirmar) -->
+        <div id="btnTicketWA" style="display:none;padding:0 20px 16px;">
+            <button onclick="enviarTicketWA()"
+                    style="width:100%;padding:12px;border:none;border-radius:14px;
+                           background:linear-gradient(135deg,#25D366,#128C7E);
+                           color:white;font-size:0.95rem;font-weight:900;cursor:pointer;
+                           display:flex;align-items:center;justify-content:center;gap:8px;">
+                <span style="font-size:1.2rem;">📲</span> Enviar ticket al cliente
+            </button>
+        </div>
     </div>
 </div>
 
@@ -1455,17 +1465,70 @@ async function confirmarVenta() {
         if (p) p.stock = Math.max(0, p.stock - item.qty);
     });
 
+    // Guardar datos para ticket WA
+    window._ultimaVenta = {
+        items: [...ventaActual],
+        total,
+        hora,
+        metodo: metodoPagoActual
+    };
+
     seleccionarMetodo('efectivo'); // resetear método de pago ANTES de cerrar
-    cerrarConfirm();
     ventaActual = [];
     localStorage.removeItem(CARRITO_KEY);
     renderVenta();
+
+    // Mostrar botón ticket en el modal antes de cerrarlo
+    const btnTicket = document.getElementById('btnTicketWA');
+    if (btnTicket) btnTicket.style.display = 'block';
+    const btnOk = document.getElementById('btnOkConfirm');
+    if (btnOk) { btnOk.textContent = '✅ Cobro confirmado'; btnOk.disabled = true; }
+    const btnCancelar = document.querySelector('.btn-cancelar-confirm');
+    if (btnCancelar) { btnCancelar.textContent = 'Cerrar'; btnCancelar.onclick = () => { cerrarConfirm(); }; }
 
     mostrarToast(stockOk ? '✅ Venta confirmada' : '✅ Venta registrada (stock manual)', 'verde');
 }
 
 function cerrarConfirm() {
     document.getElementById('modalConfirm').classList.remove('open');
+    // Reset modal para próxima venta
+    const btnTicket = document.getElementById('btnTicketWA');
+    if (btnTicket) btnTicket.style.display = 'none';
+    const btnOk = document.getElementById('btnOkConfirm');
+    if (btnOk) { btnOk.textContent = '✅ Confirmar cobro'; btnOk.disabled = false; btnOk.onclick = confirmarVenta; }
+    const btnCancelar = document.querySelector('.btn-cancelar-confirm');
+    if (btnCancelar) { btnCancelar.textContent = 'Cancelar'; btnCancelar.onclick = cerrarConfirm; }
+}
+
+function enviarTicketWA() {
+    const v = window._ultimaVenta;
+    if (!v) return;
+
+    const fecha = new Date().toLocaleDateString('es-AR', { weekday:'short', day:'2-digit', month:'2-digit' });
+    const metodoLabel = { efectivo:'💵 Efectivo', posnet:'💳 Posnet', transferencia:'📱 Transferencia' }[v.metodo] || v.metodo;
+
+    const lineas = v.items.map(i => {
+        const nombre = i.name.length > 28 ? i.name.substring(0,28) + '…' : i.name;
+        return `${i.qty}x ${nombre} $${(i.price * i.qty).toLocaleString('es-AR')}`;
+    }).join('
+');
+
+    const mensaje =
+        `🛒 *Almacén Copihue*
+` +
+        `📅 ${fecha} · ${v.hora}
+
+` +
+        `${lineas}
+` +
+        `${'─'.repeat(28)}
+` +
+        `*Total: $${v.total.toLocaleString('es-AR')}* ${metodoLabel}
+
+` +
+        `¡Gracias por tu compra! 🙏`;
+
+    window.open('https://wa.me/?text=' + encodeURIComponent(mensaje), '_blank');
 }
 function cerrarModalConfirm(e) {
     if (e.target === document.getElementById('modalConfirm')) cerrarConfirm();
