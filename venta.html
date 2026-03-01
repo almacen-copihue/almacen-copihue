@@ -1935,17 +1935,8 @@ function seleccionarMetodo(metodo) {
             if (panelTransf) panelTransf.style.display = 'none';
             const montoMP = document.getElementById('qrMontoMP');
             if (montoMP) montoMP.textContent = '$' + total.toLocaleString('es-AR');
-            // Generar QR con URL de MP
-            const qrMP = document.getElementById('qrMP');
-            if (qrMP && qrMP.children.length === 0) {
-                new QRCode(qrMP, {
-                    text: 'https://link.mercadopago.com.ar/almacencopihue',
-                    width: 200, height: 200,
-                    colorDark: '#009ee3',
-                    colorLight: '#ffffff',
-                    correctLevel: QRCode.CorrectLevel.M
-                });
-            }
+            // QR dinámico con monto exacto via MP API
+            generarQRDinamico(total);
         } else if (metodo === 'transferencia') {
             panelQR.style.display = 'block';
             if (panelPosnet) panelPosnet.style.display = 'none';
@@ -1961,6 +1952,51 @@ function seleccionarMetodo(metodo) {
 }
 
 
+
+async function generarQRDinamico(monto) {
+    const qrMP = document.getElementById('qrMP');
+    if (!qrMP) return;
+    // Limpiar QR anterior
+    qrMP.innerHTML = '<div style="color:rgba(255,255,255,0.8);font-size:0.78rem;padding:20px">⏳ Generando QR...</div>';
+
+    try {
+        const url = API_URL + '?action=crearOrdenMP&monto=' + Math.round(monto);
+        const resp = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
+        const data = await resp.json();
+
+        if (data.ok && data.url) {
+            qrMP.innerHTML = '';
+            new QRCode(qrMP, {
+                text: data.url,
+                width: 200, height: 200,
+                colorDark: '#009ee3',
+                colorLight: '#ffffff',
+                correctLevel: QRCode.CorrectLevel.M
+            });
+        } else {
+            // Fallback al link estático si falla
+            qrMP.innerHTML = '';
+            new QRCode(qrMP, {
+                text: 'https://link.mercadopago.com.ar/almacencopihue',
+                width: 200, height: 200,
+                colorDark: '#009ee3',
+                colorLight: '#ffffff',
+                correctLevel: QRCode.CorrectLevel.M
+            });
+            console.warn('MP fallback QR estático:', data.error);
+        }
+    } catch(e) {
+        // Fallback silencioso
+        qrMP.innerHTML = '';
+        new QRCode(qrMP, {
+            text: 'https://link.mercadopago.com.ar/almacencopihue',
+            width: 200, height: 200,
+            colorDark: '#009ee3',
+            colorLight: '#ffffff',
+            correctLevel: QRCode.CorrectLevel.M
+        });
+    }
+}
 
 function abrirPointTap() {
     // Deep link directo a Point Tap en MP
