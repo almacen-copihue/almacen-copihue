@@ -748,7 +748,7 @@
 <div class="header" style="flex-direction:column;gap:6px;padding:8px 16px;">
     <div style="display:flex;align-items:center;justify-content:space-between;width:100%;">
         <div class="header-titulo">
-            🏪 Copihue<span id="versionTag" style="font-size:0.6rem;font-weight:400;opacity:0.3;margin-left:6px;letter-spacing:0;color:inherit">v58</span>
+            🏪 Copihue<span id="versionTag" style="font-size:0.6rem;font-weight:400;opacity:0.3;margin-left:6px;letter-spacing:0;color:inherit">v59</span>
             <div class="indicador-carga" id="indicadorCarga" title="Cargando..."></div>
         </div>
         <button class="btn-resumen" onclick="cambiarVendedor()" id="vendedorBadge"
@@ -1094,22 +1094,10 @@
             <!-- PANEL POSNET: QR Mercado Pago -->
             <div id="panelQRPosnet" style="display:none;background:#009ee3;
                                             border-radius:14px;padding:14px;">
-                <div style="color:white;font-weight:900;font-size:0.85rem;margin-bottom:8px;">
+                <div style="color:white;font-weight:900;font-size:0.85rem;margin-bottom:6px;">
                     💳 QR Mercado Pago — Mostrá al cliente
                 </div>
-                <div id="qrMontoMP" style="color:white;font-size:2rem;font-weight:900;margin-bottom:12px;"></div>
-                <!-- Botón Point Tap -->
-                <button onclick="abrirPointTap()"
-                        style="width:100%;padding:16px;border:none;border-radius:16px;
-                               background:white;color:#009ee3;font-size:1.1rem;
-                               font-weight:900;cursor:pointer;margin-bottom:10px;
-                               box-shadow:0 4px 12px rgba(0,0,0,0.2);">
-                    📲 Abrir Point Tap
-                </button>
-                <!-- QR como alternativa -->
-                <div style="color:rgba(255,255,255,0.7);font-size:0.75rem;margin-bottom:6px;">
-                    o mostrá el QR al cliente
-                </div>
+                <div id="qrMontoMP" style="color:white;font-size:2rem;font-weight:900;margin-bottom:10px;"></div>
                 <div style="background:white;border-radius:10px;padding:8px;display:inline-block;"
                      id="qrMP"></div>
                 <div style="color:rgba(255,255,255,0.75);font-size:0.72rem;margin-top:6px;">
@@ -1650,6 +1638,24 @@ function cerrarDia() {
 
 // ========== TOAST ==========
 let toastTimeout;
+function mostrarBannerRecuperado(total) {
+    // Buscar o crear banner
+    let banner = document.getElementById('bannerRecuperado');
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'bannerRecuperado';
+        banner.style.cssText = 'background:linear-gradient(135deg,#ff6f00,#ffa000);color:white;padding:10px 16px;display:flex;justify-content:space-between;align-items:center;font-weight:700;font-size:.85rem;position:sticky;top:0;z-index:90;box-shadow:0 2px 8px rgba(0,0,0,.2)';
+        const buscadorWrap = document.querySelector('.buscador-wrap');
+        if (buscadorWrap) buscadorWrap.parentNode.insertBefore(banner, buscadorWrap);
+    }
+    const btnOk = document.createElement('button');
+    btnOk.textContent = '✓ OK';
+    btnOk.style.cssText = 'background:rgba(255,255,255,.25);border:none;color:white;border-radius:8px;padding:3px 10px;font-weight:900;cursor:pointer;font-size:.8rem';
+    btnOk.onclick = function() { document.getElementById('bannerRecuperado').remove(); };
+    banner.textContent = '🔄 Venta recuperada — $' + total.toLocaleString('es-AR') + '  ';
+    banner.appendChild(btnOk);
+}
+
 function mostrarToast(msg, tipo = '') {
     const t = document.getElementById('toast');
     t.textContent = msg;
@@ -1789,10 +1795,10 @@ function recuperarVenta() {
     
     try {
         const items = JSON.parse(guardado);
-        // Validar que los productos siguen existiendo y tienen stock
+        // Recuperar items que existan en el inventario (sin importar stock)
         ventaActual = items.filter(item => {
             const p = productos.find(pr => pr.id === item.id);
-            return p && p.stock > 0;
+            return p != null; // solo verificar que existe
         }).map(item => {
             const p = productos.find(pr => pr.id === item.id);
             return { ...item, price: p.price, stockDisponible: p.stock };
@@ -3042,7 +3048,7 @@ cargarProductos().then(() => {
                 // Recuperar automáticamente sin preguntar
                 ventaActual = items.filter(item => {
                     const p = productos.find(pr => pr.id === item.id);
-                    return p && p.stock > 0;
+                    return p != null; // recuperar aunque stock sea 0
                 }).map(item => {
                     const p = productos.find(pr => pr.id === item.id);
                     return { ...item, price: p.price, stockDisponible: p.stock };
@@ -3051,7 +3057,8 @@ cargarProductos().then(() => {
                 if (ventaActual.length > 0) {
                     renderVenta();
                     const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
-                    mostrarToast(`🔄 Venta recuperada — $${total.toLocaleString('es-AR')}`, 'verde');
+                    // Banner persistente naranja — más visible que toast
+                    mostrarBannerRecuperado(total);
                 } else {
                     localStorage.removeItem(CARRITO_KEY);
                     renderVenta();
