@@ -409,43 +409,74 @@ function renderApp(){
     return'<div class="row"><span class="row-l">👤 '+v+'</span><span><strong class="row-v">'+fmt(t)+'</strong><span class="row-pct">'+pct+'%</span></span></div>';
   }).join('');
 
-  // Top productos (barras dobles: venta verde + ganancia naranja/rojo)
+    // Top productos — escala separada para cada barra
   const maxV=stats.top.length?stats.top[0].total:1;
+  const maxG=Math.max(...stats.top.map(p=>p.conCosto?Math.max(p.ganReal,0):p.ganAprox),1);
   const topsH=stats.top.length?stats.top.map((p,i)=>{
     const pctV=Math.round(p.total/maxV*100);
     const gan=p.conCosto?p.ganReal:p.ganAprox;
-    const pctG2=maxV>0?Math.round(Math.abs(gan)/maxV*100):0;
+    const ganPos=Math.max(gan,0);
+    const pctG=Math.round(ganPos/maxG*100);
     const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':'';
     const ganCls=colorGan(gan,p.total);
-    const barCls=gan<0?'bar-rojo':gan<p.total*0.1?'bar-g':'bar-g';
+    const barGCls=p.conCosto&&gan<0?'bar-rojo':'bar-g';
+    const etiqueta=p.conCosto?fmt(gan):'~'+fmt(gan);
     return'<div class="prod-row">'+
       '<div class="prod-hdr"><span class="prod-n">'+medal+' '+p.nombre.substring(0,28)+'</span><span class="prod-d">'+p.qty+' u</span></div>'+
       '<div style="display:flex;gap:3px;align-items:center;margin-bottom:2px;"><div class="barra-bg" style="flex:1"><div class="barra-f bar-v" style="width:'+pctV+'%"></div></div><span style="font-size:.68rem;font-weight:700;color:var(--vd);min-width:60px;text-align:right">'+fmt(p.total)+'</span></div>'+
-      '<div style="display:flex;gap:3px;align-items:center;"><div class="barra-bg" style="flex:1"><div class="barra-f '+(gan<0?'bar-rojo':'bar-g')+'" style="width:'+pctG2+'%"></div></div><span class="'+ganCls+'" style="font-size:.65rem;min-width:60px;text-align:right">'+(p.conCosto?'':'~')+fmt(gan)+'</span></div>'+
+      '<div style="display:flex;gap:3px;align-items:center;"><div class="barra-bg" style="flex:1"><div class="barra-f '+barGCls+'" style="width:'+pctG+'%"></div></div><span class="'+ganCls+'" style="font-size:.65rem;min-width:60px;text-align:right">'+etiqueta+'</span></div>'+
     '</div>';
   }).join(''):'<div class="empty">Sin datos para la selección</div>';
 
-  // Mejores días
+    // Mejores días
+  const DNOM=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
   const mejoresDias=Object.entries(
     [...diasSel].reduce((acc,ds)=>{
       const {totals:td}=filtrar([ds]);
       acc[ds]=td.reduce((s,t)=>s+(t.total||0),0);
       return acc;
     },{})
-  ).sort((a,b)=>b[1]-a[1]).slice(0,5);
-  const mejDiasH=mejoresDias.length?mejoresDias.map(([ds,t])=>{
+  ).sort((a,b)=>b[1]-a[1]).slice(0,7);
+  const mejDiasH=mejoresDias.length?mejoresDias.map(([ds,t],idx)=>{
     const [a,m,d]=ds.split('-');
-    return'<div class="row"><span class="row-l">'+parseInt(d)+'/'+parseInt(m)+'/'+a.slice(2)+'</span><strong class="row-v">'+fmt(t)+'</strong></div>';
-  }).join(''):'<div class="empty">Seleccioná más días</div>';
+    const dw=new Date(ds+'T12:00:00').getDay();
+    const dnm=DNOM[dw];
+    const mesNom=MESES[parseInt(m)-1].substring(0,3);
+    const esHoy=ds===hoyStr();
+    const bgColor=idx===0?'background:var(--vl);border-radius:8px;padding:2px 6px;':'';
+    return'<div class="row"><span class="row-l" style="'+bgColor+'">'+
+      '<strong style="color:var(--vd);min-width:30px;display:inline-block">'+dnm+'</strong> '+
+      '<span style="color:var(--texto)">'+parseInt(d)+' '+mesNom+'</span>'+
+      (esHoy?' <span style="background:var(--naranja);color:#fff;font-size:.58rem;padding:1px 4px;border-radius:4px">HOY</span>':'')+
+    '</span><strong class="row-v">'+fmt(t)+'</strong></div>';
+  }).join(''):'<div class="empty">Seleccioná días para ver el ranking</div>';
 
-  // Por día de semana (de todos los items del período)
+  // Por día de semana — totales y fechas con ventas reales
   const porDSem={0:0,1:0,2:0,3:0,4:0,5:0,6:0};
-  const cntDSem={0:0,1:0,2:0,3:0,4:0,5:0,6:0};
-  totals.forEach(t=>{if(!t.fechaStr)return;const d=new Date(t.fechaStr+'T12:00:00');const dw=d.getDay();porDSem[dw]+=(t.total||0);cntDSem[dw]++;});
+  const ventasPorFechaDSem={0:{},1:{},2:{},3:{},4:{},5:{},6:{}}; // dw → {fecha: total}
+  totals.forEach(t=>{
+    if(!t.fechaStr)return;
+    const dw=new Date(t.fechaStr+'T12:00:00').getDay();
+    porDSem[dw]+=(t.total||0);
+    ventasPorFechaDSem[dw][t.fechaStr]=(ventasPorFechaDSem[dw][t.fechaStr]||0)+(t.total||0);
+  });
   const maxDSem=Math.max(...Object.values(porDSem),1);
   const dSemH=DIAS_SEM.map((n,i)=>{
     const pct=Math.round(porDSem[i]/maxDSem*100);
-    return'<div class="dsem-row"><span class="dsem-l">'+n+'</span><div class="dsem-bg"><div class="dsem-f" style="width:'+pct+'%"></div></div><span class="dsem-v">'+fmt(porDSem[i])+'</span></div>';
+    const fechasConVenta=Object.entries(ventasPorFechaDSem[i]).sort((a,b)=>a[0].localeCompare(b[0]));
+    const fechasHTML=fechasConVenta.map(([ds,tv])=>{
+      const[a,m,d]=ds.split('-');
+      const mesNom=MESES[parseInt(m)-1].substring(0,3);
+      const esHoy=ds===hoyStr();
+      return'<span style="display:inline-block;background:'+(esHoy?'var(--naranja)':'var(--vl)')+';color:'+(esHoy?'#fff':'var(--vd)')+';border-radius:6px;padding:1px 6px;font-size:.62rem;font-weight:700;margin:1px">'+
+        parseInt(d)+' '+mesNom+(esHoy?' HOY':'')+
+      '</span>';
+    }).join('');
+    return'<div style="margin-bottom:8px;">'+
+      '<div class="dsem-row" style="margin-bottom:3px"><span class="dsem-l">'+n+'</span><div class="dsem-bg"><div class="dsem-f" style="width:'+pct+'%"></div></div><span class="dsem-v">'+fmt(porDSem[i])+'</span></div>'+
+      (fechasConVenta.length?'<div style="padding-left:38px;flex-wrap:wrap;display:flex;gap:2px">'+fechasHTML+'</div>':
+      '<div style="padding-left:38px;font-size:.62rem;color:#bbb">sin ventas</div>')+
+    '</div>';
   }).join('');
 
   // Horas de más ventas
@@ -453,11 +484,19 @@ function renderApp(){
   totals.forEach(t=>{if(!t.hora)return;const h=parseInt(t.hora.split(':')[0]);if(!isNaN(h)){porHora[h]=(porHora[h]||0)+(t.total||0);}});
   const horasConVenta=Object.entries(porHora).sort((a,b)=>parseInt(a[0])-parseInt(b[0]));
   const maxH=Math.max(...Object.values(porHora),1);
-  const horasH=horasConVenta.length?
-    '<div class="hora-grid">'+horasConVenta.map(([h,t])=>{
-      const pct=Math.round(t/maxH*100);
+  // Horas: contar tickets (flujo de personas) no monto
+  const tksPorHora={};
+  totals.forEach(t=>{if(!t.hora)return;const h=parseInt(t.hora.split(':')[0]);if(!isNaN(h))tksPorHora[h]=(tksPorHora[h]||0)+1;});
+  const horasConTks=Object.entries(tksPorHora).sort((a,b)=>parseInt(a[0])-parseInt(b[0]));
+  const maxTks=Math.max(...Object.values(tksPorHora),1);
+  const mejorHora=horasConTks.sort((a,b)=>b[1]-a[1])[0];
+  horasConTks.sort((a,b)=>parseInt(a[0])-parseInt(b[0]));
+  const horasH=horasConTks.length?
+    (mejorHora?'<div style="background:var(--nl);border-radius:10px;padding:7px 10px;margin-bottom:8px;font-size:.78rem;"><strong>🏆 Hora pico: '+mejorHora[0]+'h–'+(parseInt(mejorHora[0])+1)+'h</strong> con '+mejorHora[1]+' ticket'+(mejorHora[1]>1?'s':'')+'</div>':'')+
+    '<div class="hora-grid">'+horasConTks.map(([h,tks])=>{
+      const pct=Math.round(tks/maxTks*100);
       const color=pct>75?'var(--vd)':pct>40?'var(--verde)':'var(--v3)';
-      return'<div class="hora-cel"><div class="hora-n">'+h+'h</div><div class="hora-b" style="background:'+color+';opacity:'+(0.3+pct/100*0.7)+'"></div><div style="font-size:.55rem;color:var(--gris);margin-top:2px">'+fmt(t)+'</div></div>';
+      return'<div class="hora-cel"><div class="hora-n">'+h+'h</div><div class="hora-b" style="background:'+color+';opacity:'+(0.3+pct/100*0.7)+'"></div><div style="font-size:.55rem;color:var(--gris);margin-top:2px">'+tks+' tk</div></div>';
     }).join('')+'</div>':'<div class="empty">Sin datos de hora</div>';
 
   // Comparar meses histórico
@@ -467,11 +506,12 @@ function renderApp(){
   raw.items.forEach(i=>{const m=i.fechaStr?i.fechaStr.slice(0,7):'';if(m)gXMes[m]=(gXMes[m]||0)+(i.gananciaAprox||0);});
   const ultMeses=Object.keys(vXMes).sort().slice(-6);
   const maxMV=Math.max(...ultMeses.map(m=>vXMes[m]||0),1);
+  const maxMG=Math.max(...ultMeses.map(m=>gXMes[m]||0),1); // escala propia para ganancia
   const compMH=ultMeses.reverse().map(m=>{
     const [a,mo]=m.split('-');
     const lbl=MESES[parseInt(mo)-1].substring(0,3)+' '+a.slice(2);
-    const pV=Math.round((vXMes[m]||0)/maxMV*100);
-    const pG=Math.round(Math.abs(gXMes[m]||0)/maxMV*100);
+    const pV=Math.min(100,Math.round((vXMes[m]||0)/maxMV*100));
+    const pG=Math.min(100,Math.round(Math.max(0,gXMes[m]||0)/maxMG*100)); // sin negativos, escala propia
     return'<div class="comp-row"><span class="comp-l">'+lbl+'</span>'+
       '<div class="comp-bars">'+
         '<div class="comp-bg"><div class="comp-f bar-v" style="width:'+pV+'%"></div></div>'+
@@ -502,12 +542,26 @@ function renderApp(){
     const[a,m,d]=ds.split('-');
     const fLabel=parseInt(d)+' de '+MESES[parseInt(m)-1];
     const esHoy=ds===today;
+    const DNOM2=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
     const tksH=td.length?td.map(t=>{
       const prods=id.filter(i=>i.ticket===t.ticket);
+      const waTxt=encodeURIComponent(
+        '🛒 *Ticket #'+t.ticket+'*\n'+
+        '📅 '+fLabel+' '+t.hora+'\n'+
+        '─────────────────\n'+
+        prods.map(p=>p.qty+'× '+p.nombre.substring(0,22)+'  '+fmt(p.subtotal)).join('\n')+
+        '\n─────────────────\n'+
+        '💳 '+t.metodo+'\n'+
+        '*TOTAL: '+fmt(t.total)+'*\n'+
+        '\nAlmacén Copihue 🏪'
+      );
       return'<div class="tkt">'+
         '<div class="tkt-hdr"><span>🎫 #'+t.ticket+' <span class="vtag">'+t.vendedor+'</span></span><span>'+t.hora+' <span class="mtag">'+t.metodo+'</span></span></div>'+
         prods.map(p=>'<div class="vi"><span>'+p.qty+'× '+p.nombre.substring(0,24)+'</span><span>'+fmt(p.subtotal)+'</span></div>').join('')+
-        '<div style="display:flex;justify-content:space-between;padding-top:4px;font-size:.78rem;font-weight:700;border-top:1px solid var(--borde);margin-top:3px"><span style="color:var(--gris)">Total</span><span>'+fmt(t.total)+'</span></div>'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;padding-top:5px;border-top:1px solid var(--borde);margin-top:3px">'+
+          '<a href="https://wa.me/?text='+waTxt+'" target="_blank" style="background:#25D366;color:#fff;border-radius:8px;padding:4px 10px;font-size:.7rem;font-weight:700;text-decoration:none">📲 Enviar</a>'+
+          '<span style="font-size:.82rem;font-weight:900;color:var(--vd)">'+fmt(t.total)+'</span>'+
+        '</div>'+
       '</div>';
     }).join(''):'<div style="font-size:.78rem;color:#bbb;padding:6px">Sin ventas</div>';
     return'<div class="dd">'+
@@ -569,13 +623,26 @@ function renderApp(){
       (showHoras?'<div class="tar"><div class="tar-t">🕐 Por hora del día</div>'+horasH+'</div>':'')+
       // 6 meses
       (compMH?'<div class="tar"><div class="tar-t">📅 Últimos 6 meses <span style="font-size:.58rem;color:var(--gris)">🟩 venta 🟧 ganancia</span></div>'+compMH+'</div>':'')+
-      // Vencimientos (oculto)
+      // Vencimientos top 7 días (siempre visible si hay algo urgente)
+      (()=>{
+        const venc7=venc.filter(v=>v.dias<=7);
+        if(!venc7.length)return'';
+        const v7H=venc7.map(v=>{
+          const{cls,txt}=badgeVenc(v.dias);
+          const stockCls=clsStock(v.stock);
+          return'<div class="venc-i"><div><div class="venc-n'+(v.vencido?' vencido-text':'')+'">'+v.nombre.substring(0,30)+'</div>'+
+            '<div style="font-size:.7rem;color:var(--gris)">Stock <span class="'+stockCls+'">'+v.stock+'</span> · '+v.fecha+'</div></div>'+
+            '<span class="badge '+cls+'">'+txt+'</span></div>';
+        }).join('');
+        return'<div class="tar" style="border-color:'+(venc7.some(v=>v.vencido)?'var(--rojo)':'var(--naranja)')+'"><div class="tar-t" style="color:'+(venc7.some(v=>v.vencido)?'var(--rojo)':'var(--naranja)')+'">🚨 Por vencer en 7 días ('+venc7.length+')</div>'+v7H+'</div>';
+      })()+
+      // Vencimientos completos (oculto)
       '<button class="toggle-btn" onclick="showVenc=!showVenc;renderApp()" style="border-color:'+(venc.some(v=>v.vencido)?'var(--rojo)':venc.some(v=>v.dias<=7)?'var(--naranja)':'var(--borde)')+';color:'+(venc.some(v=>v.vencido)?'var(--rojo)':venc.some(v=>v.dias<=7)?'var(--naranja)':'var(--gris)')+'">'+
-        (showVenc?'▲':'▼')+' ⏰ Vencimientos ('+venc.length+')'+
+        (showVenc?'▲':'▼')+' ⏰ Todos los vencimientos próximos ('+venc.length+')'+
       '</button>'+
-      (showVenc?'<div class="tar"><div class="tar-t">⏰ Por vencer en 30 días</div>'+vencH+'</div>':'')+
+      (showVenc?'<div class="tar"><div class="tar-t">⏰ Vencimientos — próximos 30 días</div>'+vencH+'</div>':'')+
       // Detalle días
-      (diasOrd.length?'<div style="font-size:.68rem;font-weight:700;color:var(--gris);text-transform:uppercase;letter-spacing:1.2px;margin:12px 0 8px">📋 Detalle — '+diasLabel+'</div>'+detH:'')+
+      (diasOrd.length?'<div style="font-size:.68rem;font-weight:700;color:var(--gris);text-transform:uppercase;letter-spacing:1.2px;margin:12px 0 8px">🧾 Ventas del período — '+diasLabel+'</div>'+detH:'')+
     '</div>'+
     '<div class="pb"></div>';
 }
