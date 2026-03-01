@@ -678,17 +678,6 @@
         .metodo-btn.seleccionado.efectivo { border-color: #2e7d32; background: #e8f5e9; }
         .metodo-btn.seleccionado.posnet  { border-color: #1565c0; background: #e3f2fd; }
         .metodo-btn.seleccionado.transf     { border-color: #6a1b9a; background: #f3e5f5; }
-        .metodo-btn.seleccionado.combinado  { border-color: #ab47bc; background: #f3e5f5; }
-        .metodo-secundario {
-            flex:1; padding:7px 4px; border:2px solid #ce93d8;
-            border-radius:10px; background:white; font-size:0.72rem;
-            font-weight:700; cursor:pointer; color:#7b1fa2; font-family:inherit;
-            transition: all 0.15s;
-        }
-        .metodo-secundario.selec { background:#ce93d8; color:white; border-color:#ab47bc; }
-        .metodo-emoji { font-size: 1.8rem; }
-        .metodo-label { font-size: 0.78rem; font-weight: 700; color: var(--subtexto); text-transform: uppercase; }
-        .metodo-btn.seleccionado .metodo-label { color: var(--texto); }
 
         /* ===== MODAL PESO ===== */
         .peso-display {
@@ -1093,47 +1082,10 @@
                 <span class="metodo-emoji">📱</span>
                 <span class="metodo-label">Transferencia</span>
             </button>
-            <button class="metodo-btn combinado" id="btnCombinado" onclick="seleccionarMetodo('combinado')">
-                <span class="metodo-emoji">🔀</span>
-                <span class="metodo-label">Combinado</span>
-            </button>
+
         </div>
 
-        <!-- PANEL PAGO COMBINADO -->
-        <div id="panelCombinado" style="display:none;margin:0 20px 12px;
-             background:linear-gradient(135deg,#f3e5f5,#fff3e0);
-             border-radius:16px;padding:16px;border:2px solid #ce93d8;">
-            <div style="font-size:0.82rem;font-weight:700;color:#7b1fa2;margin-bottom:10px;">
-                🔀 Pago combinado — ¿Cuánto paga con otro método?
-            </div>
-            <!-- Selector del método secundario -->
-            <div style="display:flex;gap:8px;margin-bottom:12px;">
-                <button class="metodo-secundario selec" id="sec-posnet"     onclick="seleccionarSecundario('posnet')">💳 Posnet</button>
-                <button class="metodo-secundario"       id="sec-transferencia" onclick="seleccionarSecundario('transferencia')">📱 Transf.</button>
-                <button class="metodo-secundario"       id="sec-qr"         onclick="seleccionarSecundario('qr')">📲 QR</button>
-            </div>
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-                <span style="font-size:0.82rem;font-weight:700;color:#555;">Monto:</span>
-                <div style="position:relative;flex:1;">
-                    <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);font-weight:900;color:#7b1fa2;">$</span>
-                    <input type="number" id="montoCombinado" min="0"
-                           style="width:100%;padding:10px 12px 10px 24px;border:2px solid #ce93d8;
-                                  border-radius:12px;font-size:1rem;font-weight:700;
-                                  font-family:inherit;outline:none;color:#3d3244;"
-                           oninput="actualizarCombinado()" placeholder="0">
-                </div>
-            </div>
-            <div id="resumenCombinado" style="background:white;border-radius:10px;padding:10px;font-size:0.88rem;">
-                <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-                    <span id="labelSecundario" style="color:#555;">💳 Posnet</span>
-                    <strong id="montoSecundarioLabel" style="color:#7b1fa2;">$0</strong>
-                </div>
-                <div style="display:flex;justify-content:space-between;">
-                    <span style="color:#555;">💵 Efectivo</span>
-                    <strong id="montoEfectivoLabel" style="color:#2e7d32;">$0</strong>
-                </div>
-            </div>
-        </div>
+
 
         <!-- QR PAGO -->
         <div id="panelQR" style="display:none;margin:0 20px 16px;
@@ -1232,8 +1184,7 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6
 
 let productos = [];
 let ventaActual = []; // [{id, name, price, qty, stockDisponible}]
-let metodoPagoActual = 'efectivo'; // efectivo | posnet | transferencia | combinado
-let metodoSecundario = 'posnet'; // el método no-efectivo en pago combinado
+let metodoPagoActual = 'efectivo'; // efectivo | posnet | transferencia | qr
 
 // ========== CARGA DE PRODUCTOS ==========
 async function forzarActualizacion() {
@@ -1551,15 +1502,7 @@ async function confirmarVenta() {
             precioOriginal: i.precioOriginal || 0
         }));
         // Agregar método de pago al request
-        // Armar string de método — si combinado: "POSNET+EFECTIVO ($4000+$6000)"
         let metodoPagoFinal = metodoPagoActual.toUpperCase();
-        if (metodoPagoActual === 'combinado') {
-            const montoComb = parseFloat(document.getElementById('montoCombinado').value) || 0;
-            const montoEfec = Math.max(0, total - montoComb);
-            const labSecMap = { posnet:'POSNET', transferencia:'TRANSFERENCIA', qr:'QR MP' };
-            const labSec = labSecMap[metodoSecundario] || metodoSecundario.toUpperCase();
-            metodoPagoFinal = labSec + '+EFECTIVO ($' + montoComb.toLocaleString('es-AR') + '+$' + montoEfec.toLocaleString('es-AR') + ')';
-        }
         const ventaPayload = { items: ventaData, metodoPago: metodoPagoFinal, vendedor: vendedorActual };
         const dataEncoded = encodeURIComponent(JSON.stringify(ventaPayload));
         const url = API_URL + '?action=vender&data=' + dataEncoded;
@@ -2013,41 +1956,10 @@ function seleccionarMetodo(metodo) {
             if (panelTransf) panelTransf.style.display = 'none';
         }
     }
-    // Panel combinado
-    const panelComb = document.getElementById('panelCombinado');
-    if (panelComb) {
-        panelComb.style.display = metodo === 'combinado' ? 'block' : 'none';
-        if (metodo === 'combinado') {
-            document.getElementById('montoCombinado').value = '';
-            actualizarCombinado();
-        }
-    }
+
 }
 
-function seleccionarSecundario(metodo) {
-    metodoSecundario = metodo;
-    ['posnet','transferencia','qr'].forEach(m => {
-        const b = document.getElementById('sec-' + m);
-        if (b) b.className = 'metodo-secundario' + (m === metodo ? ' selec' : '');
-    });
-    const labels = { posnet:'💳 Posnet', transferencia:'📱 Transferencia', qr:'📲 QR MP' };
-    const el = document.getElementById('labelSecundario');
-    if (el) el.textContent = labels[metodo] || metodo;
-    actualizarCombinado();
-}
 
-function actualizarCombinado() {
-    const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
-    const monto = parseFloat(document.getElementById('montoCombinado').value) || 0;
-    const resto = Math.max(0, total - monto);
-    const labels = { posnet:'💳 Posnet', transferencia:'📱 Transferencia', qr:'📲 QR MP' };
-    const lbl = document.getElementById('labelSecundario');
-    if (lbl) lbl.textContent = labels[metodoSecundario] || metodoSecundario;
-    const ms = document.getElementById('montoSecundarioLabel');
-    const me = document.getElementById('montoEfectivoLabel');
-    if (ms) ms.textContent = '$' + monto.toLocaleString('es-AR');
-    if (me) me.textContent = '$' + resto.toLocaleString('es-AR');
-}
 
 function abrirPointTap() {
     // Deep link directo a Point Tap en MP
