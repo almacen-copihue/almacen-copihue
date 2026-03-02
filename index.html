@@ -2138,23 +2138,79 @@ function validarHorario(tipo) {
 }
 
 // ========== CONSTRUCCIÓN DE POOLS ==========
+// ===== MOTOR DE PUNTAJE =====
+function calcularPuntaje(p) {
+    const hoy = new Date();
+    let puntaje = 0;
+
+    // Días para vencer
+    let diasVenc = null;
+    if (p.vencimiento) {
+        try {
+            const v = new Date(p.vencimiento);
+            if (!isNaN(v)) diasVenc = Math.round((v - hoy) / (1000 * 60 * 60 * 24));
+        } catch(e) {}
+    }
+
+    // Días desde última promo
+    let diasPromo = null;
+    if (p.ultimaPromo) {
+        try {
+            const u = new Date(p.ultimaPromo);
+            if (!isNaN(u)) diasPromo = Math.round((hoy - u) / (1000 * 60 * 60 * 24));
+        } catch(e) {}
+    }
+
+    // Penalización: si estuvo en promo en últimos 15 días
+    if (diasPromo !== null && diasPromo < 15) return -10;
+
+    if (diasVenc !== null) {
+        if (diasVenc <= 3)  puntaje += 5;
+        else if (diasVenc <= 7 && p.stockNumber >= 5) puntaje += 4;
+    }
+    if (p.rotacion >= 3) puntaje += 3;
+    if (p.price > 1000) puntaje += 2;
+
+    return puntaje;
+}
+
+function esVencimientoCritico(p) {
+    if (!p.vencimiento) return false;
+    try {
+        const v = new Date(p.vencimiento);
+        const dias = Math.round((v - new Date()) / (1000 * 60 * 60 * 24));
+        return dias <= 3;
+    } catch(e) { return false; }
+}
+
 function construirPools() {
     if (!products || products.length === 0) return;
     
-    console.log('🏗️ Construyendo pools de ofertas...');
-    
-    // POOL RELÁMPAGO: solo productos con relampago > 0
-    poolRelampago = products.filter(p => 
-        p.relampago > 0 && 
-        p.stockNumber > 0 &&
-        OFERTAS_RELAMPAGO_SISTEMA[p.relampago]
+    console.log('🏗️ Construyendo pools (motor activo)...');
+
+    // REGLA ANTI-CONFLICTO: productos con vencimiento <= 3 días
+    // van SOLO a Últimas Unidades, NO a relámpago
+    const idsVencCritico = new Set(
+        products.filter(p => esVencimientoCritico(p)).map(p => p.id)
     );
+
+    // POOL RELÁMPAGO: relampago > 0, con stock, sin vencimiento crítico
+    poolRelampago = products
+        .filter(p => 
+            p.relampago > 0 && 
+            p.stockNumber > 0 &&
+            OFERTAS_RELAMPAGO_SISTEMA[p.relampago] &&
+            !idsVencCritico.has(p.id) // anti-conflicto
+        )
+        .map(p => ({ ...p, _puntaje: calcularPuntaje(p) }))
+        .filter(p => p._puntaje >= 0) // excluir penalizados (-10)
+        .sort((a, b) => b._puntaje - a._puntaje);
     
     // POOL DESTACADAS: solo productos con destacada > 0
     poolDestacadas = products.filter(p => 
         p.destacada > 0 && 
         p.stockNumber > 0
-    ).sort((a, b) => b.destacada - a.destacada); // Ordenar por % DESC
+    ).sort((a, b) => b.destacada - a.destacada);
     
     // POOL ESPECIALES: solo productos con especial = 1
     poolEspeciales = products.filter(p => 
@@ -2162,17 +2218,25 @@ function construirPools() {
         p.stockNumber > 0
     );
 
-    // POOL ÚLTIMAS UNIDADES: relampago > 0, stock > 0, stock <= 5
-    // Ordenados por relampago DESC (prioridad), luego stock ASC (menos stock primero)
-    poolUltimas = products.filter(p =>
+    // POOL ÚLTIMAS UNIDADES:
+    // Prioridad 1: vencimiento crítico (<= 3 días) con stock
+    // Prioridad 2: relampago > 0 con stock bajo (<= 5)
+    const ultimasVenc = products.filter(p =>
+        esVencimientoCritico(p) && p.stockNumber > 0
+    ).map(p => ({ ...p, _puntaje: calcularPuntaje(p) + 10, _urgencia: 'vencimiento' }));
+
+    const ultimasBajoStock = products.filter(p =>
         p.relampago > 0 &&
         p.stockNumber > 0 &&
-        p.stockNumber <= 5
-    ).sort((a, b) => b.relampago - a.relampago || a.stockNumber - b.stockNumber);
+        p.stockNumber <= 5 &&
+        !idsVencCritico.has(p.id) // ya están en ultimasVenc
+    ).map(p => ({ ...p, _puntaje: calcularPuntaje(p), _urgencia: 'stock' }));
+
+    const todasUltimas = [...ultimasVenc, ...ultimasBajoStock];
+    todasUltimas.sort((a, b) => b._puntaje - a._puntaje);
+    poolUltimas = todasUltimas;
     
-    console.log(`⚡ Pool Relámpago: ${poolRelampago.length} productos`);
-    console.log(`🔥 Pool Destacadas: ${poolDestacadas.length} productos`);
-    console.log(`⭐ Pool Especiales: ${poolEspeciales.length} productos`);
+    console.log(`⚡ Pool Relámpago: ${poolRelampago.length} | 🔥 Destacadas: ${poolDestacadas.length} | 🏷️ Últimas: ${poolUltimas.length}`);
 }
 
 function seleccionarProductosOfertas() {
@@ -2616,14 +2680,73 @@ function cambiarPagina(nuevaPagina) {
     }
 }
 
+
+// ===== AUTO-ACTIVACIÓN A LAS 12:00 =====
+const MOTOR_KEY = 'copihue_motor_activado_';
+let _motorCheckInterval = null;
+
+async function verificarAutoActivacion() {
+    const hoy = new Date();
+    const fechaHoy = hoy.toISOString().slice(0,10);
+    const clave = MOTOR_KEY + fechaHoy;
+
+    // Si ya se activó hoy, no hacer nada
+    if (localStorage.getItem(clave)) return;
+
+    const hora = hoy.getHours();
+    const min = hoy.getMinutes();
+
+    // Solo activar a partir de las 12:00
+    if (hora < 12) return;
+
+    try {
+        const url = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec?action=motorSugerencias&t=' + Date.now();
+        const r = await fetch(url, { redirect: 'follow' });
+        const data = await r.json();
+
+        if (!data.success || !data.sugerencias || data.sugerencias.length === 0) return;
+
+        // Tomar el mejor candidato para relámpago (primero que no sea ultimas)
+        const candidato = data.sugerencias.find(s => s.tipo === 'relampago');
+        if (!candidato) return;
+
+        // Activar automáticamente en la planilla
+        const activarUrl = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec?action=relampago&data=' + 
+            encodeURIComponent(JSON.stringify({
+                productoId: candidato.id,
+                tipo: candidato.relampago,
+                limpiarOfertas: true
+            }));
+        await fetch(activarUrl, { redirect: 'follow' });
+
+        // Marcar como activado hoy
+        localStorage.setItem(clave, candidato.nombre);
+
+        console.log('🤖 Motor auto-activó:', candidato.nombre, '(puntaje:', candidato.puntaje, ')');
+
+        // Recargar productos para mostrar cambio
+        setTimeout(() => loadProductsFromAPI(), 2000);
+
+    } catch(e) {
+        console.log('Motor auto-activación error:', e);
+    }
+}
+
+function iniciarMotorAutoCheck() {
+    if (_motorCheckInterval) return;
+    verificarAutoActivacion();
+    _motorCheckInterval = setInterval(verificarAutoActivacion, 60000); // cada 1 min
+}
+
 // ========== ACTUALIZAR TODAS LAS VISTAS ==========
 function actualizarTodasLasVistas() {
     construirPools();
     seleccionarProductosOfertas();
+    iniciarMotorAutoCheck();
     
     renderizarContenedorOfertas('relampago', productosRelampago);
-    // Últimas unidades: siempre activo si hay stock bajo con relampago > 0
-    productosUltimas = poolUltimas.slice(0, 6); // máx 6 productos
+    // Últimas unidades: ordenadas por motor de puntaje, máx 6
+    productosUltimas = poolUltimas.slice(0, 6);
     renderizarContenedorOfertas('ultimas', productosUltimas);
     renderizarContenedorOfertas('destacadas', productosDestacadas);
     renderizarContenedorOfertas('especiales', productosEspeciales);
@@ -2754,7 +2877,9 @@ function processAPIData(apiData) {
             rotacion: (() => {
                 const key = Object.keys(item).find(k => k.toUpperCase() === 'ROTACION' || k.toLowerCase() === 'rotacion');
                 return key ? parseInt(item[key]) || 0 : 0;
-            })()
+            })(),
+            vencimiento: item.vencimiento || '',
+            ultimaPromo: item.ultimaPromo || ''
         };
         
         products.push(product);
