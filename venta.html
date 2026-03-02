@@ -748,7 +748,7 @@
 <div class="header" style="flex-direction:column;gap:6px;padding:8px 16px;">
     <div style="display:flex;align-items:center;justify-content:space-between;width:100%;">
         <div class="header-titulo">
-            🏪 Copihue<span id="versionTag" style="font-size:0.6rem;font-weight:400;opacity:0.3;margin-left:6px;letter-spacing:0;color:inherit">v60</span>
+            🏪 Copihue<span id="versionTag" style="font-size:0.6rem;font-weight:400;opacity:0.3;margin-left:6px;letter-spacing:0;color:inherit">v61</span>
             <div class="indicador-carga" id="indicadorCarga" title="Cargando..."></div>
         </div>
         <button class="btn-resumen" onclick="cambiarVendedor()" id="vendedorBadge"
@@ -869,6 +869,11 @@
                     <input type="number" id="ajustePrecioNuevo" min="0"
                            style="font-size:1.8rem;font-weight:900;color:#2e7d32;width:140px;border:2px solid #e0e0e0;border-radius:10px;padding:6px 10px;text-align:center;">
                 </div>
+
+                <!-- CATEGORÍA -->
+                <div style="font-size:0.72rem;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;text-align:left;">🏷️ Categoría</div>
+                <div class="categorias-grid" id="ajusteCatGrid" style="margin-bottom:20px;text-align:left;"></div>
+                <input type="hidden" id="ajusteCategoria">
 
                 <button onclick="guardarAjuste()" id="ajusteBtn"
                         style="width:100%;padding:14px;border:none;border-radius:12px;background:#1976d2;color:white;font-size:1rem;font-weight:700;cursor:pointer;">
@@ -1678,6 +1683,7 @@ const CATEGORIAS = [
 
 let npCategoriaSeleccionada = '';
 let ingCategoriaSeleccionada = '';
+let ajusteCategoriaSeleccionada = '';
 
 function abrirNuevoProducto() {
     // Resetear formulario
@@ -2340,7 +2346,27 @@ function seleccionarAjuste(id) {
     document.getElementById('ajusteNuevo').textContent = ajusteValor;
     document.getElementById('ajustePrecioNuevo').value = p.price;
     document.getElementById('ajusteNombreNuevo').value = p.name;
+    // Categoría actual
+    ajusteCategoriaSeleccionada = p.category || '';
+    document.getElementById('ajusteCategoria').value = ajusteCategoriaSeleccionada;
+    const catsDePlanilla = [...new Set(productos.map(pr => pr.category).filter(Boolean))];
+    const todasCats = [...new Set([...CATEGORIAS, ...catsDePlanilla])].sort();
+    const grid = document.getElementById('ajusteCatGrid');
+    if (grid) {
+        grid.innerHTML = todasCats.map(cat => {
+            const activo = cat === ajusteCategoriaSeleccionada ? ' activo' : '';
+            return `<button class="cat-btn${activo}" onclick="selAjusteCategoria('${cat}')" id="ajCatBtn_${cat.replace(/\s/g,'_')}">${cat}</button>`;
+        }).join('');
+    }
     document.getElementById('ajustePanel').style.display = 'block';
+}
+
+function selAjusteCategoria(cat) {
+    ajusteCategoriaSeleccionada = cat;
+    document.getElementById('ajusteCategoria').value = cat;
+    document.querySelectorAll('#ajusteCatGrid .cat-btn').forEach(b => b.classList.remove('activo'));
+    const btn = document.getElementById('ajCatBtn_' + cat.replace(/\s/g,'_'));
+    if (btn) btn.classList.add('activo');
 }
 
 function cambiarAjuste(delta) {
@@ -2356,13 +2382,15 @@ async function guardarAjuste() {
     const precioNuevo = parseInt(document.getElementById('ajustePrecioNuevo').value) || ajusteProducto.price;
     try {
         const nombreNuevo = document.getElementById('ajusteNombreNuevo').value.trim().toUpperCase();
+        const catAjuste = ajusteCategoriaSeleccionada || null;
         const datos = {
             producto: ajusteProducto.name,
             nombreNuevo: nombreNuevo !== ajusteProducto.name ? nombreNuevo : null,
             cantidad: ajusteValor - ajusteProducto.stock,
             precioVenta: precioNuevo !== ajusteProducto.price ? precioNuevo : null,
             precioCosto: null, proveedor: null, fechaVencimiento: null,
-            stockDirecto: ajusteValor
+            stockDirecto: ajusteValor,
+            categoria: catAjuste !== ajusteProducto.category ? catAjuste : null
         };
         const url = API_URL + '?action=ingresar&data=' + encodeURIComponent(JSON.stringify(datos));
         const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
@@ -2375,6 +2403,9 @@ async function guardarAjuste() {
                 const nombreViejo = ajusteProducto.name;
                 ajusteProducto.name = nombreNuevoLocal;
                 generarBatRenombrarFoto(nombreViejo, nombreNuevoLocal);
+            }
+            if (catAjuste && catAjuste !== ajusteProducto.category) {
+                ajusteProducto.category = catAjuste;
             }
             if (precioNuevo !== ajusteProducto.price) {
                 ajusteProducto.price = precioNuevo;
