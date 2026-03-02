@@ -479,25 +479,55 @@ function renderApp(){
     '</div>';
   }).join('');
 
-  // Horas de más ventas
-  const porHora={};
-  totals.forEach(t=>{if(!t.hora)return;const h=parseInt(t.hora.split(':')[0]);if(!isNaN(h)){porHora[h]=(porHora[h]||0)+(t.total||0);}});
-  const horasConVenta=Object.entries(porHora).sort((a,b)=>parseInt(a[0])-parseInt(b[0]));
-  const maxH=Math.max(...Object.values(porHora),1);
-  // Horas: contar tickets (flujo de personas) no monto
+  // Horas — contar tickets por hora (flujo de personas)
   const tksPorHora={};
-  totals.forEach(t=>{if(!t.hora)return;const h=parseInt(t.hora.split(':')[0]);if(!isNaN(h))tksPorHora[h]=(tksPorHora[h]||0)+1;});
-  const horasConTks=Object.entries(tksPorHora).sort((a,b)=>parseInt(a[0])-parseInt(b[0]));
+  totals.forEach(t=>{
+    if(!t.hora)return;
+    const h=parseInt(t.hora.split(':')[0]);
+    if(!isNaN(h))tksPorHora[h]=(tksPorHora[h]||0)+1;
+  });
+  const horasOrdenadas=Object.entries(tksPorHora).sort((a,b)=>parseInt(a[0])-parseInt(b[0]));
   const maxTks=Math.max(...Object.values(tksPorHora),1);
-  const mejorHora=horasConTks.sort((a,b)=>b[1]-a[1])[0];
-  horasConTks.sort((a,b)=>parseInt(a[0])-parseInt(b[0]));
-  const horasH=horasConTks.length?
-    (mejorHora?'<div style="background:var(--nl);border-radius:10px;padding:7px 10px;margin-bottom:8px;font-size:.78rem;"><strong>🏆 Hora pico: '+mejorHora[0]+'h–'+(parseInt(mejorHora[0])+1)+'h</strong> con '+mejorHora[1]+' ticket'+(mejorHora[1]>1?'s':'')+'</div>':'')+
-    '<div class="hora-grid">'+horasConTks.map(([h,tks])=>{
+
+  // Detectar rango pico: bloque de horas consecutivas con más tráfico (>50% del max)
+  let rangoInicio=null, rangoFin=null, mejorH=null;
+  let bloqueInicio=null, bloqueCnt=0, mejorBloqueCnt=0;
+  horasOrdenadas.forEach(([h,tks],idx)=>{
+    const hi=parseInt(h);
+    if(tks===maxTks) mejorH=hi;
+    if(tks>=maxTks*0.5){
+      if(bloqueInicio===null) bloqueInicio=hi;
+      rangoFin=hi;
+      bloqueCnt+=tks;
+      if(bloqueCnt>mejorBloqueCnt){mejorBloqueCnt=bloqueCnt;rangoInicio=bloqueInicio;rangoFin=hi;}
+    } else {
+      bloqueInicio=null; bloqueCnt=0;
+    }
+  });
+
+  const horasH=horasOrdenadas.length?
+    // Resumen rango pico
+    '<div style="background:var(--nl);border-radius:10px;padding:8px 12px;margin-bottom:10px;">'+
+      '<div style="font-size:.76rem;font-weight:900;color:var(--naranja);margin-bottom:3px">🏆 Horario pico</div>'+
+      (rangoInicio!==null&&rangoInicio!==rangoFin?
+        '<div style="font-size:1.1rem;font-weight:900;color:var(--texto)">'+rangoInicio+'h — '+(rangoFin+1)+'h</div>':
+        '<div style="font-size:1.1rem;font-weight:900;color:var(--texto)">'+(mejorH!==null?mejorH+'h — '+(mejorH+1)+'h':'—')+'</div>')+
+      '<div style="font-size:.7rem;color:var(--gris);margin-top:2px">'+mejorBloqueCnt+' tickets en ese período</div>'+
+    '</div>'+
+    // Barras por hora
+    '<div class="hora-grid">'+
+    horasOrdenadas.map(([h,tks])=>{
       const pct=Math.round(tks/maxTks*100);
-      const color=pct>75?'var(--vd)':pct>40?'var(--verde)':'var(--v3)';
-      return'<div class="hora-cel"><div class="hora-n">'+h+'h</div><div class="hora-b" style="background:'+color+';opacity:'+(0.3+pct/100*0.7)+'"></div><div style="font-size:.55rem;color:var(--gris);margin-top:2px">'+tks+' tk</div></div>';
-    }).join('')+'</div>':'<div class="empty">Sin datos de hora</div>';
+      const esPico=rangoInicio!==null&&parseInt(h)>=rangoInicio&&parseInt(h)<=rangoFin;
+      const color=esPico?'var(--naranja)':pct>60?'var(--vd)':'var(--v3)';
+      return'<div class="hora-cel">'+
+        '<div class="hora-n" style="'+(esPico?'color:var(--naranja);font-weight:900':'')+'">'+h+'h</div>'+
+        '<div class="hora-b" style="background:'+color+';opacity:'+(0.25+pct/100*0.75)+'"></div>'+
+        '<div style="font-size:.55rem;color:var(--gris);margin-top:2px">'+tks+'</div>'+
+      '</div>';
+    }).join('')+
+    '</div>'
+    :'<div class="empty">Sin datos de hora</div>';
 
   // Comparar meses histórico
   const vXMes={},gXMes={};
@@ -559,7 +589,7 @@ function renderApp(){
         '<div class="tkt-hdr"><span>🎫 #'+t.ticket+' <span class="vtag">'+t.vendedor+'</span></span><span>'+t.hora+' <span class="mtag">'+t.metodo+'</span></span></div>'+
         prods.map(p=>'<div class="vi"><span>'+p.qty+'× '+p.nombre.substring(0,24)+'</span><span>'+fmt(p.subtotal)+'</span></div>').join('')+
         '<div style="display:flex;justify-content:space-between;align-items:center;padding-top:5px;border-top:1px solid var(--borde);margin-top:3px">'+
-          '<a href="https://wa.me/?text='+waTxt+'" target="_blank" style="background:#25D366;color:#fff;border-radius:8px;padding:4px 10px;font-size:.7rem;font-weight:700;text-decoration:none">📲 Enviar</a>'+
+          '<a href="https://wa.me/5492944907380?text='+waTxt+'" target="_blank" style="background:#25D366;color:#fff;border-radius:8px;padding:4px 10px;font-size:.7rem;font-weight:700;text-decoration:none">📲 Enviar</a>'+
           '<span style="font-size:.82rem;font-weight:900;color:var(--vd)">'+fmt(t.total)+'</span>'+
         '</div>'+
       '</div>';
