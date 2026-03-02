@@ -748,7 +748,7 @@
 <div class="header" style="flex-direction:column;gap:6px;padding:8px 16px;">
     <div style="display:flex;align-items:center;justify-content:space-between;width:100%;">
         <div class="header-titulo">
-            🏪 Copihue<span id="versionTag" style="font-size:0.6rem;font-weight:400;opacity:0.3;margin-left:6px;letter-spacing:0;color:inherit">v59</span>
+            🏪 Copihue<span id="versionTag" style="font-size:0.6rem;font-weight:400;opacity:0.3;margin-left:6px;letter-spacing:0;color:inherit">v60</span>
             <div class="indicador-carga" id="indicadorCarga" title="Cargando..."></div>
         </div>
         <button class="btn-resumen" onclick="cambiarVendedor()" id="vendedorBadge"
@@ -927,6 +927,12 @@
                 <input type="text" class="form-input" id="ingProveedor"
                        placeholder="Opcional"
                        style="text-transform:uppercase;">
+            </div>
+
+            <div class="form-grupo" id="ingCategoriaGrupo">
+                <label class="form-label">🏷️ Categoría</label>
+                <div class="categorias-grid" id="ingCatGrid" style="margin-top:6px;"></div>
+                <input type="hidden" id="ingCategoria">
             </div>
 
             <div class="form-grupo">
@@ -1671,6 +1677,7 @@ const CATEGORIAS = [
 ];
 
 let npCategoriaSeleccionada = '';
+let ingCategoriaSeleccionada = '';
 
 function abrirNuevoProducto() {
     // Resetear formulario
@@ -2046,8 +2053,9 @@ function generarQRTransferencia(monto) {
 // ========== INGRESO DE MERCADERÍA ==========
 let productoIngresoSeleccionado = null;
 
-function abrirIngreso() {
+function abrirIngreso(productoPresel) {
     productoIngresoSeleccionado = null;
+    ingCategoriaSeleccionada = '';
     document.getElementById('ingProducto').value = '';
     document.getElementById('ingCantidad').value = '1';
     document.getElementById('ingCosto').value = '';
@@ -2058,8 +2066,31 @@ function abrirIngreso() {
     document.getElementById('ingSugerido').style.display = 'none';
     document.getElementById('ingResultados').style.display = 'none';
     document.getElementById('ingError').style.display = 'none';
+    document.getElementById('ingCategoria').value = '';
+    poblarCategoriasIngreso('');
     document.getElementById('modalIngreso').classList.add('open');
     setTimeout(() => document.getElementById('ingProducto').focus(), 300);
+}
+
+function poblarCategoriasIngreso(catActual) {
+    ingCategoriaSeleccionada = catActual || '';
+    const catsDePlanilla = [...new Set(productos.map(p => p.category).filter(Boolean))];
+    const todasCats = [...new Set([...CATEGORIAS, ...catsDePlanilla])].sort();
+    const grid = document.getElementById('ingCatGrid');
+    if (!grid) return;
+    grid.innerHTML = todasCats.map(cat => {
+        const activo = cat === ingCategoriaSeleccionada ? ' activo' : '';
+        return `<button class="cat-btn${activo}" onclick="selIngCategoria('${cat}')" id="ingCatBtn_${cat.replace(/\s/g,'_')}">${cat}</button>`;
+    }).join('');
+    if (catActual) document.getElementById('ingCategoria').value = catActual;
+}
+
+function selIngCategoria(cat) {
+    ingCategoriaSeleccionada = cat;
+    document.getElementById('ingCategoria').value = cat;
+    document.querySelectorAll('#ingCatGrid .cat-btn').forEach(b => b.classList.remove('activo'));
+    const btn = document.getElementById('ingCatBtn_' + cat.replace(/\s/g,'_'));
+    if (btn) btn.classList.add('activo');
 }
 
 function cerrarIngreso() {
@@ -2126,6 +2157,8 @@ function seleccionarProductoIngreso(id) {
     productoIngresoSeleccionado = p;
     document.getElementById('ingProducto').value = p.name;
     document.getElementById('ingResultados').style.display = 'none';
+    // Mostrar categoría actual y permitir cambiarla
+    poblarCategoriasIngreso(p.category || '');
     const infoDiv = document.getElementById('ingInfo');
     const sinStockSel = p.stock === 0;
     const fotoSlugSel = p.name.toLowerCase()
@@ -2187,7 +2220,8 @@ async function guardarIngreso() {
     btn.textContent = '⏳ Guardando...';
 
     try {
-        const datos = { producto: nombre, cantidad, precioCosto: costo, precioVenta: venta, proveedor, fechaVencimiento: vencimiento };
+        const catIng = ingCategoriaSeleccionada || null;
+        const datos = { producto: nombre, cantidad, precioCosto: costo, precioVenta: venta, proveedor, fechaVencimiento: vencimiento, categoria: catIng };
         const url = API_URL + '?action=ingresar&data=' + encodeURIComponent(JSON.stringify(datos));
         const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
         const resp = await r.json();
