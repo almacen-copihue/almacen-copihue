@@ -748,7 +748,7 @@
 <div class="header" style="flex-direction:column;gap:6px;padding:8px 16px;">
     <div style="display:flex;align-items:center;justify-content:space-between;width:100%;">
         <div class="header-titulo">
-            🏪 Copihue<span id="versionTag" style="font-size:0.6rem;font-weight:400;opacity:0.3;margin-left:6px;letter-spacing:0;color:inherit">v61</span>
+            🏪 Copihue<span id="versionTag" style="font-size:0.6rem;font-weight:400;opacity:0.3;margin-left:6px;letter-spacing:0;color:inherit">v62</span>
             <div class="indicador-carga" id="indicadorCarga" title="Cargando..."></div>
         </div>
         <button class="btn-resumen" onclick="cambiarVendedor()" id="vendedorBadge"
@@ -1296,7 +1296,7 @@ function buscar(term) {
         const stockClase = stockBajo ? 'bajo' : '';
 
         return `
-        <div class="resultado-item ${sinStock ? 'sin-stock' : ''}" onclick="agregarProducto(${p.id})">
+        <div class="resultado-item ${sinStock ? 'sin-stock' : ''}" onclick="abrirSelectorQty(${p.id})">
             <img class="resultado-img" src="${p.image}"
                  onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"
                  alt="${p.name}">
@@ -1386,6 +1386,80 @@ function agregarProducto(id) {
     renderVenta();
     guardarCarritoPendiente();
     mostrarToast(`✅ ${producto.name.substring(0, 30)}`, 'verde');
+}
+
+// ===== SELECTOR DE CANTIDAD ANTES DE AGREGAR =====
+let _qtyModalProducto = null;
+let _qtyModalValor = 1;
+
+function abrirSelectorQty(id) {
+    const p = productos.find(pr => pr.id === id);
+    if (!p) return;
+    if (p.stock === 0) { mostrarToast('❌ Sin stock', 'rojo'); return; }
+    // Productos por peso van directo al modal de peso
+    if (esPorPeso(p)) {
+        document.getElementById('buscador').value = '';
+        ocultarResultados();
+        document.getElementById('buscador').blur();
+        abrirModalPeso(p);
+        return;
+    }
+    _qtyModalProducto = p;
+    // Si ya está en carrito, empezar desde esa cantidad
+    const enCarrito = ventaActual.find(i => i.id === id);
+    _qtyModalValor = enCarrito ? enCarrito.qty : 1;
+    
+    document.getElementById('qtyModalImg').src = p.image || '';
+    document.getElementById('qtyModalNombre').textContent = p.name;
+    document.getElementById('qtyModalPrecio').textContent = '$' + p.price.toLocaleString('es-AR') + ' c/u';
+    actualizarQtyModal();
+    const modal = document.getElementById('modalQty');
+    modal.style.display = 'flex';
+}
+
+function cerrarSelectorQty() {
+    document.getElementById('modalQty').style.display = 'none';
+    _qtyModalProducto = null;
+}
+
+function cambiarQtyModal(delta) {
+    if (!_qtyModalProducto) return;
+    const nuevo = _qtyModalValor + delta;
+    if (nuevo < 1) return;
+    if (nuevo > _qtyModalProducto.stock) { mostrarToast(`⚠️ Stock máximo: ${_qtyModalProducto.stock}`, 'rojo'); return; }
+    _qtyModalValor = nuevo;
+    actualizarQtyModal();
+}
+
+function actualizarQtyModal() {
+    document.getElementById('qtyModalValor').textContent = _qtyModalValor;
+    const total = _qtyModalValor * (_qtyModalProducto ? _qtyModalProducto.price : 0);
+    document.getElementById('qtyModalTotal').textContent = 'Total: $' + total.toLocaleString('es-AR');
+}
+
+function confirmarSelectorQty() {
+    if (!_qtyModalProducto) return;
+    const p = _qtyModalProducto;
+    const qty = _qtyModalValor;
+    
+    const existente = ventaActual.find(i => i.id === p.id);
+    if (existente) {
+        existente.qty = qty;
+    } else {
+        ventaActual.push({
+            id: p.id, name: p.name, price: p.price, qty,
+            stockDisponible: p.stock,
+            vencimiento: p.vencimiento || '',
+            rotacion: p.rotacion || 3
+        });
+    }
+    cerrarSelectorQty();
+    document.getElementById('buscador').value = '';
+    ocultarResultados();
+    document.getElementById('buscador').blur();
+    renderVenta();
+    guardarCarritoPendiente();
+    mostrarToast(`✅ ${p.name.substring(0,30)} ×${qty}`, 'verde');
 }
 
 function cambiarCantidad(id, delta) {
@@ -3140,5 +3214,39 @@ cargarProductos().then(() => {
     }
 });
 </script>
+<!-- MODAL SELECTOR DE CANTIDAD -->
+<div id="modalQty" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:300;
+     background:rgba(0,0,0,0.4);top:0;align-items:flex-end;"
+     onclick="if(event.target===this)cerrarSelectorQty()">
+    <div style="background:white;border-radius:20px 20px 0 0;padding:20px;
+                box-shadow:0 -4px 20px rgba(0,0,0,0.15);max-width:480px;margin:0 auto;width:100%;">
+        <div style="width:36px;height:4px;background:#e0e0e0;border-radius:2px;margin:0 auto 16px;"></div>
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+            <img id="qtyModalImg" src="" onerror="this.style.display='none'" 
+                 style="width:56px;height:56px;object-fit:contain;border-radius:10px;background:#f5f5f5;flex-shrink:0;">
+            <div>
+                <div id="qtyModalNombre" style="font-weight:700;font-size:0.95rem;color:#222;line-height:1.3;"></div>
+                <div id="qtyModalPrecio" style="font-size:0.85rem;color:#2e7d32;font-weight:700;margin-top:2px;"></div>
+            </div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:center;gap:20px;margin-bottom:16px;">
+            <button onclick="cambiarQtyModal(-1)"
+                    style="width:52px;height:52px;border-radius:50%;border:none;background:#ffebee;
+                           color:#e53935;font-size:1.8rem;font-weight:700;cursor:pointer;line-height:1;">−</button>
+            <div id="qtyModalValor" style="font-size:2.4rem;font-weight:900;color:#1976d2;min-width:48px;text-align:center;">1</div>
+            <button onclick="cambiarQtyModal(+1)"
+                    style="width:52px;height:52px;border-radius:50%;border:none;background:#e8f5e9;
+                           color:#2e7d32;font-size:1.8rem;font-weight:700;cursor:pointer;line-height:1;">+</button>
+        </div>
+        <div id="qtyModalTotal" style="text-align:center;font-size:1.1rem;font-weight:700;color:#555;margin-bottom:14px;"></div>
+        <button onclick="confirmarSelectorQty()"
+                style="width:100%;padding:14px;border:none;border-radius:14px;
+                       background:linear-gradient(135deg,#2e7d32,#1b5e20);
+                       color:white;font-size:1rem;font-weight:900;cursor:pointer;">
+            🛒 Agregar al carrito
+        </button>
+    </div>
+</div>
+
 </body>
 </html>
