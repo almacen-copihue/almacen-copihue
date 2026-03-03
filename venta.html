@@ -748,7 +748,7 @@
 <div class="header" style="flex-direction:column;gap:6px;padding:8px 16px;">
     <div style="display:flex;align-items:center;justify-content:space-between;width:100%;">
         <div class="header-titulo">
-            🏪 Copihue<span id="versionTag" style="font-size:0.6rem;font-weight:400;opacity:0.3;margin-left:6px;letter-spacing:0;color:inherit">v68</span>
+            🏪 Copihue<span id="versionTag" style="font-size:0.6rem;font-weight:400;opacity:0.3;margin-left:6px;letter-spacing:0;color:inherit">v70</span>
             <div class="indicador-carga" id="indicadorCarga" title="Cargando..."></div>
         </div>
         <button class="btn-resumen" onclick="cambiarVendedor()" id="vendedorBadge"
@@ -1559,7 +1559,7 @@ async function confirmarVenta() {
     btn.textContent = '⏳ Procesando...';
 
     const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
-    const hora = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+    const _t = new Date(); const hora = _t.getHours().toString().padStart(2,'0') + ':' + _t.getMinutes().toString().padStart(2,'0');
 
     // Rebajar stock en Apps Script (Google Sheets)
     let stockOk = false;
@@ -3012,9 +3012,18 @@ async function verificarOfertasAutomaticas() {
     const hoy = new Date();
     const candidatos = productos.filter(p => {
         if (!p.vencimiento || p.stock <= 0) return false;
-        if (p.relampago && p.relampago > 0) return false; // ya tiene oferta
+        // Ya tiene oferta activa → excluir (ya está en Últimas Unidades u otro contenedor)
+        if ((p.relampago && p.relampago > 0) || (p.destacada && p.destacada > 0) || (p.especial && p.especial > 0)) return false;
         const dias = Math.ceil((new Date(p.vencimiento) - hoy) / (1000 * 60 * 60 * 24));
         return dias >= 0 && dias < 7;
+    });
+
+    // Productos que YA tienen oferta pero vencen pronto — solo informar, no pedir activar
+    const yaEnOferta = productos.filter(p => {
+        if (!p.vencimiento || p.stock <= 0) return false;
+        if (!p.relampago || p.relampago <= 0) return false;
+        const dias = Math.ceil((new Date(p.vencimiento) - hoy) / (1000 * 60 * 60 * 24));
+        return dias >= 0 && dias <= 3; // solo críticos
     });
 
     if (candidatos.length === 0) {
@@ -3097,7 +3106,7 @@ async function verificarOfertasAutomaticas() {
                         🕐 Ofertas automáticas por vencimiento
                     </div>
                     <div style="color:rgba(255,255,255,0.85);font-size:0.8rem;margin-top:2px;">
-                        ${candidatos.length} producto${candidatos.length > 1 ? 's' : ''} cerca de vencer — activá la oferta antes de vender
+                        ${candidatos.length} producto${candidatos.length > 1 ? 's' : ''} cerca de vencer sin oferta activa${yaEnOferta.length > 0 ? ' · ' + yaEnOferta.length + ' ya en Últimas Unidades ✅' : ''}
                     </div>
                 </div>
                 <div style="padding:0 20px;overflow-y:auto;flex:1;">
