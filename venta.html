@@ -751,7 +751,7 @@
 <div class="header" style="flex-direction:column;gap:6px;padding:8px 16px;">
     <div style="display:flex;align-items:center;justify-content:space-between;width:100%;">
         <div class="header-titulo">
-            🏪 Copihue<span id="versionTag" style="font-size:0.6rem;font-weight:400;opacity:0.3;margin-left:6px;letter-spacing:0;color:inherit">v75</span>
+            🏪 Copihue<span id="versionTag" style="font-size:0.6rem;font-weight:400;opacity:0.3;margin-left:6px;letter-spacing:0;color:inherit">v76</span>
             <div class="indicador-carga" id="indicadorCarga" title="Cargando..."></div>
         </div>
         <button class="btn-resumen" onclick="cambiarVendedor()" id="vendedorBadge"
@@ -979,15 +979,25 @@
 
             <div class="form-row">
                 <div class="form-grupo">
-                    <label class="form-label">Precio venta *</label>
-                    <input type="number" class="form-input" id="npPrecio"
-                           placeholder="$0" min="1">
+                    <label class="form-label">Precio COSTO</label>
+                    <input type="number" class="form-input" id="npCosto"
+                           placeholder="Opcional" min="0"
+                           oninput="calcularSugeridoNP()">
                 </div>
                 <div class="form-grupo">
                     <label class="form-label">Stock inicial</label>
                     <input type="number" class="form-input" id="npStock"
                            placeholder="0" min="0" value="0">
                 </div>
+            </div>
+            <div id="npSugerido" style="background:#fff3e0;border-left:3px solid #ff9800;padding:8px 10px;border-radius:6px;font-size:0.85rem;margin-bottom:10px;display:none;">
+                💡 Precio sugerido (+50%): <strong id="npSugeridoMonto">$0</strong>
+                <button onclick="usarSugeridoNP()" style="margin-left:8px;background:#ff9800;color:white;border:none;border-radius:6px;padding:2px 8px;font-size:0.78rem;cursor:pointer;font-weight:700;">Usar</button>
+            </div>
+            <div class="form-grupo">
+                <label class="form-label">Precio VENTA *</label>
+                <input type="number" class="form-input" id="npPrecio"
+                       placeholder="$0" min="1">
             </div>
 
             <div class="form-grupo">
@@ -1235,6 +1245,7 @@ async function cargarProductos() {
                 rotacion: parseInt(p.rotacion) || 3,
                 vencimiento: p.vencimiento || '',
                 diaCritico: (p.diaCritico || '').toLowerCase().trim(),
+                precioCosto: parseInt(p.precioCosto) || 0,
                 stockMin: parseInt(p.stockMin) || 0
             }));
         const indOk = document.getElementById('indicadorCarga');
@@ -1389,7 +1400,8 @@ function agregarProducto(id) {
             qty: 1,
             stockDisponible: producto.stock,
             vencimiento: producto.vencimiento || '',
-            rotacion: producto.rotacion || 3
+            rotacion: producto.rotacion || 3,
+            precioCosto: producto.precioCosto || 0
         });
     }
 
@@ -1464,7 +1476,8 @@ function confirmarSelectorQty() {
             id: p.id, name: p.name, price: p.price, qty,
             stockDisponible: p.stock,
             vencimiento: p.vencimiento || '',
-            rotacion: p.rotacion || 3
+            rotacion: p.rotacion || 3,
+            precioCosto: p.precioCosto || 0
         });
     }
     cerrarSelectorQty();
@@ -1587,7 +1600,8 @@ async function confirmarVenta() {
             gramos: i.gramos || 0,
             precioVenta: i.price,
             precioModificado: i.precioModificado || false,
-            precioOriginal: i.precioOriginal || 0
+            precioOriginal: i.precioOriginal || 0,
+            precioCosto: i.precioCosto || 0
         }));
         // Agregar método de pago al request
         metodoPagoFinal = metodoPagoActual.toUpperCase();
@@ -1649,20 +1663,15 @@ function cerrarConfirm() {
 }
 
 function abrirWABusiness(texto) {
-    // Abre WhatsApp Business sin destinatario — el usuario elige el contacto
+    // Intent directo a WhatsApp Business (chip del local)
     const encoded = encodeURIComponent(texto);
-    const intent = 'intent://send?text=' + encoded + '#Intent;package=com.whatsapp.w4b;scheme=whatsapp;end';
-    const fallback = 'https://wa.me/?text=' + encoded;
-    
     if (/android/i.test(navigator.userAgent)) {
-        const frame = document.createElement('iframe');
-        frame.style.display = 'none';
-        document.body.appendChild(frame);
-        frame.src = intent;
-        setTimeout(() => { document.body.removeChild(frame); }, 500);
-        setTimeout(() => { if (!document.hidden) window.open(fallback, '_blank'); }, 1500);
+        const fallbackUrl = encodeURIComponent('https://wa.me/?text=' + encoded);
+        window.location.href = 'intent://send?text=' + encoded +
+            '#Intent;package=com.whatsapp.w4b;scheme=whatsapp;end;' +
+            'S.browser_fallback_url=' + fallbackUrl;
     } else {
-        window.open(fallback, '_blank');
+        window.open('https://wa.me/?text=' + encoded, '_blank');
     }
 }
 
@@ -1707,10 +1716,28 @@ function abrirResumen() {
     const cantVentas = ventas.length;
     const ticketPromedio = cantVentas > 0 ? Math.round(totalDia / cantVentas) : 0;
 
+    // Ganancia real: solo items con precioCosto > 0
+    const gananciaBruta = ventas.reduce((s, v) => {
+        return s + v.items.reduce((ss, i) => {
+            if (i.precioCosto && i.precioCosto > 0) {
+                return ss + (i.price - i.precioCosto) * i.qty;
+            }
+            return ss;
+        }, 0);
+    }, 0);
+    const itemsConCosto = ventas.reduce((s, v) => s + v.items.filter(i => i.precioCosto > 0).length, 0);
+    const gananciaTexto = itemsConCosto > 0
+        ? '$' + gananciaBruta.toLocaleString('es-AR')
+        : '<span style="color:#bbb;font-size:0.85rem;">Sin datos de costo</span>';
+
     document.getElementById('resumenCard').innerHTML = `
         <div class="resumen-stat">
             <span class="resumen-stat-label">💰 Total del día</span>
             <span class="resumen-stat-valor grande">$${totalDia.toLocaleString('es-AR')}</span>
+        </div>
+        <div class="resumen-stat">
+            <span class="resumen-stat-label">📈 Ganancia real (estimada)</span>
+            <span class="resumen-stat-valor" style="color:${gananciaBruta > 0 ? '#2e7d32' : '#e53935'};">${gananciaTexto}</span>
         </div>
         <div class="resumen-stat">
             <span class="resumen-stat-label">🛒 Ventas realizadas</span>
@@ -1798,12 +1825,13 @@ let ajusteCategoriaSeleccionada = '';
 
 function abrirNuevoProducto() {
     // Resetear formulario
-    ['npNombre','npPrecio','npStock','npProveedor','npVencimiento'].forEach(id => {
+    ['npNombre','npCosto','npPrecio','npStock','npProveedor','npVencimiento'].forEach(id => {
         document.getElementById(id).value = '';
     });
     document.getElementById('npStock').value = '0';
     document.getElementById('npCategoria').value = '';
     document.getElementById('npError').style.display = 'none';
+    document.getElementById('npSugerido').style.display = 'none';
     document.getElementById('npBtnGuardar').disabled = false;
     document.getElementById('npBtnGuardar').textContent = '💾 Guardar en planilla';
     npCategoriaSeleccionada = '';
@@ -1857,7 +1885,8 @@ async function guardarNuevoProducto() {
     errorEl.style.display = 'none';
 
     try {
-        const datos = { name: nombre, price: precio, stock, category: categoria, proveedor, vencimiento };
+        const costo = parseInt(document.getElementById('npCosto').value) || 0;
+        const datos = { name: nombre, price: precio, stock, category: categoria, proveedor, vencimiento, precioCosto: costo };
         const url = API_URL + '?action=agregar&data=' + encodeURIComponent(JSON.stringify(datos));
         const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
         const resp = await r.json();
@@ -1893,6 +1922,26 @@ function mostrarErrorNP(msg) {
     const el = document.getElementById('npError');
     el.textContent = '⚠️ ' + msg;
     el.style.display = 'block';
+}
+
+function calcularSugeridoNP() {
+    const costo = parseFloat(document.getElementById('npCosto').value) || 0;
+    const div = document.getElementById('npSugerido');
+    if (costo > 0) {
+        const sug = Math.ceil(costo * 1.5);
+        document.getElementById('npSugeridoMonto').textContent = '$' + sug.toLocaleString('es-AR');
+        div.style.display = 'block';
+    } else {
+        div.style.display = 'none';
+    }
+}
+
+function usarSugeridoNP() {
+    const costo = parseFloat(document.getElementById('npCosto').value) || 0;
+    if (costo <= 0) return;
+    const sug = Math.ceil(costo * 1.5);
+    document.getElementById('npPrecio').value = sug;
+    mostrarToast('💡 Precio sugerido aplicado: $' + sug.toLocaleString('es-AR'), 'verde');
 }
 
 function cerrarNuevoProducto() {
