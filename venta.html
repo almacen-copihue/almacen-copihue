@@ -651,6 +651,10 @@
             margin-top: 3px;
         }
         .vence-vencido { background: #d32f2f; color: white; animation: parpadeo 0.8s infinite; }
+        @keyframes slideUpNotif {
+            from { opacity: 0; transform: translateX(-50%) translateY(20px); }
+            to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
         .vence-hoy     { background: #ff6f00; color: white; animation: parpadeo 1s infinite; }
         .vence-pronto  { background: #fff176; color: #555; border: 1px solid #f9a825; }
         @keyframes parpadeo {
@@ -1253,6 +1257,7 @@ async function cargarProductos() {
         console.log(`✅ ${productos.length} productos cargados`);
         // Alertas del día al terminar de cargar
         setTimeout(alertarVencidosHoy, 500);
+        setTimeout(procesarVencidosDeAyer, 1500); // auto-poner en 0 los confirmados ayer
         setTimeout(verificarAlertasDelDia, 800);
         programarRecordatorioCierre();
         // Sugerencia relámpago (después de alertas)
@@ -2766,38 +2771,126 @@ function cambiarVendedor() {
 }
 
 // ========== ALERTAS DEL DIA ==========
+
+// Claves localStorage para el sistema de vencidos
+function claveVencidosConfirmados(fechaStr) { return 'vencidos_confirmados_' + fechaStr; }
+function claveVencidosAutoZero(fechaStr)     { return 'vencidos_autozero_' + fechaStr; }
+
+// Poner stock en 0 en la API para un producto
+async function ponerStockEnCero(p) {
+    try {
+        const datos = { producto: p.name, cantidad: -p.stock, stockDirecto: 0,
+                        precioVenta: null, precioCosto: null, proveedor: null, fechaVencimiento: null };
+        const url = API_URL + '?action=ingresar&data=' + encodeURIComponent(JSON.stringify(datos));
+        const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(12000) });
+        const resp = await r.json();
+        if (resp.success) { p.stock = 0; return true; }
+    } catch(e) {}
+    return false;
+}
+
+// Notificación suave (no bloqueante) de stock puesto en 0 automáticamente
+function mostrarNotificacionAutoZero(nombresProductos) {
+    const existente = document.getElementById('notifAutoZero');
+    if (existente) existente.remove();
+
+    const notif = document.createElement('div');
+    notif.id = 'notifAutoZero';
+    notif.innerHTML = `
+        <div style="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);
+                    background:#1b5e20;color:white;border-radius:14px;padding:12px 18px;
+                    z-index:9000;box-shadow:0 4px 20px rgba(0,0,0,0.35);
+                    max-width:340px;width:90%;animation:slideUpNotif 0.3s ease;">
+            <div style="display:flex;align-items:flex-start;gap:10px;">
+                <span style="font-size:1.4rem;flex-shrink:0;">✅</span>
+                <div>
+                    <div style="font-weight:800;font-size:0.88rem;margin-bottom:3px;">
+                        Stock en 0 — productos retirados ayer
+                    </div>
+                    <div style="font-size:0.75rem;opacity:0.85;line-height:1.4;">
+                        ${nombresProductos.map(n => '• ' + n).join('<br>')}
+                    </div>
+                </div>
+                <button onclick="document.getElementById('notifAutoZero').remove()"
+                        style="background:rgba(255,255,255,0.2);border:none;border-radius:50%;
+                               width:24px;height:24px;color:white;cursor:pointer;font-size:0.8rem;
+                               flex-shrink:0;display:flex;align-items:center;justify-content:center;">✕</button>
+            </div>
+        </div>`;
+    document.body.appendChild(notif);
+    // Se cierra solo después de 7 segundos
+    setTimeout(() => { const n = document.getElementById('notifAutoZero'); if (n) n.remove(); }, 7000);
+}
+
+// Al día siguiente: auto-poner en 0 los productos que se confirmaron como retirados ayer
+async function procesarVencidosDeAyer() {
+    const hoy = new Date(); hoy.setHours(0,0,0,0);
+    const ayer = new Date(hoy); ayer.setDate(ayer.getDate() - 1);
+    const ayerKey = ayer.toISOString().split('T')[0];
+    const hoyKey  = hoy.toISOString().split('T')[0];
+
+    // ¿Ya procesamos hoy?
+    if (localStorage.getItem(claveVencidosAutoZero(hoyKey))) return;
+
+    // ¿Hubo confirmados ayer?
+    const raw = localStorage.getItem(claveVencidosConfirmados(ayerKey));
+    if (!raw) return;
+
+    let confirmadosAyer;
+    try { confirmadosAyer = JSON.parse(raw); } catch(e) { return; }
+    if (!confirmadosAyer || confirmadosAyer.length === 0) return;
+
+    // Filtrar los que aún tienen stock > 0
+    const pendientes = confirmadosAyer.filter(item => {
+        const prod = productos.find(p => p.id === item.id);
+        return prod && prod.stock > 0;
+    });
+
+    if (pendientes.length === 0) {
+        localStorage.setItem(claveVencidosAutoZero(hoyKey), '1');
+        return;
+    }
+
+    // Poner en 0 cada uno
+    const nombresOk = [];
+    for (const item of pendientes) {
+        const prod = productos.find(p => p.id === item.id);
+        if (!prod) continue;
+        const ok = await ponerStockEnCero(prod);
+        if (ok) nombresOk.push(prod.name);
+    }
+
+    localStorage.setItem(claveVencidosAutoZero(hoyKey), '1');
+    if (nombresOk.length > 0) mostrarNotificacionAutoZero(nombresOk);
+}
+
 function alertarVencidosHoy() {
     if (!productos || productos.length === 0) return;
-    const hoy = new Date();
-    hoy.setHours(0,0,0,0);
+    const hoy = new Date(); hoy.setHours(0,0,0,0);
+    const hoyKey = hoy.toISOString().split('T')[0];
+
+    // ¿Ya confirmó hoy? No molestar de nuevo
+    if (localStorage.getItem(claveVencidosConfirmados(hoyKey))) return;
 
     const vencidosHoy = productos.filter(p => {
         if (!p.vencimiento || p.stock <= 0) return false;
         const partes = p.vencimiento.split('-');
-        const vence = new Date(parseInt(partes[0]), parseInt(partes[1]) - 1, parseInt(partes[2]));
+        const vence = new Date(parseInt(partes[0]), parseInt(partes[1])-1, parseInt(partes[2]));
         vence.setHours(0,0,0,0);
-        return vence < hoy; // vencido = solo días ANTERIORES a hoy
+        return vence < hoy;
     });
 
     if (vencidosHoy.length === 0) return;
 
-    const lista = vencidosHoy.map(p => {
-        const partes2 = p.vencimiento.split('-');
-        const vence = new Date(parseInt(partes2[0]), parseInt(partes2[1]) - 1, parseInt(partes2[2]));
-        vence.setHours(0,0,0,0);
-        const esHoy = vence.getTime() === hoy.getTime();
-        const label = esHoy ? '⚠️ Vence HOY' : '💀 VENCIDO';
-        const color = esHoy ? '#e65100' : '#c62828';
-        return `<div style="display:flex;justify-content:space-between;align-items:center;
-                            padding:10px 0;border-bottom:1px solid #ffcdd2;">
-                    <div>
-                        <div style="font-weight:700;font-size:0.9rem;color:#212121;">${p.name}</div>
-                        <div style="font-size:0.78rem;margin-top:2px;">${badgeStock(p.stock)}</div>
-                    </div>
-                    <span style="color:${color};font-weight:900;font-size:0.82rem;
-                                 white-space:nowrap;margin-left:10px;">${label}</span>
-                </div>`;
-    }).join('');
+    const lista = vencidosHoy.map(p => `
+        <div style="display:flex;justify-content:space-between;align-items:center;
+                    padding:10px 0;border-bottom:1px solid #ffcdd2;">
+            <div>
+                <div style="font-weight:700;font-size:0.9rem;color:#212121;">${p.name}</div>
+                <div style="font-size:0.78rem;margin-top:2px;">${badgeStock(p.stock)}</div>
+            </div>
+            <span style="color:#c62828;font-weight:900;font-size:0.82rem;white-space:nowrap;margin-left:10px;">💀 VENCIDO</span>
+        </div>`).join('');
 
     const overlay = document.createElement('div');
     overlay.id = 'modalVencidosHoy';
@@ -2818,7 +2911,7 @@ function alertarVencidosHoy() {
                     ${lista}
                 </div>
                 <div style="padding:16px 20px;border-top:1px solid #ffcdd2;">
-                    <button onclick="document.getElementById('modalVencidosHoy').remove()"
+                    <button onclick="confirmarVencidosRetirados()"
                             style="width:100%;padding:14px;border:none;border-radius:12px;
                                    background:linear-gradient(135deg,#b71c1c,#e53935);
                                    color:white;font-size:1rem;font-weight:900;cursor:pointer;">
@@ -2828,6 +2921,26 @@ function alertarVencidosHoy() {
             </div>
         </div>`;
     document.body.appendChild(overlay);
+}
+
+function confirmarVencidosRetirados() {
+    const hoy = new Date(); hoy.setHours(0,0,0,0);
+    const hoyKey = hoy.toISOString().split('T')[0];
+
+    // Guardar qué productos se confirmaron hoy (para procesar mañana)
+    const vencidos = productos.filter(p => {
+        if (!p.vencimiento || p.stock <= 0) return false;
+        const partes = p.vencimiento.split('-');
+        const vence = new Date(parseInt(partes[0]), parseInt(partes[1])-1, parseInt(partes[2]));
+        vence.setHours(0,0,0,0);
+        return vence < hoy;
+    }).map(p => ({ id: p.id, name: p.name }));
+
+    localStorage.setItem(claveVencidosConfirmados(hoyKey), JSON.stringify(vencidos));
+
+    const modal = document.getElementById('modalVencidosHoy');
+    if (modal) modal.remove();
+    mostrarToast('✅ Confirmado — mañana el stock se pondrá en 0 automáticamente', 'verde');
 }
 
 function verificarAlertasDelDia() {
@@ -3265,8 +3378,7 @@ function diasParaVencer(fechaStr) {
     try {
         const hoy = new Date();
         hoy.setHours(0,0,0,0);
-        const partes = fechaStr.split('-');
-        const vence = new Date(parseInt(partes[0]), parseInt(partes[1]) - 1, parseInt(partes[2]));
+        const vence = new Date(fechaStr);
         vence.setHours(0,0,0,0);
         return Math.round((vence - hoy) / 86400000);
     } catch(e) { return null; }
