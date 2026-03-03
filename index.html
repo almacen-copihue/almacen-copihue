@@ -2744,19 +2744,51 @@ function iniciarMotorAutoCheck() {
 }
 
 // ========== ACTUALIZAR TODAS LAS VISTAS ==========
-function actualizarTodasLasVistas() {
+// ========== CEREBRO ÚNICO: BACKEND DECIDE RELÁMPAGO Y ÚLTIMAS ==========
+async function cargarOfertasDesdeBackend() {
+    try {
+        const url = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec?action=getOfertas&t=' + Date.now();
+        const r = await fetch(url, { redirect: 'follow' });
+        const data = await r.json();
+
+        if (!data.success) {
+            console.warn('Backend ofertas error:', data.mensaje);
+            return;
+        }
+
+        // Enriquecer con imagen (el backend no la tiene)
+        const enriquecer = (p) => ({
+            ...p,
+            stockNumber: p.stock,
+            image: 'imagenes-productos/' + simplificarNombre(p.name) + '.jpg',
+            price: p.price
+        });
+
+        const relampago = (data.relampagoActivo || []).map(enriquecer);
+        const ultimas   = (data.ultimasUnidades || []).map(enriquecer);
+
+        // Filtrar por horario para relámpago
+        const mostrarRelampago = validarHorario('relampago') || (esAdmin && modoMostrarTodasOfertas);
+        renderizarContenedorOfertas('relampago', mostrarRelampago ? relampago : []);
+        renderizarContenedorOfertas('ultimas', ultimas);
+
+        console.log(`✅ Backend: ${relampago.length} relámpago, ${ultimas.length} últimas unidades`);
+    } catch(e) {
+        console.warn('cargarOfertasDesdeBackend error:', e);
+    }
+}
+
+async function actualizarTodasLasVistas() {
+    // Productos normales se renderizan siempre con datos locales
+    renderizarProductosNormales();
+    // Destacadas y especiales siguen con lógica local (horario)
     construirPools();
     seleccionarProductosOfertas();
-    iniciarMotorAutoCheck();
-    
-    renderizarContenedorOfertas('relampago', productosRelampago);
-    // Últimas unidades: ordenadas por motor de puntaje, máx 6
-    productosUltimas = poolUltimas.slice(0, 6);
-    renderizarContenedorOfertas('ultimas', productosUltimas);
     renderizarContenedorOfertas('destacadas', productosDestacadas);
     renderizarContenedorOfertas('especiales', productosEspeciales);
-    
-    renderizarProductosNormales();
+    // Relámpago y Últimas: backend decide
+    await cargarOfertasDesdeBackend();
+    iniciarMotorAutoCheck();
 }
 
 // ========== CARGAR PRODUCTOS DESDE API ==========
@@ -2902,14 +2934,14 @@ function processAPIData(apiData) {
     window._intervaloActualizacion = setInterval(actualizarSoloOfertas, 60000);
 }
 
-function actualizarSoloOfertas() {
-    // Reconstruye pools y secciones de ofertas SIN tocar el grid principal del usuario
+async function actualizarSoloOfertas() {
+    // Destacadas y especiales: lógica local de horario
     construirPools();
     seleccionarProductosOfertas();
-    renderizarContenedorOfertas('relampago', productosRelampago);
     renderizarContenedorOfertas('destacadas', productosDestacadas);
     renderizarContenedorOfertas('especiales', productosEspeciales);
-    // NO llama a renderizarProductosNormales() para no interrumpir al usuario
+    // Relámpago y Últimas: backend
+    await cargarOfertasDesdeBackend();
 }
 
 function simplificarNombre(nombre) {
