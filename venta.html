@@ -651,10 +651,6 @@
             margin-top: 3px;
         }
         .vence-vencido { background: #d32f2f; color: white; animation: parpadeo 0.8s infinite; }
-        @keyframes slideUpNotif {
-            from { opacity: 0; transform: translateX(-50%) translateY(20px); }
-            to   { opacity: 1; transform: translateX(-50%) translateY(0); }
-        }
         .vence-hoy     { background: #ff6f00; color: white; animation: parpadeo 1s infinite; }
         .vence-pronto  { background: #fff176; color: #555; border: 1px solid #f9a825; }
         @keyframes parpadeo {
@@ -755,7 +751,7 @@
 <div class="header" style="flex-direction:column;gap:6px;padding:8px 16px;">
     <div style="display:flex;align-items:center;justify-content:space-between;width:100%;">
         <div class="header-titulo">
-            🏪 Copihue<span id="versionTag" style="font-size:0.6rem;font-weight:400;opacity:0.3;margin-left:6px;letter-spacing:0;color:inherit">v78</span>
+            🏪 Copihue<span id="versionTag" style="font-size:0.6rem;font-weight:400;opacity:0.3;margin-left:6px;letter-spacing:0;color:inherit">v79</span>
             <div class="indicador-carga" id="indicadorCarga" title="Cargando..."></div>
         </div>
         <button class="btn-resumen" onclick="cambiarVendedor()" id="vendedorBadge"
@@ -769,6 +765,7 @@
         <button class="btn-resumen" id="btnActualizar" onclick="forzarActualizacion()" title="Actualizar productos" style="background:rgba(105,240,174,0.2);border-color:rgba(105,240,174,0.5);flex:1;text-align:center;">🔄</button>
         <a href="copihue-reportes.html" class="btn-resumen" title="Reportes" style="background:rgba(156,39,176,0.3);border-color:rgba(156,39,176,0.6);flex:1;text-align:center;text-decoration:none;display:flex;align-items:center;justify-content:center;">📈</a>
         <a href="horario.html" class="btn-resumen" title="Mi horario" style="background:rgba(0,188,212,0.3);border-color:rgba(0,188,212,0.6);flex:1;text-align:center;text-decoration:none;display:flex;align-items:center;justify-content:center;">🕐</a>
+        <button class="btn-resumen" onclick="abrirConfigProveedores()" title="Configuración proveedores" style="background:rgba(255,193,7,0.3);border-color:rgba(255,193,7,0.6);flex:1;text-align:center;">⚙️</button>
     </div>
 </div>
 
@@ -1209,6 +1206,169 @@ function badgeStock(stock) {
 // ========== CONFIG ==========
 const API_URL = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
 
+// ========== CONFIG PROVEEDORES ==========
+let configProveedores = null;
+const CONFIG_KEY = 'copihue_config_proveedores';
+
+function cargarConfig() {
+    const guardado = localStorage.getItem(CONFIG_KEY);
+    if (guardado) {
+        try { configProveedores = JSON.parse(guardado); return; } catch(e) {}
+    }
+    // Valores por defecto primera vez
+    configProveedores = {
+        panadero: {
+            nombre: 'Panadero',
+            telefono: '',
+            mensaje: 'Hola {nombre}! 🍞 Te hago el pedido para hoy:\n\n🔸 Pan: {cantidad} kg\n\nQuedo atento. ¡Gracias!',
+            stockMinimo: 1,
+            activo: true
+        }
+    };
+    console.log('✅ Config proveedores iniciada con valores por defecto');
+}
+
+function abrirConfigProveedores() {
+    const cfg = (configProveedores && configProveedores.panadero) || {};
+    document.getElementById('cfgPanNombre').value    = cfg.nombre    || '';
+    document.getElementById('cfgPanTelefono').value  = cfg.telefono  || '';
+    document.getElementById('cfgPanStock').value     = cfg.stockMinimo !== undefined ? cfg.stockMinimo : 1;
+    document.getElementById('cfgPanMensaje').value   = cfg.mensaje   || '';
+    document.getElementById('cfgPanActivo').checked  = cfg.activo !== false;
+    document.getElementById('modalConfigProveedores').style.display = 'flex';
+}
+
+function cerrarConfigProveedores() {
+    document.getElementById('modalConfigProveedores').style.display = 'none';
+}
+
+function guardarConfigProveedores() {
+    if (!configProveedores) configProveedores = {};
+    configProveedores.panadero = {
+        nombre:      document.getElementById('cfgPanNombre').value.trim() || 'Panadero',
+        telefono:    document.getElementById('cfgPanTelefono').value.replace(/\D/g, ''),
+        stockMinimo: parseFloat(document.getElementById('cfgPanStock').value) || 1,
+        mensaje:     document.getElementById('cfgPanMensaje').value.trim() ||
+                     'Hola {nombre}! 🍞 Te pido {cantidad} kg de pan. ¡Gracias!',
+        activo:      document.getElementById('cfgPanActivo').checked
+    };
+    localStorage.setItem(CONFIG_KEY, JSON.stringify(configProveedores));
+    cerrarConfigProveedores();
+    mostrarToast('✅ Configuración guardada', 'verde');
+}
+
+function probarWAPanadero() {
+    const cfg = configProveedores && configProveedores.panadero;
+    if (!cfg) return;
+    const tel = (cfg.telefono || '').replace(/\D/g, '');
+    const msg = (cfg.mensaje || 'Hola {nombre}! Pedido de pan.')
+        .replace('{nombre}', cfg.nombre || 'Panadero')
+        .replace('{cantidad}', '2');
+    const encoded = encodeURIComponent(msg);
+    window.open(tel ? 'https://wa.me/' + tel + '?text=' + encoded : 'https://wa.me/?text=' + encoded, '_blank');
+}
+
+// Calcular stock total de pan (todos los productos que empiezan con PAN X KG)
+function calcularStockTotalPan() {
+    if (!productos) return 0;
+    return productos
+        .filter(p => {
+            const n = (p.name || '').toUpperCase();
+            return n.includes('PAN X KG') || n.includes('PAN KG');
+        })
+        .reduce((sum, p) => sum + (parseFloat(p.stock) || 0), 0);
+}
+
+// Mostrar sugerencia de pedido al panadero
+function sugerirPedidoPanadero() {
+    if (!configProveedores || !configProveedores.panadero) return;
+    const cfg = configProveedores.panadero;
+    if (!cfg.activo) return;
+
+    const stockPan = calcularStockTotalPan();
+    if (stockPan > cfg.stockMinimo) return;
+
+    // ¿Ya sugerimos hoy?
+    const hoyKey = new Date().toISOString().split('T')[0];
+    if (localStorage.getItem('pedido_panadero_sugerido_' + hoyKey)) return;
+
+    // Mostrar notificación tipo toast interactivo
+    const existente = document.getElementById('sugerenciaPanadero');
+    if (existente) return;
+
+    const notif = document.createElement('div');
+    notif.id = 'sugerenciaPanadero';
+    notif.innerHTML = `
+        <div style="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);
+                    background:#4e342e;color:white;border-radius:16px;padding:14px 18px;
+                    z-index:9500;box-shadow:0 4px 24px rgba(0,0,0,0.4);
+                    max-width:340px;width:92%;animation:slideUpNotif 0.35s ease;">
+            <div style="display:flex;align-items:center;gap:10px;">
+                <span style="font-size:1.6rem;">🍞</span>
+                <div style="flex:1;">
+                    <div style="font-weight:800;font-size:0.9rem;margin-bottom:2px;">
+                        ¡Stock bajo de pan! (${stockPan.toFixed(2)} kg)
+                    </div>
+                    <div style="font-size:0.75rem;opacity:0.85;">¿Hacés el pedido al panadero?</div>
+                </div>
+                <button onclick="document.getElementById('sugerenciaPanadero').remove()"
+                        style="background:rgba(255,255,255,0.15);border:none;border-radius:50%;
+                               width:26px;height:26px;color:white;cursor:pointer;font-size:0.85rem;
+                               display:flex;align-items:center;justify-content:center;flex-shrink:0;">✕</button>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:10px;">
+                <button onclick="enviarPedidoPanadero()"
+                        style="flex:1;background:#25D366;border:none;border-radius:10px;padding:9px;
+                               color:white;font-weight:800;font-size:0.82rem;cursor:pointer;">
+                    📲 Pedir por WhatsApp
+                </button>
+                <button onclick="posponerPedidoPanadero()"
+                        style="flex:1;background:rgba(255,255,255,0.15);border:none;border-radius:10px;
+                               padding:9px;color:white;font-weight:600;font-size:0.82rem;cursor:pointer;">
+                    Hoy no
+                </button>
+            </div>
+        </div>`;
+    document.body.appendChild(notif);
+}
+
+function posponerPedidoPanadero() {
+    const hoyKey = new Date().toISOString().split('T')[0];
+    localStorage.setItem('pedido_panadero_sugerido_' + hoyKey, '1');
+    const n = document.getElementById('sugerenciaPanadero');
+    if (n) n.remove();
+}
+
+function enviarPedidoPanadero() {
+    const cfg = configProveedores && configProveedores.panadero;
+    if (!cfg) return;
+
+    const stockPan = calcularStockTotalPan();
+    // Sugerir pedir el doble del stock mínimo (2 kg) menos lo que hay
+    const cantidadSugerida = Math.max(1, Math.ceil((cfg.stockMinimo * 2) - stockPan));
+
+    let msg = cfg.mensaje
+        .replace('{nombre}', cfg.nombre)
+        .replace('{cantidad}', cantidadSugerida);
+
+    const tel = (cfg.telefono || '').replace(/\D/g, '');
+    const encoded = encodeURIComponent(msg);
+
+    const hoyKey = new Date().toISOString().split('T')[0];
+    localStorage.setItem('pedido_panadero_sugerido_' + hoyKey, '1');
+
+    const n = document.getElementById('sugerenciaPanadero');
+    if (n) n.remove();
+
+    if (tel) {
+        window.open('https://wa.me/' + tel + '?text=' + encoded, '_blank');
+    } else {
+        // Sin número: abrir WhatsApp con texto para elegir contacto
+        window.open('https://wa.me/?text=' + encoded, '_blank');
+        mostrarToast('⚠️ Configurá el número del panadero en config.json', 'naranja');
+    }
+}
+
 let productos = [];
 let ventaActual = []; // [{id, name, price, qty, stockDisponible}]
 let metodoPagoActual = 'efectivo'; // efectivo | posnet | transferencia | qr
@@ -1257,7 +1417,6 @@ async function cargarProductos() {
         console.log(`✅ ${productos.length} productos cargados`);
         // Alertas del día al terminar de cargar
         setTimeout(alertarVencidosHoy, 500);
-        setTimeout(procesarVencidosDeAyer, 1500); // auto-poner en 0 los confirmados ayer
         setTimeout(verificarAlertasDelDia, 800);
         programarRecordatorioCierre();
         // Sugerencia relámpago (después de alertas)
@@ -1654,6 +1813,8 @@ async function confirmarVenta() {
     if (btnCancelar) { btnCancelar.textContent = 'Cerrar'; btnCancelar.onclick = () => { cerrarConfirm(); }; }
 
     mostrarToast(stockOk ? '✅ Venta confirmada' : '✅ Venta registrada (stock manual)', 'verde');
+    // Sugerir pedido al panadero si el stock bajó del mínimo
+    setTimeout(sugerirPedidoPanadero, 1200);
 }
 
 function cerrarConfirm() {
@@ -2771,126 +2932,36 @@ function cambiarVendedor() {
 }
 
 // ========== ALERTAS DEL DIA ==========
-
-// Claves localStorage para el sistema de vencidos
-function claveVencidosConfirmados(fechaStr) { return 'vencidos_confirmados_' + fechaStr; }
-function claveVencidosAutoZero(fechaStr)     { return 'vencidos_autozero_' + fechaStr; }
-
-// Poner stock en 0 en la API para un producto
-async function ponerStockEnCero(p) {
-    try {
-        const datos = { producto: p.name, cantidad: -p.stock, stockDirecto: 0,
-                        precioVenta: null, precioCosto: null, proveedor: null, fechaVencimiento: null };
-        const url = API_URL + '?action=ingresar&data=' + encodeURIComponent(JSON.stringify(datos));
-        const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(12000) });
-        const resp = await r.json();
-        if (resp.success) { p.stock = 0; return true; }
-    } catch(e) {}
-    return false;
-}
-
-// Notificación suave (no bloqueante) de stock puesto en 0 automáticamente
-function mostrarNotificacionAutoZero(nombresProductos) {
-    const existente = document.getElementById('notifAutoZero');
-    if (existente) existente.remove();
-
-    const notif = document.createElement('div');
-    notif.id = 'notifAutoZero';
-    notif.innerHTML = `
-        <div style="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);
-                    background:#1b5e20;color:white;border-radius:14px;padding:12px 18px;
-                    z-index:9000;box-shadow:0 4px 20px rgba(0,0,0,0.35);
-                    max-width:340px;width:90%;animation:slideUpNotif 0.3s ease;">
-            <div style="display:flex;align-items:flex-start;gap:10px;">
-                <span style="font-size:1.4rem;flex-shrink:0;">✅</span>
-                <div>
-                    <div style="font-weight:800;font-size:0.88rem;margin-bottom:3px;">
-                        Stock en 0 — productos retirados ayer
-                    </div>
-                    <div style="font-size:0.75rem;opacity:0.85;line-height:1.4;">
-                        ${nombresProductos.map(n => '• ' + n).join('<br>')}
-                    </div>
-                </div>
-                <button onclick="document.getElementById('notifAutoZero').remove()"
-                        style="background:rgba(255,255,255,0.2);border:none;border-radius:50%;
-                               width:24px;height:24px;color:white;cursor:pointer;font-size:0.8rem;
-                               flex-shrink:0;display:flex;align-items:center;justify-content:center;">✕</button>
-            </div>
-        </div>`;
-    document.body.appendChild(notif);
-    // Se cierra solo después de 7 segundos
-    setTimeout(() => { const n = document.getElementById('notifAutoZero'); if (n) n.remove(); }, 7000);
-}
-
-// Al día siguiente: auto-poner en 0 los productos que se confirmaron como retirados ayer
-async function procesarVencidosDeAyer() {
-    const hoy = new Date(); hoy.setHours(0,0,0,0);
-    const ayer = new Date(hoy); ayer.setDate(ayer.getDate() - 1);
-    const ayerKey = ayer.toISOString().split('T')[0];
-    const hoyKey  = hoy.toISOString().split('T')[0];
-
-    // ¿Ya procesamos hoy?
-    if (localStorage.getItem(claveVencidosAutoZero(hoyKey))) return;
-
-    // ¿Hubo confirmados ayer?
-    const raw = localStorage.getItem(claveVencidosConfirmados(ayerKey));
-    if (!raw) return;
-
-    let confirmadosAyer;
-    try { confirmadosAyer = JSON.parse(raw); } catch(e) { return; }
-    if (!confirmadosAyer || confirmadosAyer.length === 0) return;
-
-    // Filtrar los que aún tienen stock > 0
-    const pendientes = confirmadosAyer.filter(item => {
-        const prod = productos.find(p => p.id === item.id);
-        return prod && prod.stock > 0;
-    });
-
-    if (pendientes.length === 0) {
-        localStorage.setItem(claveVencidosAutoZero(hoyKey), '1');
-        return;
-    }
-
-    // Poner en 0 cada uno
-    const nombresOk = [];
-    for (const item of pendientes) {
-        const prod = productos.find(p => p.id === item.id);
-        if (!prod) continue;
-        const ok = await ponerStockEnCero(prod);
-        if (ok) nombresOk.push(prod.name);
-    }
-
-    localStorage.setItem(claveVencidosAutoZero(hoyKey), '1');
-    if (nombresOk.length > 0) mostrarNotificacionAutoZero(nombresOk);
-}
-
 function alertarVencidosHoy() {
     if (!productos || productos.length === 0) return;
-    const hoy = new Date(); hoy.setHours(0,0,0,0);
-    const hoyKey = hoy.toISOString().split('T')[0];
-
-    // ¿Ya confirmó hoy? No molestar de nuevo
-    if (localStorage.getItem(claveVencidosConfirmados(hoyKey))) return;
+    const hoy = new Date();
+    hoy.setHours(0,0,0,0);
 
     const vencidosHoy = productos.filter(p => {
         if (!p.vencimiento || p.stock <= 0) return false;
-        const partes = p.vencimiento.split('-');
-        const vence = new Date(parseInt(partes[0]), parseInt(partes[1])-1, parseInt(partes[2]));
+        const vence = new Date(p.vencimiento);
         vence.setHours(0,0,0,0);
-        return vence < hoy;
+        return vence < hoy; // vencido = solo días ANTERIORES a hoy
     });
 
     if (vencidosHoy.length === 0) return;
 
-    const lista = vencidosHoy.map(p => `
-        <div style="display:flex;justify-content:space-between;align-items:center;
-                    padding:10px 0;border-bottom:1px solid #ffcdd2;">
-            <div>
-                <div style="font-weight:700;font-size:0.9rem;color:#212121;">${p.name}</div>
-                <div style="font-size:0.78rem;margin-top:2px;">${badgeStock(p.stock)}</div>
-            </div>
-            <span style="color:#c62828;font-weight:900;font-size:0.82rem;white-space:nowrap;margin-left:10px;">💀 VENCIDO</span>
-        </div>`).join('');
+    const lista = vencidosHoy.map(p => {
+        const vence = new Date(p.vencimiento);
+        vence.setHours(0,0,0,0);
+        const esHoy = vence.getTime() === hoy.getTime();
+        const label = esHoy ? '⚠️ Vence HOY' : '💀 VENCIDO';
+        const color = esHoy ? '#e65100' : '#c62828';
+        return `<div style="display:flex;justify-content:space-between;align-items:center;
+                            padding:10px 0;border-bottom:1px solid #ffcdd2;">
+                    <div>
+                        <div style="font-weight:700;font-size:0.9rem;color:#212121;">${p.name}</div>
+                        <div style="font-size:0.78rem;margin-top:2px;">${badgeStock(p.stock)}</div>
+                    </div>
+                    <span style="color:${color};font-weight:900;font-size:0.82rem;
+                                 white-space:nowrap;margin-left:10px;">${label}</span>
+                </div>`;
+    }).join('');
 
     const overlay = document.createElement('div');
     overlay.id = 'modalVencidosHoy';
@@ -2911,7 +2982,7 @@ function alertarVencidosHoy() {
                     ${lista}
                 </div>
                 <div style="padding:16px 20px;border-top:1px solid #ffcdd2;">
-                    <button onclick="confirmarVencidosRetirados()"
+                    <button onclick="document.getElementById('modalVencidosHoy').remove()"
                             style="width:100%;padding:14px;border:none;border-radius:12px;
                                    background:linear-gradient(135deg,#b71c1c,#e53935);
                                    color:white;font-size:1rem;font-weight:900;cursor:pointer;">
@@ -2921,26 +2992,6 @@ function alertarVencidosHoy() {
             </div>
         </div>`;
     document.body.appendChild(overlay);
-}
-
-function confirmarVencidosRetirados() {
-    const hoy = new Date(); hoy.setHours(0,0,0,0);
-    const hoyKey = hoy.toISOString().split('T')[0];
-
-    // Guardar qué productos se confirmaron hoy (para procesar mañana)
-    const vencidos = productos.filter(p => {
-        if (!p.vencimiento || p.stock <= 0) return false;
-        const partes = p.vencimiento.split('-');
-        const vence = new Date(parseInt(partes[0]), parseInt(partes[1])-1, parseInt(partes[2]));
-        vence.setHours(0,0,0,0);
-        return vence < hoy;
-    }).map(p => ({ id: p.id, name: p.name }));
-
-    localStorage.setItem(claveVencidosConfirmados(hoyKey), JSON.stringify(vencidos));
-
-    const modal = document.getElementById('modalVencidosHoy');
-    if (modal) modal.remove();
-    mostrarToast('✅ Confirmado — mañana el stock se pondrá en 0 automáticamente', 'verde');
 }
 
 function verificarAlertasDelDia() {
@@ -3412,6 +3463,7 @@ if ('serviceWorker' in navigator) {
 
 // ========== INIT ==========
 inicializarVendedor();
+cargarConfig(); // cargar config proveedores (panadero, etc.)
 cargarProductos().then(() => {
     // Primero verificar si hay venta pendiente y recuperarla silenciosamente
     const guardado = localStorage.getItem(CARRITO_KEY);
@@ -3485,6 +3537,85 @@ cargarProductos().then(() => {
 
 
 <!-- ========== MODAL WIFI QR ========== -->
+<!-- ========== MODAL CONFIG PROVEEDORES ========== -->
+<div id="modalConfigProveedores" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);
+     z-index:9990;align-items:center;justify-content:center;padding:20px;"
+     onclick="if(event.target===this)cerrarConfigProveedores()">
+    <div style="background:white;border-radius:20px;width:100%;max-width:400px;overflow:hidden;
+                box-shadow:0 8px 32px rgba(0,0,0,0.4);">
+        <div style="background:linear-gradient(135deg,#f57f17,#fbc02d);padding:16px 20px;
+                    display:flex;align-items:center;justify-content:space-between;">
+            <div style="color:white;font-weight:900;font-size:1rem;">⚙️ Configuración</div>
+            <button onclick="cerrarConfigProveedores()"
+                    style="background:rgba(255,255,255,0.25);border:none;border-radius:50%;
+                           width:30px;height:30px;color:white;cursor:pointer;font-size:1rem;">✕</button>
+        </div>
+        <div style="padding:18px 20px;overflow-y:auto;max-height:70vh;">
+
+            <!-- PANADERO -->
+            <div style="margin-bottom:6px;">
+                <div style="font-weight:800;font-size:0.9rem;color:#4e342e;margin-bottom:12px;">
+                    🍞 Panadero
+                </div>
+
+                <label style="font-size:0.78rem;color:#555;font-weight:600;">Nombre</label>
+                <input id="cfgPanNombre" type="text" placeholder="Ej: Don José"
+                       style="width:100%;padding:9px 12px;border:1.5px solid #ddd;border-radius:10px;
+                              font-size:0.88rem;margin:4px 0 10px;box-sizing:border-box;">
+
+                <label style="font-size:0.78rem;color:#555;font-weight:600;">
+                    Teléfono WhatsApp
+                    <span style="font-weight:400;color:#999;"> (con código país, ej: 5491112345678)</span>
+                </label>
+                <input id="cfgPanTelefono" type="tel" placeholder="5491112345678"
+                       style="width:100%;padding:9px 12px;border:1.5px solid #ddd;border-radius:10px;
+                              font-size:0.88rem;margin:4px 0 10px;box-sizing:border-box;">
+
+                <label style="font-size:0.78rem;color:#555;font-weight:600;">
+                    Stock mínimo para sugerir pedido (kg)
+                </label>
+                <input id="cfgPanStock" type="number" min="0" step="0.5" placeholder="1"
+                       style="width:100%;padding:9px 12px;border:1.5px solid #ddd;border-radius:10px;
+                              font-size:0.88rem;margin:4px 0 10px;box-sizing:border-box;">
+
+                <label style="font-size:0.78rem;color:#555;font-weight:600;">
+                    Mensaje
+                    <span style="font-weight:400;color:#999;"> ({nombre} y {cantidad} se reemplazan solos)</span>
+                </label>
+                <textarea id="cfgPanMensaje" rows="4"
+                          placeholder="Hola {nombre}! 🍞 Te pido {cantidad} kg de pan. ¡Gracias!"
+                          style="width:100%;padding:9px 12px;border:1.5px solid #ddd;border-radius:10px;
+                                 font-size:0.85rem;margin:4px 0 10px;box-sizing:border-box;
+                                 resize:vertical;font-family:inherit;"></textarea>
+
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                    <input type="checkbox" id="cfgPanActivo" style="width:18px;height:18px;cursor:pointer;">
+                    <label for="cfgPanActivo" style="font-size:0.85rem;color:#333;cursor:pointer;">
+                        Activar sugerencia de pedido
+                    </label>
+                </div>
+            </div>
+
+            <!-- Botón probar -->
+            <button onclick="probarWAPanadero()"
+                    style="width:100%;padding:10px;background:#e8f5e9;border:1.5px solid #a5d6a7;
+                           border-radius:10px;color:#2e7d32;font-weight:700;font-size:0.85rem;
+                           cursor:pointer;margin-bottom:10px;">
+                📲 Probar WhatsApp ahora
+            </button>
+        </div>
+
+        <div style="padding:14px 20px;border-top:1px solid #eee;">
+            <button onclick="guardarConfigProveedores()"
+                    style="width:100%;padding:13px;background:linear-gradient(135deg,#f57f17,#fbc02d);
+                           border:none;border-radius:12px;color:white;font-size:1rem;
+                           font-weight:900;cursor:pointer;">
+                💾 Guardar
+            </button>
+        </div>
+    </div>
+</div>
+
 <div id="modalWifiQR" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:9990;align-items:center;justify-content:center;">
   <div style="background:white;border-radius:24px;padding:28px 24px;max-width:320px;width:90%;text-align:center;position:relative;">
     <button onclick="cerrarWifiQR()" style="position:absolute;top:14px;right:16px;background:none;border:none;font-size:1.4rem;cursor:pointer;color:#999;">✕</button>
