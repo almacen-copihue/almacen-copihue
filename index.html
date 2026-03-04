@@ -1280,32 +1280,49 @@
             width: 90%;
             max-width: 500px;
             border-radius: 15px;
-            padding: 1.5rem;
             box-shadow: var(--shadow);
             max-height: 70vh;
-            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
         }
-        
+
+        .search-modal-body {
+            overflow-y: auto;
+            padding: 1rem 1.5rem 1.5rem;
+            flex: 1;
+        }
+
         .search-modal-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 1rem;
             border-bottom: 2px solid #e8f5e9;
-            padding-bottom: 0.8rem;
+            padding: 1rem 1.5rem;
+            flex-shrink: 0;
+            background: var(--white);
+            border-radius: 15px 15px 0 0;
         }
         
         .close-search {
-            background: none;
+            background: #f0f0f0;
             border: none;
-            font-size: 1.8rem;
+            font-size: 1.2rem;
             cursor: pointer;
-            color: var(--gray);
-            transition: color 0.3s;
+            color: #555;
+            transition: all 0.2s;
+            border-radius: 50%;
+            width: 34px;
+            height: 34px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
         }
         
         .close-search:hover {
-            color: var(--primary);
+            color: var(--white);
+            background: var(--primary);
         }
 
         .mobile-search-results {
@@ -1661,6 +1678,7 @@
         <div class="logo">
             <img src="iconos-pwa/android/android-launchericon-48-48.png" alt="Logo Almacén Copihue" class="logo-icon">
             Almacén Copihue
+            <span style="font-size:0.55rem;font-weight:400;opacity:0.35;margin-left:5px;letter-spacing:0;color:inherit;vertical-align:middle;">v78</span>
             <span id="adminBadge" class="admin-badge" style="display: none;">ADMIN</span>
             <span id="relojHeader" onclick="abrirModalHorario()"
                   style="font-size:0.75rem;font-weight:600;color:rgba(255,255,255,0.7);
@@ -1871,13 +1889,15 @@
             <h2>Buscar Productos</h2>
             <button class="close-search" id="closeSearch">&times;</button>
         </div>
-        <div class="search-wrapper">
-            <input type="text" id="mobileSearch" class="search-input" 
-                   placeholder="🔍 Escribe nombre... (Presiona Enter para buscar)">
-            <button class="clear-search" id="clearMobileSearchBtn">✖️</button>
-        </div>
-        <div class="mobile-search-results" id="mobileSearchResults">
-            <!-- Resultados búsqueda móvil -->
+        <div class="search-modal-body">
+            <div class="search-wrapper">
+                <input type="text" id="mobileSearch" class="search-input" 
+                       placeholder="🔍 Escribe nombre... (Presiona Enter para buscar)">
+                <button class="clear-search" id="clearMobileSearchBtn">✖️</button>
+            </div>
+            <div class="mobile-search-results" id="mobileSearchResults">
+                <!-- Resultados búsqueda móvil -->
+            </div>
         </div>
     </div>
 </div>
@@ -2139,48 +2159,71 @@ function validarHorario(tipo) {
 
 // ========== CONSTRUCCIÓN DE POOLS ==========
 // ===== MOTOR DE PUNTAJE =====
-function calcularPuntaje(p) {
-    const hoy = new Date();
+// Fix UTC: parsear fecha como hora local evitando desfase de zona horaria
+function parseFechaLocal(fechaStr) {
+    if (!fechaStr) return null;
+    try {
+        const p = fechaStr.split('-');
+        if (p.length !== 3) return null;
+        const d = new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2]));
+        d.setHours(0,0,0,0);
+        return isNaN(d) ? null : d;
+    } catch(e) { return null; }
+}
+
+function calcularPuntaje(prod) {
+    const hoy = new Date(); hoy.setHours(0,0,0,0);
     let puntaje = 0;
 
-    // Días para vencer
+    // Días para vencer (con fix UTC)
     let diasVenc = null;
-    if (p.vencimiento) {
-        try {
-            const v = new Date(p.vencimiento);
-            if (!isNaN(v)) diasVenc = Math.round((v - hoy) / (1000 * 60 * 60 * 24));
-        } catch(e) {}
+    if (prod.vencimiento) {
+        const v = parseFechaLocal(prod.vencimiento);
+        if (v) diasVenc = Math.round((v - hoy) / 86400000);
     }
 
-    // Días desde última promo
+    // Días desde última promo (con fix UTC)
     let diasPromo = null;
-    if (p.ultimaPromo) {
-        try {
-            const u = new Date(p.ultimaPromo);
-            if (!isNaN(u)) diasPromo = Math.round((hoy - u) / (1000 * 60 * 60 * 24));
-        } catch(e) {}
+    if (prod.ultimaPromo) {
+        const u = parseFechaLocal(prod.ultimaPromo);
+        if (u) diasPromo = Math.round((hoy - u) / 86400000);
     }
 
     // Penalización: si estuvo en promo en últimos 15 días
     if (diasPromo !== null && diasPromo < 15) return -10;
 
+    // Vencimiento — los últimos 2 días tienen prioridad MÁXIMA
     if (diasVenc !== null) {
-        if (diasVenc <= 3)  puntaje += 5;
-        else if (diasVenc <= 7 && p.stockNumber >= 5) puntaje += 4;
+        if (diasVenc <= 2)       puntaje += 20; // ⚡ URGENTE: vence hoy o mañana
+        else if (diasVenc <= 3)  puntaje += 10;
+        else if (diasVenc <= 7)  puntaje += 5;
+        else if (diasVenc <= 14) puntaje += 2;
     }
-    if (p.rotacion >= 3) puntaje += 3;
-    if (p.price > 1000) puntaje += 2;
+
+    // Bonus heladera
+    const cat = (prod.category || prod.categoria || '').toString().toUpperCase();
+    if (cat.includes('HELAD') || cat.includes('FRIGO') || cat.includes('LACTEO') || cat.includes('REFRIG')) {
+        puntaje += 4;
+    }
+
+    // Rotación: baja rotación necesita más empuje
+    const rot = prod.rotacion || 0;
+    if (rot <= 1)       puntaje += 3;
+    else if (rot === 2) puntaje += 2;
+    else if (rot === 3) puntaje += 1;
+
+    if (prod.price > 1000) puntaje += 1;
 
     return puntaje;
 }
 
-function esVencimientoCritico(p) {
-    if (!p.vencimiento) return false;
-    try {
-        const v = new Date(p.vencimiento);
-        const dias = Math.round((v - new Date()) / (1000 * 60 * 60 * 24));
-        return dias <= 3;
-    } catch(e) { return false; }
+function esVencimientoCritico(prod) {
+    if (!prod.vencimiento) return false;
+    const hoy = new Date(); hoy.setHours(0,0,0,0);
+    const v = parseFechaLocal(prod.vencimiento);
+    if (!v) return false;
+    const dias = Math.round((v - hoy) / 86400000);
+    return dias <= 3;
 }
 
 function construirPools() {
@@ -2386,18 +2429,45 @@ function renderizarContenedorOfertas(tipo, productos) {
         /* ================= ESPECIALES ================= */
         else if (tipo === 'ultimas') {
             const stockNum = product.stockNumber || 0;
-            badgeTexto = `🏷️ ÚLTIMAS ${stockNum} UNIDADES`;
-            precioHTML = `
-                <div style="margin:10px 0;">
-                    <div style="font-size:1.3rem;font-weight:bold;color:#c62828;">
-                        $${product.price}
+            // Calcular días para vencer con fix UTC
+            let diasVencUlt = null;
+            if (product.vencimiento) {
+                const hoyU = new Date(); hoyU.setHours(0,0,0,0);
+                const vU = parseFechaLocal(product.vencimiento);
+                if (vU) diasVencUlt = Math.round((vU - hoyU) / 86400000);
+            }
+            const esUrgente = diasVencUlt !== null && diasVencUlt <= 2;
+            const pctDesc = esUrgente ? 25 : 0;
+            const precioDesc = esUrgente ? Math.round(product.price * 0.75) : product.price;
+            const labelDias = diasVencUlt === 0 ? 'Vence HOY' : diasVencUlt === 1 ? 'Vence mañana' : `Vence en ${diasVencUlt} días`;
+
+            if (esUrgente) {
+                badgeTexto = `⚡ OFERTA VENCIMIENTO · ÚLTIMAS ${stockNum} UNIDADES`;
+                precioHTML = `
+                    <div style="margin:10px 0;">
+                        <div style="font-size:0.78rem;color:#999;text-decoration:line-through;">$${product.price}</div>
+                        <div style="font-size:1.4rem;font-weight:900;color:#b71c1c;">$${precioDesc}</div>
+                        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
+                            <span style="background:#b71c1c;color:white;padding:4px 10px;border-radius:12px;font-size:0.82rem;font-weight:700;">-${pctDesc}% OFF</span>
+                            <span style="background:#ff6f00;color:white;padding:4px 10px;border-radius:12px;font-size:0.82rem;font-weight:700;">⏰ ${labelDias}</span>
+                        </div>
+                        <div style="background:#fff3e0;border-left:3px solid #ff6f00;padding:6px 10px;border-radius:0 8px 8px 0;margin-top:8px;font-size:0.75rem;color:#e65100;font-weight:600;">
+                            ¡Llevátelo antes de que venza!
+                        </div>
                     </div>
-                    <div style="background:#c62828;color:white;padding:4px 10px;border-radius:12px;
-                                display:inline-block;margin-top:5px;font-size:0.82rem;font-weight:700;">
-                        ⚠️ Solo quedan ${stockNum}
+                `;
+            } else {
+                badgeTexto = `🏷️ ÚLTIMAS ${stockNum} UNIDADES`;
+                precioHTML = `
+                    <div style="margin:10px 0;">
+                        <div style="font-size:1.3rem;font-weight:bold;color:#c62828;">$${product.price}</div>
+                        <div style="background:#c62828;color:white;padding:4px 10px;border-radius:12px;
+                                    display:inline-block;margin-top:5px;font-size:0.82rem;font-weight:700;">
+                            ⚠️ Solo quedan ${stockNum}
+                        </div>
                     </div>
-                </div>
-            `;
+                `;
+            }
         }
         else if (tipo === 'especiales' && product.especial) {
             const precioConDescuento = Math.round(product.price * 0.9);
@@ -2745,8 +2815,8 @@ function actualizarTodasLasVistas() {
     iniciarMotorAutoCheck();
     
     renderizarContenedorOfertas('relampago', productosRelampago);
-    // Últimas unidades: ordenadas por motor de puntaje, máx 6
-    productosUltimas = poolUltimas.slice(0, 6);
+    // Últimas unidades: ordenadas por motor de puntaje, máx 3
+    productosUltimas = poolUltimas.slice(0, 3);
     renderizarContenedorOfertas('ultimas', productosUltimas);
     renderizarContenedorOfertas('destacadas', productosDestacadas);
     renderizarContenedorOfertas('especiales', productosEspeciales);
@@ -4083,6 +4153,7 @@ function closeCartModal() {
 function openSearchModal() {
     document.getElementById('searchModal').style.display = "flex";
     document.getElementById('mobileSearch').focus();
+    history.pushState({ modalSearch: true }, '');
 }
 
 function closeSearchModal() {
@@ -4867,6 +4938,12 @@ function monitorearStockPromos() {
 */
 
 console.log('✅ Sistema mejorado con Home, Enter en búsqueda y fix carrito - Versión ' + APP_VERSION);
+
+// Interceptar botón "atrás" para cerrar modal búsqueda
+window.addEventListener('popstate', function(e) {
+    const modal = document.getElementById('searchModal');
+    if (modal && modal.style.display === 'flex') closeSearchModal();
+});
 </script>
 <!-- ========== MODAL LISTA DE COMPRAS ADMIN ========== -->
 <div id="listaComprasModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.75);z-index:9998;justify-content:center;align-items:flex-end;">
