@@ -385,46 +385,84 @@
     contenedor.appendChild(e);
   }
 
-  // Días de la semana
-  const DIAS = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
-  const hoyIdx = new Date().getDay();
-  const diasDiv = document.getElementById('dias');
-  DIAS.forEach((d, i) => {
-    const chip = document.createElement('div');
-    chip.className = 'dia-chip' + (i === hoyIdx ? ' hoy' : '');
-    chip.textContent = d;
-    diasDiv.appendChild(chip);
-  });
-
-  // Config
-  const HORA_CIERRE = 22;
-  const MIN_CIERRE = 0;
+  const API_URL = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
   const WA_NUMBER = '542944907380';
-  const MINUTOS_AVISO = 30;  // botón aparece cuando faltan 30 min para cerrar
+  const MINUTOS_AVISO = 30;
 
-  const HORA_APERTURA = 11; // no abre antes de las 11:30 AM
-  const MIN_APERTURA = 30;
+  // Fallback si la API no responde
+  let CFG = { aperturaH:11, aperturaM:30, cierreH:22, cierreM:0, diasAbierto:[1,1,1,1,1,1,1] };
+
+  // Planilla cols B-H = L M M J V S D → mapeo a día JS (0=Dom)
+  const PLAN_A_JS = [1,2,3,4,5,6,0];
+
+  async function cargarConfig() {
+    try {
+      const r = await fetch(API_URL + '?action=getConfig', { signal: AbortSignal.timeout(6000) });
+      const d = await r.json();
+      if (d.success && d.config) {
+        const c = d.config;
+        const parseHora = v => {
+          if (v === null || v === undefined || v === '') return null;
+          const s = String(v);
+          if (s.includes(':')) { const [h,m] = s.split(':'); return { h: parseInt(h), m: parseInt(m||0) }; }
+          return { h: parseInt(s), m: 0 };
+        };
+        const ap = c['Horario apertura local'] && parseHora(c['Horario apertura local'].find(x => x !== null && x !== ''));
+        const ci = c['Horario cierre local']   && parseHora(c['Horario cierre local'].find(x => x !== null && x !== ''));
+        if (ap) { CFG.aperturaH = ap.h; CFG.aperturaM = ap.m; }
+        if (ci) { CFG.cierreH   = ci.h; CFG.cierreM   = ci.m; }
+        const diasRow = c['Horario apertura local'] || c['Horario cierre local'];
+        if (diasRow) CFG.diasAbierto = diasRow.map(v => (v !== null && v !== '' && String(v) !== '0') ? 1 : 0);
+      }
+    } catch(e) { console.warn('Config fallback:', e.message); }
+    inicializarUI();
+  }
+
+  function esDiaAbierto() {
+    const planIdx = PLAN_A_JS.indexOf(new Date().getDay());
+    return planIdx === -1 || CFG.diasAbierto[planIdx] === 1;
+  }
 
   function minutosParaCerrar() {
-    const ahora = new Date();
-    const h = ahora.getHours();
-
-    // Si estamos entre medianoche y hora de apertura → ya cerró
-    // Devolver negativo para que el badge muestre "Cerrado"
-    if (h < HORA_APERTURA || (h === HORA_APERTURA && ahora.getMinutes() < MIN_APERTURA)) return -1;
-
+    const ahora = new Date(), h = ahora.getHours(), m = ahora.getMinutes();
+    if (h < CFG.aperturaH || (h === CFG.aperturaH && m < CFG.aperturaM)) return -1;
+    if (!esDiaAbierto()) return -1;
     const cierre = new Date();
-    cierre.setHours(HORA_CIERRE, MIN_CIERRE, 0, 0);
+    cierre.setHours(CFG.cierreH, CFG.cierreM, 0, 0);
     return Math.round((cierre - ahora) / 60000);
   }
 
   function avisarLlego() {
     const mins = minutosParaCerrar();
+    const hCierre = String(CFG.cierreH).padStart(2,'0') + ':' + String(CFG.cierreM).padStart(2,'0');
     const texto = mins > 0
-      ? `Hola! Ya voy al almacén, llego en 5 minutos 🏃 ¿Me esperás? (Cerrás a las 22:00)`
+      ? `Hola! Ya voy al almacén, llego en 5 minutos 🏃 ¿Me esperás? (Cerrás a las ${hCierre})`
       : `Hola! ¿Podés esperarme unos minutos? Ya voy al almacén 🙏`;
-    const url = `https://wa.me/${WA_NUMBER}?text=${encodeURIComponent(texto)}`;
-    window.open(url, '_blank');
+    window.open(`https://wa.me/${WA_NUMBER}?text=${encodeURIComponent(texto)}`, '_blank');
+  }
+
+  function inicializarUI() {
+    // Chips días de la semana
+    const DIAS = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+    const hoyJsDay = new Date().getDay();
+    const diasDiv = document.getElementById('dias');
+    diasDiv.innerHTML = '';
+    DIAS.forEach((d, jsIdx) => {
+      const planIdx = PLAN_A_JS.indexOf(jsIdx);
+      const abierto = planIdx === -1 || CFG.diasAbierto[planIdx] === 1;
+      const chip = document.createElement('div');
+      chip.className = 'dia-chip' + (jsIdx === hoyJsDay ? ' hoy' : '');
+      chip.textContent = d;
+      if (!abierto) chip.style.opacity = '0.35';
+      diasDiv.appendChild(chip);
+    });
+    // Mostrar hora de cierre dinámica
+    const hCierre = String(CFG.cierreH).padStart(2,'0') + ':' + String(CFG.cierreM).padStart(2,'0');
+    const el = document.querySelector('.horario-hora');
+    if (el) el.textContent = hCierre;
+    // Arrancar reloj
+    actualizarReloj();
+    setInterval(actualizarReloj, 1000);
   }
 
   // Reloj en vivo
@@ -457,8 +495,8 @@
       if (btnLlego) btnLlego.classList.remove('visible');
     }
   }
-  actualizarReloj();
-  setInterval(actualizarReloj, 1000);
+  // Cargar config desde planilla y arrancar
+  cargarConfig();
 </script>
 
 </body>
