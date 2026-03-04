@@ -1734,9 +1734,8 @@
             </div>
         </div>
         
-        <div class="ofertas-stock-warning">
-            ⚠️ <strong>ATENCIÓN:</strong> Ofertas válidas solo de Lunes a Jueves, de 11:30 a 17:00.
-            ¡Apurate, stock limitado!
+        <div class="ofertas-stock-warning" id="msg-relampago">
+            ⚡ <strong>¡OFERTA ACTIVA AHORA!</strong> Precios especiales por tiempo limitado. ¡Aprovechá mientras dura!
         </div>
         
         <div class="ofertas-products-grid" id="relampago-grid">
@@ -1756,9 +1755,8 @@
             </div>
         </div>
         
-        <div class="ofertas-stock-warning">
-            ⭐ <strong>ESPECIAL FINDE:</strong> Viernes y Sábados de 20:00 a 22:00.
-            ¡Los mejores descuentos de la semana!
+        <div class="ofertas-stock-warning" id="msg-destacadas">
+            🔥 <strong>¡OFERTAS DESTACADAS!</strong> Los mejores descuentos de la semana, solo por hoy.
         </div>
         
         <div class="ofertas-products-grid" id="destacadas-grid">
@@ -1778,9 +1776,8 @@
             </div>
         </div>
         
-        <div class="ofertas-stock-warning">
-            🌙 <strong>ESPECIAL NOCTURNO:</strong> Lunes a Jueves de 18:00 a 22:00.
-            ¡Aprovechá estas ofertas únicas!
+        <div class="ofertas-stock-warning" id="msg-especiales">
+            🌙 <strong>¡ESPECIAL DE HOY!</strong> Precios únicos disponibles por tiempo limitado.
         </div>
         
         <div class="ofertas-products-grid" id="especiales-grid">
@@ -1796,8 +1793,8 @@
                 <span class="ofertas-badge">HASTA AGOTAR STOCK</span>
             </h2>
         </div>
-        <div class="ofertas-stock-warning">
-            🔥 <strong>OFERTA ESPECIAL:</strong> Stock limitado — ¡llevate el tuyo antes de que se agote!
+        <div class="ofertas-stock-warning" id="msg-ultimas">
+            🏷️ <strong>¡ÚLTIMAS UNIDADES!</strong> Stock muy limitado — ¡llevate el tuyo antes de que se agote!
         </div>
         <div class="ofertas-products-grid" id="ultimas-grid">
             <!-- Productos últimas unidades -->
@@ -2228,9 +2225,88 @@ async function cargarConfigSistema() {
         if (h4) { HORARIOS.ultimas = h4; console.log('✅ Config ÚLTIMAS:', h4.dias.length ? h4 : '🔴 desactivado'); }
 
         console.log('📋 HORARIOS finales:', JSON.stringify(HORARIOS));
+
+        // Actualizar mensajes visibles al cliente con horarios reales
+        actualizarMensajesOfertas();
     } catch(e) {
         console.warn('⚠️ Error cargando config_sistema:', e.message, '— usando horarios por defecto');
     }
+}
+
+// ── Nombres de días para mostrar al cliente ──
+const _NOMBRES_DIAS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+const _NOMBRES_DIAS_FULL = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+
+function _formatearDias(diasJS) {
+    if (!diasJS || diasJS.length === 0) return null;
+    // Detectar rangos consecutivos
+    const sorted = [...diasJS].sort((a, b) => {
+        // Ordenar Lun-Dom (1,2,3,4,5,6,0)
+        const orden = [1,2,3,4,5,6,0];
+        return orden.indexOf(a) - orden.indexOf(b);
+    });
+    if (sorted.length === 7) return 'todos los días';
+    if (sorted.length === 1) return _NOMBRES_DIAS_FULL[sorted[0]];
+    // Verificar si son todos consecutivos (semana laboral, finde, etc.)
+    const orden = [1,2,3,4,5,6,0];
+    const indices = sorted.map(d => orden.indexOf(d));
+    const esConsecutivo = indices.every((v, i) => i === 0 || v === indices[i-1] + 1);
+    if (esConsecutivo && sorted.length >= 3) {
+        return _NOMBRES_DIAS_FULL[sorted[0]] + ' a ' + _NOMBRES_DIAS_FULL[sorted[sorted.length - 1]];
+    }
+    return sorted.map(d => _NOMBRES_DIAS[d]).join(', ');
+}
+
+function _formatearHora(h, m) {
+    return h + ':' + String(m).padStart(2, '0');
+}
+
+function actualizarMensajesOfertas() {
+    const configs = {
+        relampago: {
+            id: 'msg-relampago',
+            emoji: '⚡',
+            nombre: 'OFERTAS RELÁMPAGO',
+            positivo: '¡Precios especiales por tiempo limitado, aprovechá ahora!'
+        },
+        destacadas: {
+            id: 'msg-destacadas',
+            emoji: '🔥',
+            nombre: 'OFERTAS DESTACADAS',
+            positivo: '¡Los mejores descuentos de la semana, solo mientras dure!'
+        },
+        especiales: {
+            id: 'msg-especiales',
+            emoji: '🌙',
+            nombre: 'OFERTAS ESPECIALES',
+            positivo: '¡Precios únicos que no vas a encontrar en otro lado!'
+        },
+        ultimas: {
+            id: 'msg-ultimas',
+            emoji: '🏷️',
+            nombre: 'ÚLTIMAS UNIDADES',
+            positivo: '¡Llevate el tuyo antes de que se agote!'
+        }
+    };
+
+    Object.keys(configs).forEach(function(tipo) {
+        const el = document.getElementById(configs[tipo].id);
+        if (!el) return;
+        const h = HORARIOS[tipo];
+        const diasStr = h && h.dias.length > 0 ? _formatearDias(h.dias) : null;
+        const horaStr = h && h.dias.length > 0
+            ? _formatearHora(h.horaInicio, h.minInicio) + ' a ' + _formatearHora(h.horaFin, h.minFin) + ' hs'
+            : null;
+
+        if (diasStr && horaStr) {
+            el.innerHTML = configs[tipo].emoji + ' <strong>' + configs[tipo].nombre + ':</strong> '
+                + diasStr + ' de ' + horaStr + '. '
+                + configs[tipo].positivo;
+        } else {
+            el.innerHTML = configs[tipo].emoji + ' <strong>' + configs[tipo].nombre + ':</strong> '
+                + configs[tipo].positivo;
+        }
+    });
 }
 
 function validarHorario(tipo) {
