@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — Punto de Venta</title>
+    <title>Copihue — Punto de Venta v001</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -814,7 +814,7 @@
 <div class="header" style="flex-direction:column;gap:6px;padding:8px 16px;">
     <div style="display:flex;align-items:center;justify-content:space-between;width:100%;">
         <div class="header-titulo">
-            🏪 Copihue<span id="versionTag" style="font-size:0.75rem;font-weight:700;opacity:0.85;margin-left:8px;background:rgba(255,255,255,0.2);padding:2px 7px;border-radius:10px;color:white;letter-spacing:0.3px;">v87</span>
+            🏪 Copihue<span id="versionTag" style="font-size:0.75rem;font-weight:700;opacity:0.85;margin-left:8px;background:rgba(255,255,255,0.2);padding:2px 7px;border-radius:10px;color:white;letter-spacing:0.3px;">v001</span>
             <div class="indicador-carga" id="indicadorCarga" title="Cargando..."></div>
         </div>
         <button class="btn-resumen" onclick="cambiarVendedor()" id="vendedorBadge"
@@ -1527,8 +1527,24 @@ window.addEventListener('beforeunload', function(e) {
     }
 });
 
-// Botón atrás: interceptar sin pushState (que causaba recarga al expandir)
-// Usamos un flag para detectar intento de salida
+// ── BFCACHE: cuando Android restaura la app desde segundo plano,
+//    pageshow dispara con persisted=true — NO recargamos, solo sincronizamos UI
+window.addEventListener('pageshow', function(e) {
+    if (e.persisted) {
+        console.log('[PWA] Restaurado desde bfcache — restaurando estado');
+        if (ventaActual && ventaActual.length > 0) {
+            renderVenta();
+            activarGuardiaAtras();
+        }
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(function(regs) {
+                regs.forEach(function(r) { r.update(); });
+            });
+        }
+    }
+});
+
+// Botón atrás: interceptar con pushState para bloquear navegación hacia atrás
 let _backGuardActive = false;
 function activarGuardiaAtras() {
     if (_backGuardActive) return;
@@ -1542,7 +1558,7 @@ window.addEventListener('popstate', function(e) {
     if (!_backGuardActive) return;
     // Re-insertar estado para seguir bloqueando
     history.pushState({ guard: true }, '');
-    // Si hay modal abierto → solo cerrarlo, no recargar
+    // Si hay modal abierto → solo cerrarlo
     const modalCerrar = document.getElementById('modalCerrarSesion');
     const modalConfirm = document.getElementById('modalConfirmacion');
     if (modalCerrar && modalCerrar.style.display === 'flex') {
@@ -1551,10 +1567,8 @@ window.addEventListener('popstate', function(e) {
     if (modalConfirm && modalConfirm.style.display === 'flex') {
         modalConfirm.style.display = 'none'; return;
     }
-    // Sin modal → minimizar si hay venta
-    if (ventaActual && ventaActual.length > 0) {
-        minimizarPanel();
-    }
+    // Sin modal → abrir modal de cierre para que usuario elija minimizar o cerrar
+    abrirModalCerrar();
 });
 
 let productos = [];

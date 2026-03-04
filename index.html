@@ -1930,7 +1930,7 @@
 // ========== VERSIÓN Y CONFIGURACIÓN ==========
 const APP_VERSION = 'V2.4-CACHE-FIX-250127';
 // Tag versión automático con fecha
-(function(){ const h=new Date(); const el=document.getElementById('versionTag'); if(el) el.textContent='v'+String(h.getDate()).padStart(2,'0')+'/'+String(h.getMonth()+1).padStart(2,'0'); })();
+(function(){ const el=document.getElementById('versionTag'); if(el) el.textContent='v001'; })();
 
 // ========== MAPEO DE OFERTAS RELÁMPAGO ==========
 const OFERTAS_RELAMPAGO_SISTEMA = {
@@ -2113,29 +2113,116 @@ const ROTACION_SISTEMA = {
 };
 
 // ========== VALIDACIÓN HORARIOS ==========
+// Valores por defecto — se sobrescriben al cargar config_sistema desde GAS
 const HORARIOS = {
     relampago: {
-        dias: [1, 2, 3, 4], // Lunes a Jueves
-        horaInicio: 11,
-        minInicio: 30,
-        horaFin: 17,
-        minFin: 0
+        dias: [1, 2, 3, 4],
+        horaInicio: 11, minInicio: 30,
+        horaFin: 17,    minFin: 0
     },
     destacadas: {
-        dias: [5, 6], // Viernes y Sábado
-        horaInicio: 20,
-        minInicio: 0,
-        horaFin: 22,
-        minFin: 0
+        dias: [5, 6],
+        horaInicio: 20, minInicio: 0,
+        horaFin: 22,    minFin: 0
     },
     especiales: {
-        dias: [1, 2, 3, 4], // Lunes a Jueves
-        horaInicio: 18,
-        minInicio: 0,
-        horaFin: 22,
-        minFin: 0
+        dias: [1, 2, 3, 4],
+        horaInicio: 18, minInicio: 0,
+        horaFin: 22,    minFin: 0
+    },
+    ultimas: {
+        dias: [0,1,2,3,4,5,6],
+        horaInicio: 21, minInicio: 0,
+        horaFin: 22,    minFin: 0
     }
 };
+
+// ── Parsear valor de hora desde planilla: puede ser número (21) o string "21:30" ──
+function _parseHora(val) {
+    if (val === null || val === undefined || val === '') return null;
+    const s = String(val).trim();
+    if (s.includes(':')) {
+        const p = s.split(':');
+        return { h: parseInt(p[0]) || 0, m: parseInt(p[1]) || 0 };
+    }
+    const n = parseFloat(s);
+    if (isNaN(n)) return null;
+    const hh = Math.floor(n);
+    const mm = Math.round((n - hh) * 60);
+    return { h: hh, m: mm };
+}
+
+// ── Días de semana: índices JS (0=Dom,1=Lun,...,6=Sab) ──
+// Columnas en planilla: B=LUN(1), C=MAR(2), D=MIE(3), E=JUE(4), F=VIE(5), G=SAB(6), H=DOM(0)
+const _COL_A_DIA_JS = [1, 2, 3, 4, 5, 6, 0]; // índice 0-6 en array planilla → día JS
+
+// ── Cargar config_sistema desde GAS y aplicar a HORARIOS ──
+async function cargarConfigSistema() {
+    try {
+        const GAS_URL = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
+        const r = await fetch(GAS_URL + '?action=getConfig&t=' + Date.now(), { redirect: 'follow' });
+        const data = await r.json();
+        if (!data.success || !data.config) {
+            console.warn('⚠️ config_sistema no disponible — usando horarios por defecto');
+            return;
+        }
+        const cfg = data.config;
+
+        // ── HELPER: construir bloque HORARIOS para un tipo de oferta ──
+        function _buildHorario(seccion, claveDias) {
+            const claveInicio = seccion + '|Hora inicio oferta';
+            const claveCierre = seccion + '|Hora cierre oferta';
+            const rowInicio = cfg[claveInicio];
+            const rowCierre = cfg[claveCierre];
+            const rowDias   = cfg[claveDias];
+            if (!rowInicio || !rowCierre || !rowDias) {
+                console.warn('⚠️ Faltan claves para sección ' + seccion, {claveInicio, claveCierre, claveDias});
+                return null;
+            }
+
+            const diasJS = [];
+            rowDias.forEach(function(v, i) {
+                if (v === 1 || v === '1' || v === true) diasJS.push(_COL_A_DIA_JS[i]);
+            });
+
+            // Extraer hora inicio y fin del primer día activo (o primer valor no nulo)
+            let hInicio = null, hCierre = null;
+            for (let i = 0; i < 7; i++) {
+                if (!hInicio && rowInicio[i] !== null) hInicio = _parseHora(rowInicio[i]);
+                if (!hCierre && rowCierre[i] !== null) hCierre = _parseHora(rowCierre[i]);
+                if (hInicio && hCierre) break;
+            }
+
+            if (!hInicio || !hCierre || diasJS.length === 0) return null;
+
+            return {
+                dias: diasJS,
+                horaInicio: hInicio.h, minInicio: hInicio.m,
+                horaFin:    hCierre.h, minFin:    hCierre.m
+            };
+        }
+
+        // RELÁMPAGO
+        const h1 = _buildHorario('relampago', 'relampago|Dias ofertas relampago');
+        if (h1) { HORARIOS.relampago = h1; console.log('✅ Config RELÁMPAGO cargado:', h1); }
+
+        // DESTACADAS
+        const h2 = _buildHorario('destacadas', 'destacadas|Dias ofertas destacadas');
+        if (h2) { HORARIOS.destacadas = h2; console.log('✅ Config DESTACADAS cargado:', h2); }
+
+        // ESPECIALES
+        const h3 = _buildHorario('especiales', 'especiales|Dias ofertas especiales');
+        if (h3) { HORARIOS.especiales = h3; console.log('✅ Config ESPECIALES cargado:', h3); }
+
+        // ÚLTIMAS UNIDADES
+        const h4 = _buildHorario('ultimas', 'ultimas|Dias ofertas UNIDADES');
+        if (h4) { HORARIOS.ultimas = h4; console.log('✅ Config ÚLTIMAS UNIDADES cargado:', h4); }
+
+        console.log('📋 HORARIOS finales:', JSON.stringify(HORARIOS));
+    } catch(e) {
+        console.warn('⚠️ Error cargando config_sistema:', e.message, '— usando horarios por defecto');
+    }
+}
 
 function validarHorario(tipo) {
     // Usar hora de Argentina centralizada
@@ -4854,6 +4941,9 @@ function init() {
     });
     
     loadProductsFromAPI();
+    
+    // Cargar config_sistema para horarios de ofertas (en paralelo, no bloquea)
+    cargarConfigSistema();
     
     // Iniciar monitor de stock después de cargar productos
     setTimeout(() => {
