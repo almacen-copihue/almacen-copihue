@@ -814,7 +814,7 @@
 <div class="header" style="flex-direction:column;gap:6px;padding:8px 16px;">
     <div style="display:flex;align-items:center;justify-content:space-between;width:100%;">
         <div class="header-titulo">
-            🏪 Copihue<span id="versionTag" style="font-size:0.75rem;font-weight:700;opacity:0.85;margin-left:8px;background:rgba(255,255,255,0.2);padding:2px 7px;border-radius:10px;color:white;letter-spacing:0.3px;">v84</span>
+            🏪 Copihue<span id="versionTag" style="font-size:0.75rem;font-weight:700;opacity:0.85;margin-left:8px;background:rgba(255,255,255,0.2);padding:2px 7px;border-radius:10px;color:white;letter-spacing:0.3px;">v85</span>
             <div class="indicador-carga" id="indicadorCarga" title="Cargando..."></div>
         </div>
         <button class="btn-resumen" onclick="cambiarVendedor()" id="vendedorBadge"
@@ -862,6 +862,10 @@
         <button class="btn-resumen" onclick="abrirConfigProveedores()" title="Configuración proveedores" style="background:rgba(255,193,7,0.3);border-color:rgba(255,193,7,0.6);flex:1;text-align:center;">⚙️</button>
 
         <!-- POS 8 (final): Actualizar — movido al último lugar -->
+        <button onclick="abrirModalCerrar()" title="Cerrar POS"
+        style="background:rgba(183,28,28,0.25);border:1px solid rgba(183,28,28,0.5);
+               border-radius:20px;color:#ffcdd2;padding:4px 10px;font-size:0.82rem;
+               font-weight:700;cursor:pointer;flex:1;text-align:center;">🚪</button>
         <button class="btn-resumen" id="btnActualizar" onclick="forzarActualizacion()" title="Actualizar productos" style="background:rgba(105,240,174,0.2);border-color:rgba(105,240,174,0.5);flex:1;text-align:center;">🔄</button>
 
     </div>
@@ -905,7 +909,10 @@
     <div class="panel-venta-header">
         <span class="panel-venta-titulo">🛒 Venta actual</span>
         <div style="display:flex;gap:6px;align-items:center;">
-            <button class="btn-minimizar" onclick="minimizarPanel()" title="Minimizar">— </button>
+            <button onclick="minimizarPanel()" title="Minimizar panel"
+                    style="background:#e8f5e9;border:1.5px solid #a5d6a7;border-radius:20px;
+                           padding:5px 12px;font-size:0.85rem;color:#2e7d32;cursor:pointer;
+                           font-weight:800;line-height:1;">⊟ Min</button>
             <button class="btn-limpiar" onclick="limpiarVenta()">🗑 Limpiar</button>
         </div>
     </div>
@@ -1479,6 +1486,33 @@ function enviarPedidoPanadero() {
 // ── MINIMIZAR / EXPANDIR PANEL ───────────────────────────────────────────────
 let panelMinimizado = false;
 
+function abrirModalCerrar() {
+    const modal = document.getElementById('modalCerrarSesion');
+    const texto = document.getElementById('modalCerrarTexto');
+    if (ventaActual && ventaActual.length > 0) {
+        const total = ventaActual.reduce((s,i) => s + i.price * i.qty, 0);
+        texto.innerHTML = `<div style="font-size:0.88rem;color:#555;text-align:center;margin-bottom:16px;">
+            Tenés <strong>${ventaActual.length} producto(s)</strong> en la venta actual por
+            <strong>$${Math.round(total).toLocaleString('es-AR')}</strong>.<br><br>
+            Si cerrás vas a perder estos datos.
+        </div>`;
+    } else {
+        texto.innerHTML = `<div style="font-size:0.88rem;color:#555;text-align:center;margin-bottom:16px;">
+            No tenés ventas en curso.
+        </div>`;
+    }
+    modal.style.display = 'flex';
+}
+
+function confirmarCerrarPOS() {
+    // Limpiar guardia para que el beforeunload no pregunte
+    ventaActual = [];
+    desactivarGuardiaAtras();
+    document.getElementById('modalCerrarSesion').style.display = 'none';
+    // Recargar la página (equivale a "cerrar sesión" en este POS)
+    window.location.reload();
+}
+
 function minimizarPanel() {
     panelMinimizado = true;
     document.getElementById('panelVenta').classList.add('minimizado');
@@ -1501,23 +1535,32 @@ function actualizarBarraMinimizada() {
 }
 
 // ── PROTECCIÓN CONTRA SALIDA ACCIDENTAL ──────────────────────────────────────
-// Bloquear botón atrás: en vez de salir, minimiza el panel
-history.pushState({ pos: 'venta' }, '');
-window.addEventListener('popstate', function(e) {
-    // Siempre re-insertar el estado para que nunca pueda "salir" con atrás
-    history.pushState({ pos: 'venta' }, '');
-    // Si hay items en la venta → solo minimizar
-    if (ventaActual && ventaActual.length > 0) {
-        minimizarPanel();
-    }
-    // Si no hay items, no hace nada — no cierra
-});
-
 // Advertencia al cerrar pestaña/recargar si hay venta en curso
 window.addEventListener('beforeunload', function(e) {
     if (ventaActual && ventaActual.length > 0) {
         e.preventDefault();
-        e.returnValue = ''; // Muestra diálogo nativo del navegador
+        e.returnValue = '';
+    }
+});
+
+// Botón atrás: interceptar sin pushState (que causaba recarga al expandir)
+// Usamos un flag para detectar intento de salida
+let _backGuardActive = false;
+function activarGuardiaAtras() {
+    if (_backGuardActive) return;
+    _backGuardActive = true;
+    history.pushState({ guard: true }, '');
+}
+function desactivarGuardiaAtras() {
+    _backGuardActive = false;
+}
+window.addEventListener('popstate', function(e) {
+    if (!_backGuardActive) return;
+    // Re-insertar estado para seguir bloqueando
+    history.pushState({ guard: true }, '');
+    // Minimizar si hay venta
+    if (ventaActual && ventaActual.length > 0) {
+        minimizarPanel();
     }
 });
 
@@ -1840,6 +1883,7 @@ function renderVenta() {
         contenedor.innerHTML = '<div class="venta-vacia">Sin productos aún</div>';
         totalEl.textContent = '$0';
         btnConfirmar.disabled = true;
+        desactivarGuardiaAtras(); // sin items → liberar botón atrás
         return;
     }
 
@@ -1847,6 +1891,7 @@ function renderVenta() {
     totalEl.textContent = '$' + total.toLocaleString('es-AR');
     btnConfirmar.disabled = false;
     actualizarBarraMinimizada();
+    activarGuardiaAtras(); // hay items → activar guardia botón atrás
 
     contenedor.innerHTML = ventaActual.map(item => `
         <div class="item-venta">
@@ -3895,6 +3940,43 @@ document.getElementById('modalWifiQR').addEventListener('click', function(e) {
   if (e.target === this) cerrarWifiQR();
 });
 </script>
+
+<!-- MODAL CERRAR SESIÓN -->
+<div id="modalCerrarSesion" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);
+     z-index:10100;align-items:center;justify-content:center;padding:20px;">
+    <div style="background:white;border-radius:20px;width:100%;max-width:360px;overflow:hidden;
+                box-shadow:0 8px 32px rgba(0,0,0,0.4);">
+        <div style="background:linear-gradient(135deg,#b71c1c,#e53935);padding:20px 24px;text-align:center;">
+            <div style="font-size:2rem;margin-bottom:6px;">⚠️</div>
+            <div style="color:white;font-weight:900;font-size:1rem;">¿Cerrar el POS?</div>
+        </div>
+        <div style="padding:16px 20px;" id="modalCerrarTexto">
+            <div style="font-size:0.88rem;color:#555;text-align:center;margin-bottom:16px;">
+                Tenés una venta en curso. Si cerrás vas a perder los datos.
+            </div>
+        </div>
+        <div style="padding:0 16px 16px;display:flex;flex-direction:column;gap:8px;">
+            <button onclick="confirmarCerrarPOS()"
+                    style="width:100%;padding:13px;background:linear-gradient(135deg,#b71c1c,#e53935);
+                           border:none;border-radius:12px;color:white;font-size:0.95rem;
+                           font-weight:900;cursor:pointer;">
+                🚪 Sí, cerrar igual
+            </button>
+            <button onclick="document.getElementById('modalCerrarSesion').style.display='none';minimizarPanel();"
+                    style="width:100%;padding:13px;background:#e8f5e9;border:1.5px solid #a5d6a7;
+                           border-radius:12px;color:#2e7d32;font-size:0.95rem;
+                           font-weight:900;cursor:pointer;">
+                ⊟ Minimizar y seguir
+            </button>
+            <button onclick="document.getElementById('modalCerrarSesion').style.display='none';"
+                    style="width:100%;padding:11px;background:none;border:1.5px solid #ddd;
+                           border-radius:12px;color:#888;font-size:0.88rem;
+                           font-weight:700;cursor:pointer;">
+                Cancelar
+            </button>
+        </div>
+    </div>
+</div>
 
 </body>
 </html>
