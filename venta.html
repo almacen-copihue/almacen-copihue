@@ -210,6 +210,12 @@
             max-height: 55vh;
             display: flex;
             flex-direction: column;
+            transition: max-height 0.3s ease, opacity 0.3s ease;
+        }
+        .panel-venta.minimizado {
+            max-height: 0 !important;
+            overflow: hidden;
+            border-top: none;
         }
 
         .panel-venta-header {
@@ -237,6 +243,59 @@
             cursor: pointer;
             font-weight: 600;
         }
+
+        /* ── Barra minimizada flotante ── */
+        .barra-minimizada {
+            display: none;
+            position: fixed;
+            bottom: 0; left: 0; right: 0;
+            background: var(--verde-oscuro);
+            z-index: 500;
+            padding: 10px 16px;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 -3px 16px rgba(0,0,0,0.25);
+            cursor: pointer;
+            gap: 10px;
+        }
+        .barra-minimizada.visible { display: flex; }
+        .barra-min-info {
+            display: flex; align-items: center; gap: 10px; flex: 1;
+        }
+        .barra-min-titulo {
+            color: rgba(255,255,255,0.85);
+            font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .barra-min-total {
+            color: white; font-size: 1.5rem; font-weight: 900;
+        }
+        .barra-min-items {
+            background: rgba(255,255,255,0.2);
+            color: white; border-radius: 20px;
+            padding: 2px 8px; font-size: 0.75rem; font-weight: 700;
+        }
+        .btn-expandir {
+            background: rgba(255,255,255,0.15);
+            border: 1.5px solid rgba(255,255,255,0.3);
+            border-radius: 10px; color: white;
+            padding: 7px 14px; font-size: 0.82rem; font-weight: 800;
+            cursor: pointer; flex-shrink: 0;
+        }
+        .btn-expandir:active { background: rgba(255,255,255,0.3); }
+
+        /* ── Botón minimizar en header ── */
+        .btn-minimizar {
+            background: none;
+            border: 1px solid #ddd;
+            border-radius: 20px;
+            padding: 4px 10px;
+            font-size: 0.85rem;
+            color: #888;
+            cursor: pointer;
+            font-weight: 700;
+            line-height: 1;
+        }
+        .btn-minimizar:active { background: #f0f0f0; }
 
         .items-venta {
             overflow-y: auto;
@@ -755,7 +814,7 @@
 <div class="header" style="flex-direction:column;gap:6px;padding:8px 16px;">
     <div style="display:flex;align-items:center;justify-content:space-between;width:100%;">
         <div class="header-titulo">
-            🏪 Copihue<span id="versionTag" style="font-size:0.6rem;font-weight:400;opacity:0.3;margin-left:6px;letter-spacing:0;color:inherit">v83</span>
+            🏪 Copihue<span id="versionTag" style="font-size:0.6rem;font-weight:400;opacity:0.3;margin-left:6px;letter-spacing:0;color:inherit">v84</span>
             <div class="indicador-carga" id="indicadorCarga" title="Cargando..."></div>
         </div>
         <button class="btn-resumen" onclick="cambiarVendedor()" id="vendedorBadge"
@@ -827,11 +886,28 @@
 <!-- RESULTADOS BÚSQUEDA -->
 <div class="resultados" id="resultados"></div>
 
+<!-- BARRA MINIMIZADA FLOTANTE -->
+<div class="barra-minimizada" id="barraMinimizada" onclick="expandirPanel()">
+    <div class="barra-min-info">
+        <div>
+            <div class="barra-min-titulo">🛒 Venta actual</div>
+            <div class="barra-min-total" id="barraMinTotal">$0</div>
+        </div>
+        <span class="barra-min-items" id="barraMinItems">0 items</span>
+    </div>
+    <button class="btn-expandir" onclick="expandirPanel(); event.stopPropagation();">
+        ▲ Ver venta
+    </button>
+</div>
+
 <!-- PANEL VENTA ACTUAL -->
 <div class="panel-venta" id="panelVenta">
     <div class="panel-venta-header">
         <span class="panel-venta-titulo">🛒 Venta actual</span>
-        <button class="btn-limpiar" onclick="limpiarVenta()">🗑 Limpiar</button>
+        <div style="display:flex;gap:6px;align-items:center;">
+            <button class="btn-minimizar" onclick="minimizarPanel()" title="Minimizar">— </button>
+            <button class="btn-limpiar" onclick="limpiarVenta()">🗑 Limpiar</button>
+        </div>
     </div>
     <div class="items-venta" id="itemsVenta">
         <div class="venta-vacia">Sin productos aún</div>
@@ -1256,8 +1332,6 @@ function badgeStock(stock) {
 
 // ========== CONFIG ==========
 const API_URL = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-// Tag versión automático con fecha de última carga
-(function(){ const h=new Date(); const el=document.getElementById('versionTag'); if(el) el.textContent='v'+String(h.getDate()).padStart(2,'0')+'/'+String(h.getMonth()+1).padStart(2,'0'); })();
 
 // ========== CONFIG PROVEEDORES ==========
 let configProveedores = [];
@@ -1401,6 +1475,51 @@ function enviarPedidoPanadero() {
     window.open(tel ? 'https://wa.me/'+tel+'?text='+encodeURIComponent(msg) : 'https://wa.me/?text='+encodeURIComponent(msg), '_blank');
     if (!tel) mostrarToast('⚠️ Agregá el teléfono en ⚙️ Configuración', 'naranja');
 }
+
+// ── MINIMIZAR / EXPANDIR PANEL ───────────────────────────────────────────────
+let panelMinimizado = false;
+
+function minimizarPanel() {
+    panelMinimizado = true;
+    document.getElementById('panelVenta').classList.add('minimizado');
+    document.getElementById('barraMinimizada').classList.add('visible');
+    actualizarBarraMinimizada();
+}
+
+function expandirPanel() {
+    panelMinimizado = false;
+    document.getElementById('panelVenta').classList.remove('minimizado');
+    document.getElementById('barraMinimizada').classList.remove('visible');
+}
+
+function actualizarBarraMinimizada() {
+    if (!panelMinimizado) return;
+    const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
+    const items = ventaActual.reduce((s, i) => s + i.qty, 0);
+    document.getElementById('barraMinTotal').textContent = '$' + Math.round(total).toLocaleString('es-AR');
+    document.getElementById('barraMinItems').textContent = items + (items === 1 ? ' item' : ' items');
+}
+
+// ── PROTECCIÓN CONTRA SALIDA ACCIDENTAL ──────────────────────────────────────
+// Bloquear botón atrás: en vez de salir, minimiza el panel
+history.pushState({ pos: 'venta' }, '');
+window.addEventListener('popstate', function(e) {
+    // Siempre re-insertar el estado para que nunca pueda "salir" con atrás
+    history.pushState({ pos: 'venta' }, '');
+    // Si hay items en la venta → solo minimizar
+    if (ventaActual && ventaActual.length > 0) {
+        minimizarPanel();
+    }
+    // Si no hay items, no hace nada — no cierra
+});
+
+// Advertencia al cerrar pestaña/recargar si hay venta en curso
+window.addEventListener('beforeunload', function(e) {
+    if (ventaActual && ventaActual.length > 0) {
+        e.preventDefault();
+        e.returnValue = ''; // Muestra diálogo nativo del navegador
+    }
+});
 
 let productos = [];
 let ventaActual = []; // [{id, name, price, qty, stockDisponible}]
@@ -1727,6 +1846,7 @@ function renderVenta() {
     const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
     totalEl.textContent = '$' + total.toLocaleString('es-AR');
     btnConfirmar.disabled = false;
+    actualizarBarraMinimizada();
 
     contenedor.innerHTML = ventaActual.map(item => `
         <div class="item-venta">
@@ -1755,6 +1875,7 @@ function renderVenta() {
 
 // ========== CONFIRMACIÓN Y COBRO ==========
 function abrirConfirmacion() {
+    expandirPanel(); // asegurar que esté visible al confirmar
     if (ventaActual.length === 0) return;
 
     const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
@@ -2986,13 +3107,17 @@ function agregarNotifPos(icono, titulo, detalle, color) {
 // Poner stock en 0 via API
 async function ponerStockEnCero(p) {
     try {
-        const datos = { producto: p.name, cantidad: -p.stock, stockDirecto: 0,
+        // cantidad: 0 para que no falle la validación; stockDirecto:0 es lo que manda
+        const datos = { producto: p.name, cantidad: 0, stockDirecto: 0,
                         precioVenta: null, precioCosto: null, proveedor: null, fechaVencimiento: null };
         const url = API_URL + '?action=ingresar&data=' + encodeURIComponent(JSON.stringify(datos));
-        const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(12000) });
+        const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
         const resp = await r.json();
         if (resp.success) { p.stock = 0; return true; }
-    } catch(e) {}
+        console.warn('⚠️ ponerStockEnCero falló:', resp.mensaje, '| producto:', p.name);
+    } catch(e) {
+        console.error('❌ ponerStockEnCero error:', e, '| producto:', p.name);
+    }
     return false;
 }
 
@@ -3029,10 +3154,17 @@ async function procesarVencidosDeAyer() {
         if (ok) nombresOk.push(prod.name);
     }
 
+    const nombresFail = pendientes.map(i => i.name).filter(n => !nombresOk.includes(n));
+
     if (nombresOk.length > 0) {
         agregarNotifPos('✅', 'Stock en 0 automático',
             'Retirados ayer: ' + nombresOk.join(', '), '#2e7d32');
-        renderVenta(); // refrescar vista
+        renderVenta();
+    }
+    if (nombresFail.length > 0) {
+        agregarNotifPos('⚠️', 'No se pudo poner en 0 automáticamente',
+            nombresFail.join(', ') + ' · Hacelo manualmente en la planilla', '#e65100');
+        console.warn('⚠️ Auto-zero falló para:', nombresFail);
     }
 }
 
