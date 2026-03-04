@@ -216,7 +216,7 @@ let vendActivos=new Set(['TODOS']);
 let showVenc=false, showDiaSem=false, showHoras=false;
 
 const fmt=n=>'$'+Math.round(n).toLocaleString('es-AR');
-const hoyStr=()=>new Date().toISOString().slice(0,10);
+const hoyStr=()=>{const h=new Date();return h.getFullYear()+'-'+String(h.getMonth()+1).padStart(2,'0')+'-'+String(h.getDate()).padStart(2,'0');};
 
 // ====== INIT ======
 async function init(){
@@ -257,7 +257,8 @@ function filtrar(dias){
     tksOk=new Set([...tksOk].filter(tk=>{
       const [f,ti]=tk.split('_');
       const tot=totsF.find(t=>t.fechaStr===f&&t.ticket===ti);
-      return tot&&vendActivos.has(tot.vendedor||'');
+      // Comparar normalizando tildes
+      return tot&&[...vendActivos].some(va=>normVend(va).toUpperCase()===normVend(tot.vendedor||'').toUpperCase());
     }));
   }
   return{
@@ -278,8 +279,11 @@ function calcStats(its,tots){
   tots.forEach(t=>{
     const m=(t.metodo||'EFECTIVO').toUpperCase();
     metodos[m]=(metodos[m]||0)+(t.total||0);
-    const v=t.vendedor||'Sin nombre';
-    vendedores[v]=(vendedores[v]||0)+(t.total||0);
+    // Normalizar vendedor para unificar "Sebastian" y "Sebastián"
+    const vRaw=t.vendedor||'Sin nombre';
+    const vKey=normVend(vRaw);
+    if(!vendedores[vKey])vendedores[vKey]={nombre:vRaw,total:0};
+    vendedores[vKey].total+=(t.total||0);
   });
   const prods={};
   its.forEach(i=>{
@@ -339,11 +343,14 @@ function renderApp(){
   const metSet=new Set();raw.totales.forEach(t=>{if(t.metodo)metSet.add(t.metodo.toUpperCase());});
   const metodos=[...metSet].sort();
 
-  // Vendedores disponibles (sin excluidos)
-  const vendSet=new Set();
+// Normaliza nombre: quita tildes y capitaliza para unificar "Sebastian" y "Sebastián"
+const normVend=v=>v.normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+
+  // Vendedores disponibles (sin excluidos) — normalizados para evitar duplicados con/sin tilde
+  const vendMap=new Map(); // normKey → nombre display (primera aparición)
   raw.totales.filter(t=>!EXCLUIR_VENDEDORES.includes((t.vendedor||'').toUpperCase()))
-    .forEach(t=>{if(t.vendedor)vendSet.add(t.vendedor);});
-  const vendedores=[...vendSet].sort();
+    .forEach(t=>{if(t.vendedor){const k=normVend(t.vendedor).toUpperCase();if(!vendMap.has(k))vendMap.set(k,t.vendedor);}});
+  const vendedores=[...vendMap.values()].sort();
 
   // Calendario
   const primerDia=new Date(anio,mes,1).getDay();
@@ -404,9 +411,9 @@ function renderApp(){
   }).join('');
 
   // Vendedores
-  const vendRowsH=Object.entries(stats.vendedores).sort((a,b)=>b[1]-a[1]).map(([v,t])=>{
-    const pct=stats.venta>0?Math.round(t/stats.venta*100):0;
-    return'<div class="row"><span class="row-l">👤 '+v+'</span><span><strong class="row-v">'+fmt(t)+'</strong><span class="row-pct">'+pct+'%</span></span></div>';
+  const vendRowsH=Object.values(stats.vendedores).sort((a,b)=>b.total-a.total).map(({nombre,total})=>{
+    const pct=stats.venta>0?Math.round(total/stats.venta*100):0;
+    return'<div class="row"><span class="row-l">👤 '+nombre+'</span><span><strong class="row-v">'+fmt(total)+'</strong><span class="row-pct">'+pct+'%</span></span></div>';
   }).join('');
 
     // Top productos — escala separada para cada barra
