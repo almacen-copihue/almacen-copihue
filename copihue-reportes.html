@@ -207,6 +207,7 @@ const API_URL='https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pv
 const MESES=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const DIAS_SEM=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
 const EXCLUIR_VENDEDORES=['DIEGO','DIEGO REAL']; // no aparecen en reportes
+const normVend=v=>(v||'').normalize('NFD').replace(/[̀-ͯ]/g,'').trim().toUpperCase();
 
 let raw=null;
 let mes=new Date().getMonth(), anio=new Date().getFullYear();
@@ -221,11 +222,13 @@ const hoyStr=()=>{const h=new Date();return h.getFullYear()+'-'+String(h.getMont
 // ====== INIT ======
 async function init(){
   try{
-    const r=await fetch(API_URL+'?action=getReportes',{redirect:'follow'});
+    const r=await fetch(API_URL+'?action=getReportes',{redirect:'follow',signal:AbortSignal.timeout(20000)});
     const d=await r.json();
     if(d.error) throw new Error(d.error);
     raw=d;
-    diasSel.add(hoyStr());
+    // Seleccionar hoy solo si el mes visible es el mes actual
+    const hoy=new Date();
+    if(mes===hoy.getMonth()&&anio===hoy.getFullYear()) diasSel.add(hoyStr());
     renderApp();
   }catch(e){
     document.getElementById('app').innerHTML='<div class="ldg" style="color:#c62828">❌ '+e.message+'</div>';
@@ -243,7 +246,7 @@ function filtrar(dias){
   const its=raw.items.filter(v=>set.has(v.fechaStr));
   const tots=raw.totales.filter(v=>set.has(v.fechaStr));
   // Excluir vendedores
-  const totsF=tots.filter(t=>!EXCLUIR_VENDEDORES.includes((t.vendedor||'').toUpperCase()));
+  const totsF=tots.filter(t=>!EXCLUIR_VENDEDORES.includes(normVend(t.vendedor||'')));
   // Tickets válidos
   let tksOk=new Set(totsF.map(t=>t.fechaStr+'_'+t.ticket));
   if(!metActivos.has('TODOS')){
@@ -258,7 +261,7 @@ function filtrar(dias){
       const [f,ti]=tk.split('_');
       const tot=totsF.find(t=>t.fechaStr===f&&t.ticket===ti);
       // Comparar normalizando tildes
-      return tot&&[...vendActivos].some(va=>normVend(va).toUpperCase()===normVend(tot.vendedor||'').toUpperCase());
+      return tot&&[...vendActivos].some(va=>normVend(va)===normVend(tot.vendedor||''));
     }));
   }
   return{
@@ -284,6 +287,8 @@ function calcStats(its,tots){
     const vKey=normVend(vRaw);
     if(!vendedores[vKey])vendedores[vKey]={nombre:vRaw,total:0};
     vendedores[vKey].total+=(t.total||0);
+    // unificar nombre display: usar el más corto (sin tilde) como canónico si ya existe
+    if(vendedores[vKey].nombre.length>vRaw.length)vendedores[vKey].nombre=vRaw;
   });
   const prods={};
   its.forEach(i=>{
@@ -343,13 +348,10 @@ function renderApp(){
   const metSet=new Set();raw.totales.forEach(t=>{if(t.metodo)metSet.add(t.metodo.toUpperCase());});
   const metodos=[...metSet].sort();
 
-// Normaliza nombre: quita tildes y capitaliza para unificar "Sebastian" y "Sebastián"
-const normVend=v=>v.normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
-
   // Vendedores disponibles (sin excluidos) — normalizados para evitar duplicados con/sin tilde
   const vendMap=new Map(); // normKey → nombre display (primera aparición)
-  raw.totales.filter(t=>!EXCLUIR_VENDEDORES.includes((t.vendedor||'').toUpperCase()))
-    .forEach(t=>{if(t.vendedor){const k=normVend(t.vendedor).toUpperCase();if(!vendMap.has(k))vendMap.set(k,t.vendedor);}});
+  raw.totales.filter(t=>!EXCLUIR_VENDEDORES.includes(normVend(t.vendedor||'')))
+    .forEach(t=>{if(t.vendedor){const k=normVend(t.vendedor);if(!vendMap.has(k))vendMap.set(k,t.vendedor);}});
   const vendedores=[...vendMap.values()].sort();
 
   // Calendario
@@ -390,7 +392,7 @@ const normVend=v=>v.normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
   const fVendH=vendedores.length>1?
     '<div class="lbl">Vendedor</div><div class="chips-wrap">'+
     '<button class="chip ven'+(vendActivos.has('TODOS')?' activo':'')+'" onclick="togVend(\'TODOS\')">👥 Todos</button>'+
-    vendedores.map(v=>'<button class="chip ven'+(vendActivos.has(v)?' activo':'')+'" onclick="togVend(\''+v+'\')">👤 '+v+'</button>').join('')+
+    vendedores.map(v=>'<button class="chip ven'+(vendActivos.has(normVend(v))?' activo':'')+'" onclick="togVend(\''+v+'\')">👤 '+v+'</button>').join('')+
     '</div>':'';
 
   // Cards
@@ -496,21 +498,20 @@ const normVend=v=>v.normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
   const horasOrdenadas=Object.entries(tksPorHora).sort((a,b)=>parseInt(a[0])-parseInt(b[0]));
   const maxTks=Math.max(...Object.values(tksPorHora),1);
 
-  // Detectar rango pico: bloque de horas consecutivas con más tráfico (>50% del max)
-  let rangoInicio=null, rangoFin=null, mejorH=null;
-  let bloqueInicio=null, bloqueCnt=0, mejorBloqueCnt=0;
-  horasOrdenadas.forEach(([h,tks],idx)=>{
-    const hi=parseInt(h);
-    if(tks===maxTks) mejorH=hi;
-    if(tks>=maxTks*0.5){
-      if(bloqueInicio===null) bloqueInicio=hi;
-      rangoFin=hi;
-      bloqueCnt+=tks;
-      if(bloqueCnt>mejorBloqueCnt){mejorBloqueCnt=bloqueCnt;rangoInicio=bloqueInicio;rangoFin=hi;}
-    } else {
-      bloqueInicio=null; bloqueCnt=0;
-    }
-  });
+  // Detectar rango pico: hora con más tickets + rango ±1h alrededor
+  let rangoInicio=null, rangoFin=null, mejorH=null, mejorBloqueCnt=0;
+  if(horasOrdenadas.length){
+    // Hora con máximo tráfico
+    const [hMax,tMax]=horasOrdenadas.reduce((best,cur)=>cur[1]>best[1]?cur:best);
+    mejorH=parseInt(hMax);
+    // Expandir mientras horas contiguas tengan >40% del max
+    const hSet=new Set(horasOrdenadas.map(([h])=>parseInt(h)));
+    let ini=mejorH, fin=mejorH;
+    while(hSet.has(ini-1)&&(tksPorHora[ini-1]||0)>=maxTks*0.4) ini--;
+    while(hSet.has(fin+1)&&(tksPorHora[fin+1]||0)>=maxTks*0.4) fin++;
+    rangoInicio=ini; rangoFin=fin;
+    mejorBloqueCnt=horasOrdenadas.filter(([h])=>parseInt(h)>=ini&&parseInt(h)<=fin).reduce((s,[,t])=>s+t,0);
+  }
 
   const horasH=horasOrdenadas.length?
     // Resumen rango pico
@@ -538,7 +539,7 @@ const normVend=v=>v.normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
 
   // Comparar meses histórico
   const vXMes={},gXMes={};
-  raw.totales.filter(t=>!EXCLUIR_VENDEDORES.includes((t.vendedor||'').toUpperCase()))
+  raw.totales.filter(t=>!EXCLUIR_VENDEDORES.includes(normVend(t.vendedor||'')))
     .forEach(t=>{const m=t.fechaStr?t.fechaStr.slice(0,7):'';if(m)vXMes[m]=(vXMes[m]||0)+(t.total||0);});
   raw.items.forEach(i=>{const m=i.fechaStr?i.fechaStr.slice(0,7):'';if(m)gXMes[m]=(gXMes[m]||0)+(i.gananciaAprox||0);});
   const ultMeses=Object.keys(vXMes).sort().slice(-6);
@@ -691,13 +692,18 @@ function togMet(m){
   renderApp();
 }
 function togVend(v){
-  if(v==='TODOS'){vendActivos.clear();vendActivos.add('TODOS');}
-  else{vendActivos.delete('TODOS');vendActivos.has(v)?vendActivos.delete(v):vendActivos.add(v);if(!vendActivos.size)vendActivos.add('TODOS');}
+  const vn=normVend(v);
+  if(vn==='TODOS'||v==='TODOS'){vendActivos.clear();vendActivos.add('TODOS');}
+  else{vendActivos.delete('TODOS');vendActivos.has(vn)?vendActivos.delete(vn):vendActivos.add(vn);if(!vendActivos.size)vendActivos.add('TODOS');}
   renderApp();
 }
 function cambMes(d){
   mes+=d;if(mes<0){mes=11;anio--;}if(mes>11){mes=0;anio++;}
-  diasSel.clear();renderApp();
+  diasSel.clear();
+  // Si volvemos al mes actual, auto-seleccionar hoy
+  const hoy=new Date();
+  if(mes===hoy.getMonth()&&anio===hoy.getFullYear()) diasSel.add(hoyStr());
+  renderApp();
 }
 function selTodo(){const n=new Date(anio,mes+1,0).getDate();for(let d=1;d<=n;d++)diasSel.add(anio+'-'+String(mes+1).padStart(2,'0')+'-'+String(d).padStart(2,'0'));renderApp();}
 function deselTodo(){diasSel.clear();renderApp();}
