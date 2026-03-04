@@ -1,12 +1,13 @@
 // ======================
-// ALMACÉN COPIHUE - SISTEMA COMPLETO v5.5
-// v5.5: Hoja Proveedores → action=proveedores para leer/escribir desde el POS
+// ALMACÉN COPIHUE - SISTEMA COMPLETO v5.8
+// v5.8: Nueva hoja Ajuste_Rapido separada de Historial
 // ======================
 
 const SS_ID = '1hKeM-13t6wyGD5Ya4Rx9NeUJXsgJoVN4dOb-rklPznA';
 const HOJA_INVENTARIO = 'inventario';
 const HOJA_CONFIG     = 'config_sistema';
 const HOJA_HISTORIAL = 'Historial';
+const HOJA_AJUSTE_RAPIDO = 'Ajuste_Rapido';
 const HOJA_PROVEEDORES = 'Proveedores';
 const MP_ACCESS_TOKEN = 'APP_USR-5614141351834158-022520-6ad6dd5ed431ca58fa841bfd74f0945b-213611899';
 
@@ -316,6 +317,91 @@ function ingresarMercaderia(datos) {
     return { success: true, mensaje: mensaje, nuevoStock: nuevoStock };
   } catch (error) {
     console.error('Error ingresarMercaderia:', error);
+    return { success: false, mensaje: 'Error: ' + error.toString() };
+  }
+}
+
+// ========== AJUSTE RÁPIDO (hoja exclusiva Ajuste_Rapido) ==========
+// Solo edita stock, precio, nombre y categoría. NO toca Historial.
+function ajustarProducto(datos) {
+  try {
+    const ss = SpreadsheetApp.openById(SS_ID);
+    const sheetInventario = ss.getSheetByName(HOJA_INVENTARIO);
+
+    // Obtener o crear hoja Ajuste_Rapido
+    let sheetAjuste = ss.getSheetByName(HOJA_AJUSTE_RAPIDO);
+    if (!sheetAjuste) {
+      sheetAjuste = ss.insertSheet(HOJA_AJUSTE_RAPIDO);
+      // Encabezados
+      sheetAjuste.appendRow([
+        'FECHA', 'PRODUCTO', 'NOMBRE ANTES', 'NOMBRE DESPUÉS',
+        'STOCK ANTES', 'STOCK DESPUÉS', 'PRECIO ANTES', 'PRECIO DESPUÉS',
+        'CATEGORÍA ANTES', 'CATEGORÍA DESPUÉS', 'USUARIO'
+      ]);
+      // Formato encabezado
+      sheetAjuste.getRange(1, 1, 1, 11).setBackground('#37474f').setFontColor('white').setFontWeight('bold');
+    }
+
+    const producto = String(datos.producto || '').trim();
+    if (!producto) return { success: false, mensaje: 'Nombre de producto vacío' };
+
+    // Buscar producto en inventario
+    const datosInv = sheetInventario.getDataRange().getValues();
+    let filaProducto = -1;
+    let stockActual = 0, precioActual = 0, catActual = '', nombreActual = '';
+    const productoNorm = producto.toUpperCase().replace(/\s+/g, ' ');
+
+    for (let i = 1; i < datosInv.length; i++) {
+      if (!datosInv[i][0]) continue;
+      const nombreEnSheet = String(datosInv[i][0]).trim().toUpperCase().replace(/\s+/g, ' ');
+      if (nombreEnSheet === productoNorm) {
+        filaProducto = i + 1;
+        nombreActual = String(datosInv[i][0]).trim();
+        precioActual = Number(datosInv[i][1]) || 0;
+        catActual    = String(datosInv[i][2] || '').trim();
+        stockActual  = Number(datosInv[i][5]) || 0;
+        break;
+      }
+    }
+
+    if (filaProducto === -1) return { success: false, mensaje: 'Producto no encontrado: ' + producto };
+
+    const stockNuevo    = (datos.stockDespues !== undefined && datos.stockDespues !== null) ? Number(datos.stockDespues) : stockActual;
+    const precioNuevo   = datos.precioDespues ? Number(datos.precioDespues) : precioActual;
+    const nombreNuevo   = datos.nombreNuevo   ? String(datos.nombreNuevo).trim().toUpperCase() : nombreActual;
+    const catNueva      = datos.categoriaDespues ? String(datos.categoriaDespues).trim().toUpperCase() : catActual;
+
+    // Actualizar inventario
+    sheetInventario.getRange(filaProducto, 6).setValue(stockNuevo);
+    if (precioNuevo !== precioActual)   sheetInventario.getRange(filaProducto, 2).setValue(precioNuevo);
+    if (nombreNuevo !== nombreActual)   sheetInventario.getRange(filaProducto, 1).setValue(nombreNuevo);
+    if (catNueva    !== catActual)      sheetInventario.getRange(filaProducto, 3).setValue(catNueva);
+
+    // Registrar en hoja Ajuste_Rapido
+    const fecha = new Date();
+    sheetAjuste.appendRow([
+      fecha,
+      producto,
+      nombreActual,    nombreNuevo    !== nombreActual  ? nombreNuevo  : '',
+      stockActual,     stockNuevo,
+      precioActual,    precioNuevo    !== precioActual  ? precioNuevo  : '',
+      catActual,       catNueva       !== catActual     ? catNueva     : '',
+      'POS'
+    ]);
+
+    let cambios = [];
+    if (stockNuevo !== stockActual)  cambios.push('Stock: ' + stockActual + ' → ' + stockNuevo);
+    if (precioNuevo !== precioActual) cambios.push('Precio: $' + precioActual + ' → $' + precioNuevo);
+    if (nombreNuevo !== nombreActual) cambios.push('Nombre: ' + nombreActual + ' → ' + nombreNuevo);
+    if (catNueva !== catActual)       cambios.push('Categoría: ' + catActual + ' → ' + catNueva);
+
+    return {
+      success: true,
+      mensaje: '✅ Ajuste guardado\n' + cambios.join('\n'),
+      stockNuevo: stockNuevo
+    };
+  } catch (error) {
+    console.error('Error ajustarProducto:', error);
     return { success: false, mensaje: 'Error: ' + error.toString() };
   }
 }
@@ -704,6 +790,12 @@ function doGet(e) {
     if (e && e.parameter && e.parameter.action === 'ingresar') {
       const datos = JSON.parse(decodeURIComponent(e.parameter.data));
       return respuestaJSON(ingresarMercaderia(datos));
+    }
+
+    // ACCIÓN: AJUSTE RÁPIDO (stock, precio, nombre, categoría → hoja Ajuste_Rapido)
+    if (e && e.parameter && e.parameter.action === 'ajusteRapido') {
+      const datos = JSON.parse(decodeURIComponent(e.parameter.data));
+      return respuestaJSON(ajustarProducto(datos));
     }
 
     // ACCIÓN: CREAR ORDEN MP
