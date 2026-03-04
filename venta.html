@@ -755,7 +755,7 @@
 <div class="header" style="flex-direction:column;gap:6px;padding:8px 16px;">
     <div style="display:flex;align-items:center;justify-content:space-between;width:100%;">
         <div class="header-titulo">
-            🏪 Copihue<span id="versionTag" style="font-size:0.6rem;font-weight:400;opacity:0.3;margin-left:6px;letter-spacing:0;color:inherit">v82</span>
+            🏪 Copihue<span id="versionTag" style="font-size:0.6rem;font-weight:400;opacity:0.3;margin-left:6px;letter-spacing:0;color:inherit">v83</span>
             <div class="indicador-carga" id="indicadorCarga" title="Cargando..."></div>
         </div>
         <button class="btn-resumen" onclick="cambiarVendedor()" id="vendedorBadge"
@@ -797,7 +797,7 @@
         <a href="copihue-reportes.html" class="btn-resumen" title="Reportes" style="background:rgba(156,39,176,0.3);border-color:rgba(156,39,176,0.6);flex:1;text-align:center;text-decoration:none;display:flex;align-items:center;justify-content:center;">📈</a>
 
         <!-- POS 6: Horario — sin cambios -->
-        <a href="horario.html" class="btn-resumen" title="Mi horario" style="background:rgba(0,188,212,0.3);border-color:rgba(0,188,212,0.6);flex:1;text-align:center;text-decoration:none;display:flex;align-items:center;justify-content:center;">🕐</a>
+        <a href="horario.html?v=2" class="btn-resumen" title="Mi horario" style="background:rgba(0,188,212,0.3);border-color:rgba(0,188,212,0.6);flex:1;text-align:center;text-decoration:none;display:flex;align-items:center;justify-content:center;">🕐</a>
 
         <!-- POS 7: Config — sin cambios -->
         <button class="btn-resumen" onclick="abrirConfigProveedores()" title="Configuración proveedores" style="background:rgba(255,193,7,0.3);border-color:rgba(255,193,7,0.6);flex:1;text-align:center;">⚙️</button>
@@ -2984,13 +2984,17 @@ function agregarNotifPos(icono, titulo, detalle, color) {
 // Poner stock en 0 via API
 async function ponerStockEnCero(p) {
     try {
-        const datos = { producto: p.name, cantidad: -p.stock, stockDirecto: 0,
+        // cantidad: 0 para que no falle la validación; stockDirecto:0 es lo que manda
+        const datos = { producto: p.name, cantidad: 0, stockDirecto: 0,
                         precioVenta: null, precioCosto: null, proveedor: null, fechaVencimiento: null };
         const url = API_URL + '?action=ingresar&data=' + encodeURIComponent(JSON.stringify(datos));
-        const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(12000) });
+        const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
         const resp = await r.json();
         if (resp.success) { p.stock = 0; return true; }
-    } catch(e) {}
+        console.warn('⚠️ ponerStockEnCero falló:', resp.mensaje, '| producto:', p.name);
+    } catch(e) {
+        console.error('❌ ponerStockEnCero error:', e, '| producto:', p.name);
+    }
     return false;
 }
 
@@ -3027,10 +3031,17 @@ async function procesarVencidosDeAyer() {
         if (ok) nombresOk.push(prod.name);
     }
 
+    const nombresFail = pendientes.map(i => i.name).filter(n => !nombresOk.includes(n));
+
     if (nombresOk.length > 0) {
         agregarNotifPos('✅', 'Stock en 0 automático',
             'Retirados ayer: ' + nombresOk.join(', '), '#2e7d32');
-        renderVenta(); // refrescar vista
+        renderVenta();
+    }
+    if (nombresFail.length > 0) {
+        agregarNotifPos('⚠️', 'No se pudo poner en 0 automáticamente',
+            nombresFail.join(', ') + ' · Hacelo manualmente en la planilla', '#e65100');
+        console.warn('⚠️ Auto-zero falló para:', nombresFail);
     }
 }
 
