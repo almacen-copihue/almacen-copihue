@@ -651,6 +651,10 @@
             margin-top: 3px;
         }
         .vence-vencido { background: #d32f2f; color: white; animation: parpadeo 0.8s infinite; }
+        @keyframes slideUpNotif {
+            from { opacity: 0; transform: translateX(-50%) translateY(20px); }
+            to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
         .vence-hoy     { background: #ff6f00; color: white; animation: parpadeo 1s infinite; }
         .vence-pronto  { background: #fff176; color: #555; border: 1px solid #f9a825; }
         @keyframes parpadeo {
@@ -751,7 +755,7 @@
 <div class="header" style="flex-direction:column;gap:6px;padding:8px 16px;">
     <div style="display:flex;align-items:center;justify-content:space-between;width:100%;">
         <div class="header-titulo">
-            🏪 Copihue<span id="versionTag" style="font-size:0.6rem;font-weight:400;opacity:0.3;margin-left:6px;letter-spacing:0;color:inherit">v80</span>
+            🏪 Copihue<span id="versionTag" style="font-size:0.6rem;font-weight:400;opacity:0.3;margin-left:6px;letter-spacing:0;color:inherit">v81</span>
             <div class="indicador-carga" id="indicadorCarga" title="Cargando..."></div>
         </div>
         <button class="btn-resumen" onclick="cambiarVendedor()" id="vendedorBadge"
@@ -797,6 +801,18 @@
     <div class="items-venta" id="itemsVenta">
         <div class="venta-vacia">Sin productos aún</div>
     </div>
+</div>
+
+<!-- NOTIFICACIONES POS -->
+<div id="seccionNotifPos" style="display:none;margin:0 10px 8px;border-radius:14px;
+     background:#fff8e1;border:1.5px solid #ffe082;overflow:hidden;">
+    <div style="display:flex;align-items:center;justify-content:space-between;
+                padding:8px 14px;background:#fff3cd;border-bottom:1px solid #ffe082;">
+        <span style="font-weight:800;font-size:0.8rem;color:#f57f17;">🔔 Notificaciones del día</span>
+        <button onclick="document.getElementById('seccionNotifPos').style.display='none'"
+                style="background:none;border:none;color:#f57f17;cursor:pointer;font-size:1rem;">✕</button>
+    </div>
+    <div id="listaNotifPos" style="padding:8px 14px;max-height:140px;overflow-y:auto;"></div>
 </div>
 
 <!-- TOTAL + CONFIRMAR -->
@@ -1207,47 +1223,33 @@ function badgeStock(stock) {
 const API_URL = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
 
 // ========== CONFIG PROVEEDORES ==========
-// Fuente principal: planilla Google (action=getProveedores)
-// Respaldo: localStorage (funciona sin conexión)
-
-let configProveedores = []; // array de { nombre, telefono, mensaje, activo, stockMinimo }
+let configProveedores = [];
 const CONFIG_KEY = 'copihue_config_proveedores';
 
 async function cargarConfig() {
-    // 1. Cargar desde localStorage inmediatamente (para no bloquear)
     const guardado = localStorage.getItem(CONFIG_KEY);
-    if (guardado) {
-        try { configProveedores = JSON.parse(guardado); } catch(e) { configProveedores = []; }
-    }
-    // 2. Intentar traer de la planilla (fuente de verdad)
+    if (guardado) { try { configProveedores = JSON.parse(guardado); } catch(e) { configProveedores = []; } }
     try {
         const r = await fetch(API_URL + '?action=getProveedores', { signal: AbortSignal.timeout(8000) });
         const data = await r.json();
         if (data.success && Array.isArray(data.proveedores)) {
-            // Mezclar: preservar stockMinimo local (no existe en planilla)
+            const localArr = JSON.parse(guardado || '[]');
             configProveedores = data.proveedores.map(p => {
-                const local = (Array.isArray(guardado ? JSON.parse(guardado) : []) ? 
-                    (JSON.parse(guardado || '[]')).find(l => l.nombre === p.nombre) : null) || {};
-                return { ...p, stockMinimo: local.stockMinimo || 1 };
+                const local = Array.isArray(localArr) ? localArr.find(l => l.nombre === p.nombre) : null;
+                return { ...p, stockMinimo: (local && local.stockMinimo) || 1 };
             });
             localStorage.setItem(CONFIG_KEY, JSON.stringify(configProveedores));
-            console.log('✅ Proveedores cargados desde planilla:', configProveedores.length);
         }
-    } catch(e) {
-        console.warn('⚠️ No se pudo cargar proveedores de la planilla, usando caché local');
-    }
+    } catch(e) { console.warn('⚠️ Sin conexión, usando config local'); }
 }
 
-// Proveedor del panadero (primer activo con PAN en nombre o cualquier activo)
 function getProveedorPanadero() {
     if (!Array.isArray(configProveedores)) return null;
     return configProveedores.find(p => p.activo && p.nombre.includes('PANADERO')) ||
            configProveedores.find(p => p.activo && p.telefono);
 }
 
-function cerrarConfigProveedores() {
-    document.getElementById('modalConfigProveedores').style.display = 'none';
-}
+function cerrarConfigProveedores() { document.getElementById('modalConfigProveedores').style.display = 'none'; }
 
 function abrirConfigProveedores() {
     renderizarTablaProveedores();
@@ -1258,160 +1260,108 @@ function renderizarTablaProveedores() {
     const lista = Array.isArray(configProveedores) ? configProveedores : [];
     const contenedor = document.getElementById('cfgListaProveedores');
     if (!contenedor) return;
-
     if (lista.length === 0) {
-        contenedor.innerHTML = '<div style="text-align:center;color:#999;padding:20px;font-size:0.85rem;">Sin proveedores cargados aún.<br>Se cargan automáticamente desde la planilla.</div>';
+        contenedor.innerHTML = '<div style="text-align:center;color:#999;padding:20px;font-size:0.85rem;">Sin proveedores. Se cargan desde la planilla automáticamente.</div>';
         return;
     }
-
     contenedor.innerHTML = lista.map((p, idx) => `
         <div style="border:1.5px solid #eee;border-radius:12px;padding:12px 14px;margin-bottom:10px;background:${p.activo ? '#f9fff9' : '#fafafa'};">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-                <div style="font-weight:800;font-size:0.9rem;color:#212121;">${p.nombre}</div>
+                <div style="font-weight:800;font-size:0.9rem;">${p.nombre}</div>
                 <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
-                    <input type="checkbox" ${p.activo ? 'checked' : ''} onchange="toggleProveedorActivo(${idx}, this.checked)"
-                           style="width:16px;height:16px;">
-                    <span style="font-size:0.75rem;color:#555;">WhatsApp activo</span>
+                    <input type="checkbox" ${p.activo ? 'checked' : ''} onchange="editarProveedor(${idx},'activo',this.checked)" style="width:16px;height:16px;">
+                    <span style="font-size:0.75rem;color:#555;">WA activo</span>
                 </label>
             </div>
             <input type="tel" value="${p.telefono || ''}" placeholder="5491112345678"
-                   oninput="editarProveedor(${idx}, 'telefono', this.value)"
-                   style="width:100%;padding:7px 10px;border:1.5px solid #ddd;border-radius:8px;
-                          font-size:0.82rem;margin-bottom:6px;box-sizing:border-box;">
+                   oninput="editarProveedor(${idx},'telefono',this.value)"
+                   style="width:100%;padding:7px 10px;border:1.5px solid #ddd;border-radius:8px;font-size:0.82rem;margin-bottom:6px;box-sizing:border-box;">
             <input type="number" value="${p.stockMinimo || 1}" min="0" step="0.5" placeholder="Stock mínimo (kg)"
-                   oninput="editarProveedor(${idx}, 'stockMinimo', parseFloat(this.value)||1)"
-                   style="width:100%;padding:7px 10px;border:1.5px solid #ddd;border-radius:8px;
-                          font-size:0.82rem;margin-bottom:6px;box-sizing:border-box;">
+                   oninput="editarProveedor(${idx},'stockMinimo',parseFloat(this.value)||1)"
+                   style="width:100%;padding:7px 10px;border:1.5px solid #ddd;border-radius:8px;font-size:0.82rem;margin-bottom:6px;box-sizing:border-box;">
             <button onclick="probarWAProveedor(${idx})"
-                    style="width:100%;padding:7px;background:#e8f5e9;border:1.5px solid #a5d6a7;
-                           border-radius:8px;color:#2e7d32;font-weight:700;font-size:0.78rem;cursor:pointer;">
+                    style="width:100%;padding:7px;background:#e8f5e9;border:1.5px solid #a5d6a7;border-radius:8px;color:#2e7d32;font-weight:700;font-size:0.78rem;cursor:pointer;">
                 📲 Probar WhatsApp
             </button>
         </div>`).join('');
 }
 
 function editarProveedor(idx, campo, valor) {
-    if (Array.isArray(configProveedores) && configProveedores[idx]) {
-        configProveedores[idx][campo] = valor;
-    }
-}
-
-function toggleProveedorActivo(idx, activo) {
-    if (Array.isArray(configProveedores) && configProveedores[idx]) {
-        configProveedores[idx].activo = activo;
-    }
+    if (Array.isArray(configProveedores) && configProveedores[idx]) configProveedores[idx][campo] = valor;
 }
 
 function probarWAProveedor(idx) {
-    const p = configProveedores[idx];
-    if (!p) return;
+    const p = configProveedores[idx]; if (!p) return;
     const tel = (p.telefono || '').replace(/\D/g, '');
-    const msg = (p.mensaje || 'Hola {nombre}! 🛒 Te hago el pedido.')
-        .replace('{nombre}', p.nombre)
-        .replace('{cantidad}', '2')
-        .replace('{productos}', '- Pan: 2 kg');
-    window.open(tel ? 'https://wa.me/' + tel + '?text=' + encodeURIComponent(msg)
-                    : 'https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
+    const msg = (p.mensaje || 'Hola {nombre}! 🛒 Te hago el pedido.').replace('{nombre}', p.nombre).replace('{cantidad}', '2').replace('{productos}', '- Pan: 2 kg');
+    window.open(tel ? 'https://wa.me/' + tel + '?text=' + encodeURIComponent(msg) : 'https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
 }
 
 async function guardarConfigProveedores() {
-    // Guardar localmente
     localStorage.setItem(CONFIG_KEY, JSON.stringify(configProveedores));
-
-    // Sincronizar cada proveedor con la planilla
     let errores = 0;
     for (const p of configProveedores) {
         try {
-            const url = API_URL + '?action=guardarProveedor&data=' + encodeURIComponent(JSON.stringify(p));
-            const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+            const r = await fetch(API_URL + '?action=guardarProveedor&data=' + encodeURIComponent(JSON.stringify(p)), { signal: AbortSignal.timeout(8000) });
             const resp = await r.json();
             if (!resp.success) errores++;
         } catch(e) { errores++; }
     }
-
     cerrarConfigProveedores();
-    if (errores === 0) {
-        mostrarToast('✅ Proveedores guardados en planilla', 'verde');
-    } else {
-        mostrarToast('✅ Guardado local · ⚠️ ' + errores + ' sin sync (sin conexión)', 'naranja');
-    }
+    mostrarToast(errores === 0 ? '✅ Guardado en planilla' : '✅ Guardado local · ⚠️ sin sync', errores === 0 ? 'verde' : 'naranja');
 }
 
-// ── Stock total de pan ──────────────────────────────────────────────────────
+// Stock total de pan
 function calcularStockTotalPan() {
     if (!productos) return 0;
-    return productos
-        .filter(p => { const n = (p.name || '').toUpperCase(); return n.includes('PAN X KG') || n.includes('PAN KG'); })
-        .reduce((sum, p) => sum + (parseFloat(p.stock) || 0), 0);
+    return productos.filter(p => { const n=(p.name||'').toUpperCase(); return n.includes('PAN X KG')||n.includes('PAN KG'); })
+                    .reduce((s,p) => s + (parseFloat(p.stock)||0), 0);
 }
 
-// ── Sugerencia de pedido al terminar venta ──────────────────────────────────
+// Sugerencia pedido panadero
 function sugerirPedidoPanadero() {
-    const cfg = getProveedorPanadero();
-    if (!cfg) return;
+    const cfg = getProveedorPanadero(); if (!cfg) return;
     const stockPan = calcularStockTotalPan();
     if (stockPan > (cfg.stockMinimo || 1)) return;
     const hoyKey = new Date().toISOString().split('T')[0];
     if (localStorage.getItem('pedido_panadero_sugerido_' + hoyKey)) return;
     if (document.getElementById('sugerenciaPanadero')) return;
-
     const notif = document.createElement('div');
     notif.id = 'sugerenciaPanadero';
-    notif.innerHTML = `
-        <div style="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);
-                    background:#4e342e;color:white;border-radius:16px;padding:14px 18px;
-                    z-index:9500;box-shadow:0 4px 24px rgba(0,0,0,0.4);
-                    max-width:340px;width:92%;animation:slideUpNotif 0.35s ease;">
-            <div style="display:flex;align-items:center;gap:10px;">
-                <span style="font-size:1.6rem;">🍞</span>
-                <div style="flex:1;">
-                    <div style="font-weight:800;font-size:0.9rem;margin-bottom:2px;">
-                        ¡Stock bajo de pan! (${stockPan.toFixed(2)} kg)
-                    </div>
-                    <div style="font-size:0.75rem;opacity:0.85;">¿Hacés el pedido al panadero?</div>
-                </div>
-                <button onclick="document.getElementById('sugerenciaPanadero').remove()"
-                        style="background:rgba(255,255,255,0.15);border:none;border-radius:50%;
-                               width:26px;height:26px;color:white;cursor:pointer;font-size:0.85rem;
-                               display:flex;align-items:center;justify-content:center;flex-shrink:0;">✕</button>
+    notif.innerHTML = `<div style="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);
+        background:#4e342e;color:white;border-radius:16px;padding:14px 18px;z-index:9500;
+        box-shadow:0 4px 24px rgba(0,0,0,0.4);max-width:340px;width:92%;animation:slideUpNotif 0.35s ease;">
+        <div style="display:flex;align-items:center;gap:10px;">
+            <span style="font-size:1.6rem;">🍞</span>
+            <div style="flex:1;">
+                <div style="font-weight:800;font-size:0.9rem;margin-bottom:2px;">¡Stock bajo de pan! (${stockPan.toFixed(2)} kg)</div>
+                <div style="font-size:0.75rem;opacity:0.85;">¿Hacés el pedido al panadero?</div>
             </div>
-            <div style="display:flex;gap:8px;margin-top:10px;">
-                <button onclick="enviarPedidoPanadero()"
-                        style="flex:1;background:#25D366;border:none;border-radius:10px;padding:9px;
-                               color:white;font-weight:800;font-size:0.82rem;cursor:pointer;">
-                    📲 Pedir por WhatsApp
-                </button>
-                <button onclick="posponerPedidoPanadero()"
-                        style="flex:1;background:rgba(255,255,255,0.15);border:none;border-radius:10px;
-                               padding:9px;color:white;font-weight:600;font-size:0.82rem;cursor:pointer;">
-                    Hoy no
-                </button>
-            </div>
-        </div>`;
+            <button onclick="document.getElementById('sugerenciaPanadero').remove()"
+                    style="background:rgba(255,255,255,0.15);border:none;border-radius:50%;width:26px;height:26px;color:white;cursor:pointer;font-size:0.85rem;display:flex;align-items:center;justify-content:center;flex-shrink:0;">✕</button>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:10px;">
+            <button onclick="enviarPedidoPanadero()" style="flex:1;background:#25D366;border:none;border-radius:10px;padding:9px;color:white;font-weight:800;font-size:0.82rem;cursor:pointer;">📲 Pedir por WhatsApp</button>
+            <button onclick="posponerPedidoPanadero()" style="flex:1;background:rgba(255,255,255,0.15);border:none;border-radius:10px;padding:9px;color:white;font-weight:600;font-size:0.82rem;cursor:pointer;">Hoy no</button>
+        </div></div>`;
     document.body.appendChild(notif);
 }
 
 function posponerPedidoPanadero() {
     localStorage.setItem('pedido_panadero_sugerido_' + new Date().toISOString().split('T')[0], '1');
-    const n = document.getElementById('sugerenciaPanadero');
-    if (n) n.remove();
+    const n = document.getElementById('sugerenciaPanadero'); if (n) n.remove();
 }
 
 function enviarPedidoPanadero() {
-    const cfg = getProveedorPanadero();
-    if (!cfg) return;
+    const cfg = getProveedorPanadero(); if (!cfg) return;
     const stockPan = calcularStockTotalPan();
-    const cantidadSugerida = Math.max(1, Math.ceil(((cfg.stockMinimo || 1) * 2) - stockPan));
+    const cant = Math.max(1, Math.ceil(((cfg.stockMinimo||1)*2) - stockPan));
     const msg = (cfg.mensaje || 'Hola {nombre}! 🍞 Te pido {cantidad} kg de pan. ¡Gracias!')
-        .replace('{nombre}', cfg.nombre)
-        .replace('{cantidad}', cantidadSugerida)
-        .replace('{productos}', '- Pan: ' + cantidadSugerida + ' kg');
+        .replace('{nombre}', cfg.nombre).replace('{cantidad}', cant).replace('{productos}', '- Pan: ' + cant + ' kg');
     const tel = (cfg.telefono || '').replace(/\D/g, '');
     localStorage.setItem('pedido_panadero_sugerido_' + new Date().toISOString().split('T')[0], '1');
-    const n = document.getElementById('sugerenciaPanadero');
-    if (n) n.remove();
-    window.open(tel ? 'https://wa.me/' + tel + '?text=' + encodeURIComponent(msg)
-                    : 'https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
+    const n = document.getElementById('sugerenciaPanadero'); if (n) n.remove();
+    window.open(tel ? 'https://wa.me/'+tel+'?text='+encodeURIComponent(msg) : 'https://wa.me/?text='+encodeURIComponent(msg), '_blank');
     if (!tel) mostrarToast('⚠️ Agregá el teléfono en ⚙️ Configuración', 'naranja');
 }
 
@@ -1463,6 +1413,7 @@ async function cargarProductos() {
         console.log(`✅ ${productos.length} productos cargados`);
         // Alertas del día al terminar de cargar
         setTimeout(alertarVencidosHoy, 500);
+        setTimeout(procesarVencidosDeAyer, 1500); // auto-zero stock confirmados ayer
         setTimeout(verificarAlertasDelDia, 800);
         programarRecordatorioCierre();
         // Sugerencia relámpago (después de alertas)
@@ -1859,7 +1810,6 @@ async function confirmarVenta() {
     if (btnCancelar) { btnCancelar.textContent = 'Cerrar'; btnCancelar.onclick = () => { cerrarConfirm(); }; }
 
     mostrarToast(stockOk ? '✅ Venta confirmada' : '✅ Venta registrada (stock manual)', 'verde');
-    // Sugerir pedido al panadero si el stock bajó del mínimo
     setTimeout(sugerirPedidoPanadero, 1200);
 }
 
@@ -2978,36 +2928,116 @@ function cambiarVendedor() {
 }
 
 // ========== ALERTAS DEL DIA ==========
+
+function claveVencidosConfirmados(fechaStr) { return 'vencidos_confirmados_' + fechaStr; }
+function claveVencidosAutoZero(fechaStr)     { return 'vencidos_autozero_' + fechaStr; }
+
+// Agregar notificación a la sección del POS (no bloqueante)
+function agregarNotifPos(icono, titulo, detalle, color) {
+    const sec = document.getElementById('seccionNotifPos');
+    const lista = document.getElementById('listaNotifPos');
+    if (!sec || !lista) return;
+    const item = document.createElement('div');
+    item.style.cssText = 'display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid #ffe082;font-size:0.78rem;';
+    item.innerHTML = `<span style="font-size:1.1rem;flex-shrink:0;">${icono}</span>
+        <div><div style="font-weight:700;color:${color};">${titulo}</div>
+        <div style="color:#555;margin-top:1px;">${detalle}</div></div>`;
+    lista.appendChild(item);
+    sec.style.display = 'block';
+}
+
+// Poner stock en 0 via API
+async function ponerStockEnCero(p) {
+    try {
+        const datos = { producto: p.name, cantidad: -p.stock, stockDirecto: 0,
+                        precioVenta: null, precioCosto: null, proveedor: null, fechaVencimiento: null };
+        const url = API_URL + '?action=ingresar&data=' + encodeURIComponent(JSON.stringify(datos));
+        const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(12000) });
+        const resp = await r.json();
+        if (resp.success) { p.stock = 0; return true; }
+    } catch(e) {}
+    return false;
+}
+
+// Al día siguiente: auto-poner en 0 los confirmados ayer
+async function procesarVencidosDeAyer() {
+    const hoy = new Date(); hoy.setHours(0,0,0,0);
+    const ayer = new Date(hoy); ayer.setDate(ayer.getDate() - 1);
+    const ayerKey = ayer.toISOString().split('T')[0];
+    const hoyKey  = hoy.toISOString().split('T')[0];
+
+    if (localStorage.getItem(claveVencidosAutoZero(hoyKey))) return;
+
+    const raw = localStorage.getItem(claveVencidosConfirmados(ayerKey));
+    if (!raw) return;
+
+    let confirmadosAyer;
+    try { confirmadosAyer = JSON.parse(raw); } catch(e) { return; }
+    if (!confirmadosAyer || confirmadosAyer.length === 0) return;
+
+    const pendientes = confirmadosAyer.filter(item => {
+        const prod = productos.find(p => p.id === item.id);
+        return prod && prod.stock > 0;
+    });
+
+    localStorage.setItem(claveVencidosAutoZero(hoyKey), '1');
+
+    if (pendientes.length === 0) return;
+
+    const nombresOk = [];
+    for (const item of pendientes) {
+        const prod = productos.find(p => p.id === item.id);
+        if (!prod) continue;
+        const ok = await ponerStockEnCero(prod);
+        if (ok) nombresOk.push(prod.name);
+    }
+
+    if (nombresOk.length > 0) {
+        agregarNotifPos('✅', 'Stock en 0 automático',
+            'Retirados ayer: ' + nombresOk.join(', '), '#2e7d32');
+        renderVenta(); // refrescar vista
+    }
+}
+
 function alertarVencidosHoy() {
     if (!productos || productos.length === 0) return;
-    const hoy = new Date();
-    hoy.setHours(0,0,0,0);
+    const hoy = new Date(); hoy.setHours(0,0,0,0);
+    const hoyKey = hoy.toISOString().split('T')[0];
+
+    // ¿Ya confirmó hoy? → solo mostrar en notificaciones, NO el modal
+    if (localStorage.getItem(claveVencidosConfirmados(hoyKey))) {
+        // Mostrar recordatorio suave en sección notificaciones
+        const raw = localStorage.getItem(claveVencidosConfirmados(hoyKey));
+        try {
+            const confirmados = JSON.parse(raw);
+            if (confirmados && confirmados.length > 0) {
+                agregarNotifPos('🔴', 'Productos vencidos confirmados',
+                    confirmados.map(p => p.name).join(', ') + ' · Stock se pondrá en 0 mañana',
+                    '#c62828');
+            }
+        } catch(e) {}
+        return; // NO mostrar modal
+    }
 
     const vencidosHoy = productos.filter(p => {
         if (!p.vencimiento || p.stock <= 0) return false;
-        const vence = new Date(p.vencimiento);
+        const partes = p.vencimiento.split('-');
+        const vence = new Date(parseInt(partes[0]), parseInt(partes[1])-1, parseInt(partes[2]));
         vence.setHours(0,0,0,0);
-        return vence < hoy; // vencido = solo días ANTERIORES a hoy
+        return vence < hoy;
     });
 
     if (vencidosHoy.length === 0) return;
 
-    const lista = vencidosHoy.map(p => {
-        const vence = new Date(p.vencimiento);
-        vence.setHours(0,0,0,0);
-        const esHoy = vence.getTime() === hoy.getTime();
-        const label = esHoy ? '⚠️ Vence HOY' : '💀 VENCIDO';
-        const color = esHoy ? '#e65100' : '#c62828';
-        return `<div style="display:flex;justify-content:space-between;align-items:center;
-                            padding:10px 0;border-bottom:1px solid #ffcdd2;">
-                    <div>
-                        <div style="font-weight:700;font-size:0.9rem;color:#212121;">${p.name}</div>
-                        <div style="font-size:0.78rem;margin-top:2px;">${badgeStock(p.stock)}</div>
-                    </div>
-                    <span style="color:${color};font-weight:900;font-size:0.82rem;
-                                 white-space:nowrap;margin-left:10px;">${label}</span>
-                </div>`;
-    }).join('');
+    const lista = vencidosHoy.map(p => `
+        <div style="display:flex;justify-content:space-between;align-items:center;
+                    padding:10px 0;border-bottom:1px solid #ffcdd2;">
+            <div>
+                <div style="font-weight:700;font-size:0.9rem;color:#212121;">${p.name}</div>
+                <div style="font-size:0.78rem;margin-top:2px;">${badgeStock(p.stock)}</div>
+            </div>
+            <span style="color:#c62828;font-weight:900;font-size:0.82rem;white-space:nowrap;margin-left:10px;">💀 VENCIDO</span>
+        </div>`).join('');
 
     const overlay = document.createElement('div');
     overlay.id = 'modalVencidosHoy';
@@ -3028,7 +3058,7 @@ function alertarVencidosHoy() {
                     ${lista}
                 </div>
                 <div style="padding:16px 20px;border-top:1px solid #ffcdd2;">
-                    <button onclick="document.getElementById('modalVencidosHoy').remove()"
+                    <button onclick="confirmarVencidosRetirados()"
                             style="width:100%;padding:14px;border:none;border-radius:12px;
                                    background:linear-gradient(135deg,#b71c1c,#e53935);
                                    color:white;font-size:1rem;font-weight:900;cursor:pointer;">
@@ -3038,6 +3068,31 @@ function alertarVencidosHoy() {
             </div>
         </div>`;
     document.body.appendChild(overlay);
+}
+
+function confirmarVencidosRetirados() {
+    const hoy = new Date(); hoy.setHours(0,0,0,0);
+    const hoyKey = hoy.toISOString().split('T')[0];
+
+    const vencidos = productos.filter(p => {
+        if (!p.vencimiento || p.stock <= 0) return false;
+        const partes = p.vencimiento.split('-');
+        const vence = new Date(parseInt(partes[0]), parseInt(partes[1])-1, parseInt(partes[2]));
+        vence.setHours(0,0,0,0);
+        return vence < hoy;
+    }).map(p => ({ id: p.id, name: p.name }));
+
+    localStorage.setItem(claveVencidosConfirmados(hoyKey), JSON.stringify(vencidos));
+
+    const modal = document.getElementById('modalVencidosHoy');
+    if (modal) modal.remove();
+
+    // Agregar a notificaciones del POS
+    agregarNotifPos('🔴', 'Productos vencidos confirmados',
+        vencidos.map(p => p.name).join(', ') + ' · Stock se pondrá en 0 mañana automáticamente',
+        '#c62828');
+
+    mostrarToast('✅ Confirmado — mañana el stock se pone en 0 automáticamente', 'verde');
 }
 
 function verificarAlertasDelDia() {
@@ -3473,9 +3528,9 @@ async function verificarOfertasAutomaticas() {
 function diasParaVencer(fechaStr) {
     if (!fechaStr) return null;
     try {
-        const hoy = new Date();
-        hoy.setHours(0,0,0,0);
-        const vence = new Date(fechaStr);
+        const hoy = new Date(); hoy.setHours(0,0,0,0);
+        const partes = fechaStr.split('-');
+        const vence = new Date(parseInt(partes[0]), parseInt(partes[1])-1, parseInt(partes[2]));
         vence.setHours(0,0,0,0);
         return Math.round((vence - hoy) / 86400000);
     } catch(e) { return null; }
@@ -3509,7 +3564,7 @@ if ('serviceWorker' in navigator) {
 
 // ========== INIT ==========
 inicializarVendedor();
-cargarConfig(); // async — carga proveedores desde planilla con fallback localStorage
+cargarConfig();
 cargarProductos().then(() => {
     // Primero verificar si hay venta pendiente y recuperarla silenciosamente
     const guardado = localStorage.getItem(CARRITO_KEY);
@@ -3587,34 +3642,21 @@ cargarProductos().then(() => {
 <div id="modalConfigProveedores" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);
      z-index:9990;align-items:center;justify-content:center;padding:20px;"
      onclick="if(event.target===this)cerrarConfigProveedores()">
-    <div style="background:white;border-radius:20px;width:100%;max-width:400px;overflow:hidden;
-                box-shadow:0 8px 32px rgba(0,0,0,0.4);">
-        <div style="background:linear-gradient(135deg,#f57f17,#fbc02d);padding:16px 20px;
-                    display:flex;align-items:center;justify-content:space-between;">
-            <div style="color:white;font-weight:900;font-size:1rem;">⚙️ Configuración</div>
-            <button onclick="cerrarConfigProveedores()"
-                    style="background:rgba(255,255,255,0.25);border:none;border-radius:50%;
-                           width:30px;height:30px;color:white;cursor:pointer;font-size:1rem;">✕</button>
+    <div style="background:white;border-radius:20px;width:100%;max-width:400px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.4);">
+        <div style="background:linear-gradient(135deg,#f57f17,#fbc02d);padding:16px 20px;display:flex;align-items:center;justify-content:space-between;">
+            <div style="color:white;font-weight:900;font-size:1rem;">⚙️ Proveedores</div>
+            <button onclick="cerrarConfigProveedores()" style="background:rgba(255,255,255,0.25);border:none;border-radius:50%;width:30px;height:30px;color:white;cursor:pointer;font-size:1rem;">✕</button>
         </div>
-        <div style="padding:18px 20px;overflow-y:auto;max-height:70vh;">
-
-            <!-- Lista dinámica de proveedores desde planilla -->
+        <div style="padding:14px 16px;overflow-y:auto;max-height:65vh;">
             <div style="font-size:0.72rem;color:#999;margin-bottom:10px;line-height:1.4;">
-                Los proveedores se cargan desde la planilla Google automáticamente.<br>
-                Activá el WhatsApp y completá el teléfono para los que uses.
-                <span style="font-weight:700;color:#f57f17;"> {nombre} = nombre del proveedor · {cantidad} = cantidad sugerida</span>
+                Proveedores desde la planilla. Activá los que usan WhatsApp y completá el teléfono.<br>
+                <span style="color:#f57f17;font-weight:700;">{nombre}</span> = nombre · <span style="color:#f57f17;font-weight:700;">{cantidad}</span> = cantidad sugerida
             </div>
-            <div id="cfgListaProveedores">
-                <div style="text-align:center;color:#bbb;padding:20px;font-size:0.85rem;">Cargando...</div>
-            </div>
+            <div id="cfgListaProveedores"><div style="text-align:center;color:#bbb;padding:20px;font-size:0.85rem;">Cargando...</div></div>
         </div>
-
-        <div style="padding:14px 20px;border-top:1px solid #eee;">
-            <button onclick="guardarConfigProveedores()"
-                    style="width:100%;padding:13px;background:linear-gradient(135deg,#f57f17,#fbc02d);
-                           border:none;border-radius:12px;color:white;font-size:1rem;
-                           font-weight:900;cursor:pointer;">
-                💾 Guardar
+        <div style="padding:14px 16px;border-top:1px solid #eee;">
+            <button onclick="guardarConfigProveedores()" style="width:100%;padding:13px;background:linear-gradient(135deg,#f57f17,#fbc02d);border:none;border-radius:12px;color:white;font-size:1rem;font-weight:900;cursor:pointer;">
+                💾 Guardar en planilla
             </button>
         </div>
     </div>
