@@ -751,7 +751,7 @@
 <div class="header" style="flex-direction:column;gap:6px;padding:8px 16px;">
     <div style="display:flex;align-items:center;justify-content:space-between;width:100%;">
         <div class="header-titulo">
-            🏪 Copihue<span id="versionTag" style="font-size:0.6rem;font-weight:400;opacity:0.3;margin-left:6px;letter-spacing:0;color:inherit">v79</span>
+            🏪 Copihue<span id="versionTag" style="font-size:0.6rem;font-weight:400;opacity:0.3;margin-left:6px;letter-spacing:0;color:inherit">v80</span>
             <div class="indicador-carga" id="indicadorCarga" title="Cargando..."></div>
         </div>
         <button class="btn-resumen" onclick="cambiarVendedor()" id="vendedorBadge"
@@ -1207,94 +1207,153 @@ function badgeStock(stock) {
 const API_URL = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
 
 // ========== CONFIG PROVEEDORES ==========
-let configProveedores = null;
+// Fuente principal: planilla Google (action=getProveedores)
+// Respaldo: localStorage (funciona sin conexión)
+
+let configProveedores = []; // array de { nombre, telefono, mensaje, activo, stockMinimo }
 const CONFIG_KEY = 'copihue_config_proveedores';
 
-function cargarConfig() {
+async function cargarConfig() {
+    // 1. Cargar desde localStorage inmediatamente (para no bloquear)
     const guardado = localStorage.getItem(CONFIG_KEY);
     if (guardado) {
-        try { configProveedores = JSON.parse(guardado); return; } catch(e) {}
+        try { configProveedores = JSON.parse(guardado); } catch(e) { configProveedores = []; }
     }
-    // Valores por defecto primera vez
-    configProveedores = {
-        panadero: {
-            nombre: 'Panadero',
-            telefono: '',
-            mensaje: 'Hola {nombre}! 🍞 Te hago el pedido para hoy:\n\n🔸 Pan: {cantidad} kg\n\nQuedo atento. ¡Gracias!',
-            stockMinimo: 1,
-            activo: true
+    // 2. Intentar traer de la planilla (fuente de verdad)
+    try {
+        const r = await fetch(API_URL + '?action=getProveedores', { signal: AbortSignal.timeout(8000) });
+        const data = await r.json();
+        if (data.success && Array.isArray(data.proveedores)) {
+            // Mezclar: preservar stockMinimo local (no existe en planilla)
+            configProveedores = data.proveedores.map(p => {
+                const local = (Array.isArray(guardado ? JSON.parse(guardado) : []) ? 
+                    (JSON.parse(guardado || '[]')).find(l => l.nombre === p.nombre) : null) || {};
+                return { ...p, stockMinimo: local.stockMinimo || 1 };
+            });
+            localStorage.setItem(CONFIG_KEY, JSON.stringify(configProveedores));
+            console.log('✅ Proveedores cargados desde planilla:', configProveedores.length);
         }
-    };
-    console.log('✅ Config proveedores iniciada con valores por defecto');
+    } catch(e) {
+        console.warn('⚠️ No se pudo cargar proveedores de la planilla, usando caché local');
+    }
 }
 
-function abrirConfigProveedores() {
-    const cfg = (configProveedores && configProveedores.panadero) || {};
-    document.getElementById('cfgPanNombre').value    = cfg.nombre    || '';
-    document.getElementById('cfgPanTelefono').value  = cfg.telefono  || '';
-    document.getElementById('cfgPanStock').value     = cfg.stockMinimo !== undefined ? cfg.stockMinimo : 1;
-    document.getElementById('cfgPanMensaje').value   = cfg.mensaje   || '';
-    document.getElementById('cfgPanActivo').checked  = cfg.activo !== false;
-    document.getElementById('modalConfigProveedores').style.display = 'flex';
+// Proveedor del panadero (primer activo con PAN en nombre o cualquier activo)
+function getProveedorPanadero() {
+    if (!Array.isArray(configProveedores)) return null;
+    return configProveedores.find(p => p.activo && p.nombre.includes('PANADERO')) ||
+           configProveedores.find(p => p.activo && p.telefono);
 }
 
 function cerrarConfigProveedores() {
     document.getElementById('modalConfigProveedores').style.display = 'none';
 }
 
-function guardarConfigProveedores() {
-    if (!configProveedores) configProveedores = {};
-    configProveedores.panadero = {
-        nombre:      document.getElementById('cfgPanNombre').value.trim() || 'Panadero',
-        telefono:    document.getElementById('cfgPanTelefono').value.replace(/\D/g, ''),
-        stockMinimo: parseFloat(document.getElementById('cfgPanStock').value) || 1,
-        mensaje:     document.getElementById('cfgPanMensaje').value.trim() ||
-                     'Hola {nombre}! 🍞 Te pido {cantidad} kg de pan. ¡Gracias!',
-        activo:      document.getElementById('cfgPanActivo').checked
-    };
+function abrirConfigProveedores() {
+    renderizarTablaProveedores();
+    document.getElementById('modalConfigProveedores').style.display = 'flex';
+}
+
+function renderizarTablaProveedores() {
+    const lista = Array.isArray(configProveedores) ? configProveedores : [];
+    const contenedor = document.getElementById('cfgListaProveedores');
+    if (!contenedor) return;
+
+    if (lista.length === 0) {
+        contenedor.innerHTML = '<div style="text-align:center;color:#999;padding:20px;font-size:0.85rem;">Sin proveedores cargados aún.<br>Se cargan automáticamente desde la planilla.</div>';
+        return;
+    }
+
+    contenedor.innerHTML = lista.map((p, idx) => `
+        <div style="border:1.5px solid #eee;border-radius:12px;padding:12px 14px;margin-bottom:10px;background:${p.activo ? '#f9fff9' : '#fafafa'};">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                <div style="font-weight:800;font-size:0.9rem;color:#212121;">${p.nombre}</div>
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                    <input type="checkbox" ${p.activo ? 'checked' : ''} onchange="toggleProveedorActivo(${idx}, this.checked)"
+                           style="width:16px;height:16px;">
+                    <span style="font-size:0.75rem;color:#555;">WhatsApp activo</span>
+                </label>
+            </div>
+            <input type="tel" value="${p.telefono || ''}" placeholder="5491112345678"
+                   oninput="editarProveedor(${idx}, 'telefono', this.value)"
+                   style="width:100%;padding:7px 10px;border:1.5px solid #ddd;border-radius:8px;
+                          font-size:0.82rem;margin-bottom:6px;box-sizing:border-box;">
+            <input type="number" value="${p.stockMinimo || 1}" min="0" step="0.5" placeholder="Stock mínimo (kg)"
+                   oninput="editarProveedor(${idx}, 'stockMinimo', parseFloat(this.value)||1)"
+                   style="width:100%;padding:7px 10px;border:1.5px solid #ddd;border-radius:8px;
+                          font-size:0.82rem;margin-bottom:6px;box-sizing:border-box;">
+            <button onclick="probarWAProveedor(${idx})"
+                    style="width:100%;padding:7px;background:#e8f5e9;border:1.5px solid #a5d6a7;
+                           border-radius:8px;color:#2e7d32;font-weight:700;font-size:0.78rem;cursor:pointer;">
+                📲 Probar WhatsApp
+            </button>
+        </div>`).join('');
+}
+
+function editarProveedor(idx, campo, valor) {
+    if (Array.isArray(configProveedores) && configProveedores[idx]) {
+        configProveedores[idx][campo] = valor;
+    }
+}
+
+function toggleProveedorActivo(idx, activo) {
+    if (Array.isArray(configProveedores) && configProveedores[idx]) {
+        configProveedores[idx].activo = activo;
+    }
+}
+
+function probarWAProveedor(idx) {
+    const p = configProveedores[idx];
+    if (!p) return;
+    const tel = (p.telefono || '').replace(/\D/g, '');
+    const msg = (p.mensaje || 'Hola {nombre}! 🛒 Te hago el pedido.')
+        .replace('{nombre}', p.nombre)
+        .replace('{cantidad}', '2')
+        .replace('{productos}', '- Pan: 2 kg');
+    window.open(tel ? 'https://wa.me/' + tel + '?text=' + encodeURIComponent(msg)
+                    : 'https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
+}
+
+async function guardarConfigProveedores() {
+    // Guardar localmente
     localStorage.setItem(CONFIG_KEY, JSON.stringify(configProveedores));
+
+    // Sincronizar cada proveedor con la planilla
+    let errores = 0;
+    for (const p of configProveedores) {
+        try {
+            const url = API_URL + '?action=guardarProveedor&data=' + encodeURIComponent(JSON.stringify(p));
+            const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+            const resp = await r.json();
+            if (!resp.success) errores++;
+        } catch(e) { errores++; }
+    }
+
     cerrarConfigProveedores();
-    mostrarToast('✅ Configuración guardada', 'verde');
+    if (errores === 0) {
+        mostrarToast('✅ Proveedores guardados en planilla', 'verde');
+    } else {
+        mostrarToast('✅ Guardado local · ⚠️ ' + errores + ' sin sync (sin conexión)', 'naranja');
+    }
 }
 
-function probarWAPanadero() {
-    const cfg = configProveedores && configProveedores.panadero;
-    if (!cfg) return;
-    const tel = (cfg.telefono || '').replace(/\D/g, '');
-    const msg = (cfg.mensaje || 'Hola {nombre}! Pedido de pan.')
-        .replace('{nombre}', cfg.nombre || 'Panadero')
-        .replace('{cantidad}', '2');
-    const encoded = encodeURIComponent(msg);
-    window.open(tel ? 'https://wa.me/' + tel + '?text=' + encoded : 'https://wa.me/?text=' + encoded, '_blank');
-}
-
-// Calcular stock total de pan (todos los productos que empiezan con PAN X KG)
+// ── Stock total de pan ──────────────────────────────────────────────────────
 function calcularStockTotalPan() {
     if (!productos) return 0;
     return productos
-        .filter(p => {
-            const n = (p.name || '').toUpperCase();
-            return n.includes('PAN X KG') || n.includes('PAN KG');
-        })
+        .filter(p => { const n = (p.name || '').toUpperCase(); return n.includes('PAN X KG') || n.includes('PAN KG'); })
         .reduce((sum, p) => sum + (parseFloat(p.stock) || 0), 0);
 }
 
-// Mostrar sugerencia de pedido al panadero
+// ── Sugerencia de pedido al terminar venta ──────────────────────────────────
 function sugerirPedidoPanadero() {
-    if (!configProveedores || !configProveedores.panadero) return;
-    const cfg = configProveedores.panadero;
-    if (!cfg.activo) return;
-
+    const cfg = getProveedorPanadero();
+    if (!cfg) return;
     const stockPan = calcularStockTotalPan();
-    if (stockPan > cfg.stockMinimo) return;
-
-    // ¿Ya sugerimos hoy?
+    if (stockPan > (cfg.stockMinimo || 1)) return;
     const hoyKey = new Date().toISOString().split('T')[0];
     if (localStorage.getItem('pedido_panadero_sugerido_' + hoyKey)) return;
-
-    // Mostrar notificación tipo toast interactivo
-    const existente = document.getElementById('sugerenciaPanadero');
-    if (existente) return;
+    if (document.getElementById('sugerenciaPanadero')) return;
 
     const notif = document.createElement('div');
     notif.id = 'sugerenciaPanadero';
@@ -1333,40 +1392,27 @@ function sugerirPedidoPanadero() {
 }
 
 function posponerPedidoPanadero() {
-    const hoyKey = new Date().toISOString().split('T')[0];
-    localStorage.setItem('pedido_panadero_sugerido_' + hoyKey, '1');
+    localStorage.setItem('pedido_panadero_sugerido_' + new Date().toISOString().split('T')[0], '1');
     const n = document.getElementById('sugerenciaPanadero');
     if (n) n.remove();
 }
 
 function enviarPedidoPanadero() {
-    const cfg = configProveedores && configProveedores.panadero;
+    const cfg = getProveedorPanadero();
     if (!cfg) return;
-
     const stockPan = calcularStockTotalPan();
-    // Sugerir pedir el doble del stock mínimo (2 kg) menos lo que hay
-    const cantidadSugerida = Math.max(1, Math.ceil((cfg.stockMinimo * 2) - stockPan));
-
-    let msg = cfg.mensaje
+    const cantidadSugerida = Math.max(1, Math.ceil(((cfg.stockMinimo || 1) * 2) - stockPan));
+    const msg = (cfg.mensaje || 'Hola {nombre}! 🍞 Te pido {cantidad} kg de pan. ¡Gracias!')
         .replace('{nombre}', cfg.nombre)
-        .replace('{cantidad}', cantidadSugerida);
-
+        .replace('{cantidad}', cantidadSugerida)
+        .replace('{productos}', '- Pan: ' + cantidadSugerida + ' kg');
     const tel = (cfg.telefono || '').replace(/\D/g, '');
-    const encoded = encodeURIComponent(msg);
-
-    const hoyKey = new Date().toISOString().split('T')[0];
-    localStorage.setItem('pedido_panadero_sugerido_' + hoyKey, '1');
-
+    localStorage.setItem('pedido_panadero_sugerido_' + new Date().toISOString().split('T')[0], '1');
     const n = document.getElementById('sugerenciaPanadero');
     if (n) n.remove();
-
-    if (tel) {
-        window.open('https://wa.me/' + tel + '?text=' + encoded, '_blank');
-    } else {
-        // Sin número: abrir WhatsApp con texto para elegir contacto
-        window.open('https://wa.me/?text=' + encoded, '_blank');
-        mostrarToast('⚠️ Configurá el número del panadero en config.json', 'naranja');
-    }
+    window.open(tel ? 'https://wa.me/' + tel + '?text=' + encodeURIComponent(msg)
+                    : 'https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
+    if (!tel) mostrarToast('⚠️ Agregá el teléfono en ⚙️ Configuración', 'naranja');
 }
 
 let productos = [];
@@ -3463,7 +3509,7 @@ if ('serviceWorker' in navigator) {
 
 // ========== INIT ==========
 inicializarVendedor();
-cargarConfig(); // cargar config proveedores (panadero, etc.)
+cargarConfig(); // async — carga proveedores desde planilla con fallback localStorage
 cargarProductos().then(() => {
     // Primero verificar si hay venta pendiente y recuperarla silenciosamente
     const guardado = localStorage.getItem(CARRITO_KEY);
@@ -3552,57 +3598,15 @@ cargarProductos().then(() => {
         </div>
         <div style="padding:18px 20px;overflow-y:auto;max-height:70vh;">
 
-            <!-- PANADERO -->
-            <div style="margin-bottom:6px;">
-                <div style="font-weight:800;font-size:0.9rem;color:#4e342e;margin-bottom:12px;">
-                    🍞 Panadero
-                </div>
-
-                <label style="font-size:0.78rem;color:#555;font-weight:600;">Nombre</label>
-                <input id="cfgPanNombre" type="text" placeholder="Ej: Don José"
-                       style="width:100%;padding:9px 12px;border:1.5px solid #ddd;border-radius:10px;
-                              font-size:0.88rem;margin:4px 0 10px;box-sizing:border-box;">
-
-                <label style="font-size:0.78rem;color:#555;font-weight:600;">
-                    Teléfono WhatsApp
-                    <span style="font-weight:400;color:#999;"> (con código país, ej: 5491112345678)</span>
-                </label>
-                <input id="cfgPanTelefono" type="tel" placeholder="5491112345678"
-                       style="width:100%;padding:9px 12px;border:1.5px solid #ddd;border-radius:10px;
-                              font-size:0.88rem;margin:4px 0 10px;box-sizing:border-box;">
-
-                <label style="font-size:0.78rem;color:#555;font-weight:600;">
-                    Stock mínimo para sugerir pedido (kg)
-                </label>
-                <input id="cfgPanStock" type="number" min="0" step="0.5" placeholder="1"
-                       style="width:100%;padding:9px 12px;border:1.5px solid #ddd;border-radius:10px;
-                              font-size:0.88rem;margin:4px 0 10px;box-sizing:border-box;">
-
-                <label style="font-size:0.78rem;color:#555;font-weight:600;">
-                    Mensaje
-                    <span style="font-weight:400;color:#999;"> ({nombre} y {cantidad} se reemplazan solos)</span>
-                </label>
-                <textarea id="cfgPanMensaje" rows="4"
-                          placeholder="Hola {nombre}! 🍞 Te pido {cantidad} kg de pan. ¡Gracias!"
-                          style="width:100%;padding:9px 12px;border:1.5px solid #ddd;border-radius:10px;
-                                 font-size:0.85rem;margin:4px 0 10px;box-sizing:border-box;
-                                 resize:vertical;font-family:inherit;"></textarea>
-
-                <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-                    <input type="checkbox" id="cfgPanActivo" style="width:18px;height:18px;cursor:pointer;">
-                    <label for="cfgPanActivo" style="font-size:0.85rem;color:#333;cursor:pointer;">
-                        Activar sugerencia de pedido
-                    </label>
-                </div>
+            <!-- Lista dinámica de proveedores desde planilla -->
+            <div style="font-size:0.72rem;color:#999;margin-bottom:10px;line-height:1.4;">
+                Los proveedores se cargan desde la planilla Google automáticamente.<br>
+                Activá el WhatsApp y completá el teléfono para los que uses.
+                <span style="font-weight:700;color:#f57f17;"> {nombre} = nombre del proveedor · {cantidad} = cantidad sugerida</span>
             </div>
-
-            <!-- Botón probar -->
-            <button onclick="probarWAPanadero()"
-                    style="width:100%;padding:10px;background:#e8f5e9;border:1.5px solid #a5d6a7;
-                           border-radius:10px;color:#2e7d32;font-weight:700;font-size:0.85rem;
-                           cursor:pointer;margin-bottom:10px;">
-                📲 Probar WhatsApp ahora
-            </button>
+            <div id="cfgListaProveedores">
+                <div style="text-align:center;color:#bbb;padding:20px;font-size:0.85rem;">Cargando...</div>
+            </div>
         </div>
 
         <div style="padding:14px 20px;border-top:1px solid #eee;">
