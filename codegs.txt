@@ -366,10 +366,15 @@ function ajustarProducto(datos) {
 
     if (filaProducto === -1) return { success: false, mensaje: 'Producto no encontrado: ' + producto };
 
-    const stockNuevo    = (datos.stockDespues !== undefined && datos.stockDespues !== null) ? Number(datos.stockDespues) : stockActual;
-    const precioNuevo   = datos.precioDespues ? Number(datos.precioDespues) : precioActual;
-    const nombreNuevo   = datos.nombreNuevo   ? String(datos.nombreNuevo).trim().toUpperCase() : nombreActual;
-    const catNueva      = datos.categoriaDespues ? String(datos.categoriaDespues).trim().toUpperCase() : catActual;
+    const stockNuevo  = (datos.stockDespues !== undefined && datos.stockDespues !== null) ? Number(datos.stockDespues) : stockActual;
+    const precioNuevo = datos.precioDespues ? Number(datos.precioDespues) : precioActual;
+    const nombreNuevo = datos.nombreNuevo   ? String(datos.nombreNuevo).trim().toUpperCase() : nombreActual;
+    const catNueva    = datos.categoriaDespues ? String(datos.categoriaDespues).trim().toUpperCase() : catActual;
+
+    // Usar el "antes" que mandó el front (lo que vio el usuario al abrir el panel)
+    // Esto evita que si el inventario cambió entre medio, el registro quede mal
+    const stockRegistroAntes = (datos.stockAntes !== undefined && datos.stockAntes !== null) ? Number(datos.stockAntes) : stockActual;
+    const precioRegistroAntes = datos.precioAntes ? Number(datos.precioAntes) : precioActual;
 
     // Actualizar inventario
     sheetInventario.getRange(filaProducto, 6).setValue(stockNuevo);
@@ -382,18 +387,18 @@ function ajustarProducto(datos) {
     sheetAjuste.appendRow([
       fecha,
       producto,
-      nombreActual,    nombreNuevo    !== nombreActual  ? nombreNuevo  : '',
-      stockActual,     stockNuevo,
-      precioActual,    precioNuevo    !== precioActual  ? precioNuevo  : '',
-      catActual,       catNueva       !== catActual     ? catNueva     : '',
+      nombreActual,          nombreNuevo  !== nombreActual  ? nombreNuevo  : '',
+      stockRegistroAntes,    stockNuevo,
+      precioRegistroAntes,   precioNuevo  !== precioRegistroAntes ? precioNuevo : '',
+      catActual,             catNueva     !== catActual     ? catNueva     : '',
       'POS'
     ]);
 
     let cambios = [];
-    if (stockNuevo !== stockActual)  cambios.push('Stock: ' + stockActual + ' → ' + stockNuevo);
-    if (precioNuevo !== precioActual) cambios.push('Precio: $' + precioActual + ' → $' + precioNuevo);
-    if (nombreNuevo !== nombreActual) cambios.push('Nombre: ' + nombreActual + ' → ' + nombreNuevo);
-    if (catNueva !== catActual)       cambios.push('Categoría: ' + catActual + ' → ' + catNueva);
+    if (stockNuevo !== stockRegistroAntes)   cambios.push('Stock: ' + stockRegistroAntes + ' → ' + stockNuevo);
+    if (precioNuevo !== precioRegistroAntes)  cambios.push('Precio: $' + precioRegistroAntes + ' → $' + precioNuevo);
+    if (nombreNuevo !== nombreActual)         cambios.push('Nombre: ' + nombreActual + ' → ' + nombreNuevo);
+    if (catNueva    !== catActual)            cambios.push('Categoría: ' + catActual + ' → ' + catNueva);
 
     return {
       success: true,
@@ -773,6 +778,242 @@ function getConfig() {
   }
 }
 
+// ========== SET CONFIG — escribir un valor en config_sistema ==========
+// Recibe: { seccion, clave, dia (0-6 = Lun-Dom), valor (0 o 1) }
+function setConfig(datos) {
+  try {
+    const ss = SpreadsheetApp.openById(SS_ID);
+    const sheet = ss.getSheetByName(HOJA_CONFIG);
+    if (!sheet) return { success: false, mensaje: 'Hoja config_sistema no encontrada' };
+
+    const seccion  = String(datos.seccion || '').toLowerCase();
+    const clave    = String(datos.clave   || '').trim();
+    const diaIdx   = parseInt(datos.dia);   // 0=Lun ... 6=Dom → columna B(1)+diaIdx
+    const valor    = datos.valor === 1 || datos.valor === '1' ? 1 : 0;
+
+    if (isNaN(diaIdx) || diaIdx < 0 || diaIdx > 6) return { success: false, mensaje: 'Día inválido' };
+
+    const hojaData = sheet.getDataRange().getValues();
+    let seccionActual = 'general';
+    let filaObjetivo = -1;
+
+    for (let i = 1; i < hojaData.length; i++) {
+      const celda = String(hojaData[i][0] || '').trim();
+      if (!celda) continue;
+      // Detectar sección
+      if (celda.startsWith('──') || celda.startsWith('─') || celda.startsWith('📌')) {
+        const c = celda.toLowerCase();
+        if (c.includes('relámpago') || c.includes('relampago')) seccionActual = 'relampago';
+        else if (c.includes('destacada')) seccionActual = 'destacadas';
+        else if (c.includes('especial')) seccionActual = 'especiales';
+        else if (c.includes('unidad') || c.includes('última') || c.includes('ultima')) seccionActual = 'ultimas';
+        else if (c.includes('horario')) seccionActual = 'horario';
+        continue;
+      }
+      if (seccionActual === seccion && celda === clave) {
+        filaObjetivo = i + 1; // +1 por índice base 1
+        break;
+      }
+    }
+
+    if (filaObjetivo === -1) return { success: false, mensaje: 'No se encontró: ' + seccion + '|' + clave };
+
+    // Columna B=2 es diaIdx=0 (Lun), C=3 es diaIdx=1, etc.
+    const columna = diaIdx + 2;
+    sheet.getRange(filaObjetivo, columna).setValue(valor);
+
+    return { success: true, mensaje: 'OK: ' + seccion + '|' + clave + '[' + diaIdx + '] = ' + valor };
+  } catch(e) {
+    return { success: false, mensaje: e.toString() };
+  }
+}
+
+// ========== LOG INTERRUPTORES ==========
+// Registra cada activación/desactivación en hoja Interruptores_Log
+// ========== JUEVES CERVECERO ==========
+function getJuevesCervecero() {
+  try {
+    const ss = SpreadsheetApp.openById(SS_ID);
+    const sheetInv    = ss.getSheetByName(HOJA_INVENTARIO);
+    const sheetVentas = ss.getSheetByName('Ventas');
+    const sheetCfg    = ss.getSheetByName(HOJA_CONFIG);
+    if (!sheetInv) return { success: false, mensaje: 'Sin inventario' };
+
+    // ── Leer hora cierre del local desde config_sistema (columna JUE = índice 3) ──
+    let horaCierre = 22; // default
+    if (sheetCfg) {
+      const cfgData = sheetCfg.getDataRange().getValues();
+      let enHorario = false;
+      for (let i = 0; i < cfgData.length; i++) {
+        const clave = String(cfgData[i][0] || '').trim().toLowerCase();
+        if (clave.includes('horario local') || clave.includes('── horario')) { enHorario = true; continue; }
+        if (enHorario && clave.includes('cierre local')) {
+          // Columna E = JUE = índice 4 (B=1,C=2,D=3,E=4)
+          const v = cfgData[i][4];
+          if (v !== null && v !== '') {
+            const parsed = parseFloat(String(v).split(':')[0]);
+            if (!isNaN(parsed)) horaCierre = parsed;
+          }
+          break;
+        }
+      }
+    }
+
+    const inv = sheetInv.getDataRange().getValues();
+
+    // ── 1. Filtrar cervezas con stock > 3 ──
+    const cervezas = [];
+    for (let i = 1; i < inv.length; i++) {
+      const nombre = String(inv[i][0] || '').trim();
+      const cat    = String(inv[i][2] || '').trim().toUpperCase();
+      const precio = parseFloat(inv[i][1]) || 0;
+      const stock  = parseInt(inv[i][5]) || 0;
+      const costo  = parseFloat(inv[i][18]) || 0;
+      if (!nombre || stock < 3 || precio <= 0) continue;
+      const esCerveza = cat.includes('CERV') ||
+                        nombre.toUpperCase().includes('CERVEZA') ||
+                        nombre.toUpperCase().includes(' LATA') ||
+                        nombre.toUpperCase().includes('BIRRA') ||
+                        nombre.toUpperCase().includes(' IPA') ||
+                        nombre.toUpperCase().includes(' STOUT') ||
+                        nombre.toUpperCase().includes(' PORTER');
+      if (!esCerveza) continue;
+      const margen = costo > 0 ? (precio - costo) / precio : 0.35;
+      cervezas.push({ i, nombre, precio, stock, costo, margen });
+    }
+
+    if (!cervezas.length) return { success: true, productos: [], horaCierre };
+
+    // ── 2. Calcular rotación desde ventas (últimos 30 días) ──
+    const ventasProd = {};
+    const ticketTotales = {};
+    if (sheetVentas) {
+      const hoy   = new Date();
+      const hace30 = new Date(hoy - 30 * 86400000);
+      const ventas = sheetVentas.getDataRange().getValues();
+      for (let i = 1; i < ventas.length; i++) {
+        const f = ventas[i];
+        const nombre = String(f[3] || '').trim();
+        if (nombre.includes('TOTAL TICKET')) {
+          ticketTotales[String(f[0] || '').trim()] = parseFloat(f[7]) || 0;
+        }
+      }
+      for (let i = 1; i < ventas.length; i++) {
+        const f = ventas[i];
+        const fecha = f[1];
+        if (!(fecha instanceof Date) || fecha < hace30) continue;
+        const nombre = String(f[3] || '').trim().toUpperCase();
+        const qty    = parseFloat(f[4]) || 0;
+        const tk     = String(f[0] || '').trim();
+        if (!nombre || nombre.startsWith('─')) continue;
+        if (!ventasProd[nombre]) ventasProd[nombre] = { qty: 0, tickets: 0, ticketTotal: 0 };
+        ventasProd[nombre].qty += qty;
+        ventasProd[nombre].tickets++;
+        ventasProd[nombre].ticketTotal += ticketTotales[tk] || 0;
+      }
+    }
+
+    // ── 3. Score para cada cerveza ──
+    const maxQty    = Math.max(...cervezas.map(c => (ventasProd[c.nombre.toUpperCase()] || {qty:0}).qty), 1);
+    const maxStock  = Math.max(...cervezas.map(c => c.stock), 1);
+    const maxTicket = Math.max(...cervezas.map(c => (ventasProd[c.nombre.toUpperCase()] || {ticketTotal:0}).ticketTotal), 1);
+
+    const scored = cervezas.map(c => {
+      const vd       = ventasProd[c.nombre.toUpperCase()] || { qty: 0, tickets: 0, ticketTotal: 0 };
+      const rotScore  = vd.qty / maxQty;                          // 0-1
+      const stockScore = c.stock / maxStock;                       // 0-1 (más stock = más necesita promo)
+      const margenScore = Math.min(c.margen, 1);                   // 0-1
+      const ticketScore = vd.ticketTotal / maxTicket;              // 0-1
+
+      const promoScore = (rotScore * 0.35) + (stockScore * 0.25) + (margenScore * 0.20) + (ticketScore * 0.20);
+
+      // Lógica de descuento — nunca vender por debajo del costo
+      let descuento = 10;
+      if (c.margen > 0.40 && rotScore < 0.5)       descuento = 20;
+      else if (c.margen > 0.30 && rotScore >= 0.5)  descuento = 15;
+
+      const precioPromo = Math.max(
+        Math.round(c.precio * (1 - descuento / 100)),
+        c.costo > 0 ? Math.ceil(c.costo * 1.05) : 0  // mínimo 5% sobre costo
+      );
+
+      return { ...c, promoScore, descuento, precioPromo, ventas30: vd.qty };
+    });
+
+    // Top 6 por score
+    const top6 = scored.sort((a, b) => b.promoScore - a.promoScore).slice(0, 6);
+
+    return { success: true, productos: top6, horaCierre };
+  } catch(e) {
+    return { success: false, mensaje: e.toString() };
+  }
+}
+
+function logEventoCerveza(datos) {
+  try {
+    const ss = SpreadsheetApp.openById(SS_ID);
+    const HOJA_LOG = 'evento_cerveza_log';
+    let sheet = ss.getSheetByName(HOJA_LOG);
+    if (!sheet) {
+      sheet = ss.insertSheet(HOJA_LOG);
+      sheet.appendRow(['FECHA', 'PRODUCTOS', 'UNIDADES VENDIDAS', 'FACTURACIÓN', 'GANANCIA', 'TICKET PROMEDIO', 'DESCUENTO APLICADO']);
+      sheet.getRange(1, 1, 1, 7).setBackground('#4a148c').setFontColor('white').setFontWeight('bold');
+      [120, 200, 80, 100, 100, 100, 100].forEach((w, i) => sheet.setColumnWidth(i + 1, w));
+    }
+    const tz = Session.getScriptTimeZone();
+    const fecha = Utilities.formatDate(new Date(), tz, 'dd/MM/yyyy HH:mm');
+    sheet.appendRow([
+      fecha,
+      String(datos.productos || ''),
+      datos.unidades || 0,
+      datos.facturacion || 0,
+      datos.ganancia || 0,
+      datos.ticketPromedio || 0,
+      String(datos.descuentos || '')
+    ]);
+    return { success: true };
+  } catch(e) {
+    return { success: false, mensaje: e.toString() };
+  }
+}
+
+function logInterruptor(datos) {
+  try {
+    const ss = SpreadsheetApp.openById(SS_ID);
+    const HOJA_LOG = 'Interruptores_Log';
+    let sheet = ss.getSheetByName(HOJA_LOG);
+    if (!sheet) {
+      sheet = ss.insertSheet(HOJA_LOG);
+      sheet.appendRow(['FECHA', 'HORA', 'OFERTA', 'ACCIÓN', 'DÍA SEMANA', 'VENDEDOR']);
+      sheet.getRange(1, 1, 1, 6)
+           .setBackground('#1a237e').setFontColor('white').setFontWeight('bold');
+      sheet.setColumnWidth(1, 110);
+      sheet.setColumnWidth(2, 80);
+      sheet.setColumnWidth(3, 120);
+      sheet.setColumnWidth(4, 100);
+      sheet.setColumnWidth(5, 120);
+      sheet.setColumnWidth(6, 120);
+    }
+
+    const tz = Session.getScriptTimeZone();
+    const ahora = new Date();
+    const fecha = Utilities.formatDate(ahora, tz, 'dd/MM/yyyy');
+    const hora  = Utilities.formatDate(ahora, tz, 'HH:mm:ss');
+    const diasNombres = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+    const diaSemana = diasNombres[ahora.getDay()];
+
+    const oferta   = String(datos.tipo     || '').toUpperCase();
+    const accion   = datos.estado === 1 ? '🟢 ACTIVADO' : '🔴 DESACTIVADO';
+    const vendedor = String(datos.vendedor || 'Desconocido');
+
+    sheet.appendRow([fecha, hora, oferta, accion, diaSemana, vendedor]);
+
+    return { success: true };
+  } catch(e) {
+    return { success: false, mensaje: e.toString() };
+  }
+}
+
 function doGet(e) {
   try {
 
@@ -796,6 +1037,27 @@ function doGet(e) {
     if (e && e.parameter && e.parameter.action === 'ajusteRapido') {
       const datos = JSON.parse(decodeURIComponent(e.parameter.data));
       return respuestaJSON(ajustarProducto(datos));
+    }
+
+    // ACCIÓN: SET CONFIG — escribir valor en config_sistema (interruptores admin)
+    if (e && e.parameter && e.parameter.action === 'setConfig') {
+      const datos = JSON.parse(decodeURIComponent(e.parameter.data));
+      return respuestaJSON(setConfig(datos));
+    }
+
+    // ACCIÓN: JUEVES CERVECERO
+    if (e && e.parameter && e.parameter.action === 'getJuevesCervecero') {
+      return respuestaJSON(getJuevesCervecero());
+    }
+
+    // ACCIÓN: LOG EVENTO CERVEZA
+    if (e && e.parameter && e.parameter.action === 'logEventoCerveza') {
+      const datos = JSON.parse(decodeURIComponent(e.parameter.data));
+      return respuestaJSON(logEventoCerveza(datos));
+    }
+    if (e && e.parameter && e.parameter.action === 'logInterruptor') {
+      const datos = JSON.parse(decodeURIComponent(e.parameter.data));
+      return respuestaJSON(logInterruptor(datos));
     }
 
     // ACCIÓN: CREAR ORDEN MP
@@ -972,9 +1234,13 @@ function procesarVenta(dataStr) {
       if (qty <= 0) continue;
 
       if (esPeso) {
+        const kgVendidos = gramos / 1000;
+        const stockEnKg  = parseFloat(fila[5]) || 0;
+        const nuevoStockKg = Math.max(0, Math.round((stockEnKg - kgVendidos) * 1000) / 1000);
+        sheetInventario.getRange(filaIndex + 1, 6).setValue(nuevoStockKg);
         const nombreConPeso = gramos > 0 ? `${nombreEnSheet} (${gramos}gr)` : nombreEnSheet;
         totalVenta += precioVenta;
-        procesados.push({ name: nombreConPeso, qty: gramos, nuevoStock: stockActual, precio: precioVenta, esPeso: true });
+        procesados.push({ name: nombreConPeso, qty: gramos, nuevoStock: nuevoStockKg, precio: precioVenta, esPeso: true });
       } else {
         if (stockActual < qty) errores.push(`${nombreEnSheet}: stock insuficiente (tiene ${stockActual}, vendió ${qty})`);
         const nuevoStock = Math.max(0, stockActual - qty);
@@ -1182,7 +1448,41 @@ function getReportes() {
       }
     }
 
-    return { items, totales, vencProximos, stockInfo };
+    // ========== RANKING TOP GANANCIA POR PRODUCTO ==========
+    const mapaGanancia = {};
+    for (const it of items) {
+      if (!mapaGanancia[it.nombre]) {
+        mapaGanancia[it.nombre] = {
+          nombre: it.nombre,
+          qtdVendida: 0,
+          ingresos: 0,
+          gananciaReal: 0,
+          gananciaAprox: 0,
+          tieneCosto: it.tieneCosto,
+          costo: it.costo
+        };
+      }
+      const m = mapaGanancia[it.nombre];
+      m.qtdVendida  += it.qty;
+      m.ingresos    += it.subtotal;
+      m.gananciaAprox += it.gananciaAprox;
+      if (it.gananciaReal !== null) {
+        m.gananciaReal += it.gananciaReal;
+        m.tieneCosto = true;
+      }
+    }
+
+    const topGanancia = Object.values(mapaGanancia)
+      .map(p => ({
+        ...p,
+        ganancia: p.tieneCosto ? p.gananciaReal : p.gananciaAprox,
+        esReal: p.tieneCosto
+      }))
+      .filter(p => p.ganancia > 0)
+      .sort((a, b) => b.ganancia - a.ganancia)
+      .slice(0, 20);
+
+    return { items, totales, vencProximos, stockInfo, topGanancia };
   } catch(e) {
     return { error: e.toString() };
   }

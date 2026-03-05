@@ -409,7 +409,83 @@
             border-left-color: #e53935;
         }
 
-        /* ========== ESTILOS BASE COMPARTIDOS ========== */
+        /* 🍺 JUEVES CERVECERO */
+        .ofertas-container.cervecero {
+            border-color: #f9a825;
+            background: linear-gradient(135deg, #1a237e 0%, #283593 50%, #1565c0 100%);
+            position: relative;
+            overflow: hidden;
+        }
+        .ofertas-container.cervecero::before {
+            content: '🍺';
+            position: absolute;
+            font-size: 8rem;
+            opacity: 0.06;
+            right: -10px;
+            top: -10px;
+            pointer-events: none;
+        }
+        .ofertas-container.cervecero .ofertas-header {
+            background: linear-gradient(135deg, #0d47a1, #1565c0);
+            border-bottom: 3px solid #f9a825;
+        }
+        .ofertas-container.cervecero .ofertas-badge {
+            background: #f9a825;
+            color: #0d47a1;
+            font-weight: 900;
+            animation: flash 1s infinite;
+        }
+        .ofertas-container.cervecero .ofertas-products-grid {
+            background: rgba(255,255,255,0.03);
+        }
+        .ofertas-container.cervecero .ofertas-product-card {
+            border-color: rgba(249,168,37,0.4);
+            background: rgba(255,255,255,0.95);
+        }
+        .ofertas-container.cervecero .ofertas-exclusive-badge {
+            background: linear-gradient(135deg, #f57f17, #f9a825);
+            color: #0d47a1;
+        }
+        .cervecero-precio-antes {
+            text-decoration: line-through;
+            color: #999;
+            font-size: 0.85rem;
+        }
+        .cervecero-precio-promo {
+            font-size: 1.3rem;
+            font-weight: 900;
+            color: #0d47a1;
+        }
+        .cervecero-ahorro {
+            background: #f9a825;
+            color: #0d47a1;
+            padding: 3px 10px;
+            border-radius: 15px;
+            font-size: 0.8rem;
+            font-weight: 900;
+            display: inline-block;
+            margin-top: 4px;
+        }
+        .cervecero-timer {
+            background: rgba(249,168,37,0.2);
+            border: 1px solid rgba(249,168,37,0.5);
+            color: #f9a825;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 700;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 6px;
+        }
+        @keyframes cervecero-pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(249,168,37,0.4); }
+            50%       { box-shadow: 0 0 0 8px rgba(249,168,37,0); }
+        }
+        .ofertas-container.cervecero {
+            animation: cervecero-pulse 2s infinite;
+        }
         .ofertas-header {
             color: white;
             padding: 1rem;
@@ -1844,6 +1920,21 @@
         </div>
     </div>
 
+    <!-- ========== JUEVES CERVECERO ========== -->
+    <div class="ofertas-container cervecero" id="ofertasCervecero" style="display:none;">
+        <div class="ofertas-header">
+            <h2>🍺 JUEVES CERVECERO <span class="ofertas-badge">ESTA NOCHE</span></h2>
+            <div class="cervecero-timer">
+                🕐 Termina a las <span id="cervecero-cierre">22:00</span>hs
+            </div>
+        </div>
+        <div class="ofertas-stock-warning" id="msg-cervecero"
+             style="background:rgba(249,168,37,0.15);color:#f9a825;border-left:4px solid #f9a825;">
+            🍺 <strong>¡JUEVES CERVECERO!</strong> Precios especiales en cervezas seleccionadas, solo esta noche.
+        </div>
+        <div class="ofertas-products-grid" id="cervecero-grid"></div>
+    </div>
+
     <div class="search-container" id="desktopSearch">
         <div class="search-wrapper">
             <input type="text" id="productSearch" class="search-input" 
@@ -2154,224 +2245,79 @@ const ROTACION_SISTEMA = {
     }
 };
 
-// ========== VALIDACIÓN HORARIOS ==========
-// Valores por defecto — se sobrescriben al cargar config_sistema desde GAS
-const HORARIOS = {
-    relampago: {
-        dias: [1, 2, 3, 4],
-        horaInicio: 11, minInicio: 30,
-        horaFin: 17,    minFin: 0
-    },
-    destacadas: {
-        dias: [5, 6],
-        horaInicio: 20, minInicio: 0,
-        horaFin: 22,    minFin: 0
-    },
-    especiales: {
-        dias: [1, 2, 3, 4],
-        horaInicio: 18, minInicio: 0,
-        horaFin: 22,    minFin: 0
-    },
-    ultimas: {
-        dias: [0,1,2,3,4,5,6],
-        horaInicio: 21, minInicio: 0,
-        horaFin: 22,    minFin: 0
-    }
+// ========== ESTADO DE OFERTAS ==========
+// Fuente de verdad: planilla config_sistema, columna del día actual
+// El interruptor en venta.html escribe 0/1 → index.html lo lee aquí
+// NO hay validación de hora — el interruptor manda
+
+// Estado activo por tipo (true/false), cargado desde planilla
+const OFERTA_ACTIVA = {
+    relampago:  false,
+    destacadas: false,
+    especiales: false,
+    ultimas:    false
 };
 
-// ── Parsear valor de hora desde planilla: puede ser número (21) o string "21:30" ──
-function _parseHora(val) {
-    if (val === null || val === undefined || val === '') return null;
-    const s = String(val).trim();
-    if (s.includes(':')) {
-        const p = s.split(':');
-        return { h: parseInt(p[0]) || 0, m: parseInt(p[1]) || 0 };
-    }
-    const n = parseFloat(s);
-    if (isNaN(n)) return null;
-    const hh = Math.floor(n);
-    const mm = Math.round((n - hh) * 60);
-    return { h: hh, m: mm };
+// Mapeo columna planilla → día JS (0=Dom,1=Lun,...,6=Sab)
+const _COL_A_DIA_JS = [1, 2, 3, 4, 5, 6, 0];
+
+// Día actual como índice de columna planilla (0=Lun...6=Dom)
+function _diaActualColIdx() {
+    const js = new Date().getDay(); // 0=Dom,1=Lun,...,6=Sab
+    return _COL_A_DIA_JS.indexOf(js); // → 0=Lun...6=Dom
 }
 
-// ── Días de semana: índices JS (0=Dom,1=Lun,...,6=Sab) ──
-// Columnas en planilla: B=LUN(1), C=MAR(2), D=MIE(3), E=JUE(4), F=VIE(5), G=SAB(6), H=DOM(0)
-const _COL_A_DIA_JS = [1, 2, 3, 4, 5, 6, 0]; // índice 0-6 en array planilla → día JS
-
-// ── Cargar config_sistema desde GAS y aplicar a HORARIOS ──
+// ── Cargar config_sistema desde GAS ──
 async function cargarConfigSistema() {
     try {
         const GAS_URL = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
         const r = await fetch(GAS_URL + '?action=getConfig&t=' + Date.now(), { redirect: 'follow' });
         const data = await r.json();
         if (!data.success || !data.config) {
-            console.warn('⚠️ config_sistema no disponible — usando horarios por defecto');
+            console.warn('⚠️ config_sistema no disponible');
             return;
         }
         const cfg = data.config;
+        const diaIdx = _diaActualColIdx();
 
-        // ── HELPER: construir bloque HORARIOS para un tipo de oferta ──
-        function _buildHorario(seccion, claveDias) {
-            const claveInicio = seccion + '|Hora inicio oferta';
-            const claveCierre = seccion + '|Hora cierre oferta';
-            const rowInicio = cfg[claveInicio];
-            const rowCierre = cfg[claveCierre];
-            const rowDias   = cfg[claveDias];
-            if (!rowInicio || !rowCierre || !rowDias) {
-                console.warn('⚠️ Faltan claves para sección ' + seccion, {claveInicio, claveCierre, claveDias});
-                return null;
-            }
+        const claves = {
+            relampago:  cfg['relampago|Dias ofertas relampago']  || cfg['Dias ofertas relampago'],
+            destacadas: cfg['destacadas|Dias ofertas destacadas'] || cfg['Dias ofertas destacadas'],
+            especiales: cfg['especiales|Dias ofertas especiales'] || cfg['Dias ofertas especiales'],
+            ultimas:    cfg['ultimas|Dias ofertas UNIDADES']     || cfg['Dias ofertas UNIDADES']
+        };
 
-            const diasJS = [];
-            rowDias.forEach(function(v, i) {
-                if (v === 1 || v === '1' || v === true) diasJS.push(_COL_A_DIA_JS[i]);
-            });
+        Object.keys(claves).forEach(function(tipo) {
+            const row = claves[tipo];
+            if (!row) return;
+            const val = row[diaIdx];
+            OFERTA_ACTIVA[tipo] = (val === 1 || val === '1' || val === true);
+            console.log('🔘 ' + tipo + ': ' + (OFERTA_ACTIVA[tipo] ? '🟢 ACTIVA' : '🔴 inactiva'));
+        });
 
-            // Si todos los días son 0 → sección desactivada, retornar dias vacío
-            // (NO retornar null, porque null deja el valor por defecto hardcodeado)
-            if (diasJS.length === 0) {
-                console.log('🔴 Sección ' + seccion + ' desactivada (todos los días en 0)');
-                return { dias: [], horaInicio: 0, minInicio: 0, horaFin: 0, minFin: 0 };
-            }
-
-            // Extraer hora inicio y fin del primer valor no nulo
-            let hInicio = null, hCierre = null;
-            for (let i = 0; i < 7; i++) {
-                if (!hInicio && rowInicio[i] !== null) hInicio = _parseHora(rowInicio[i]);
-                if (!hCierre && rowCierre[i] !== null) hCierre = _parseHora(rowCierre[i]);
-                if (hInicio && hCierre) break;
-            }
-
-            if (!hInicio || !hCierre) return { dias: [], horaInicio: 0, minInicio: 0, horaFin: 0, minFin: 0 };
-
-            return {
-                dias: diasJS,
-                horaInicio: hInicio.h, minInicio: hInicio.m,
-                horaFin:    hCierre.h, minFin:    hCierre.m
-            };
-        }
-
-        // RELÁMPAGO
-        const h1 = _buildHorario('relampago', 'relampago|Dias ofertas relampago');
-        if (h1) { HORARIOS.relampago = h1; console.log('✅ Config RELÁMPAGO:', h1.dias.length ? h1 : '🔴 desactivado'); }
-
-        // DESTACADAS
-        const h2 = _buildHorario('destacadas', 'destacadas|Dias ofertas destacadas');
-        if (h2) { HORARIOS.destacadas = h2; console.log('✅ Config DESTACADAS:', h2.dias.length ? h2 : '🔴 desactivado'); }
-
-        // ESPECIALES
-        const h3 = _buildHorario('especiales', 'especiales|Dias ofertas especiales');
-        if (h3) { HORARIOS.especiales = h3; console.log('✅ Config ESPECIALES:', h3.dias.length ? h3 : '🔴 desactivado'); }
-
-        // ÚLTIMAS UNIDADES
-        const h4 = _buildHorario('ultimas', 'ultimas|Dias ofertas UNIDADES');
-        if (h4) { HORARIOS.ultimas = h4; console.log('✅ Config ÚLTIMAS:', h4.dias.length ? h4 : '🔴 desactivado'); }
-
-        console.log('📋 HORARIOS finales:', JSON.stringify(HORARIOS));
-
-        // Actualizar mensajes visibles al cliente con horarios reales
         actualizarMensajesOfertas();
     } catch(e) {
-        console.warn('⚠️ Error cargando config_sistema:', e.message, '— usando horarios por defecto');
+        console.warn('⚠️ Error cargando config_sistema:', e.message);
     }
 }
 
-// ── Nombres de días para mostrar al cliente ──
-const _NOMBRES_DIAS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
-const _NOMBRES_DIAS_FULL = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-
-function _formatearDias(diasJS) {
-    if (!diasJS || diasJS.length === 0) return null;
-    // Detectar rangos consecutivos
-    const sorted = [...diasJS].sort((a, b) => {
-        // Ordenar Lun-Dom (1,2,3,4,5,6,0)
-        const orden = [1,2,3,4,5,6,0];
-        return orden.indexOf(a) - orden.indexOf(b);
-    });
-    if (sorted.length === 7) return 'todos los días';
-    if (sorted.length === 1) return _NOMBRES_DIAS_FULL[sorted[0]];
-    // Verificar si son todos consecutivos (semana laboral, finde, etc.)
-    const orden = [1,2,3,4,5,6,0];
-    const indices = sorted.map(d => orden.indexOf(d));
-    const esConsecutivo = indices.every((v, i) => i === 0 || v === indices[i-1] + 1);
-    if (esConsecutivo && sorted.length >= 3) {
-        return _NOMBRES_DIAS_FULL[sorted[0]] + ' a ' + _NOMBRES_DIAS_FULL[sorted[sorted.length - 1]];
-    }
-    return sorted.map(d => _NOMBRES_DIAS[d]).join(', ');
-}
-
-function _formatearHora(h, m) {
-    return h + ':' + String(m).padStart(2, '0');
+// validarHorario ahora solo mira el estado del interruptor
+function validarHorario(tipo) {
+    return OFERTA_ACTIVA[tipo] === true;
 }
 
 function actualizarMensajesOfertas() {
     const configs = {
-        relampago: {
-            id: 'msg-relampago',
-            emoji: '⚡',
-            nombre: 'OFERTAS RELÁMPAGO',
-            positivo: '¡Precios especiales por tiempo limitado, aprovechá ahora!'
-        },
-        destacadas: {
-            id: 'msg-destacadas',
-            emoji: '🔥',
-            nombre: 'OFERTAS DESTACADAS',
-            positivo: '¡Los mejores descuentos de la semana, solo mientras dure!'
-        },
-        especiales: {
-            id: 'msg-especiales',
-            emoji: '🌙',
-            nombre: 'OFERTAS ESPECIALES',
-            positivo: '¡Precios únicos que no vas a encontrar en otro lado!'
-        },
-        ultimas: {
-            id: 'msg-ultimas',
-            emoji: '🏷️',
-            nombre: 'ÚLTIMAS UNIDADES',
-            positivo: '¡Llevate el tuyo antes de que se agote!'
-        }
+        relampago:  { id: 'msg-relampago',  emoji: '⚡', nombre: 'OFERTAS RELÁMPAGO', positivo: '¡Precios especiales activados ahora, aprovechá!' },
+        destacadas: { id: 'msg-destacadas', emoji: '🔥', nombre: 'OFERTAS DESTACADAS', positivo: '¡Los mejores descuentos, solo mientras dure!' },
+        especiales: { id: 'msg-especiales', emoji: '🌙', nombre: 'OFERTAS ESPECIALES',  positivo: '¡Precios únicos que no vas a encontrar en otro lado!' },
+        ultimas:    { id: 'msg-ultimas',    emoji: '🏷️', nombre: 'ÚLTIMAS UNIDADES',   positivo: '¡Llevate el tuyo antes de que se agote!' }
     };
-
     Object.keys(configs).forEach(function(tipo) {
         const el = document.getElementById(configs[tipo].id);
         if (!el) return;
-        const h = HORARIOS[tipo];
-        const diasStr = h && h.dias.length > 0 ? _formatearDias(h.dias) : null;
-        const horaStr = h && h.dias.length > 0
-            ? _formatearHora(h.horaInicio, h.minInicio) + ' a ' + _formatearHora(h.horaFin, h.minFin) + ' hs'
-            : null;
-
-        if (diasStr && horaStr) {
-            el.innerHTML = configs[tipo].emoji + ' <strong>' + configs[tipo].nombre + ':</strong> '
-                + diasStr + ' de ' + horaStr + '. '
-                + configs[tipo].positivo;
-        } else {
-            el.innerHTML = configs[tipo].emoji + ' <strong>' + configs[tipo].nombre + ':</strong> '
-                + configs[tipo].positivo;
-        }
+        el.innerHTML = configs[tipo].emoji + ' <strong>' + configs[tipo].nombre + ':</strong> ' + configs[tipo].positivo;
     });
-}
-
-function validarHorario(tipo) {
-    // Usar hora de Argentina centralizada
-    const now = new Date();
-    const argentinaTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
-    const dia = argentinaTime.getDay();
-    const hora = argentinaTime.getHours();
-    const min = argentinaTime.getMinutes();
-    
-    const config = HORARIOS[tipo];
-    if (!config) return false;
-    
-    // Validar día
-    if (!config.dias.includes(dia)) return false;
-    
-    // Validar hora
-    const horaActual = hora * 60 + min;
-    const horaInicio = config.horaInicio * 60 + config.minInicio;
-    const horaFin = config.horaFin * 60 + config.minFin;
-    
-    return horaActual >= horaInicio && horaActual < horaFin;
 }
 
 // ========== CONSTRUCCIÓN DE POOLS ==========
@@ -2737,44 +2683,12 @@ function renderizarContenedorOfertas(tipo, productos) {
     if (tipo !== 'ultimas') iniciarCountdown(tipo);
 }
 
-// ========== COUNTDOWN ==========
+// ========== COUNTDOWN — reemplazado por indicador ACTIVO ==========
 function iniciarCountdown(tipo) {
-    const countdownId = `${tipo}-countdown`;
-    const config = HORARIOS[tipo];
-    
-    if (!config) return;
-    
-    const countdownElement = document.getElementById(countdownId);
-    if (!countdownElement) return;
-    
-    const updateCountdown = () => {
-        const now = new Date();
-        const argentinaTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
-        const endTime = new Date(argentinaTime);
-        
-        endTime.setHours(config.horaFin, config.minFin, 0, 0);
-        
-        if (argentinaTime >= endTime) {
-            countdownElement.textContent = '00:00:00';
-            return;
-        }
-        
-        const diff = endTime - argentinaTime;
-        const hours = Math.floor(diff / (1000 * 60 * 60));
-        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-        const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-        
-        countdownElement.textContent = 
-            `${hours.toString().padStart(2, '0')}:` +
-            `${minutes.toString().padStart(2, '0')}:` +
-            `${seconds.toString().padStart(2, '0')}`;
-        
-        setTimeout(updateCountdown, 1000);
-    };
-    
-    updateCountdown();
+    const countdownEl = document.getElementById(tipo + '-countdown');
+    if (countdownEl) countdownEl.textContent = 'ACTIVO';
 }
-
+        
 function renderizarProductosNormales() {
     const productsGrid = document.getElementById('productsGrid');
     if (!productsGrid) return;
@@ -3024,7 +2938,85 @@ function iniciarMotorAutoCheck() {
     _motorCheckInterval = setInterval(verificarAutoActivacion, 60000); // cada 1 min
 }
 
-// ========== ACTUALIZAR TODAS LAS VISTAS ==========
+// ========== JUEVES CERVECERO ==========
+const GAS_URL_CERVECERO = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
+let _cerveceroProductos = [];
+let _cerveceroHoraCierre = 22;
+let _cerveceroOverride = null; // null=auto, true=forzado ON, false=forzado OFF
+
+function _esCerveceroActivo() {
+    if (_cerveceroOverride !== null) return _cerveceroOverride;
+    const now = new Date();
+    const arg = new Date(now.toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+    const dia  = arg.getDay(); // 4 = jueves
+    const hora = arg.getHours() + arg.getMinutes() / 60;
+    return dia === 4 && hora >= 18 && hora < _cerveceroHoraCierre;
+}
+
+async function cargarJuevesCervecero() {
+    try {
+        const r = await fetch(GAS_URL_CERVECERO + '?action=getJuevesCervecero&t=' + Date.now(),
+                              { redirect: 'follow', signal: AbortSignal.timeout(10000) });
+        const data = await r.json();
+        if (!data.success) return;
+        _cerveceroProductos  = data.productos || [];
+        _cerveceroHoraCierre = data.horaCierre || 22;
+        // Actualizar texto de cierre
+        const elCierre = document.getElementById('cervecero-cierre');
+        if (elCierre) elCierre.textContent = _cerveceroHoraCierre + ':00';
+        renderizarCervecero();
+    } catch(e) {
+        console.warn('⚠️ Jueves Cervecero no disponible:', e.message);
+    }
+}
+
+function renderizarCervecero() {
+    const container = document.getElementById('ofertasCervecero');
+    const grid      = document.getElementById('cervecero-grid');
+    if (!container || !grid) return;
+
+    const activo = _esCerveceroActivo();
+    if (!activo || !_cerveceroProductos.length) {
+        container.style.display = 'none';
+        return;
+    }
+
+    container.style.display = 'block';
+    grid.innerHTML = _cerveceroProductos.map(p => {
+        const ahorro = p.precio - p.precioPromo;
+        const imgSrc = `imagenes-productos/${simplificarNombre(p.nombre)}.jpg`;
+        return `
+        <div class="ofertas-product-card" onclick="agregarProductoCervecero(${p.i}, ${p.precioPromo})"
+             style="cursor:pointer;">
+            <span class="ofertas-exclusive-badge">🍺 ${p.descuento}% OFF</span>
+            <img src="${imgSrc}" alt="${p.nombre}"
+                 onerror="this.style.display='none'"
+                 style="width:100%;height:140px;object-fit:contain;padding:10px;">
+            <div style="padding:10px 12px 14px;">
+                <div style="font-weight:800;font-size:0.88rem;color:#1a237e;margin-bottom:6px;line-height:1.3">
+                    ${p.nombre.length > 32 ? p.nombre.substring(0, 32) + '…' : p.nombre}
+                </div>
+                <div class="cervecero-precio-antes">Antes: $${p.precio.toLocaleString('es-AR')}</div>
+                <div class="cervecero-precio-promo">$${p.precioPromo.toLocaleString('es-AR')}</div>
+                <div class="cervecero-ahorro">🍺 Ahorrás $${ahorro.toLocaleString('es-AR')}</div>
+                <div style="font-size:0.72rem;color:#888;margin-top:6px;">Stock: ${p.stock} u</div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function agregarProductoCervecero(idProducto, precioPromo) {
+    // Agregar al carrito con precio especial (solo si index tiene carrito)
+    if (typeof openCart === 'function') {
+        const prod = products.find(p => p.id === idProducto);
+        if (prod) addToCart({ ...prod, price: precioPromo, _esCervecero: true });
+    }
+}
+
+// Auto-check cada 5 minutos para activar/desactivar según hora
+setInterval(() => { if (_cerveceroProductos.length) renderizarCervecero(); }, 5 * 60 * 1000);
+
+
 function actualizarTodasLasVistas() {
     construirPools();
     seleccionarProductosOfertas();
@@ -5075,6 +5067,9 @@ function init() {
     cargarConfigSistema().then(function() {
         loadProductsFromAPI();
     });
+
+    // Jueves Cervecero — cargar en paralelo (independiente del resto)
+    cargarJuevesCervecero();
     
     // Iniciar monitor de stock después de cargar productos
     setTimeout(() => {

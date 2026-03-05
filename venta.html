@@ -868,6 +868,10 @@
                 style="flex:1;font-size:0.7rem;font-weight:700;padding:4px 2px;border-radius:8px;border:1.5px solid;cursor:pointer;transition:all 0.2s;">
             🏷️ ULT
         </button>
+        <button id="toggleCervecero" onclick="toggleCervecero()" title="Jueves Cervecero — override manual"
+                style="flex:1;font-size:0.7rem;font-weight:700;padding:4px 2px;border-radius:8px;border:1.5px solid;cursor:pointer;transition:all 0.2s;background:rgba(13,71,161,0.3);border-color:rgba(249,168,37,0.6);color:rgba(255,255,255,0.5);">
+            🍺 JC
+        </button>
     </div>
 </div>
 
@@ -1762,15 +1766,20 @@ document.addEventListener('click', function(e) {
 });
 
 // ========== AGREGAR PRODUCTO ==========
-// Detectar si un producto se vende por peso (contiene KG en el nombre)
+// Detectar si un producto se vende por peso
+// REGLAS:
+//   SÍ por peso: "MANZANA KG", "AJO X KG", "JENGIBRE KG", "BANANA X KG"
+//   NO por peso: "HARINA 1KG", "AZUCAR 500GR", "FIDEOS 500G", "LECHE 1L"
+//   → KG suelto al final o precedido de X/x → por peso
+//   → Número inmediatamente antes de KG/GR → unidad fija
 function esPorPeso(producto) {
-    // Venta por peso:
-    // 1. Categoría FRUTAS Y VERDURAS (cebolla kg, papa kg, etc.)
-    // 2. Nombre contiene " X KG" (queso x kg, fiambre x kg, etc.)
-    // Excluye: AZUCAR 1KG, HARINA 1KG, etc. (no tienen " X KG")
+    const nombre = (producto.name || '').toUpperCase().trim();
+    // Excluir: número seguido de KG o GR (ej: 1KG, 500GR, 2KG)
+    if (/\d\s*KG|\d\s*GR|\d\s*G\b/.test(nombre)) return false;
+    // SÍ por peso: termina en KG, o tiene X KG, o categoría FRUTAS/VERDURAS con KG
     const cat = (producto.category || '').toUpperCase();
-    const nombre = (producto.name || '').toUpperCase();
-    return cat.includes('FRUTAS') || nombre.includes(' X KG');
+    return /\bKG\b/.test(nombre) || 
+           (cat.includes('FRUTA') || cat.includes('VERDURA')) && nombre.includes('KG');
 }
 
 function agregarProducto(id) {
@@ -2029,8 +2038,16 @@ async function confirmarVenta() {
 
     // Actualizar stock local para no vender más de lo que hay
     ventaActual.forEach(item => {
-        const p = productos.find(pr => pr.id === item.id);
-        if (p) p.stock = Math.max(0, p.stock - item.qty);
+        const idBuscar = item.esPeso ? item.idOriginal : item.id;
+        const p = productos.find(pr => pr.id === idBuscar);
+        if (!p) return;
+        if (item.esPeso) {
+            // Stock en kg — rebajar proporcionalmente
+            const kgVendidos = (item.gramos || 0) / 1000;
+            p.stock = Math.max(0, Math.round((p.stock - kgVendidos) * 1000) / 1000);
+        } else {
+            p.stock = Math.max(0, p.stock - item.qty);
+        }
     });
 
     // Guardar datos para ticket WA
@@ -3948,6 +3965,10 @@ async function toggleOferta(tipo) {
         const resp = await r.json();
         if (resp.success) {
             mostrarToast((nuevoValor ? '🟢 ' : '🔴 ') + cfg.emoji + ' ' + tipo + (nuevoValor ? ' activada' : ' desactivada'), nuevoValor ? 'verde' : 'rojo');
+            // Registrar en log (sin esperar respuesta para no bloquear)
+            const logDatos = { tipo, estado: nuevoValor, vendedor: vendedorActual || 'POS' };
+            fetch(API_URL + '?action=logInterruptor&data=' + encodeURIComponent(JSON.stringify(logDatos)),
+                  { redirect: 'follow' }).catch(() => {});
         } else {
             // Revertir si falló
             _toggleEstado[tipo] = !_toggleEstado[tipo];
@@ -3966,6 +3987,61 @@ function iniciarToggleOfertas() {
     // Mostrar estado "cargando" mientras fetch
     Object.keys(_TOGGLE_CONFIG).forEach(tipo => _pintarToggle(tipo, null));
     cargarEstadoToggles();
+    _pintarToggleCervecero();
+}
+
+// ── Jueves Cervecero override ──
+// null = auto (por hora/día), true = forzado ON, false = forzado OFF
+let _cerveceroOverride = localStorage.getItem('cervecero_override');
+if (_cerveceroOverride === 'true')  _cerveceroOverride = true;
+else if (_cerveceroOverride === 'false') _cerveceroOverride = false;
+else _cerveceroOverride = null;
+
+function _esCerveceroAutoActivo() {
+    const now = new Date();
+    const arg = new Date(now.toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+    return arg.getDay() === 4 && arg.getHours() >= 18;
+}
+
+function _pintarToggleCervecero() {
+    const btn = document.getElementById('toggleCervecero');
+    if (!btn) return;
+    const autoActivo = _esCerveceroAutoActivo();
+    const activo = _cerveceroOverride !== null ? _cerveceroOverride : autoActivo;
+    const esOverride = _cerveceroOverride !== null;
+    btn.style.background   = activo ? 'rgba(13,71,161,0.6)'       : 'rgba(60,60,60,0.3)';
+    btn.style.borderColor  = activo ? '#f9a825'                    : 'rgba(150,150,150,0.4)';
+    btn.style.color        = activo ? '#f9a825'                    : 'rgba(255,255,255,0.35)';
+    btn.style.opacity      = '1';
+    btn.textContent        = '🍺 JC' + (activo ? ' ✓' : ' ✗') + (esOverride ? ' ⚡' : '');
+    btn.title = esOverride
+        ? 'Override manual activo — tocá para volver a auto'
+        : (autoActivo ? 'Jueves Cervecero automático activo' : 'Automático: inactivo (no es jueves 18-23hs)');
+}
+
+function toggleCervecero() {
+    const autoActivo = _esCerveceroAutoActivo();
+    const estadoActual = _cerveceroOverride !== null ? _cerveceroOverride : autoActivo;
+
+    if (_cerveceroOverride === null) {
+        // Sin override → forzar el opuesto del auto
+        _cerveceroOverride = !autoActivo;
+    } else {
+        // Con override → volver a auto
+        _cerveceroOverride = null;
+    }
+
+    // Guardar en localStorage
+    if (_cerveceroOverride === null) localStorage.removeItem('cervecero_override');
+    else localStorage.setItem('cervecero_override', String(_cerveceroOverride));
+
+    _pintarToggleCervecero();
+
+    const nuevoEstado = _cerveceroOverride !== null ? _cerveceroOverride : autoActivo;
+    const msg = _cerveceroOverride === null
+        ? '🔄 Cervecero en modo automático'
+        : (nuevoEstado ? '🟢 🍺 Cervecero activado (manual)' : '🔴 🍺 Cervecero desactivado (manual)');
+    mostrarToast(msg, nuevoEstado ? 'verde' : 'rojo');
 }
 
 cargarProductos().then(() => {
