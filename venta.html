@@ -1762,20 +1762,15 @@ document.addEventListener('click', function(e) {
 });
 
 // ========== AGREGAR PRODUCTO ==========
-// Detectar si un producto se vende por peso
-// REGLAS:
-//   SÍ por peso: "MANZANA KG", "AJO X KG", "JENGIBRE KG", "BANANA X KG"
-//   NO por peso: "HARINA 1KG", "AZUCAR 500GR", "FIDEOS 500G", "LECHE 1L"
-//   → KG suelto al final o precedido de X/x → por peso
-//   → Número inmediatamente antes de KG/GR → unidad fija
+// Detectar si un producto se vende por peso (contiene KG en el nombre)
 function esPorPeso(producto) {
-    const nombre = (producto.name || '').toUpperCase().trim();
-    // Excluir: número seguido de KG o GR (ej: 1KG, 500GR, 2KG)
-    if (/\d\s*KG|\d\s*GR|\d\s*G\b/.test(nombre)) return false;
-    // SÍ por peso: termina en KG, o tiene X KG, o categoría FRUTAS/VERDURAS con KG
+    // Venta por peso:
+    // 1. Categoría FRUTAS Y VERDURAS (cebolla kg, papa kg, etc.)
+    // 2. Nombre contiene " X KG" (queso x kg, fiambre x kg, etc.)
+    // Excluye: AZUCAR 1KG, HARINA 1KG, etc. (no tienen " X KG")
     const cat = (producto.category || '').toUpperCase();
-    return /\bKG\b/.test(nombre) || 
-           (cat.includes('FRUTA') || cat.includes('VERDURA')) && nombre.includes('KG');
+    const nombre = (producto.name || '').toUpperCase();
+    return cat.includes('FRUTAS') || nombre.includes(' X KG');
 }
 
 function agregarProducto(id) {
@@ -2034,16 +2029,8 @@ async function confirmarVenta() {
 
     // Actualizar stock local para no vender más de lo que hay
     ventaActual.forEach(item => {
-        const idBuscar = item.esPeso ? item.idOriginal : item.id;
-        const p = productos.find(pr => pr.id === idBuscar);
-        if (!p) return;
-        if (item.esPeso) {
-            // Stock en kg — rebajar proporcionalmente
-            const kgVendidos = (item.gramos || 0) / 1000;
-            p.stock = Math.max(0, Math.round((p.stock - kgVendidos) * 1000) / 1000);
-        } else {
-            p.stock = Math.max(0, p.stock - item.qty);
-        }
+        const p = productos.find(pr => pr.id === item.id);
+        if (p) p.stock = Math.max(0, p.stock - item.qty);
     });
 
     // Guardar datos para ticket WA
@@ -3961,10 +3948,6 @@ async function toggleOferta(tipo) {
         const resp = await r.json();
         if (resp.success) {
             mostrarToast((nuevoValor ? '🟢 ' : '🔴 ') + cfg.emoji + ' ' + tipo + (nuevoValor ? ' activada' : ' desactivada'), nuevoValor ? 'verde' : 'rojo');
-            // Registrar en log (sin esperar respuesta para no bloquear)
-            const logDatos = { tipo, estado: nuevoValor, vendedor: vendedorActual || 'POS' };
-            fetch(API_URL + '?action=logInterruptor&data=' + encodeURIComponent(JSON.stringify(logDatos)),
-                  { redirect: 'follow' }).catch(() => {});
         } else {
             // Revertir si falló
             _toggleEstado[tipo] = !_toggleEstado[tipo];
