@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Copihue · Reportes</title>
+<title>Copihue · Reportes v1.4</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -190,6 +190,28 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
 .seccion-sep{height:12px}
 .toggle-btn{width:100%;padding:9px;border:2px solid var(--borde);border-radius:12px;background:#fff;font-size:.78rem;font-weight:700;color:var(--gris);cursor:pointer;font-family:inherit;margin-bottom:8px;display:flex;align-items:center;justify-content:center;gap:6px}
 .toggle-btn:active{background:var(--vl)}
+
+/* MODAL PRODUCTO */
+.mprod-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;align-items:flex-end}
+.mprod-overlay.open{display:flex}
+.mprod-sheet{background:#fff;border-radius:22px 22px 0 0;width:100%;max-height:88dvh;overflow-y:auto;padding:0 0 32px}
+.mprod-drag{width:40px;height:4px;background:#e0e0e0;border-radius:2px;margin:12px auto 0}
+.mprod-hdr{padding:14px 16px 10px;border-bottom:1px solid var(--borde);position:sticky;top:0;background:#fff;z-index:1}
+.mprod-nombre{font-size:.92rem;font-weight:900;color:var(--texto);margin-bottom:2px}
+.mprod-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.mprod-chip{padding:4px 10px;border-radius:20px;font-size:.68rem;font-weight:700}
+.mprod-body{padding:12px 16px}
+.mprod-stat{display:flex;gap:8px;margin-bottom:12px}
+.mprod-card{flex:1;background:var(--vl);border-radius:12px;padding:8px 10px;text-align:center}
+.mprod-card.naranja{background:var(--nl)}
+.mprod-card.gris{background:#f5f5f5}
+.mprod-clbl{font-size:.58rem;color:var(--gris);text-transform:uppercase;letter-spacing:.6px;margin-bottom:2px}
+.mprod-cval{font-size:1rem;font-weight:900;color:var(--vd)}
+.mprod-cval.nar{color:var(--naranja)}
+.mprod-sec{font-size:.65rem;font-weight:700;color:var(--gris);text-transform:uppercase;letter-spacing:1px;margin:10px 0 6px;padding-bottom:4px;border-bottom:1px solid #f0f0f0}
+.mprod-ticket{background:#f9faf9;border-radius:10px;padding:8px 10px;margin-bottom:6px;border-left:3px solid var(--verde)}
+.mprod-trow{display:flex;justify-content:space-between;align-items:center;font-size:.75rem}
+.mprod-fecha{color:var(--gris);font-size:.68rem;margin-top:2px}
 </style>
 </head>
 <body>
@@ -430,15 +452,34 @@ function renderApp(){
     const ganCls=colorGan(gan,p.total);
     const barGCls=p.conCosto&&gan<0?'bar-rojo':'bar-g';
     const etiqueta=p.conCosto?fmt(gan):'~'+fmt(gan);
-    return'<div class="prod-row">'+
+    return'<div class="prod-row prod-clickable" data-nombre="'+p.nombre.replace(/"/g,'&quot;')+'" onclick="abrirModalProdGlobal(this.dataset.nombre)" style="cursor:pointer;border-radius:8px;padding:4px;margin:-4px;transition:background .15s" onmouseenter="this.style.background=\'var(--vl)\'" onmouseleave="this.style.background=\'\'">'+
       '<div class="prod-hdr"><span class="prod-n">'+medal+' '+p.nombre.substring(0,28)+'</span><span class="prod-d">'+p.qty+' u</span></div>'+
       '<div style="display:flex;gap:3px;align-items:center;margin-bottom:2px;"><div class="barra-bg" style="flex:1"><div class="barra-f bar-v" style="width:'+pctV+'%"></div></div><span style="font-size:.68rem;font-weight:700;color:var(--vd);min-width:60px;text-align:right">'+fmt(p.total)+'</span></div>'+
       '<div style="display:flex;gap:3px;align-items:center;"><div class="barra-bg" style="flex:1"><div class="barra-f '+barGCls+'" style="width:'+pctG+'%"></div></div><span class="'+ganCls+'" style="font-size:.65rem;min-width:60px;text-align:right">'+etiqueta+'</span></div>'+
     '</div>';
   }).join(''):'<div class="empty">Sin datos para la selección</div>';
 
+  // Top por GANANCIA — mismo pool, ordenado por ganancia en vez de venta
+  const topGananciaArr=[...stats.top]
+    .map(p=>({...p,ganancia:p.conCosto?p.ganReal:p.ganAprox}))
+    .filter(p=>p.ganancia>0)
+    .sort((a,b)=>b.ganancia-a.ganancia);
+  const maxGanRank=topGananciaArr.length?topGananciaArr[0].ganancia:1;
+  const topGanH=topGananciaArr.length?topGananciaArr.map((p,i)=>{
+    const pct=Math.round(p.ganancia/maxGanRank*100);
+    const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':(i+1)+'.';
+    const esReal=p.conCosto;
+    const etiqueta=(esReal?'':'~')+fmt(p.ganancia);
+    return'<div class="prod-row prod-clickable" data-nombre="'+p.nombre.replace(/"/g,'&quot;')+'" onclick="abrirModalProdGlobal(this.dataset.nombre)" style="cursor:pointer;border-radius:8px;padding:4px;margin:-4px;transition:background .15s" onmouseenter="this.style.background=\'var(--nl)\'" onmouseleave="this.style.background=\'\'">'+
+      '<div class="prod-hdr"><span class="prod-n">'+medal+' '+p.nombre.substring(0,28)+'</span><span class="prod-d" style="color:'+(esReal?'var(--naranja)':'var(--vd)')+';font-weight:900">'+etiqueta+(esReal?'':' ★')+'</span></div>'+
+      '<div style="display:flex;gap:3px;align-items:center;">'+
+        '<div class="barra-bg" style="flex:1"><div class="barra-f" style="width:'+pct+'%;background:'+(esReal?'var(--naranja)':'#a5d6a7')+'"></div></div>'+
+        '<span style="font-size:.65rem;color:var(--gris);min-width:60px;text-align:right">'+p.qty+' u · '+fmt(p.total)+'</span>'+
+      '</div>'+
+    '</div>';
+  }).join(''):'<div class="empty">Sin datos de ganancia en el período</div>';
+
     // Mejores días
-  const DNOM=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
   const mejoresDias=Object.entries(
     [...diasSel].reduce((acc,ds)=>{
       const {totals:td}=filtrar([ds]);
@@ -449,7 +490,7 @@ function renderApp(){
   const mejDiasH=mejoresDias.length?mejoresDias.map(([ds,t],idx)=>{
     const [a,m,d]=ds.split('-');
     const dw=new Date(ds+'T12:00:00').getDay();
-    const dnm=DNOM[dw];
+    const dnm=DIAS_SEM[dw];
     const mesNom=MESES[parseInt(m)-1].substring(0,3);
     const esHoy=ds===hoyStr();
     const bgColor=idx===0?'background:var(--vl);border-radius:8px;padding:2px 6px;':'';
@@ -644,8 +685,10 @@ function renderApp(){
       (Object.keys(stats.metodos).length?'<div class="tar"><div class="tar-t">💳 Por método de pago</div>'+metRowsH+'</div>':'')+
       // Vendedores
       (Object.keys(stats.vendedores).length>1?'<div class="tar"><div class="tar-t">👥 Por vendedor</div>'+vendRowsH+'</div>':'')+
-      // Top productos
+      // Top productos por venta
       '<div class="tar"><div class="tar-t">🏆 Top productos <span style="font-size:.6rem;font-weight:400;color:var(--gris)">🟩 venta · 🟧 ganancia</span></div>'+topsH+'</div>'+
+      // Top productos por ganancia
+      '<div class="tar" style="border-color:var(--naranja)"><div class="tar-t" style="color:var(--naranja)">💰 Top por ganancia <span style="font-size:.6rem;font-weight:400;color:var(--gris)">🟧 real · 🟩 estimada ★</span></div>'+topGanH+'</div>'+
       // Mejores días
       (mejoresDias.length?'<div class="tar"><div class="tar-t">🏅 Mejores días</div>'+mejDiasH+'</div>':'')+
       // Días semana
@@ -716,7 +759,122 @@ function selSemana(n){
 }
 function togDet(h){h.nextElementSibling.classList.toggle('open');}
 
+// ====== MODAL DETALLE PRODUCTO ======
+function abrirModalProd(nombre) {
+  const overlay = document.getElementById('mprodOverlay');
+  const nomEl   = document.getElementById('mprodNombre');
+  const chipsEl = document.getElementById('mprodChips');
+  const bodyEl  = document.getElementById('mprodBody');
+
+  const diasArr = Array.from(diasSel);
+  const {items} = filtrar(diasArr);
+  const its = items.filter(i => i.nombre === nombre);
+
+  nomEl.textContent = nombre;
+  chipsEl.innerHTML = '';
+
+  if (!its.length) {
+    bodyEl.innerHTML = '<div class="empty">Sin ventas en el período seleccionado</div>';
+  } else {
+    const totalVenta    = its.reduce((s,i) => s + i.subtotal, 0);
+    const totalQty      = its.reduce((s,i) => s + i.qty, 0);
+    const tieneCosto    = its.some(i => i.tieneCosto);
+    const ganancia      = tieneCosto
+      ? its.reduce((s,i) => s + (i.gananciaReal || 0), 0)
+      : its.reduce((s,i) => s + (i.gananciaAprox || 0), 0);
+    const precioPromedio = totalQty > 0 ? Math.round(totalVenta / totalQty) : 0;
+
+    const porDia = {};
+    its.forEach(i => {
+      if (!porDia[i.fechaStr]) porDia[i.fechaStr] = [];
+      porDia[i.fechaStr].push(i);
+    });
+    const diasOrdenados = Object.keys(porDia).sort().reverse();
+    const MNOM3 = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+
+    const diasHTML = diasOrdenados.map(ds => {
+      const [a,m,d] = ds.split('-');
+      const dw  = new Date(ds+'T12:00:00').getDay();
+      const lbl = DIAS_SEM[dw]+' '+parseInt(d)+' '+MNOM3[parseInt(m)-1];
+      const regs     = porDia[ds];
+      const totalDia = regs.reduce((s,i) => s + i.subtotal, 0);
+      const qtyDia   = regs.reduce((s,i) => s + i.qty, 0);
+      const ganDia   = tieneCosto
+        ? regs.reduce((s,i) => s + (i.gananciaReal || 0), 0)
+        : regs.reduce((s,i) => s + (i.gananciaAprox || 0), 0);
+
+      const tkH = regs.map(i =>
+        '<div class="mprod-ticket">'+
+          '<div class="mprod-trow">'+
+            '<span style="font-weight:700">🎫 #'+i.ticket+'</span>'+
+            '<span style="font-weight:900;color:var(--vd)">'+fmt(i.subtotal)+'</span>'+
+          '</div>'+
+          '<div class="mprod-trow" style="margin-top:3px">'+
+            '<span style="color:var(--gris)">'+i.qty+' u · $'+fmt(i.precio)+'/u'+(i.hora?' · '+i.hora:'')+'</span>'+
+            '<span style="font-size:.68rem;color:var(--naranja);font-weight:700">'+(tieneCosto?'+'+fmt(i.gananciaReal||0):'~+'+fmt(i.gananciaAprox||0))+'</span>'+
+          '</div>'+
+        '</div>'
+      ).join('');
+
+      return '<div class="mprod-sec">📅 '+lbl+
+        ' <span style="color:var(--gris);font-weight:400">'+qtyDia+' u · '+fmt(totalDia)+
+        ' <span style="color:var(--naranja)">+'+fmt(ganDia)+'</span></span></div>'+tkH;
+    }).join('');
+
+    chipsEl.innerHTML =
+      '<span class="mprod-chip" style="background:var(--vl);color:var(--vd)">'+totalQty+' unidades</span>'+
+      '<span class="mprod-chip" style="background:#e8f5e9;color:var(--vd)">'+diasOrdenados.length+' día'+(diasOrdenados.length>1?'s':'')+'</span>'+
+      (tieneCosto
+        ? '<span class="mprod-chip" style="background:var(--nl);color:var(--naranja)">Costo real ✓</span>'
+        : '<span class="mprod-chip" style="background:#f5f5f5;color:var(--gris)">★ Estimado</span>');
+
+    bodyEl.innerHTML =
+      '<div class="mprod-stat">'+
+        '<div class="mprod-card"><div class="mprod-clbl">Venta total</div><div class="mprod-cval">'+fmt(totalVenta)+'</div></div>'+
+        '<div class="mprod-card naranja"><div class="mprod-clbl">Ganancia'+(tieneCosto?'':' ★')+'</div><div class="mprod-cval nar">'+(tieneCosto?'':'~')+fmt(ganancia)+'</div></div>'+
+        '<div class="mprod-card gris"><div class="mprod-clbl">Precio prom.</div><div class="mprod-cval" style="color:var(--texto)">'+fmt(precioPromedio)+'</div></div>'+
+      '</div>'+
+      diasHTML;
+  }
+
+  overlay.classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function cerrarModalProd() {
+  document.getElementById('mprodOverlay').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
 init();
 </script>
+
+<script>
+// Garantizar acceso global a abrirModalProd desde onclick inline
+// Este script corre DESPUÉS del script principal
+function abrirModalProdGlobal(nombre) {
+  // Buscar la función en el scope del script anterior via evento
+  const ev = new CustomEvent('copihue:abrirProd', { detail: { nombre } });
+  document.dispatchEvent(ev);
+}
+document.addEventListener('copihue:abrirProd', function(e) {
+  abrirModalProd(e.detail.nombre);
+});
+</script>
+<!-- MODAL DETALLE PRODUCTO -->
+<div class="mprod-overlay" id="mprodOverlay" onclick="if(event.target===this)cerrarModalProd()">
+  <div class="mprod-sheet" id="mprodSheet">
+    <div class="mprod-drag"></div>
+    <div class="mprod-hdr">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div class="mprod-nombre" id="mprodNombre">—</div>
+        <button onclick="cerrarModalProd()" style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--gris);padding:0 0 0 10px">✕</button>
+      </div>
+      <div class="mprod-chips" id="mprodChips"></div>
+    </div>
+    <div class="mprod-body" id="mprodBody"></div>
+  </div>
+</div>
+
 </body>
 </html>
