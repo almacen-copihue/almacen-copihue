@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Copihue · Reportes v1.5</title>
+<title>Copihue · Reportes v1.6</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -229,13 +229,22 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
 .mtk-drag{width:40px;height:4px;background:#e0e0e0;border-radius:4px;margin:10px auto 0}
 .mprod-fecha{color:var(--gris);font-size:.68rem;margin-top:2px}
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
 
 <div class="hdr">
   <div class="hdr-icon">🏪</div>
   <div><div class="hdr-t">Copihue</div><div class="hdr-s">Reportes</div></div>
-  <a href="venta.html" class="btn-back">← Volver</a>
+  <div style="display:flex;gap:6px;align-items:center;">
+    <button onclick="exportarExcel()" id="btnExcel"
+            style="background:#1b5e20;color:white;border:none;border-radius:10px;
+                   padding:6px 12px;font-size:0.72rem;font-weight:700;cursor:pointer;
+                   display:flex;align-items:center;gap:4px;">
+      📊 Excel
+    </button>
+    <a href="venta.html" class="btn-back">← Volver</a>
+  </div>
 </div>
 
 <div id="app"><div class="ldg"><div class="spin"></div>Cargando reportes...</div></div>
@@ -926,6 +935,184 @@ function abrirModalTicket(fechaStr, ticket) {
 function cerrarModalTicket() {
   document.getElementById('mtkOverlay').classList.remove('open');
   document.body.style.overflow = '';
+}
+
+// ====== EXPORTAR EXCEL ======
+function exportarExcel() {
+  if (!raw) { alert('Esperá que carguen los datos'); return; }
+
+  const btn = document.getElementById('btnExcel');
+  btn.textContent = '⏳ Generando...';
+  btn.disabled = true;
+
+  try {
+    const wb = XLSX.utils.book_new();
+    const diasArr = Array.from(diasSel);
+    const { items, totals } = filtrar(diasArr);
+    const MNOM = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+
+    // Período label
+    const diasOrd = diasArr.sort();
+    const periodoLabel = diasOrd.length === 0 ? 'Sin selección'
+      : diasOrd.length === 1 ? diasOrd[0]
+      : diasOrd[0] + ' al ' + diasOrd[diasOrd.length - 1];
+
+    // ── HOJA 1: RESUMEN ──
+    const totalVenta   = totals.reduce((s,t) => s + (t.total||0), 0);
+    const totalGanReal = items.filter(i=>i.tieneCosto).reduce((s,i) => s + (i.gananciaReal||0), 0);
+    const totalGanAprox= items.filter(i=>!i.tieneCosto).reduce((s,i) => s + (i.gananciaAprox||0), 0);
+    const totalGan     = totalGanReal + totalGanAprox;
+    const nTickets     = totals.length;
+    const ticketProm   = nTickets > 0 ? Math.round(totalVenta / nTickets) : 0;
+    const totalItems   = items.length;
+
+    const resumen = [
+      ['RESUMEN DEL PERÍODO', periodoLabel],
+      [],
+      ['Métrica', 'Valor'],
+      ['Venta total', totalVenta],
+      ['Ganancia total (real+estimada)', totalGan],
+      ['Ganancia real (con costo)', totalGanReal],
+      ['Ganancia estimada (~40%)', totalGanAprox],
+      ['Margen promedio %', totalVenta > 0 ? +((totalGan/totalVenta)*100).toFixed(1) : 0],
+      ['Cantidad de tickets', nTickets],
+      ['Ticket promedio', ticketProm],
+      ['Líneas vendidas', totalItems],
+      [],
+      ['Métodos de pago', 'Monto'],
+      ...Object.entries(
+        totals.reduce((acc,t) => {
+          const m = (t.metodo||'EFECTIVO').toUpperCase();
+          acc[m] = (acc[m]||0) + (t.total||0); return acc;
+        }, {})
+      ).sort((a,b) => b[1]-a[1])
+    ];
+    const ws1 = XLSX.utils.aoa_to_sheet(resumen);
+    ws1['!cols'] = [{wch:32},{wch:18}];
+    XLSX.utils.book_append_sheet(wb, ws1, '📋 Resumen');
+
+    // ── HOJA 2: TOP POR VENTA ──
+    const topVentaMap = {};
+    items.forEach(i => {
+      if (!topVentaMap[i.nombre]) topVentaMap[i.nombre] = {qty:0, total:0, gan:0, conCosto:false};
+      topVentaMap[i.nombre].qty   += i.qty||0;
+      topVentaMap[i.nombre].total += i.subtotal||0;
+      topVentaMap[i.nombre].gan   += i.tieneCosto ? (i.gananciaReal||0) : (i.gananciaAprox||0);
+      if (i.tieneCosto) topVentaMap[i.nombre].conCosto = true;
+    });
+    const topVenta = Object.entries(topVentaMap)
+      .sort((a,b) => b[1].total - a[1].total)
+      .map(([nombre, d], idx) => [
+        idx+1, nombre,
+        d.qty,
+        d.total,
+        d.gan,
+        d.total > 0 ? +((d.gan/d.total)*100).toFixed(1) : 0,
+        d.conCosto ? 'Real' : 'Estimada'
+      ]);
+    const ws2 = XLSX.utils.aoa_to_sheet([
+      ['#', 'Producto', 'Unidades', 'Venta ($)', 'Ganancia ($)', 'Margen %', 'Tipo ganancia'],
+      ...topVenta
+    ]);
+    ws2['!cols'] = [{wch:4},{wch:36},{wch:10},{wch:12},{wch:14},{wch:10},{wch:14}];
+    XLSX.utils.book_append_sheet(wb, ws2, '📈 Top por Venta');
+
+    // ── HOJA 3: TOP POR GANANCIA ──
+    const topGanancia = Object.entries(topVentaMap)
+      .sort((a,b) => b[1].gan - a[1].gan)
+      .map(([nombre, d], idx) => [
+        idx+1, nombre,
+        d.qty,
+        d.total,
+        d.gan,
+        d.total > 0 ? +((d.gan/d.total)*100).toFixed(1) : 0,
+        d.conCosto ? 'Real' : 'Estimada'
+      ]);
+    const ws3 = XLSX.utils.aoa_to_sheet([
+      ['#', 'Producto', 'Unidades', 'Venta ($)', 'Ganancia ($)', 'Margen %', 'Tipo ganancia'],
+      ...topGanancia
+    ]);
+    ws3['!cols'] = [{wch:4},{wch:36},{wch:10},{wch:12},{wch:14},{wch:10},{wch:14}];
+    XLSX.utils.book_append_sheet(wb, ws3, '💰 Top por Ganancia');
+
+    // ── HOJA 4: VENTAS POR DÍA ──
+    const porDia = {};
+    totals.forEach(t => {
+      if (!porDia[t.fechaStr]) porDia[t.fechaStr] = {venta:0, tickets:0, gan:0};
+      porDia[t.fechaStr].venta   += t.total||0;
+      porDia[t.fechaStr].tickets += 1;
+    });
+    items.forEach(i => {
+      if (!porDia[i.fechaStr]) porDia[i.fechaStr] = {venta:0, tickets:0, gan:0};
+      porDia[i.fechaStr].gan += i.tieneCosto ? (i.gananciaReal||0) : (i.gananciaAprox||0);
+    });
+    const diasData = Object.entries(porDia).sort((a,b) => a[0].localeCompare(b[0]))
+      .map(([ds, d]) => {
+        const [a,m,dd] = ds.split('-');
+        const dw = new Date(ds+'T12:00:00').getDay();
+        return [
+          ds,
+          DIAS_SEM[dw]+' '+parseInt(dd)+' '+MNOM[parseInt(m)-1],
+          d.tickets,
+          d.venta,
+          d.gan,
+          d.venta > 0 ? +((d.gan/d.venta)*100).toFixed(1) : 0,
+          d.tickets > 0 ? Math.round(d.venta/d.tickets) : 0
+        ];
+      });
+    const ws4 = XLSX.utils.aoa_to_sheet([
+      ['Fecha', 'Día', 'Tickets', 'Venta ($)', 'Ganancia ($)', 'Margen %', 'Ticket prom. ($)'],
+      ...diasData,
+      [],
+      ['TOTAL', '', diasData.reduce((s,r)=>s+r[2],0), diasData.reduce((s,r)=>s+r[3],0),
+       diasData.reduce((s,r)=>s+r[4],0), '', Math.round(diasData.reduce((s,r)=>s+r[3],0)/Math.max(1,diasData.reduce((s,r)=>s+r[2],0)))]
+    ]);
+    ws4['!cols'] = [{wch:12},{wch:16},{wch:8},{wch:12},{wch:14},{wch:10},{wch:14}];
+    XLSX.utils.book_append_sheet(wb, ws4, '📅 Ventas por Día');
+
+    // ── HOJA 5: DETALLE TICKETS ──
+    const detalleRows = [];
+    const tkIds = [...new Set(totals.map(t => t.fechaStr+'_'+t.ticket))];
+    tkIds.sort().forEach(tkId => {
+      const [fechaStr, ticket] = tkId.split('_');
+      const tot = totals.find(t => t.fechaStr === fechaStr && t.ticket === ticket);
+      const its = items.filter(i => i.fechaStr === fechaStr && i.ticket === ticket);
+      const [a,m,d] = fechaStr.split('-');
+      const fechaLbl = parseInt(d)+'/'+m+'/'+a;
+      its.forEach(i => {
+        detalleRows.push([
+          fechaLbl,
+          '#'+ticket,
+          tot ? (tot.metodo||'EFECTIVO') : '',
+          tot ? (tot.vendedor||'') : '',
+          i.nombre,
+          i.qty,
+          i.precio||0,
+          i.subtotal||0,
+          i.tieneCosto ? (i.gananciaReal||0) : (i.gananciaAprox||0),
+          i.tieneCosto ? 'Real' : 'Estimada',
+          i.hora||''
+        ]);
+      });
+    });
+    const ws5 = XLSX.utils.aoa_to_sheet([
+      ['Fecha','Ticket','Método','Vendedor','Producto','Cant.','Precio unit.','Subtotal','Ganancia','Tipo gan.','Hora'],
+      ...detalleRows
+    ]);
+    ws5['!cols'] = [{wch:10},{wch:8},{wch:12},{wch:12},{wch:36},{wch:6},{wch:12},{wch:12},{wch:12},{wch:10},{wch:8}];
+    XLSX.utils.book_append_sheet(wb, ws5, '🧾 Detalle Tickets');
+
+    // ── Descargar ──
+    const fecha = new Date().toISOString().split('T')[0];
+    XLSX.writeFile(wb, `copihue-reporte-${fecha}.xlsx`);
+
+  } catch(err) {
+    console.error(err);
+    alert('Error generando Excel: ' + err.message);
+  } finally {
+    btn.textContent = '📊 Excel';
+    btn.disabled = false;
+  }
 }
 
 init();
