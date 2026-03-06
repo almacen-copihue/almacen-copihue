@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Copihue · Reportes v1.6</title>
+<title>Copihue · Reportes v1.8</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -697,6 +697,7 @@ function renderApp(){
         '<div class="acc-grid">'+
           '<button class="btn-acc verde" onclick="selHoy()">📍 Hoy</button>'+
           '<button class="btn-acc verde" onclick="selTodo()">✅ Mes</button>'+
+          '<button class="btn-acc verde" onclick="selAnual()">📆 Todo</button>'+
           semsHTML+
         '</div>'+
       '</div>'+
@@ -776,6 +777,15 @@ function cambMes(d){
 function selTodo(){const n=new Date(anio,mes+1,0).getDate();for(let d=1;d<=n;d++)diasSel.add(anio+'-'+String(mes+1).padStart(2,'0')+'-'+String(d).padStart(2,'0'));renderApp();}
 function deselTodo(){diasSel.clear();renderApp();}
 function selHoy(){diasSel.clear();diasSel.add(hoyStr());renderApp();}
+function selAnual(){
+  // Seleccionar todos los días que tienen datos en raw
+  diasSel.clear();
+  if(raw){
+    raw.items.forEach(i=>{if(i.fechaStr)diasSel.add(i.fechaStr);});
+    raw.totales.forEach(t=>{if(t.fechaStr)diasSel.add(t.fechaStr);});
+  }
+  renderApp();
+}
 function selSemana(n){
   const ini=(n-1)*7+1;
   const fin=Math.min(n*7,new Date(anio,mes+1,0).getDate());
@@ -947,13 +957,25 @@ function exportarExcel() {
 
   try {
     const wb = XLSX.utils.book_new();
-    const diasArr = Array.from(diasSel);
-    const { items, totals } = filtrar(diasArr);
+
+    // Si los días seleccionados no tienen datos, usar todos los días disponibles
+    let diasArr = Array.from(diasSel);
+    let { items, totals } = filtrar(diasArr);
+    if (items.length === 0 && totals.length === 0) {
+      // Usar todos los días disponibles en raw
+      diasArr = [...new Set([
+        ...raw.items.map(i => i.fechaStr),
+        ...raw.totales.map(t => t.fechaStr)
+      ])].filter(Boolean);
+      const r = filtrar(diasArr);
+      items  = r.items;
+      totals = r.totals;
+    }
     const MNOM = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 
     // Período label
-    const diasOrd = diasArr.sort();
-    const periodoLabel = diasOrd.length === 0 ? 'Sin selección'
+    const diasOrd = [...new Set([...items.map(i=>i.fechaStr),...totals.map(t=>t.fechaStr)])].filter(Boolean).sort();
+    const periodoLabel = diasOrd.length === 0 ? 'Sin datos'
       : diasOrd.length === 1 ? diasOrd[0]
       : diasOrd[0] + ' al ' + diasOrd[diasOrd.length - 1];
 
