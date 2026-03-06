@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Copihue · Reportes v1.8</title>
+<title>Copihue · Reportes v1.9</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -53,6 +53,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
 
 /* CALENDARIO */
 .cal{background:var(--vl);border-radius:14px;overflow:hidden;margin-bottom:10px;border:1px solid var(--borde)}
+.cal-meses{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-bottom:10px}
+.cal-mes-btn{padding:8px 4px;border:1px solid var(--borde);border-radius:10px;background:#fff;font-size:.72rem;font-weight:700;cursor:pointer;color:var(--gris);font-family:inherit;text-align:center;transition:all .15s}
+.cal-mes-btn.sel{background:var(--vl);border-color:var(--verde);color:var(--vd)}
+.cal-mes-btn.activo{background:var(--verde);color:#fff;border-color:var(--vd)}
 .cal-sem{display:grid;grid-template-columns:repeat(7,1fr);background:var(--verde);padding:4px 0}
 .cal-dn{text-align:center;padding:4px 2px;font-size:.63rem;font-weight:700;color:rgba(255,255,255,.85);text-transform:uppercase}
 .cal-dias{display:grid;grid-template-columns:repeat(7,1fr);background:var(--vl);gap:0;padding:3px}
@@ -209,42 +213,17 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
 .mprod-cval{font-size:1rem;font-weight:900;color:var(--vd)}
 .mprod-cval.nar{color:var(--naranja)}
 .mprod-sec{font-size:.65rem;font-weight:700;color:var(--gris);text-transform:uppercase;letter-spacing:1px;margin:10px 0 6px;padding-bottom:4px;border-bottom:1px solid #f0f0f0}
-.mprod-ticket{background:#f9faf9;border-radius:10px;padding:8px 10px;margin-bottom:6px;border-left:3px solid var(--verde);cursor:pointer;transition:background .15s}
-.mprod-ticket:active{background:#e8f5e9}
+.mprod-ticket{background:#f9faf9;border-radius:10px;padding:8px 10px;margin-bottom:6px;border-left:3px solid var(--verde)}
 .mprod-trow{display:flex;justify-content:space-between;align-items:center;font-size:.75rem}
-/* Modal ticket */
-.mtk-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:300;align-items:flex-end}
-.mtk-overlay.open{display:flex}
-.mtk-sheet{background:white;border-radius:20px 20px 0 0;width:100%;max-height:85vh;overflow-y:auto;padding:0 0 24px}
-.mtk-hdr{padding:14px 16px 10px;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:white;z-index:1}
-.mtk-num{font-size:1rem;font-weight:900;color:#1b5e20}
-.mtk-cerrar{background:none;border:none;font-size:1.2rem;cursor:pointer;color:#999;padding:4px 8px}
-.mtk-meta{display:flex;gap:6px;flex-wrap:wrap;padding:10px 16px}
-.mtk-chip{font-size:.7rem;padding:3px 10px;border-radius:20px;font-weight:700}
-.mtk-item{display:flex;justify-content:space-between;align-items:center;padding:9px 16px;border-bottom:1px solid #f5f5f5}
-.mtk-item-n{font-size:.82rem;font-weight:600;color:#222;flex:1;padding-right:8px}
-.mtk-item-p{font-size:.82rem;font-weight:800;color:#1b5e20;white-space:nowrap}
-.mtk-item-d{font-size:.68rem;color:#999;margin-top:1px}
-.mtk-total{padding:12px 16px;background:#f9fffe;border-top:2px solid #e8f5e9;display:flex;justify-content:space-between;align-items:center;margin-top:4px}
-.mtk-drag{width:40px;height:4px;background:#e0e0e0;border-radius:4px;margin:10px auto 0}
 .mprod-fecha{color:var(--gris);font-size:.68rem;margin-top:2px}
 </style>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
 
 <div class="hdr">
   <div class="hdr-icon">🏪</div>
   <div><div class="hdr-t">Copihue</div><div class="hdr-s">Reportes</div></div>
-  <div style="display:flex;gap:6px;align-items:center;">
-    <button onclick="exportarExcel()" id="btnExcel"
-            style="background:#1b5e20;color:white;border:none;border-radius:10px;
-                   padding:6px 12px;font-size:0.72rem;font-weight:700;cursor:pointer;
-                   display:flex;align-items:center;gap:4px;">
-      📊 Excel
-    </button>
-    <a href="venta.html" class="btn-back">← Volver</a>
-  </div>
+  <a href="venta.html" class="btn-back">← Volver</a>
 </div>
 
 <div id="app"><div class="ldg"><div class="spin"></div>Cargando reportes...</div></div>
@@ -259,6 +238,7 @@ const normVend=v=>(v||'').normalize('NFD').replace(/[̀-ͯ]/g,'').trim().toUpper
 let raw=null;
 let mes=new Date().getMonth(), anio=new Date().getFullYear();
 let diasSel=new Set();
+let modoNav='mes'; // 'mes' | 'anio'
 let metActivos=new Set(['TODOS']);
 let vendActivos=new Set(['TODOS']);
 let showVenc=false, showDiaSem=false, showHoras=false;
@@ -426,6 +406,15 @@ function renderApp(){
     const ini=(n-1)*7+1, fin=Math.min(n*7,diasEnMes);
     if(ini>diasEnMes)return'';
     return'<button class="btn-acc" onclick="selSemana('+n+')">'+s+'</button>';
+  }).join('');
+
+  // Calendario de meses (modo año)
+  const calMesesH=MESES.map((nm,mi)=>{
+    const tieneData = raw && raw.totales.some(t=>t.fechaStr && t.fechaStr.startsWith(anio+'-'+String(mi+1).padStart(2,'0')));
+    const diasDelMes=[...diasSel].filter(d=>d.startsWith(anio+'-'+String(mi+1).padStart(2,'0')));
+    const esSel = diasDelMes.length > 0;
+    const cls = esSel ? 'cal-mes-btn activo' : tieneData ? 'cal-mes-btn sel' : 'cal-mes-btn';
+    return '<button class="'+cls+'" onclick="selMes('+mi+')">'+nm.substring(0,3)+(tieneData?'':'<br><span style="font-size:.55rem;opacity:.4">sin datos</span>')+'</button>';
   }).join('');
 
   // Filtros método
@@ -684,21 +673,32 @@ function renderApp(){
     '<div class="sel-panel">'+
       '<div class="sel-titulo">📋 Seleccioná tu informe</div>'+
       '<div class="sel-body">'+
-        // Mes
-        '<div class="mes-nav"><button class="btn-mes" onclick="cambMes(-1)">‹</button><span class="mes-nombre">'+MESES[mes]+' '+anio+'</span><button class="btn-mes" onclick="cambMes(1)">›</button></div>'+
+        // Nav mes/año con selector
+        '<div class="mes-nav">'+
+          '<button class="btn-mes" onclick="cambMes(-1)">‹</button>'+
+          '<span class="mes-nombre" onclick="toggleModoNav()" style="cursor:pointer;user-select:none" title="Tocar para cambiar vista">'+
+            (modoNav==='anio' ? '📆 '+anio : MESES[mes]+' '+anio)+
+          '</span>'+
+          '<button class="btn-mes" onclick="cambMes(1)">›</button>'+
+        '</div>'+
         // Método
         '<div class="lbl">Método de pago</div>'+fMetH+
         // Vendedor
         fVendH+
-        // Calendario
-        '<div class="lbl">Días del mes</div>'+
-        '<div class="cal">'+calH+'</div>'+
-        // Semanas y atajos
-        '<div class="acc-grid">'+
+        // Calendario — solo en modo mes
+        (modoNav==='mes' ?
+          '<div class="lbl">Días del mes</div><div class="cal">'+calH+'</div>' :
+          '<div class="lbl">Meses del año</div><div class="cal-meses">'+calMesesH+'</div>'
+        )+
+        // Atajos
+        '<div class="acc-grid" style="margin-top:8px">'+
           '<button class="btn-acc verde" onclick="selHoy()">📍 Hoy</button>'+
-          '<button class="btn-acc verde" onclick="selTodo()">✅ Mes</button>'+
-          '<button class="btn-acc verde" onclick="selAnual()">📆 Todo</button>'+
-          semsHTML+
+          '<button class="btn-acc verde" onclick="selTodo()">✅ '+(modoNav==='mes'?'Mes':'Año')+'</button>'+
+          (modoNav==='mes' ? semsHTML : '')+
+          '<button class="btn-acc '+(modoNav==='anio'?'naranja':'verde')+'" onclick="toggleModoNav()">'+
+            (modoNav==='mes'?'📆 Año':'📅 Mes')+
+          '</button>'+
+          '<button class="btn-acc verde" onclick="selAnual()">🗂 Todo</button>'+
         '</div>'+
       '</div>'+
     '</div>'+
@@ -767,18 +767,50 @@ function togVend(v){
   renderApp();
 }
 function cambMes(d){
+  if(modoNav==='anio'){
+    anio+=d; diasSel.clear(); renderApp(); return;
+  }
   mes+=d;if(mes<0){mes=11;anio--;}if(mes>11){mes=0;anio++;}
   diasSel.clear();
-  // Si volvemos al mes actual, auto-seleccionar hoy
   const hoy=new Date();
   if(mes===hoy.getMonth()&&anio===hoy.getFullYear()) diasSel.add(hoyStr());
   renderApp();
 }
-function selTodo(){const n=new Date(anio,mes+1,0).getDate();for(let d=1;d<=n;d++)diasSel.add(anio+'-'+String(mes+1).padStart(2,'0')+'-'+String(d).padStart(2,'0'));renderApp();}
+function selTodo(){
+  diasSel.clear();
+  if(modoNav==='anio'){
+    // Seleccionar todo el año
+    for(let m=0;m<12;m++){
+      const n=new Date(anio,m+1,0).getDate();
+      for(let d=1;d<=n;d++) diasSel.add(anio+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0'));
+    }
+  } else {
+    const n=new Date(anio,mes+1,0).getDate();
+    for(let d=1;d<=n;d++) diasSel.add(anio+'-'+String(mes+1).padStart(2,'0')+'-'+String(d).padStart(2,'0'));
+  }
+  renderApp();
+}
 function deselTodo(){diasSel.clear();renderApp();}
 function selHoy(){diasSel.clear();diasSel.add(hoyStr());renderApp();}
+function selSemana(n){
+  const ini=(n-1)*7+1;
+  const fin=Math.min(n*7,new Date(anio,mes+1,0).getDate());
+  for(let d=ini;d<=fin;d++)diasSel.add(anio+'-'+String(mes+1).padStart(2,'0')+'-'+String(d).padStart(2,'0'));
+  renderApp();
+}
+function selMes(m){
+  // Toggle mes completo en modo año
+  const prefix=anio+'-'+String(m+1).padStart(2,'0');
+  const yaSelec=[...diasSel].some(d=>d.startsWith(prefix));
+  const n=new Date(anio,m+1,0).getDate();
+  if(yaSelec){
+    for(let d=1;d<=n;d++) diasSel.delete(prefix+'-'+String(d).padStart(2,'0'));
+  } else {
+    for(let d=1;d<=n;d++) diasSel.add(prefix+'-'+String(d).padStart(2,'0'));
+  }
+  renderApp();
+}
 function selAnual(){
-  // Seleccionar todos los días que tienen datos en raw
   diasSel.clear();
   if(raw){
     raw.items.forEach(i=>{if(i.fechaStr)diasSel.add(i.fechaStr);});
@@ -786,10 +818,8 @@ function selAnual(){
   }
   renderApp();
 }
-function selSemana(n){
-  const ini=(n-1)*7+1;
-  const fin=Math.min(n*7,new Date(anio,mes+1,0).getDate());
-  for(let d=ini;d<=fin;d++)diasSel.add(anio+'-'+String(mes+1).padStart(2,'0')+'-'+String(d).padStart(2,'0'));
+function toggleModoNav(){
+  modoNav = modoNav==='mes' ? 'anio' : 'mes';
   renderApp();
 }
 function togDet(h){h.nextElementSibling.classList.toggle('open');}
@@ -839,9 +869,9 @@ function abrirModalProd(nombre) {
         : regs.reduce((s,i) => s + (i.gananciaAprox || 0), 0);
 
       const tkH = regs.map(i =>
-        '<div class="mprod-ticket" onclick="abrirModalTicket(\''+i.fechaStr+'\',\''+i.ticket+'\')">'+
+        '<div class="mprod-ticket">'+
           '<div class="mprod-trow">'+
-            '<span style="font-weight:700">🎫 #'+i.ticket+' <span style="font-size:.65rem;color:#aaa;font-weight:400">→ ver ticket</span></span>'+
+            '<span style="font-weight:700">🎫 #'+i.ticket+'</span>'+
             '<span style="font-weight:900;color:var(--vd)">'+fmt(i.subtotal)+'</span>'+
           '</div>'+
           '<div class="mprod-trow" style="margin-top:3px">'+
@@ -881,280 +911,14 @@ function cerrarModalProd() {
   document.body.style.overflow = '';
 }
 
-// Listener global tap prod-row
+// Listener global para tap en prod-row — evita problemas de escape de comillas
 document.addEventListener('click', function(e) {
   const row = e.target.closest('.prod-clickable');
   if (row) abrirModalProd(row.dataset.nombre);
 });
 
-// ====== MODAL DETALLE TICKET ======
-function abrirModalTicket(fechaStr, ticket) {
-  const tot   = raw.totales.find(t => t.fechaStr === fechaStr && String(t.ticket) === String(ticket));
-  const items = raw.items.filter(i => i.fechaStr === fechaStr && String(i.ticket) === String(ticket));
-  const overlay = document.getElementById('mtkOverlay');
-
-  const metodo  = tot ? (tot.metodo || 'EFECTIVO') : 'EFECTIVO';
-  const vendedor = tot ? (tot.vendedor || '') : '';
-  const total   = tot ? (tot.total || 0) : items.reduce((s,i) => s + i.subtotal, 0);
-  const MNOM3   = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
-  const [a,m,d] = fechaStr.split('-');
-  const fechaLbl = parseInt(d)+' '+MNOM3[parseInt(m)-1]+' '+a;
-  const metIco  = metodo.includes('TRANSF')?'📱':metodo.includes('QR')?'📲':metodo.includes('POSNET')?'💳':'💵';
-
-  document.getElementById('mtkNum').textContent   = '🎫 Ticket #'+ticket;
-  document.getElementById('mtkFecha').textContent = fechaLbl;
-
-  const chips = [
-    `<span class="mtk-chip" style="background:#e8f5e9;color:#1b5e20">${metIco} ${metodo}</span>`,
-    vendedor ? `<span class="mtk-chip" style="background:#e3f2fd;color:#1565c0">👤 ${vendedor}</span>` : '',
-    `<span class="mtk-chip" style="background:#f3e5f5;color:#6a1b9a">${items.length} ítem${items.length!==1?'s':''}</span>`,
-  ].filter(Boolean).join('');
-  document.getElementById('mtkChips').innerHTML = chips;
-
-  const itemsHTML = items.map(i => {
-    const gan    = i.tieneCosto ? (i.gananciaReal||0) : (i.gananciaAprox||0);
-    const ganStr = (i.tieneCosto ? '+' : '~+')+fmt(gan);
-    return `<div class="mtk-item">
-      <div style="flex:1;padding-right:8px">
-        <div class="mtk-item-n">${i.nombre}</div>
-        <div class="mtk-item-d">${i.qty} u · $${fmt(i.precio)}/u${i.hora?' · '+i.hora:''}</div>
-      </div>
-      <div style="text-align:right">
-        <div class="mtk-item-p">$${fmt(i.subtotal)}</div>
-        <div style="font-size:.65rem;color:var(--naranja);font-weight:700">${ganStr}</div>
-      </div>
-    </div>`;
-  }).join('');
-
-  const tieneCosto = items.some(i => i.tieneCosto);
-  const ganTotal   = items.reduce((s,i) => s + (i.tieneCosto ? (i.gananciaReal||0) : (i.gananciaAprox||0)), 0);
-
-  document.getElementById('mtkBody').innerHTML = itemsHTML +
-    `<div class="mtk-total">
-      <span style="font-weight:700;font-size:.85rem;color:#555">Total ticket</span>
-      <div style="text-align:right">
-        <div style="font-size:1.1rem;font-weight:900;color:#1b5e20">$${fmt(total)}</div>
-        <div style="font-size:.7rem;color:var(--naranja);font-weight:700">${tieneCosto?'':'~'}+$${fmt(ganTotal)} gan.</div>
-      </div>
-    </div>`;
-
-  overlay.classList.add('open');
-  document.body.style.overflow = 'hidden';
-}
-
-function cerrarModalTicket() {
-  document.getElementById('mtkOverlay').classList.remove('open');
-  document.body.style.overflow = '';
-}
-
-// ====== EXPORTAR EXCEL ======
-function exportarExcel() {
-  if (!raw) { alert('Esperá que carguen los datos'); return; }
-
-  const btn = document.getElementById('btnExcel');
-  btn.textContent = '⏳ Generando...';
-  btn.disabled = true;
-
-  try {
-    const wb = XLSX.utils.book_new();
-
-    // Si los días seleccionados no tienen datos, usar todos los días disponibles
-    let diasArr = Array.from(diasSel);
-    let { items, totals } = filtrar(diasArr);
-    if (items.length === 0 && totals.length === 0) {
-      // Usar todos los días disponibles en raw
-      diasArr = [...new Set([
-        ...raw.items.map(i => i.fechaStr),
-        ...raw.totales.map(t => t.fechaStr)
-      ])].filter(Boolean);
-      const r = filtrar(diasArr);
-      items  = r.items;
-      totals = r.totals;
-    }
-    const MNOM = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
-
-    // Período label
-    const diasOrd = [...new Set([...items.map(i=>i.fechaStr),...totals.map(t=>t.fechaStr)])].filter(Boolean).sort();
-    const periodoLabel = diasOrd.length === 0 ? 'Sin datos'
-      : diasOrd.length === 1 ? diasOrd[0]
-      : diasOrd[0] + ' al ' + diasOrd[diasOrd.length - 1];
-
-    // ── HOJA 1: RESUMEN ──
-    const totalVenta   = totals.reduce((s,t) => s + (t.total||0), 0);
-    const totalGanReal = items.filter(i=>i.tieneCosto).reduce((s,i) => s + (i.gananciaReal||0), 0);
-    const totalGanAprox= items.filter(i=>!i.tieneCosto).reduce((s,i) => s + (i.gananciaAprox||0), 0);
-    const totalGan     = totalGanReal + totalGanAprox;
-    const nTickets     = totals.length;
-    const ticketProm   = nTickets > 0 ? Math.round(totalVenta / nTickets) : 0;
-    const totalItems   = items.length;
-
-    const resumen = [
-      ['RESUMEN DEL PERÍODO', periodoLabel],
-      [],
-      ['Métrica', 'Valor'],
-      ['Venta total', totalVenta],
-      ['Ganancia total (real+estimada)', totalGan],
-      ['Ganancia real (con costo)', totalGanReal],
-      ['Ganancia estimada (~40%)', totalGanAprox],
-      ['Margen promedio %', totalVenta > 0 ? +((totalGan/totalVenta)*100).toFixed(1) : 0],
-      ['Cantidad de tickets', nTickets],
-      ['Ticket promedio', ticketProm],
-      ['Líneas vendidas', totalItems],
-      [],
-      ['Métodos de pago', 'Monto'],
-      ...Object.entries(
-        totals.reduce((acc,t) => {
-          const m = (t.metodo||'EFECTIVO').toUpperCase();
-          acc[m] = (acc[m]||0) + (t.total||0); return acc;
-        }, {})
-      ).sort((a,b) => b[1]-a[1])
-    ];
-    const ws1 = XLSX.utils.aoa_to_sheet(resumen);
-    ws1['!cols'] = [{wch:32},{wch:18}];
-    XLSX.utils.book_append_sheet(wb, ws1, '📋 Resumen');
-
-    // ── HOJA 2: TOP POR VENTA ──
-    const topVentaMap = {};
-    items.forEach(i => {
-      if (!topVentaMap[i.nombre]) topVentaMap[i.nombre] = {qty:0, total:0, gan:0, conCosto:false};
-      topVentaMap[i.nombre].qty   += i.qty||0;
-      topVentaMap[i.nombre].total += i.subtotal||0;
-      topVentaMap[i.nombre].gan   += i.tieneCosto ? (i.gananciaReal||0) : (i.gananciaAprox||0);
-      if (i.tieneCosto) topVentaMap[i.nombre].conCosto = true;
-    });
-    const topVenta = Object.entries(topVentaMap)
-      .sort((a,b) => b[1].total - a[1].total)
-      .map(([nombre, d], idx) => [
-        idx+1, nombre,
-        d.qty,
-        d.total,
-        d.gan,
-        d.total > 0 ? +((d.gan/d.total)*100).toFixed(1) : 0,
-        d.conCosto ? 'Real' : 'Estimada'
-      ]);
-    const ws2 = XLSX.utils.aoa_to_sheet([
-      ['#', 'Producto', 'Unidades', 'Venta ($)', 'Ganancia ($)', 'Margen %', 'Tipo ganancia'],
-      ...topVenta
-    ]);
-    ws2['!cols'] = [{wch:4},{wch:36},{wch:10},{wch:12},{wch:14},{wch:10},{wch:14}];
-    XLSX.utils.book_append_sheet(wb, ws2, '📈 Top por Venta');
-
-    // ── HOJA 3: TOP POR GANANCIA ──
-    const topGanancia = Object.entries(topVentaMap)
-      .sort((a,b) => b[1].gan - a[1].gan)
-      .map(([nombre, d], idx) => [
-        idx+1, nombre,
-        d.qty,
-        d.total,
-        d.gan,
-        d.total > 0 ? +((d.gan/d.total)*100).toFixed(1) : 0,
-        d.conCosto ? 'Real' : 'Estimada'
-      ]);
-    const ws3 = XLSX.utils.aoa_to_sheet([
-      ['#', 'Producto', 'Unidades', 'Venta ($)', 'Ganancia ($)', 'Margen %', 'Tipo ganancia'],
-      ...topGanancia
-    ]);
-    ws3['!cols'] = [{wch:4},{wch:36},{wch:10},{wch:12},{wch:14},{wch:10},{wch:14}];
-    XLSX.utils.book_append_sheet(wb, ws3, '💰 Top por Ganancia');
-
-    // ── HOJA 4: VENTAS POR DÍA ──
-    const porDia = {};
-    totals.forEach(t => {
-      if (!porDia[t.fechaStr]) porDia[t.fechaStr] = {venta:0, tickets:0, gan:0};
-      porDia[t.fechaStr].venta   += t.total||0;
-      porDia[t.fechaStr].tickets += 1;
-    });
-    items.forEach(i => {
-      if (!porDia[i.fechaStr]) porDia[i.fechaStr] = {venta:0, tickets:0, gan:0};
-      porDia[i.fechaStr].gan += i.tieneCosto ? (i.gananciaReal||0) : (i.gananciaAprox||0);
-    });
-    const diasData = Object.entries(porDia).sort((a,b) => a[0].localeCompare(b[0]))
-      .map(([ds, d]) => {
-        const [a,m,dd] = ds.split('-');
-        const dw = new Date(ds+'T12:00:00').getDay();
-        return [
-          ds,
-          DIAS_SEM[dw]+' '+parseInt(dd)+' '+MNOM[parseInt(m)-1],
-          d.tickets,
-          d.venta,
-          d.gan,
-          d.venta > 0 ? +((d.gan/d.venta)*100).toFixed(1) : 0,
-          d.tickets > 0 ? Math.round(d.venta/d.tickets) : 0
-        ];
-      });
-    const ws4 = XLSX.utils.aoa_to_sheet([
-      ['Fecha', 'Día', 'Tickets', 'Venta ($)', 'Ganancia ($)', 'Margen %', 'Ticket prom. ($)'],
-      ...diasData,
-      [],
-      ['TOTAL', '', diasData.reduce((s,r)=>s+r[2],0), diasData.reduce((s,r)=>s+r[3],0),
-       diasData.reduce((s,r)=>s+r[4],0), '', Math.round(diasData.reduce((s,r)=>s+r[3],0)/Math.max(1,diasData.reduce((s,r)=>s+r[2],0)))]
-    ]);
-    ws4['!cols'] = [{wch:12},{wch:16},{wch:8},{wch:12},{wch:14},{wch:10},{wch:14}];
-    XLSX.utils.book_append_sheet(wb, ws4, '📅 Ventas por Día');
-
-    // ── HOJA 5: DETALLE TICKETS ──
-    const detalleRows = [];
-    const tkIds = [...new Set(totals.map(t => t.fechaStr+'_'+t.ticket))];
-    tkIds.sort().forEach(tkId => {
-      const [fechaStr, ticket] = tkId.split('_');
-      const tot = totals.find(t => t.fechaStr === fechaStr && t.ticket === ticket);
-      const its = items.filter(i => i.fechaStr === fechaStr && i.ticket === ticket);
-      const [a,m,d] = fechaStr.split('-');
-      const fechaLbl = parseInt(d)+'/'+m+'/'+a;
-      its.forEach(i => {
-        detalleRows.push([
-          fechaLbl,
-          '#'+ticket,
-          tot ? (tot.metodo||'EFECTIVO') : '',
-          tot ? (tot.vendedor||'') : '',
-          i.nombre,
-          i.qty,
-          i.precio||0,
-          i.subtotal||0,
-          i.tieneCosto ? (i.gananciaReal||0) : (i.gananciaAprox||0),
-          i.tieneCosto ? 'Real' : 'Estimada',
-          i.hora||''
-        ]);
-      });
-    });
-    const ws5 = XLSX.utils.aoa_to_sheet([
-      ['Fecha','Ticket','Método','Vendedor','Producto','Cant.','Precio unit.','Subtotal','Ganancia','Tipo gan.','Hora'],
-      ...detalleRows
-    ]);
-    ws5['!cols'] = [{wch:10},{wch:8},{wch:12},{wch:12},{wch:36},{wch:6},{wch:12},{wch:12},{wch:12},{wch:10},{wch:8}];
-    XLSX.utils.book_append_sheet(wb, ws5, '🧾 Detalle Tickets');
-
-    // ── Descargar ──
-    const fecha = new Date().toISOString().split('T')[0];
-    XLSX.writeFile(wb, `copihue-reporte-${fecha}.xlsx`);
-
-  } catch(err) {
-    console.error(err);
-    alert('Error generando Excel: ' + err.message);
-  } finally {
-    btn.textContent = '📊 Excel';
-    btn.disabled = false;
-  }
-}
-
 init();
 </script>
-
-<!-- MODAL DETALLE TICKET -->
-<div class="mtk-overlay" id="mtkOverlay" onclick="if(event.target===this)cerrarModalTicket()">
-  <div class="mtk-sheet">
-    <div class="mtk-drag"></div>
-    <div class="mtk-hdr">
-      <div>
-        <div class="mtk-num" id="mtkNum">🎫 Ticket</div>
-        <div style="font-size:.72rem;color:#999;margin-top:2px" id="mtkFecha"></div>
-      </div>
-      <button class="mtk-cerrar" onclick="cerrarModalTicket()">✕</button>
-    </div>
-    <div class="mtk-meta" id="mtkChips"></div>
-    <div id="mtkBody"></div>
-  </div>
-</div>
 <!-- MODAL DETALLE PRODUCTO -->
 <div class="mprod-overlay" id="mprodOverlay" onclick="if(event.target===this)cerrarModalProd()">
   <div class="mprod-sheet" id="mprodSheet">
