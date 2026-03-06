@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Copihue · Reportes v1.10</title>
+<title>Copihue · Reportes v1.11</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -456,6 +456,17 @@ function renderApp(){
   }).join('');
 
     // Top productos — escala separada para cada barra
+  const stockMap={};
+  (raw.vencProximos||[]).forEach(v=>{ if(v.nombre) stockMap[v.nombre]=(stockMap[v.nombre]!==undefined?Math.min(stockMap[v.nombre],v.stock):v.stock); });
+  function stockBadge(nombre){
+    if(stockMap[nombre]===undefined) return '';
+    const s=stockMap[nombre];
+    const [bg,txt,lbl] = s===0?['#ffebee','#c62828','⚠️ Sin stock']:
+                         s<=2? ['#fff3e0','#e65100','⚠️ '+s+' und']:
+                         s<=5? ['#fffde7','#f57f17','📦 '+s+' und']:
+                               ['#e8f5e9','#2e7d32','📦 '+s+' und'];
+    return '<span style="font-size:.6rem;font-weight:700;background:'+bg+';color:'+txt+';padding:1px 7px;border-radius:20px;margin-left:4px">'+lbl+'</span>';
+  }
   const maxV=stats.top.length?stats.top[0].total:1;
   const maxG=Math.max(...stats.top.map(p=>p.conCosto?Math.max(p.ganReal,0):p.ganAprox),1);
   const topsH=stats.top.length?stats.top.map((p,i)=>{
@@ -469,6 +480,7 @@ function renderApp(){
     const etiqueta=p.conCosto?fmt(gan):'~'+fmt(gan);
     return'<div class="prod-row prod-clickable" data-nombre="'+p.nombre.replace(/"/g,'&quot;')+'" style="cursor:pointer;border-radius:8px;padding:4px;margin:-4px;transition:background .15s" onmouseenter="this.style.background=\'var(--vl)\'" onmouseleave="this.style.background=\'\'">'+
       '<div class="prod-hdr"><span class="prod-n">'+medal+' '+p.nombre.substring(0,28)+'</span><span class="prod-d">'+p.qty+' u</span></div>'+
+      stockBadge(p.nombre)+
       '<div style="display:flex;gap:3px;align-items:center;margin-bottom:2px;"><div class="barra-bg" style="flex:1"><div class="barra-f bar-v" style="width:'+pctV+'%"></div></div><span style="font-size:.68rem;font-weight:700;color:var(--vd);min-width:60px;text-align:right">'+fmt(p.total)+'</span></div>'+
       '<div style="display:flex;gap:3px;align-items:center;"><div class="barra-bg" style="flex:1"><div class="barra-f '+barGCls+'" style="width:'+pctG+'%"></div></div><span class="'+ganCls+'" style="font-size:.65rem;min-width:60px;text-align:right">'+etiqueta+'</span></div>'+
     '</div>';
@@ -487,6 +499,7 @@ function renderApp(){
     const etiqueta=(esReal?'':'~')+fmt(p.ganancia);
     return'<div class="prod-row prod-clickable" data-nombre="'+p.nombre.replace(/"/g,'&quot;')+'" style="cursor:pointer;border-radius:8px;padding:4px;margin:-4px;transition:background .15s" onmouseenter="this.style.background=\'var(--nl)\'" onmouseleave="this.style.background=\'\'">'+
       '<div class="prod-hdr"><span class="prod-n">'+medal+' '+p.nombre.substring(0,28)+'</span><span class="prod-d" style="color:'+(esReal?'var(--naranja)':'var(--vd)')+';font-weight:900">'+etiqueta+(esReal?'':' ★')+'</span></div>'+
+      stockBadge(p.nombre)+
       '<div style="display:flex;gap:3px;align-items:center;">'+
         '<div class="barra-bg" style="flex:1"><div class="barra-f" style="width:'+pct+'%;background:'+(esReal?'var(--naranja)':'#a5d6a7')+'"></div></div>'+
         '<span style="font-size:.65rem;color:var(--gris);min-width:60px;text-align:right">'+p.qty+' u · '+fmt(p.total)+'</span>'+
@@ -894,12 +907,24 @@ function abrirModalProd(nombre) {
         ' <span style="color:var(--naranja)">+'+fmt(ganDia)+'</span></span></div>'+tkH;
     }).join('');
 
+    const stockActual = stockMap[nombre];
+    const stockChip = stockActual !== undefined
+      ? (stockActual === 0
+          ? '<span class="mprod-chip" style="background:#ffebee;color:#c62828">⚠️ Sin stock</span>'
+          : stockActual <= 2
+          ? '<span class="mprod-chip" style="background:#fff3e0;color:#e65100">⚠️ Stock: '+stockActual+' und</span>'
+          : stockActual <= 5
+          ? '<span class="mprod-chip" style="background:#fffde7;color:#f57f17">📦 Stock: '+stockActual+' und</span>'
+          : '<span class="mprod-chip" style="background:#e8f5e9;color:#2e7d32">📦 Stock: '+stockActual+' und</span>')
+      : '';
+
     chipsEl.innerHTML =
       '<span class="mprod-chip" style="background:var(--vl);color:var(--vd)">'+totalQty+' unidades</span>'+
       '<span class="mprod-chip" style="background:#e8f5e9;color:var(--vd)">'+diasOrdenados.length+' día'+(diasOrdenados.length>1?'s':'')+'</span>'+
       (tieneCosto
         ? '<span class="mprod-chip" style="background:var(--nl);color:var(--naranja)">Costo real ✓</span>'
-        : '<span class="mprod-chip" style="background:#f5f5f5;color:var(--gris)">★ Estimado</span>');
+        : '<span class="mprod-chip" style="background:#f5f5f5;color:var(--gris)">★ Estimado</span>')+
+      stockChip;
 
     bodyEl.innerHTML =
       '<div class="mprod-stat">'+
