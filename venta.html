@@ -2368,25 +2368,38 @@ function fechaArgentina(offsetDias = 0) {
     return new Date(now.toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }))
         .toISOString().slice(0, 10);
 }
-const HOY_KEY = 'copihue_ventas_' + fechaArgentina();
+// HOY_KEY como función para que siempre use la fecha correcta del momento
+function getHoyKey() { return 'copihue_ventas_' + fechaArgentina(); }
+const HOY_KEY = getHoyKey(); // compatibilidad con código que la usa como constante
 
-// Guard: detectar si HOY_KEY tiene fecha incorrecta (UTC vs ARG)
-(function chequearFechaUTC() {
-    const utc = new Date().toISOString().slice(0, 10);
-    const arg = fechaArgentina();
-    if (utc !== arg) {
-        console.warn('⚠️ ZONA HORARIA: UTC=' + utc + ' vs ARG=' + arg + ' — diferencia detectada. HOY_KEY usa ARG correctamente.');
+// Leer ventas del día — incluye fallback a key UTC por datos guardados antes del fix
+function getVentasHoy() {
+    const keyArg = getHoyKey();
+    const keyUtc = 'copihue_ventas_' + new Date().toISOString().slice(0, 10);
+    const ventasArg = JSON.parse(localStorage.getItem(keyArg) || '[]');
+    // Si la key UTC es distinta, fusionar (ventas guardadas antes del fix v106)
+    if (keyUtc !== keyArg) {
+        const ventasUtc = JSON.parse(localStorage.getItem(keyUtc) || '[]');
+        if (ventasUtc.length > 0) {
+            // Migrar: mover ventas UTC a key ARG y borrar la vieja
+            const todas = [...ventasArg, ...ventasUtc];
+            localStorage.setItem(keyArg, JSON.stringify(todas));
+            localStorage.removeItem(keyUtc);
+            console.log('📦 Migradas', ventasUtc.length, 'ventas de key UTC a ARG');
+            return todas;
+        }
     }
-})();
+    return ventasArg;
+}
 
 function guardarVentaDia(venta) {
-    const ventas = JSON.parse(localStorage.getItem(HOY_KEY) || '[]');
+    const ventas = getVentasHoy();
     ventas.push(venta);
-    localStorage.setItem(HOY_KEY, JSON.stringify(ventas));
+    localStorage.setItem(getHoyKey(), JSON.stringify(ventas));
 }
 
 function abrirResumen() {
-    const ventas = JSON.parse(localStorage.getItem(HOY_KEY) || '[]');
+    const ventas = getVentasHoy();
     const totalDia = ventas.reduce((s, v) => s + v.total, 0);
     const cantVentas = ventas.length;
     const ticketPromedio = cantVentas > 0 ? Math.round(totalDia / cantVentas) : 0;
@@ -4334,7 +4347,7 @@ function abrirInfoProd(id) {
         (p.vencimiento ? `<div style="color:#aaa;font-size:.75rem;margin-top:4px;">Vence: ${p.vencimiento}</div>` : '');
 
     // Ventas de hoy desde historial local
-    const ventasHoy = JSON.parse(localStorage.getItem(HOY_KEY) || '[]');
+    const ventasHoy = getVentasHoy();
     const itemsHoy = ventasHoy.flatMap(v =>
         (v.items || []).filter(i => {
             const idBuscar = i.esPeso ? i.idOriginal : i.id;
