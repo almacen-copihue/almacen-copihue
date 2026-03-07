@@ -147,10 +147,12 @@
             transition: transform 0.1s, box-shadow 0.1s;
             border: 2px solid transparent;
         }
-        .resultado-item:active { transform: scale(0.98); }
+        .resultado-item:active { transform: scale(0.98); background: #f9f9f9 !important; }
+        .resultado-item.en-carrito { border-color: #a5d6a7; box-shadow: 0 2px 8px rgba(67,160,71,0.15); }
         .resultado-item.sin-stock { opacity: 0.6; }
         .resultado-item.sin-stock .resultado-nombre { color: #e53935; }
         .resultado-item.sin-stock .resultado-precio { color: #e53935; }
+
 
         .resultado-img {
             width: 52px; height: 52px;
@@ -942,6 +944,23 @@
             style="height:44px;min-width:44px;border-radius:12px;border:1.5px solid #e0e0e0;background:#fff;font-size:1.2rem;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center"
             title="Ver todos los productos">☰</button>
 </div>
+
+<!-- BARRA TOTAL FIJA ARRIBA -->
+<div id="barraTotal" style="display:none;background:linear-gradient(135deg,#1b5e20,#2e7d32);
+     padding:8px 14px;display:flex;align-items:center;justify-content:space-between;
+     flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,0.2);">
+    <div>
+        <div style="color:rgba(255,255,255,0.7);font-size:0.65rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Total · <span id="barraTotalItems">0</span> items</div>
+        <div id="barraTotalMonto" style="color:white;font-size:1.4rem;font-weight:900;font-family:'Playfair Display',serif;line-height:1;">$0</div>
+    </div>
+    <button onclick="expandirPanel()"
+            style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);
+                   color:white;border-radius:20px;padding:6px 14px;font-size:0.78rem;
+                   font-weight:700;cursor:pointer;font-family:inherit;">
+        🛒 Ver venta
+    </button>
+</div>
+
 
 <!-- BANNER VENTA PENDIENTE -->
 <div id="bannerPendiente" style="display:none;background:#ff6f00;color:white;padding:10px 16px;font-size:0.9rem;font-weight:600;display:none;align-items:center;justify-content:space-between;flex-shrink:0;">
@@ -1893,10 +1912,15 @@ function toggleListadoCompleto() {
     }
     listadoCompletoVisible = true;
     document.getElementById('btnListado').style.background = '#e8f5e9';
+    // Ordenar: en-carrito primero, luego por más vendido, sin stock al final
+    const idsEnCarrito = new Set(ventaActual.map(i => i.id));
     const todos = [...productos].sort((a, b) => {
+        const aCarrito = idsEnCarrito.has(a.id) ? 1 : 0;
+        const bCarrito = idsEnCarrito.has(b.id) ? 1 : 0;
+        if (bCarrito !== aCarrito) return bCarrito - aCarrito; // en carrito arriba
+        if (a.stock === 0 && b.stock > 0) return 1;  // sin stock abajo
         if (a.stock > 0 && b.stock === 0) return -1;
-        if (a.stock === 0 && b.stock > 0) return 1;
-        return a.name.localeCompare(b.name);
+        return rankScore(b.id) - rankScore(a.id); // más vendido primero
     });
     renderResultados(todos);
 }
@@ -1930,32 +1954,99 @@ function renderResultados(results, term = '') {
         return;
     }
 
-    contenedor.innerHTML = results.map(p => {
-        const sinStock = p.stock === 0;
-        const stockBajo = p.stock > 0 && p.stock <= 3;
+    const idsEnCarrito = {};
+    ventaActual.forEach(i => { idsEnCarrito[i.id] = i.qty; });
+
+    // Separar en-carrito del resto para el separador visual
+    const enCarrito = results.filter(p => idsEnCarrito[p.id]);
+    const resto     = results.filter(p => !idsEnCarrito[p.id]);
+
+    function cardHTML(p) {
+        const sinStock   = p.stock === 0;
+        const stockBajo  = p.stock > 0 && p.stock <= 3;
         const stockTexto = sinStock ? '❌ Sin stock' :
                           stockBajo ? `⚠️ Últimas ${p.stock}` :
                           `✅ Stock: ${p.stock}`;
-        const stockClase = stockBajo ? 'bajo' : '';
+        const qty    = idsEnCarrito[p.id] || 0;
+        const oferta = calcularOfertaPOS(p, 1);
+
+        const precioHTML = oferta.tieneOferta
+            ? `<div style="text-align:right;line-height:1.2">
+                <span style="font-size:.65rem;color:#999;text-decoration:line-through">$${p.price.toLocaleString('es-AR')}</span><br>
+                <span style="font-weight:900;color:#f9a825">$${oferta.precioUnitario.toLocaleString('es-AR')}</span>
+               </div>`
+            : `<div class="resultado-precio">$${p.price.toLocaleString('es-AR')}</div>`;
+
+        // Badge integrado: número verde al lado del nombre, no flotando sobre imagen
+        const badgeQty = qty > 0
+            ? `<span style="display:inline-flex;align-items:center;justify-content:center;
+                            background:#43a047;color:white;border-radius:20px;
+                            padding:1px 7px;font-size:0.7rem;font-weight:900;
+                            margin-left:5px;vertical-align:middle;">×${qty}</span>`
+            : '';
 
         return `
-        <div class="resultado-item ${sinStock ? 'sin-stock' : ''}">
+        <button class="resultado-item ${sinStock ? 'sin-stock' : ''} ${qty > 0 ? 'en-carrito' : ''}"
+                data-prod-id="${p.id}"
+                onclick="agregarProducto(${p.id})"
+                style="width:100%;text-align:left;border:none;
+                       background:${qty>0?'#f1f8e9':'white'};
+                       cursor:pointer;font-family:inherit;padding:10px 12px;
+                       display:flex;align-items:center;gap:10px;
+                       border-bottom:1px solid #f0f0f0;
+                       ${qty>0?'border-left:3px solid #43a047;':'border-left:3px solid transparent;'}">
             <img class="resultado-img" src="${p.image}"
                  onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"
-                 onclick="event.stopPropagation();abrirInfoProd(${p.id})"
-                 style="cursor:pointer;"
-                 alt="${p.name}">
-            <div class="resultado-img-placeholder" style="display:none;" onclick="event.stopPropagation();abrirInfoProd(${p.id})">🛒</div>
-            <div class="resultado-info" onclick="${sinStock ? `abrirInfoProd(${p.id})` : `abrirSelectorQty(${p.id}, event)`}" style="cursor:pointer;flex:1;">
-                <div class="resultado-nombre" onclick="event.stopPropagation();abrirInfoProd(${p.id})" title="Ver historial">${p.name} ${badgeVencimiento(p)}${badgeOfertaPOS(p)}</div>
-                <div class="resultado-stock ${stockClase}">${stockTexto}</div>
+                 alt="${p.name}"
+                 style="pointer-events:none;flex-shrink:0;">
+            <div class="resultado-img-placeholder" style="display:none;pointer-events:none;flex-shrink:0;">🛒</div>
+            <div class="resultado-info" style="flex:1;pointer-events:none;">
+                <div class="resultado-nombre">${p.name}${badgeQty} ${badgeVencimiento(p)}${badgeOfertaPOS(p)}</div>
+                <div class="resultado-stock ${stockBajo?'bajo':''}">${stockTexto}</div>
             </div>
-            ${(() => { const o=calcularOfertaPOS(p,1); return o.tieneOferta
-                ? `<div style="text-align:right;line-height:1.2"><span style="font-size:.65rem;color:#999;text-decoration:line-through">$${p.price.toLocaleString('es-AR')}</span><br><span style="font-weight:900;color:#f9a825">$${o.precioUnitario.toLocaleString('es-AR')}</span></div>`
-                : `<div class="resultado-precio">$${p.price.toLocaleString('es-AR')}</div>`; })()}
-            <button class="btn-warn" onclick="event.stopPropagation();abrirAjusteStockRapido(${p.id})" title="Ajuste rápido">⚠️</button>
-            <button class="btn-agregar btn-mas ${sinStock ? 'sin-stock-btn' : ''}" onclick="event.stopPropagation();agregarProducto(${p.id})" title="${sinStock ? 'Sin stock — agregar igual' : 'Agregar'}">+</button>
-        </div>`;
+            ${precioHTML}
+            <button class="btn-warn"
+                    onclick="event.stopPropagation();abrirAjusteStockRapido(${p.id})"
+                    title="Ajuste rápido de stock/precio"
+                    style="flex-shrink:0;pointer-events:auto;">⚠️</button>
+        </button>`;
+    }
+
+    // Separador visual entre en-carrito y el resto
+    let html = '';
+    if (enCarrito.length > 0) {
+        html += `<div style="padding:6px 14px 4px;font-size:0.65rem;font-weight:700;
+                             color:#2e7d32;text-transform:uppercase;letter-spacing:1.5px;
+                             background:#f1f8e9;border-bottom:1px solid #c8e6c9;">
+                    🛒 En el carrito
+                 </div>`;
+        html += enCarrito.map(cardHTML).join('');
+        if (resto.length > 0) {
+            html += `<div style="padding:6px 14px 4px;font-size:0.65rem;font-weight:700;
+                                 color:#888;text-transform:uppercase;letter-spacing:1.5px;
+                                 background:#fafafa;border-bottom:1px solid #eee;">
+                        Productos
+                     </div>`;
+        }
+    }
+    html += resto.map(cardHTML).join('');
+    contenedor.innerHTML = html;
+
+    // Tap largo (500ms) → abre info del producto
+    contenedor.querySelectorAll('button[data-prod-id]').forEach(btn => {
+        let timer = null;
+        btn.addEventListener('touchstart', () => {
+            timer = setTimeout(() => {
+                const id = parseInt(btn.dataset.prodId);
+                abrirInfoProd(id);
+            }, 500);
+        }, { passive: true });
+        btn.addEventListener('touchend',   () => clearTimeout(timer), { passive: true });
+        btn.addEventListener('touchmove',  () => clearTimeout(timer), { passive: true });
+    });
+
+    mostrarResultados();
+}
     }).join('');
 
     mostrarResultados();
@@ -2183,16 +2274,37 @@ function renderVenta() {
         btnConfirmar.disabled = true;
         desactivarGuardiaAtras();
         _setHeaderModoVenta(false); // expandir header cuando carrito vacío
+        // Ocultar barra total arriba
+        document.getElementById('barraTotal').style.display = 'none';
         return;
     }
 
     _setHeaderModoVenta(true); // colapsar header cuando hay productos
 
     const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
+    const totalItems = ventaActual.reduce((s, i) => s + i.qty, 0);
     totalEl.textContent = '$' + total.toLocaleString('es-AR');
     btnConfirmar.disabled = false;
     actualizarBarraMinimizada();
     activarGuardiaAtras(); // hay items → activar guardia botón atrás
+
+    // Actualizar barra total arriba
+    document.getElementById('barraTotal').style.display = 'flex';
+    document.getElementById('barraTotalMonto').textContent = '$' + Math.round(total).toLocaleString('es-AR');
+    document.getElementById('barraTotalItems').textContent = totalItems;
+
+    // Re-render lista si está visible (para actualizar badges de cantidad)
+    if (listadoCompletoVisible) {
+        // Re-render completo para respetar el separador y los badges de texto
+        const term = document.getElementById('buscador').value.trim();
+        if (term.length >= 1) {
+            renderResultados(buscarProductos(term), term);
+        } else {
+            toggleListadoCompleto(); // cierra
+            toggleListadoCompleto(); // reabre con orden actualizado
+        }
+    }
+
 
     contenedor.innerHTML = ventaActual.map(item => {
         const imgSrc = `imagenes-productos/${simplificarNombre(item.name)}.jpg`;
@@ -2389,6 +2501,7 @@ async function confirmarVenta() {
     seleccionarMetodo('efectivo'); // resetear método de pago ANTES de cerrar
     ventaActual = [];
     localStorage.removeItem(CARRITO_KEY);
+    actualizarRanking(); // recalcular ranking después de confirmar venta
     renderVenta();
 
     // Mostrar botón ticket en el modal antes de cerrarlo
@@ -2526,7 +2639,34 @@ function getVentasHoy() {
     return ventasArg;
 }
 
-function guardarVentaDia(venta) {
+// ===== RANKING LOCAL POR VENTAS (últimos 30 días) =====
+// Cuenta cuántas unidades se vendieron por producto en localStorage
+// Se usa para ordenar la lista de productos por más vendido
+function contarVentasLocal(dias = 30) {
+    const conteo = {}; // id -> qty total
+    for (let d = 0; d <= dias; d++) {
+        const key = 'copihue_ventas_' + fechaArgentina(-d);
+        const ventas = JSON.parse(localStorage.getItem(key) || '[]');
+        ventas.forEach(v => {
+            (v.items || []).forEach(i => {
+                const idKey = String(i.esPeso ? i.idOriginal : i.id);
+                conteo[idKey] = (conteo[idKey] || 0) + (i.qty || 1);
+            });
+        });
+    }
+    return conteo;
+}
+
+// Cache del ranking — se recalcula al cargar y después de cada venta
+let _rankingVentas = {};
+function actualizarRanking() {
+    _rankingVentas = contarVentasLocal(30);
+}
+function rankScore(id) {
+    return _rankingVentas[String(id)] || 0;
+}
+
+
     const ventas = getVentasHoy();
     ventas.push(venta);
     localStorage.setItem(getHoyKey(), JSON.stringify(ventas));
@@ -4562,7 +4702,8 @@ function abrirInfoProd(id) {
 }
 
 function cerrarInfoProd(e) {
-    if (e && e.target !== document.getElementById('modalInfoProd')) return;
+    // Soporta: cerrarInfoProd() sin args O cerrarInfoProd(event) desde fondo
+    if (e && e.target && e.target !== document.getElementById('modalInfoProd')) return;
     document.getElementById('modalInfoProd').style.display = 'none';
 }
 
@@ -4844,6 +4985,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 cargarProductos().then(() => {
+    actualizarRanking(); // calcular ranking de más vendido al arrancar
     iniciarToggleOfertas();
     cargarPoolsOfertas();
     // Primero verificar si hay venta pendiente y recuperarla silenciosamente
