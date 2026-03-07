@@ -129,10 +129,10 @@
         .resultados {
             flex: 1;
             overflow-y: auto;
-            padding: 8px;
-            display: none;
+            padding: 8px 8px 80px 8px; /* padding-bottom para el botón cobrar fijo */
+            display: block;
         }
-        .resultados.visible { display: block; }
+
 
         .resultado-item {
             background: white;
@@ -940,27 +940,7 @@
            placeholder="🔍 Buscar producto..."
            autocomplete="off" autocorrect="off" spellcheck="false"
            style="flex:1">
-    <button id="btnListado" onclick="toggleListadoCompleto()"
-            style="height:44px;min-width:44px;border-radius:12px;border:1.5px solid #e0e0e0;background:#fff;font-size:1.2rem;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center"
-            title="Ver todos los productos">☰</button>
 </div>
-
-<!-- BARRA TOTAL FIJA ARRIBA -->
-<div id="barraTotal" style="display:none;background:linear-gradient(135deg,#1b5e20,#2e7d32);
-     padding:8px 14px;display:flex;align-items:center;justify-content:space-between;
-     flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,0.2);">
-    <div>
-        <div style="color:rgba(255,255,255,0.7);font-size:0.65rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Total · <span id="barraTotalItems">0</span> items</div>
-        <div id="barraTotalMonto" style="color:white;font-size:1.4rem;font-weight:900;font-family:'Playfair Display',serif;line-height:1;">$0</div>
-    </div>
-    <button onclick="expandirPanel()"
-            style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);
-                   color:white;border-radius:20px;padding:6px 14px;font-size:0.78rem;
-                   font-weight:700;cursor:pointer;font-family:inherit;">
-        🛒 Ver venta
-    </button>
-</div>
-
 
 <!-- BANNER VENTA PENDIENTE -->
 <div id="bannerPendiente" style="display:none;background:#ff6f00;color:white;padding:10px 16px;font-size:0.9rem;font-weight:600;display:none;align-items:center;justify-content:space-between;flex-shrink:0;">
@@ -974,7 +954,7 @@
 <!-- RESULTADOS BÚSQUEDA -->
 <div class="resultados" id="resultados"></div>
 
-<!-- BARRA MINIMIZADA FLOTANTE -->
+<!-- BARRA MINIMIZADA FLOTANTE — solo total flotante -->
 <div class="barra-minimizada" id="barraMinimizada" onclick="expandirPanel()">
     <div class="barra-min-info">
         <div>
@@ -983,8 +963,18 @@
         </div>
         <span class="barra-min-items" id="barraMinItems">0 items</span>
     </div>
-    <button class="btn-expandir" onclick="expandirPanel(); event.stopPropagation();">
-        ▲ Ver venta
+</div>
+
+<!-- BOTÓN COBRAR FIJO ABAJO -->
+<div id="btnCobrarFijo" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:3500;
+     padding:10px 16px 16px;background:linear-gradient(to top, #f0f4f0 80%, transparent);">
+    <button onclick="abrirConfirmacion()"
+            style="width:100%;padding:16px;background:linear-gradient(135deg,#1b5e20,#2e7d32);
+                   color:white;border:none;border-radius:20px;font-size:1.1rem;font-weight:900;
+                   cursor:pointer;font-family:inherit;box-shadow:0 4px 20px rgba(27,94,32,0.5);
+                   display:flex;align-items:center;justify-content:space-between;">
+        <span>✅ Cobrar</span>
+        <span id="btnCobrarTotal" style="font-size:1.3rem;font-family:'Playfair Display',serif;">$0</span>
     </button>
 </div>
 
@@ -1928,21 +1918,22 @@ function toggleListadoCompleto() {
 let searchTimeout;
 document.getElementById('buscador').addEventListener('input', function() {
     clearTimeout(searchTimeout);
-    listadoCompletoVisible = false;
-    document.getElementById('btnListado').style.background = '#fff';
     const term = this.value.trim();
-    if (term.length < 1) {
-        ocultarResultados();
-        return;
-    }
     searchTimeout = setTimeout(() => {
-        const results = buscarProductos(term);
-        renderResultados(results, term);
+        if (term.length < 1) {
+            // Sin búsqueda: mostrar todos ordenados por más vendido + carrito arriba
+            const idsEnCarrito = new Set(ventaActual.map(i => i.id));
+            renderResultados([...productos].sort((a, b) => {
+                const ac = idsEnCarrito.has(a.id) ? 1 : 0, bc = idsEnCarrito.has(b.id) ? 1 : 0;
+                if (bc !== ac) return bc - ac;
+                if (a.stock === 0 && b.stock > 0) return 1;
+                if (a.stock > 0 && b.stock === 0) return -1;
+                return rankScore(b.id) - rankScore(a.id);
+            }));
+        } else {
+            renderResultados(buscarProductos(term), term);
+        }
     }, 150);
-});
-
-document.getElementById('buscador').addEventListener('focus', function() {
-    if (this.value.trim().length >= 1) mostrarResultados();
 });
 
 function renderResultados(results, term = '') {
@@ -1962,68 +1953,83 @@ function renderResultados(results, term = '') {
     const resto     = results.filter(p => !idsEnCarrito[p.id]);
 
     function cardHTML(p) {
-        const sinStock   = p.stock === 0;
-        const stockBajo  = p.stock > 0 && p.stock <= 3;
-        const stockTexto = sinStock ? '❌ Sin stock' :
-                          stockBajo ? `⚠️ Últimas ${p.stock}` :
-                          `✅ Stock: ${p.stock}`;
-        const qty    = idsEnCarrito[p.id] || 0;
-        const oferta = calcularOfertaPOS(p, 1);
+        const sinStock  = p.stock === 0;
+        const stockBajo = p.stock > 0 && p.stock <= 3;
+        const qty       = idsEnCarrito[p.id] || 0;
+        const oferta    = calcularOfertaPOS(p, 1);
+        const precio    = oferta.precioUnitario || p.price;
+        const totalCart = qty > 0 ? precio * qty : null;
 
-        const precioHTML = oferta.tieneOferta
-            ? `<div style="text-align:right;line-height:1.2">
-                <span style="font-size:.65rem;color:#999;text-decoration:line-through">$${p.price.toLocaleString('es-AR')}</span><br>
-                <span style="font-weight:900;color:#f9a825">$${oferta.precioUnitario.toLocaleString('es-AR')}</span>
-               </div>`
-            : `<div class="resultado-precio">$${p.price.toLocaleString('es-AR')}</div>`;
+        const nombreLen  = p.name.length;
+        const nombreSize = nombreLen > 30 ? '0.72rem' : nombreLen > 20 ? '0.82rem' : '0.9rem';
 
-        // Badge integrado: número verde al lado del nombre, no flotando sobre imagen
-        const badgeQty = qty > 0
-            ? `<span style="display:inline-flex;align-items:center;justify-content:center;
-                            background:#43a047;color:white;border-radius:20px;
-                            padding:1px 7px;font-size:0.7rem;font-weight:900;
-                            margin-left:5px;vertical-align:middle;">×${qty}</span>`
+        const badgeFoto = qty > 0
+            ? `<div style="position:absolute;top:-5px;left:-5px;
+                           background:#e53935;color:white;border-radius:50%;
+                           width:20px;height:20px;font-size:0.68rem;font-weight:900;
+                           display:flex;align-items:center;justify-content:center;
+                           border:2px solid white;z-index:2;line-height:1;">${qty}</div>`
             : '';
+
+        const precioUnitHTML = oferta.tieneOferta
+            ? `<span style="font-size:.6rem;color:#999;text-decoration:line-through;margin-right:3px;">$${p.price.toLocaleString('es-AR')}</span><span style="color:#f9a825;font-weight:900;font-size:.72rem;">$${precio.toLocaleString('es-AR')}</span>`
+            : `<span style="color:#666;font-size:.72rem;">$${precio.toLocaleString('es-AR')}</span>`;
+
+        const stockColor = sinStock ? '#e53935' : stockBajo ? '#f57c00' : '#aaa';
+        const stockLabel = sinStock ? '❌ sin stock' : stockBajo ? `⚠️ últimas ${p.stock}` : `stock: ${p.stock}`;
 
         return `
         <button class="resultado-item ${sinStock ? 'sin-stock' : ''} ${qty > 0 ? 'en-carrito' : ''}"
                 data-prod-id="${p.id}"
                 onclick="agregarProducto(${p.id})"
-                style="width:100%;text-align:left;border:none;
+                style="width:100%;text-align:left;border:none;border-radius:0;
                        background:${qty>0?'#f1f8e9':'white'};
-                       cursor:pointer;font-family:inherit;padding:10px 12px;
-                       display:flex;align-items:center;gap:10px;
-                       border-bottom:1px solid #f0f0f0;
+                       cursor:pointer;font-family:inherit;padding:8px 10px;
+                       display:flex;align-items:center;gap:8px;
+                       border-bottom:1px solid #efefef;
                        ${qty>0?'border-left:3px solid #43a047;':'border-left:3px solid transparent;'}">
-            <img class="resultado-img" src="${p.image}"
-                 onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"
-                 alt="${p.name}"
-                 style="pointer-events:none;flex-shrink:0;">
-            <div class="resultado-img-placeholder" style="display:none;pointer-events:none;flex-shrink:0;">🛒</div>
-            <div class="resultado-info" style="flex:1;pointer-events:none;">
-                <div class="resultado-nombre">${p.name}${badgeQty} ${badgeVencimiento(p)}${badgeOfertaPOS(p)}</div>
-                <div class="resultado-stock ${stockBajo?'bajo':''}">${stockTexto}</div>
+            <div style="position:relative;flex-shrink:0;width:46px;height:46px;">
+                ${badgeFoto}
+                <img src="${p.image}"
+                     onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"
+                     alt="${p.name}"
+                     style="width:46px;height:46px;border-radius:10px;object-fit:cover;pointer-events:none;display:block;">
+                <div style="display:none;width:46px;height:46px;border-radius:10px;
+                            background:#eee;align-items:center;justify-content:center;
+                            font-size:1.2rem;pointer-events:none;">🛒</div>
             </div>
-            ${precioHTML}
-            <button class="btn-warn"
-                    onclick="event.stopPropagation();abrirAjusteStockRapido(${p.id})"
-                    title="Ajuste rápido de stock/precio"
-                    style="flex-shrink:0;pointer-events:auto;">⚠️</button>
+            <div style="flex:1;min-width:0;pointer-events:none;">
+                <div style="font-size:${nombreSize};font-weight:700;color:#1a1a1a;
+                            line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                    ${p.name}${badgeVencimiento(p)}${badgeOfertaPOS(p)}
+                </div>
+                <div style="margin-top:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                    ${precioUnitHTML}
+                    <span style="color:${stockColor};font-size:.6rem;">${stockLabel}</span>
+                </div>
+            </div>
+            ${totalCart ? `<div style="flex-shrink:0;text-align:right;pointer-events:none;">
+                <div style="font-size:.62rem;color:#888;line-height:1;">total</div>
+                <div style="font-weight:900;font-size:.92rem;color:#2e7d32;line-height:1.1;">$${totalCart.toLocaleString('es-AR')}</div>
+            </div>` : ''}
+            <button onclick="event.stopPropagation();abrirAjusteStockRapido(${p.id})"
+                    title="Ajuste rápido"
+                    style="flex-shrink:0;background:none;border:none;cursor:pointer;
+                           font-size:1rem;padding:4px;pointer-events:auto;opacity:0.5;">⚠️</button>
         </button>`;
     }
 
-    // Separador visual entre en-carrito y el resto
     let html = '';
     if (enCarrito.length > 0) {
-        html += `<div style="padding:6px 14px 4px;font-size:0.65rem;font-weight:700;
+        html += `<div style="padding:5px 12px 3px;font-size:0.6rem;font-weight:700;
                              color:#2e7d32;text-transform:uppercase;letter-spacing:1.5px;
                              background:#f1f8e9;border-bottom:1px solid #c8e6c9;">
                     🛒 En el carrito
                  </div>`;
         html += enCarrito.map(cardHTML).join('');
         if (resto.length > 0) {
-            html += `<div style="padding:6px 14px 4px;font-size:0.65rem;font-weight:700;
-                                 color:#888;text-transform:uppercase;letter-spacing:1.5px;
+            html += `<div style="padding:5px 12px 3px;font-size:0.6rem;font-weight:700;
+                                 color:#aaa;text-transform:uppercase;letter-spacing:1.5px;
                                  background:#fafafa;border-bottom:1px solid #eee;">
                         Productos
                      </div>`;
@@ -2032,38 +2038,24 @@ function renderResultados(results, term = '') {
     html += resto.map(cardHTML).join('');
     contenedor.innerHTML = html;
 
-    // Tap largo (500ms) → abre info del producto
     contenedor.querySelectorAll('button[data-prod-id]').forEach(btn => {
         let timer = null;
         btn.addEventListener('touchstart', () => {
-            timer = setTimeout(() => {
-                const id = parseInt(btn.dataset.prodId);
-                abrirInfoProd(id);
-            }, 500);
+            timer = setTimeout(() => { abrirInfoProd(parseInt(btn.dataset.prodId)); }, 500);
         }, { passive: true });
-        btn.addEventListener('touchend',   () => clearTimeout(timer), { passive: true });
-        btn.addEventListener('touchmove',  () => clearTimeout(timer), { passive: true });
+        btn.addEventListener('touchend',  () => clearTimeout(timer), { passive: true });
+        btn.addEventListener('touchmove', () => clearTimeout(timer), { passive: true });
     });
-
-    mostrarResultados();
 }
 
 function buscar(term) {
-    const results = buscarProductos(term);
-    renderResultados(results, term);
+    renderResultados(buscarProductos(term), term);
 }
 
-function mostrarResultados() {
-    document.getElementById('resultados').classList.add('visible');
-    document.getElementById('panelVenta').style.display = 'none';
-}
+function mostrarResultados() { /* lista siempre visible */ }
+function ocultarResultados() { /* lista siempre visible */ }
 
-function ocultarResultados() {
-    document.getElementById('resultados').classList.remove('visible');
-    document.getElementById('panelVenta').style.display = 'flex';
-}
-
-// Cerrar resultados al tocar fuera (no cuando se abre el selector de cantidad)
+// Cerrar resultados al tocar fuera// Cerrar resultados al tocar fuera (no cuando se abre el selector de cantidad)
 document.addEventListener('click', function(e) {
     if (document.getElementById('modalQty').style.display === 'flex') return; // modal qty abierto, no cerrar
     if (!e.target.closest('.resultados') && !e.target.closest('.buscador-wrap')) {
@@ -2269,38 +2261,37 @@ function renderVenta() {
         totalEl.textContent = '$0';
         btnConfirmar.disabled = true;
         desactivarGuardiaAtras();
-        _setHeaderModoVenta(false); // expandir header cuando carrito vacío
-        // Ocultar barra total arriba
-        document.getElementById('barraTotal').style.display = 'none';
+        _setHeaderModoVenta(false);
+        document.getElementById('btnCobrarFijo').style.display = 'none';
         return;
     }
 
-    _setHeaderModoVenta(true); // colapsar header cuando hay productos
+    _setHeaderModoVenta(true);
 
     const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
     const totalItems = ventaActual.reduce((s, i) => s + i.qty, 0);
     totalEl.textContent = '$' + total.toLocaleString('es-AR');
     btnConfirmar.disabled = false;
     actualizarBarraMinimizada();
-    activarGuardiaAtras(); // hay items → activar guardia botón atrás
+    activarGuardiaAtras();
 
-    // Actualizar barra total arriba
-    document.getElementById('barraTotal').style.display = 'flex';
-    document.getElementById('barraTotalMonto').textContent = '$' + Math.round(total).toLocaleString('es-AR');
-    document.getElementById('barraTotalItems').textContent = totalItems;
+    // Mostrar botón cobrar fijo abajo con total actualizado
+    document.getElementById('btnCobrarFijo').style.display = 'block';
+    document.getElementById('btnCobrarTotal').textContent = '$' + Math.round(total).toLocaleString('es-AR');
 
-    // Re-render lista si está visible (para actualizar badges de cantidad)
-    if (listadoCompletoVisible) {
-        // Re-render completo para respetar el separador y los badges de texto
-        const term = document.getElementById('buscador').value.trim();
-        if (term.length >= 1) {
-            renderResultados(buscarProductos(term), term);
-        } else {
-            toggleListadoCompleto(); // cierra
-            toggleListadoCompleto(); // reabre con orden actualizado
-        }
-    }
-
+    // Re-render lista para actualizar badges y separador
+    const term = document.getElementById('buscador').value.trim();
+    const listaResultados = term.length >= 1 ? buscarProductos(term) : (() => {
+        const idsEnCarrito = new Set(ventaActual.map(i => i.id));
+        return [...productos].sort((a, b) => {
+            const ac = idsEnCarrito.has(a.id) ? 1 : 0, bc = idsEnCarrito.has(b.id) ? 1 : 0;
+            if (bc !== ac) return bc - ac;
+            if (a.stock === 0 && b.stock > 0) return 1;
+            if (a.stock > 0 && b.stock === 0) return -1;
+            return rankScore(b.id) - rankScore(a.id);
+        });
+    })();
+    renderResultados(listaResultados, term);
 
     contenedor.innerHTML = ventaActual.map(item => {
         const imgSrc = `imagenes-productos/${simplificarNombre(item.name)}.jpg`;
@@ -4984,6 +4975,13 @@ cargarProductos().then(() => {
     actualizarRanking(); // calcular ranking de más vendido al arrancar
     iniciarToggleOfertas();
     cargarPoolsOfertas();
+    // Mostrar lista completa al arrancar, ordenada por más vendido
+    renderResultados([...productos].sort((a, b) => {
+        if (a.stock === 0 && b.stock > 0) return 1;
+        if (a.stock > 0 && b.stock === 0) return -1;
+        return rankScore(b.id) - rankScore(a.id);
+    }));
+
     // Primero verificar si hay venta pendiente y recuperarla silenciosamente
     const guardado = localStorage.getItem(CARRITO_KEY);
     if (guardado) {
