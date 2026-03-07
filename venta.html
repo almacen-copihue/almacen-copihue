@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — Punto de Venta v104</title>
+    <title>Copihue — Punto de Venta v106</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -325,6 +325,16 @@
             border-bottom: 1px solid #f5f5f5;
             gap: 10px;
         }
+        .item-venta-img {
+            width: 44px; height: 44px;
+            border-radius: 8px;
+            object-fit: cover;
+            background: #e8f5e9;
+            flex-shrink: 0;
+            cursor: pointer;
+            transition: transform .15s;
+        }
+        .item-venta-img:hover { transform: scale(1.08); }
         .item-venta-nombre {
             flex: 1;
             font-size: 1rem;
@@ -2050,8 +2060,15 @@ function renderVenta() {
     actualizarBarraMinimizada();
     activarGuardiaAtras(); // hay items → activar guardia botón atrás
 
-    contenedor.innerHTML = ventaActual.map(item => `
+    contenedor.innerHTML = ventaActual.map(item => {
+        const imgSrc = `imagenes-productos/${simplificarNombre(item.name)}.jpg`;
+        return `
         <div class="item-venta">
+            <img class="item-venta-img" src="${imgSrc}"
+                 onerror="this.style.display='none'"
+                 onclick="abrirInfoProd(${item.esPeso ? item.idOriginal : item.id})"
+                 title="Ver historial"
+                 style="display:none;">
             <div class="item-venta-nombre">
                 ${item.name}
                 ${item.vencimiento ? badgeVencimiento(item) : ''}
@@ -2073,8 +2090,14 @@ function renderVenta() {
             </span>
             <div class="item-subtotal">$${(item.price * item.qty).toLocaleString('es-AR')}</div>
         </div>
-    `).join('');
-}
+    `}).join('');
+
+    // Mostrar imágenes solo en desktop (pantallas anchas)
+    if (window.innerWidth >= 768) {
+        contenedor.querySelectorAll('.item-venta-img').forEach(img => {
+            img.style.display = 'block';
+        });
+    }
 
 // ========== CONFIRMACIÓN Y COBRO ==========
 let _redondeoActivo = false; // se activa automáticamente con efectivo
@@ -2138,7 +2161,8 @@ function abrirConfirmacion() {
 
     const detalleHTML = ventaActual.map(item => `
         <div class="confirm-item">
-            <span>${item.qty}× ${item.name.substring(0, 35)}</span>
+            ${window.innerWidth >= 768 ? `<img src="imagenes-productos/${simplificarNombre(item.name)}.jpg" onerror="this.style.display='none'" style="width:36px;height:36px;border-radius:6px;object-fit:cover;background:#e8f5e9;flex-shrink:0;">` : ''}
+            <span>${item.qty}× ${item.name.substring(0, 35)}${item.ofertaEtiqueta ? ` <span style="background:#f9a825;color:#000;font-size:.58rem;font-weight:800;padding:1px 4px;border-radius:6px">${item.ofertaEtiqueta}</span>` : ''}</span>
             <span style="font-weight:700;">$${(item.price * item.qty).toLocaleString('es-AR')}</span>
         </div>
     `).join('') + `
@@ -4348,6 +4372,31 @@ function cerrarInfoProd(e) {
 
 // Espejo exacto de la lógica del carrito WA (index.html)
 
+// Pools activos — se cargan desde getOfertas igual que el carrito WA
+const _poolIdsRelampago  = new Set();
+const _poolIdsDestacadas = new Set();
+const _poolIdsEspeciales = new Set();
+const _poolIdsUltimas    = new Set();
+
+async function cargarPoolsOfertas() {
+    try {
+        const r = await fetch(API_URL + '?action=getOfertas&t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(8000) });
+        const data = await r.json();
+        if (!data.success) return;
+        _poolIdsRelampago.clear();
+        _poolIdsDestacadas.clear();
+        _poolIdsEspeciales.clear();
+        _poolIdsUltimas.clear();
+        (data.relampagoActivo   || []).forEach(p => _poolIdsRelampago.add(p.id));
+        (data.destacadasActivas || []).forEach(p => _poolIdsDestacadas.add(p.id));
+        (data.especialesActivas || []).forEach(p => _poolIdsEspeciales.add(p.id));
+        (data.ultimasUnidades   || []).forEach(p => _poolIdsUltimas.add(p.id));
+        console.log(`✅ Pools POS: ${_poolIdsRelampago.size} rel · ${_poolIdsDestacadas.size} dest · ${_poolIdsEspeciales.size} esp · ${_poolIdsUltimas.size} ult`);
+    } catch(e) {
+        console.warn('⚠️ No se pudieron cargar pools de ofertas:', e.message);
+    }
+}
+
 const OFERTAS_RELAMPAGO_SISTEMA = {
     '1':  { nombre:'2x1',   tipo:'nxm', cantidad:2, pagas:1    },
     '2':  { nombre:'3x2',   tipo:'nxm', cantidad:3, pagas:2    },
@@ -4367,8 +4416,8 @@ const OFERTAS_RELAMPAGO_SISTEMA = {
 function calcularOfertaPOS(producto, qty) {
     const r = { precioUnitario: producto.price, precioTotal: producto.price * qty, etiqueta: null, tieneOferta: false, tipoOferta: null };
 
-    // 1. RELÁMPAGO — usa tipo NxM o %
-    if (producto.relampago > 0 && _toggleEstado.relampago) {
+    // 1. RELÁMPAGO — toggle activo Y producto en el pool del día
+    if (producto.relampago > 0 && _toggleEstado.relampago && _poolIdsRelampago.has(producto.id)) {
         const cfg = OFERTAS_RELAMPAGO_SISTEMA[String(producto.relampago)];
         if (cfg) {
             if (cfg.tipo === 'pct') {
@@ -4376,7 +4425,6 @@ function calcularOfertaPOS(producto, qty) {
                 r.precioTotal    = r.precioUnitario * qty;
                 r.etiqueta       = `⚡ -${cfg.descuento}% OFF`;
             } else if (cfg.tipo === 'nxm') {
-                // NxM: calcular total según ciclos
                 const ciclos    = Math.floor(qty / cfg.cantidad);
                 const resto     = qty % cfg.cantidad;
                 r.precioTotal   = Math.round((ciclos * cfg.pagas + resto) * producto.price);
@@ -4386,21 +4434,21 @@ function calcularOfertaPOS(producto, qty) {
             r.tieneOferta = true; r.tipoOferta = 'relampago';
         }
     }
-    // 2. DESTACADAS — % fijo en columna H
-    else if (producto.destacada > 0 && _toggleEstado.destacadas) {
+    // 2. DESTACADAS — toggle activo Y en pool
+    else if (producto.destacada > 0 && _toggleEstado.destacadas && _poolIdsDestacadas.has(producto.id)) {
         r.precioUnitario = Math.round(producto.price * (1 - producto.destacada / 100));
         r.precioTotal    = r.precioUnitario * qty;
         r.etiqueta       = `🔥 -${producto.destacada}% OFF`;
         r.tieneOferta = true; r.tipoOferta = 'destacadas';
     }
-    // 3. ESPECIALES — siempre 10%
-    else if (producto.especial > 0 && _toggleEstado.especiales) {
+    // 3. ESPECIALES — toggle activo Y en pool
+    else if (producto.especial > 0 && _toggleEstado.especiales && _poolIdsEspeciales.has(producto.id)) {
         r.precioUnitario = Math.round(producto.price * 0.9);
         r.precioTotal    = r.precioUnitario * qty;
         r.etiqueta       = `⭐ -10% OFF`;
         r.tieneOferta = true; r.tipoOferta = 'especiales';
     }
-    // 4. PRECIO NORMAL en columna K (oferta espontánea)
+    // 4. PRECIO NORMAL columna K
     else if (producto.normal && producto.normal > producto.price) {
         r.etiqueta  = `↓ -${Math.round((producto.normal - producto.price) / producto.normal * 100)}%`;
         r.tieneOferta = true; r.tipoOferta = 'normal';
@@ -4411,13 +4459,13 @@ function calcularOfertaPOS(producto, qty) {
 
 // Badge de oferta para el buscador
 function badgeOfertaPOS(producto) {
-    if (producto.relampago > 0 && _toggleEstado.relampago) {
+    if (producto.relampago > 0 && _toggleEstado.relampago && _poolIdsRelampago.has(producto.id)) {
         const cfg = OFERTAS_RELAMPAGO_SISTEMA[String(producto.relampago)];
         if (cfg) return `<span style="background:#f9a825;color:#000;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">⚡ ${cfg.nombre.toUpperCase()}</span>`;
     }
-    if (producto.destacada > 0 && _toggleEstado.destacadas)
+    if (producto.destacada > 0 && _toggleEstado.destacadas && _poolIdsDestacadas.has(producto.id))
         return `<span style="background:#ff6f00;color:#fff;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">🔥 -${producto.destacada}%</span>`;
-    if (producto.especial > 0 && _toggleEstado.especiales)
+    if (producto.especial > 0 && _toggleEstado.especiales && _poolIdsEspeciales.has(producto.id))
         return `<span style="background:#00bcd4;color:#fff;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">⭐ -10%</span>`;
     return '';
 }
@@ -4586,6 +4634,7 @@ function toggleCervecero() {
 
 cargarProductos().then(() => {
     iniciarToggleOfertas();
+    cargarPoolsOfertas();
 
     // ── WakeLock: mantener pantalla encendida mientras la app está activa ──
     let _wakeLock = null;
