@@ -897,16 +897,6 @@
     </div>
 </div>
 
-<!-- LUPA FLOTANTE -->
-<div id="lupaBtn"
-     style="display:none;position:fixed;top:10px;right:10px;z-index:600;
-            width:38px;height:38px;border-radius:50%;
-            background:rgba(255,255,255,0.93);
-            box-shadow:0 2px 8px rgba(0,0,0,0.18);
-            align-items:center;justify-content:center;
-            font-size:1.1rem;cursor:pointer;border:1.5px solid #e0e0e0;"
-     onclick="toggleBuscadorFlotante()">🔍</div>
-
 <div id="buscadorFlotante"
      style="display:none;position:fixed;top:0;left:0;right:0;z-index:700;
             background:white;padding:8px 10px;
@@ -958,20 +948,32 @@
             title="Limpiar carrito">🗑</button>
 </div>
 
-<!-- DIV OCULTO — mantiene IDs necesarios para renderVenta y confirmación -->
-<div style="display:none">
-    <div id="itemsVenta"></div>
-    <div id="totalMonto"></div>
-    <button id="btnConfirmar" disabled></button>
-</div>
-
-<!-- BARRA MINIMIZADA FLOTANTE — solo total flotante -->
-
-            <div class="barra-min-total" id="barraMinTotal">$0</div>
+<!-- PANEL VENTA — visible en desktop, oculto en mobile -->
+<div class="panel-venta" id="panelVenta" style="display:none">
+    <div class="panel-venta-header">
+        <span class="panel-venta-titulo">🛒 Venta actual</span>
+        <div style="display:flex;gap:6px;align-items:center;">
+            <button onclick="minimizarPanel()" title="Minimizar"
+                    style="background:#e8f5e9;border:1.5px solid #a5d6a7;border-radius:20px;
+                           padding:5px 12px;font-size:0.85rem;color:#2e7d32;cursor:pointer;
+                           font-weight:800;line-height:1;">⊟</button>
+            <button class="btn-limpiar" onclick="limpiarVenta()">🗑</button>
         </div>
-        <span class="barra-min-items" id="barraMinItems">0 items</span>
+    </div>
+    <div class="items-venta" id="itemsVenta">
+        <div class="venta-vacia">Sin productos aún</div>
+    </div>
+    <div class="panel-total" id="panelTotal">
+        <div>
+            <div class="total-label">TOTAL</div>
+            <div class="total-monto" id="totalMonto">$0</div>
+        </div>
+        <button class="btn-confirmar" id="btnConfirmar" onclick="abrirConfirmacion()" disabled>
+            ✅ Cobrar
+        </button>
     </div>
 </div>
+
 
 <div id="modalNotifPos" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:4000;"
      onclick="if(event.target===this)cerrarNotifPos()">
@@ -1614,9 +1616,27 @@ function cerrarModalYMinimizar() {
     setTimeout(() => minimizarPanel(), 50);
 }
 
-function minimizarPanel() { /* panel eliminado */ }
-function expandirPanel()   { /* panel eliminado */ }
-function actualizarBarraMinimizada() { /* barra eliminada */ }
+function minimizarPanel() {
+    if (MOBILE) return;
+    panelMinimizado = true;
+    const pv = document.getElementById('panelVenta');
+    if (pv) pv.classList.add('minimizado');
+}
+function expandirPanel() {
+    if (MOBILE) return;
+    panelMinimizado = false;
+    const pv = document.getElementById('panelVenta');
+    if (pv) { pv.classList.remove('minimizado'); pv.style.display = 'flex'; }
+}
+function actualizarBarraMinimizada() {
+    if (MOBILE) return;
+    const total = ventaActual.reduce((s,i) => s+i.price*i.qty, 0);
+    const items = ventaActual.reduce((s,i) => s+i.qty, 0);
+    if (document.getElementById('barraMinTotal'))
+        document.getElementById('barraMinTotal').textContent = '$' + Math.round(total).toLocaleString('es-AR');
+    if (document.getElementById('barraMinItems'))
+        document.getElementById('barraMinItems').textContent = items + (items===1?' item':' items');
+}
 
 // ── PROTECCIÓN CONTRA SALIDA ACCIDENTAL ──────────────────────────────────────
 // Advertencia al cerrar pestaña/recargar si hay venta en curso
@@ -1928,12 +1948,17 @@ function renderResultados(results, term = '') {
             : `<span style="color:#666;font-size:.72rem;">$${precio.toLocaleString('es-AR')}</span>`;
 
         const stockColor = sinStock ? '#e53935' : stockBajo ? '#f57c00' : '#aaa';
-        const stockLabel = sinStock ? '❌ sin stock' : stockBajo ? `⚠️ últimas ${p.stock}` : `stock: ${p.stock}`;
+        const stockLabel = sinStock ? 'sin stock' : stockBajo ? `${p.stock} u. (poco)` : `stock: ${p.stock}`;
+
+        // Mobile: tap = +1 directo | Desktop: tap = modal cantidad
+        const tapAction = MOBILE
+            ? `agregarProducto(${p.id})`
+            : `abrirSelectorQty(${p.id}, event)`;
 
         return `
         <button class="resultado-item ${sinStock ? 'sin-stock' : ''} ${qty > 0 ? 'en-carrito' : ''}"
                 data-prod-id="${p.id}"
-                onclick="agregarProducto(${p.id})"
+                onclick="${tapAction}"
                 style="width:100%;text-align:left;border:none;border-radius:0;
                        background:${qty>0?'#f1f8e9':'white'};
                        cursor:pointer;font-family:inherit;padding:8px 10px;
@@ -2004,8 +2029,27 @@ function buscar(term) {
     renderResultados(buscarProductos(term), term);
 }
 
-function mostrarResultados() { /* lista siempre visible */ }
-function ocultarResultados() { /* lista siempre visible */ }
+function mostrarResultados() {
+    document.getElementById('resultados').classList.add('visible');
+    if (!MOBILE) {
+        const pv = document.getElementById('panelVenta');
+        if (pv) pv.style.display = 'none';
+    }
+}
+
+function ocultarResultados() {
+    if (MOBILE) {
+        // Mobile: lista siempre visible
+        document.getElementById('resultados').classList.add('visible');
+    } else {
+        // Desktop: ocultar resultados, mostrar panel si hay items
+        document.getElementById('resultados').classList.remove('visible');
+        if (ventaActual.length > 0) {
+            const pv = document.getElementById('panelVenta');
+            if (pv) pv.style.display = 'flex';
+        }
+    }
+}
 
 // Cerrar resultados al tocar fuera// Cerrar resultados al tocar fuera (no cuando se abre el selector de cantidad)
 document.addEventListener('click', function(e) {
@@ -2214,8 +2258,13 @@ function renderVenta() {
         if (btnConfirmar) btnConfirmar.disabled = true;
         desactivarGuardiaAtras();
         _setHeaderModoVenta(false);
-        document.getElementById('fabCobrar').style.display = 'none';
-        document.getElementById('fabLimpiar').style.display = 'none';
+        if (MOBILE) {
+            document.getElementById('fabCobrar').style.display = 'none';
+            document.getElementById('fabLimpiar').style.display = 'none';
+        } else {
+            const pv = document.getElementById('panelVenta');
+            if (pv) pv.style.display = 'none';
+        }
         return;
     }
 
@@ -2227,10 +2276,15 @@ function renderVenta() {
     if (btnConfirmar) btnConfirmar.disabled = false;
     activarGuardiaAtras();
 
-    // FABs flotantes
-    document.getElementById('fabCobrar').style.display = 'block';
-    document.getElementById('fabLimpiar').style.display = 'block';
-    document.getElementById('btnCobrarTotal').textContent = '$' + Math.round(total).toLocaleString('es-AR');
+    if (MOBILE) {
+        document.getElementById('fabCobrar').style.display = 'block';
+        document.getElementById('fabLimpiar').style.display = 'block';
+        document.getElementById('btnCobrarTotal').textContent = '$' + Math.round(total).toLocaleString('es-AR');
+    } else {
+        const pv = document.getElementById('panelVenta');
+        if (pv) pv.style.display = 'flex';
+        actualizarBarraMinimizada();
+    }
 
     // Re-render lista para actualizar badges y separador
     const term = document.getElementById('buscador').value.trim();
@@ -4931,7 +4985,8 @@ function cerrarBuscadorFlotante() {
 // ===== SWIPE EN CARDS DE PRODUCTO =====
 // Swipe derecha → +1  |  Swipe izquierda → quitar del carrito
 (function initSwipeProductos() {
-    let sx = 0, sy = 0, startEl = null;
+    if (!MOBILE) return; // swipe solo en mobile
+    let sx = 0, sy = 0, startEl = null, didSwipe = false;
     const UMBRAL = 55; // px mínimo para activar
     const RATIO  = 1.5; // horizontal debe superar 1.5× vertical
 
@@ -4941,43 +4996,71 @@ function cerrarBuscadorFlotante() {
         sx = e.touches[0].clientX;
         sy = e.touches[0].clientY;
         startEl = btn;
+        didSwipe = false;
+    }, { passive: true });
+
+    document.addEventListener('touchmove', function(e) {
+        if (!startEl) return;
+        const dx = e.touches[0].clientX - sx;
+        const dy = e.touches[0].clientY - sy;
+        // Si va más horizontal que vertical → marcar como swipe (bloquea scroll)
+        if (Math.abs(dx) > 18 && Math.abs(dx) > Math.abs(dy) * RATIO) {
+            didSwipe = true;
+        }
     }, { passive: true });
 
     document.addEventListener('touchend', function(e) {
         if (!startEl) return;
+        const btn = startEl;
         const dx = e.changedTouches[0].clientX - sx;
         const dy = e.changedTouches[0].clientY - sy;
         startEl = null;
-        if (Math.abs(dx) < UMBRAL) return;
-        if (Math.abs(dx) < Math.abs(dy) * RATIO) return; // más vertical que horizontal → scroll
 
-        const id = parseInt(startEl.dataset.prodId);
+        if (!didSwipe || Math.abs(dx) < UMBRAL) return;
+        if (Math.abs(dx) < Math.abs(dy) * RATIO) return;
+
+        // Feedback visual
+        btn.style.transition = 'transform 0.15s';
+        btn.style.transform = dx > 0 ? 'translateX(12px)' : 'translateX(-12px)';
+        setTimeout(() => { btn.style.transform = ''; }, 200);
+
+        const id = parseInt(btn.dataset.prodId);
         if (dx > 0) {
-            // Swipe derecha → +1
             agregarProducto(id);
         } else {
-            // Swipe izquierda → quitar del carrito
             const idx = ventaActual.findIndex(i => i.id === id);
             if (idx !== -1) {
                 ventaActual.splice(idx, 1);
                 renderVenta();
                 guardarCarritoPendiente();
-                mostrarToast('🗑 Quitado del carrito', 'rojo');
+                mostrarToast('🗑 Quitado', 'rojo');
+            } else {
+                mostrarToast('No está en el carrito', '');
             }
         }
     }, { passive: true });
+
+    // Cancelar click si fue swipe
+    document.addEventListener('click', function(e) {
+        if (didSwipe) { e.stopPropagation(); didSwipe = false; }
+    }, true);
 })();
 
 cargarProductos().then(() => {
     actualizarRanking(); // calcular ranking de más vendido al arrancar
     iniciarToggleOfertas();
     cargarPoolsOfertas();
-    // Mostrar lista completa al arrancar, ordenada por más vendido
+    // Mostrar lista al arrancar
     renderResultados([...productos].sort((a, b) => {
         if (a.stock === 0 && b.stock > 0) return 1;
         if (a.stock > 0 && b.stock === 0) return -1;
         return rankScore(b.id) - rankScore(a.id);
     }));
+    // En desktop: panel oculto hasta que haya items
+    if (!MOBILE) {
+        const pv = document.getElementById('panelVenta');
+        if (pv) pv.style.display = 'none';
+    }
 
     // Primero verificar si hay venta pendiente y recuperarla silenciosamente
     const guardado = localStorage.getItem(CARRITO_KEY);
@@ -5096,6 +5179,9 @@ cargarProductos().then(() => {
 </div>
 
 <script>
+// ── Detección de dispositivo (se fija al cargar) ──
+const MOBILE = window.innerWidth < 768;
+
 const WIFI_SSID = 'ALMACEN-COPIHUE.VERCEL.APP';
 const WIFI_PASSWORD = 'copihue457';
 let _wifiQRGenerado = false;
