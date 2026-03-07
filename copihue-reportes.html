@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Copihue · Reportes v1.16</title>
+<title>Copihue · Reportes v1.17</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -225,6 +225,28 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
 .empty{text-align:center;padding:24px;color:#bbb;font-size:.82rem}
 .pb{padding-bottom:28px}
 .seccion-sep{height:12px}
+/* TABLA DETALLE PRODUCTOS x DÍAS */
+.pdias-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -2px}
+.pdias-table{border-collapse:collapse;font-size:.7rem;min-width:100%}
+.pdias-table th{background:#fff;font-weight:700;white-space:nowrap;padding:5px 4px;border-bottom:2px solid var(--borde);color:var(--gris);font-size:.6rem;letter-spacing:.5px}
+.pdias-table th.col-prod{position:sticky;left:0;z-index:3;text-align:left;min-width:120px;background:#fff}
+.pdias-table th.col-tot{position:sticky;right:0;z-index:3;background:#fff;border-left:2px solid var(--borde)}
+.pdias-table td{padding:4px 4px;border-bottom:1px solid #f0f0f0;text-align:center;white-space:nowrap;vertical-align:middle}
+.pdias-table td.col-prod{position:sticky;left:0;background:#fff;text-align:left;font-weight:700;font-size:.71rem;max-width:120px;overflow:hidden;text-overflow:ellipsis}
+.pdias-table td.col-tot{position:sticky;right:0;background:#fff;font-weight:900;color:var(--vd);border-left:2px solid var(--borde)}
+.pdias-table tr:hover td{background:#f5fbf5 !important}
+.pdias-qty{display:inline-block;min-width:18px;padding:1px 3px;border-radius:4px;font-weight:700;font-size:.68rem}
+.pdias-qty.q0{color:#ddd}
+.pdias-qty.q1{background:#e8f5e9;color:#388e3c}
+.pdias-qty.q2{background:#c8e6c9;color:#2e7d32}
+.pdias-qty.q3{background:#a5d6a7;color:#1b5e20}
+.pdias-qty.q4{background:#66bb6a;color:#fff}
+.pdias-qty.q5{background:#2e7d32;color:#fff}
+.pdias-th-dia{text-align:center;padding:3px 4px !important}
+.dia-n{display:block;font-weight:900;font-size:.68rem;color:var(--texto)}
+.dia-dow{display:block;color:var(--gris);font-size:.55rem;line-height:1}
+.hoy-col .dia-n{background:var(--naranja);color:#fff;border-radius:8px;padding:1px 4px}
+
 .toggle-btn{width:100%;padding:9px;border:2px solid var(--borde);border-radius:12px;background:#fff;font-size:.78rem;font-weight:700;color:var(--gris);cursor:pointer;font-family:inherit;margin-bottom:8px;display:flex;align-items:center;justify-content:center;gap:6px}
 .toggle-btn:active{background:var(--vl)}
 
@@ -278,7 +300,7 @@ let aniosAbiertos=new Set(); // años anteriores expandidos en el selector
 let metActivos=new Set(['TODOS']);
 let vendActivos=new Set(['TODOS']);
 let topOrden='venta'; // 'venta' | 'ganancia'
-let showVenc=false, showDiaSem=false, showHoras=false;
+let showVenc=false, showDiaSem=false, showHoras=false, showPDias=false;
 
 const fmt=n=>'$'+Math.round(n).toLocaleString('es-AR');
 const hoyStr=()=>{const h=new Date();return h.getFullYear()+'-'+String(h.getMonth()+1).padStart(2,'0')+'-'+String(h.getDate()).padStart(2,'0');};
@@ -882,6 +904,67 @@ function renderApp(){
       (showVenc?'<div class="tar"><div class="tar-t">⏰ Vencimientos — próximos 30 días</div>'+vencH+'</div>':'')+
       // Detalle días
       (diasOrd.length?'<div style="font-size:.68rem;font-weight:700;color:var(--gris);text-transform:uppercase;letter-spacing:1.2px;margin:12px 0 8px">🧾 Ventas del período — '+diasLabel+'</div>'+detH:'')+
+      // ===== TABLA PRODUCTOS x DÍAS =====
+      (()=>{
+        // Siempre últimos 30 días del histórico total
+        const todayStr=hoyStr();
+        const ultimos30=[];
+        for(let i=29;i>=0;i--){
+          const d=new Date(); d.setDate(d.getDate()-i);
+          ultimos30.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));
+        }
+        // Agrupar items por producto y día
+        const prodDias={}; // {nombre: {fecha: qty}}
+        if(raw) raw.items.forEach(it=>{
+          if(!ultimos30.includes(it.fechaStr)) return;
+          if(!prodDias[it.nombre]) prodDias[it.nombre]={};
+          prodDias[it.nombre][it.fechaStr]=(prodDias[it.nombre][it.fechaStr]||0)+it.qty;
+        });
+        // Totales por producto, ordenar por total desc
+        const prods=Object.entries(prodDias)
+          .map(([n,dias])=>({n, dias, tot:Object.values(dias).reduce((s,v)=>s+v,0)}))
+          .filter(p=>p.tot>0)
+          .sort((a,b)=>b.tot-a.tot);
+        if(!prods.length) return '';
+        // Máximo para escala de color
+        const maxQty=Math.max(...prods.flatMap(p=>Object.values(p.dias)));
+        // Cabecera días
+        const DOW=['D','L','M','X','J','V','S'];
+        const thDias=ultimos30.map(ds=>{
+          const d=new Date(ds+'T12:00:00');
+          const esHoy=ds===todayStr;
+          return'<th class="pdias-th-dia'+(esHoy?' hoy-col':'')+'">'+
+            '<span class="dia-n">'+d.getDate()+'</span>'+
+            '<span class="dia-dow">'+DOW[d.getDay()]+'</span>'+
+          '</th>';
+        }).join('');
+        // Filas productos
+        const filas=prods.map(p=>{
+          const celdas=ultimos30.map(ds=>{
+            const q=p.dias[ds]||0;
+            const qr=Math.round(q*10)/10;
+            const nivel=q===0?0:q<=maxQty*.15?1:q<=maxQty*.35?2:q<=maxQty*.55?3:q<=maxQty*.8?4:5;
+            return'<td><span class="pdias-qty q'+nivel+'">'+(q===0?'·':qr)+'</span></td>';
+          }).join('');
+          return'<tr>'+
+            '<td class="col-prod" title="'+p.n+'">'+p.n.substring(0,20)+'</td>'+
+            celdas+
+            '<td class="col-tot">'+Math.round(p.tot*10)/10+'</td>'+
+          '</tr>';
+        }).join('');
+        const tabla='<div class="pdias-wrap">'+
+          '<table class="pdias-table">'+
+            '<thead><tr>'+
+              '<th class="col-prod">Producto</th>'+thDias+'<th class="col-tot">30d</th>'+
+            '</tr></thead>'+
+            '<tbody>'+filas+'</tbody>'+
+          '</table>'+
+        '</div>';
+        return '<button class="toggle-btn" onclick="showPDias=!showPDias;renderApp()" style="border-color:var(--azul);color:var(--azul)">'+
+          (showPDias?'▲':'▼')+' 📊 Detalle unidades por producto — últimos 30 días'+
+        '</button>'+
+        (showPDias?'<div class="tar" style="padding:8px;overflow:visible">'+tabla+'</div>':'');
+      })()+
     '</div>'+
     '<div class="pb"></div>';
 }
