@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — Punto de Venta v100</title>
+    <title>Copihue — Punto de Venta v101</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -1669,7 +1669,11 @@ async function cargarProductos() {
                 vencimiento: p.vencimiento || '',
                 diaCritico: (p.diaCritico || '').toLowerCase().trim(),
                 precioCosto: parseInt(p.precioCosto) || 0,
-                stockMin: parseInt(p.stockMin) || 0
+                stockMin: parseInt(p.stockMin) || 0,
+                relampago: parseInt(p.relampago) || 0,
+                destacada: parseInt(p.destacada) || 0,
+                especial: parseInt(p.especial) || 0,
+                normal: parseInt(p.normal) || 0
             }));
         const indOk = document.getElementById('indicadorCarga');
         if (indOk) { indOk.classList.remove('cargando'); indOk.classList.add('ok'); indOk.title = `${productos.length} productos cargados`; }
@@ -1751,10 +1755,12 @@ function buscar(term) {
                  alt="${p.name}">
             <div class="resultado-img-placeholder" style="display:none;">🛒</div>
             <div class="resultado-info">
-                <div class="resultado-nombre">${p.name} ${badgeVencimiento(p)}</div>
+                <div class="resultado-nombre">${p.name} ${badgeVencimiento(p)}${badgeOfertaPOS(p)}</div>
                 <div class="resultado-stock ${stockClase}">${stockTexto}</div>
             </div>
-            <div class="resultado-precio">$${p.price.toLocaleString('es-AR')}</div>
+            ${(() => { const o=calcularOfertaPOS(p,1); return o.tieneOferta
+                ? `<div style="text-align:right;line-height:1.2"><span style="font-size:.65rem;color:#999;text-decoration:line-through">$${p.price.toLocaleString('es-AR')}</span><br><span style="font-weight:900;color:#f9a825">$${o.precioUnitario.toLocaleString('es-AR')}</span></div>`
+                : `<div class="resultado-precio">$${p.price.toLocaleString('es-AR')}</div>`; })()}
             <button class="btn-agregar" style="background:#ff6f00;font-size:1rem;min-width:36px;" onclick="event.stopPropagation();abrirAjusteStockRapido(${p.id})" title="Ajuste rápido">⚠️</button>
             ${sinStock
                 ? ''
@@ -1823,17 +1829,28 @@ function agregarProducto(id) {
             return;
         }
         existente.qty++;
+        // Recalcular precio con oferta NxM si aplica (cambia al agregar más unidades)
+        if (existente.ofertaTipo) {
+            const o = calcularOfertaPOS(producto, existente.qty);
+            existente.price = o.precioUnitario;
+        }
     } else {
+        const oferta = calcularOfertaPOS(producto, 1);
         ventaActual.push({
             id: producto.id,
             name: producto.name,
-            price: producto.price,
+            price: oferta.precioUnitario,
+            precioOriginal: oferta.tieneOferta ? producto.price : 0,
+            precioModificado: oferta.tieneOferta,
             qty: 1,
             stockDisponible: producto.stock,
             vencimiento: producto.vencimiento || '',
             rotacion: producto.rotacion || 3,
-            precioCosto: producto.precioCosto || 0
+            precioCosto: producto.precioCosto || 0,
+            ofertaTipo: oferta.tipoOferta || null,
+            ofertaEtiqueta: oferta.etiqueta || null
         });
+        if (oferta.tieneOferta) mostrarToast(`${oferta.etiqueta} — ${producto.name.substring(0,25)}`, 'naranja');
     }
 
     // Cerrar buscador y listo para el siguiente producto
@@ -1889,26 +1906,41 @@ function cambiarQtyModal(delta) {
 }
 
 function actualizarQtyModal() {
+    if (!_qtyModalProducto) return;
+    const oferta = calcularOfertaPOS(_qtyModalProducto, _qtyModalValor);
     document.getElementById('qtyModalValor').textContent = _qtyModalValor;
-    const total = _qtyModalValor * (_qtyModalProducto ? _qtyModalProducto.price : 0);
-    document.getElementById('qtyModalTotal').textContent = 'Total: $' + total.toLocaleString('es-AR');
+    const total = oferta.tieneOferta ? oferta.precioTotal : (_qtyModalValor * _qtyModalProducto.price);
+    document.getElementById('qtyModalTotal').textContent = 'Total: $' + total.toLocaleString('es-AR') +
+        (oferta.etiqueta ? ` ${oferta.etiqueta}` : '');
 }
 
 function confirmarSelectorQty() {
     if (!_qtyModalProducto) return;
     const p = _qtyModalProducto;
     const qty = _qtyModalValor;
-    
+    const oferta = calcularOfertaPOS(p, qty);
+
     const existente = ventaActual.find(i => i.id === p.id);
     if (existente) {
-        existente.qty = qty;
+        existente.qty   = qty;
+        existente.price = oferta.precioUnitario;
+        existente.precioOriginal  = oferta.tieneOferta ? p.price : 0;
+        existente.precioModificado = oferta.tieneOferta;
+        existente.ofertaTipo   = oferta.tipoOferta || null;
+        existente.ofertaEtiqueta = oferta.etiqueta || null;
     } else {
         ventaActual.push({
-            id: p.id, name: p.name, price: p.price, qty,
+            id: p.id, name: p.name,
+            price: oferta.precioUnitario,
+            precioOriginal: oferta.tieneOferta ? p.price : 0,
+            precioModificado: oferta.tieneOferta,
+            qty,
             stockDisponible: p.stock,
             vencimiento: p.vencimiento || '',
             rotacion: p.rotacion || 3,
-            precioCosto: p.precioCosto || 0
+            precioCosto: p.precioCosto || 0,
+            ofertaTipo: oferta.tipoOferta || null,
+            ofertaEtiqueta: oferta.etiqueta || null
         });
     }
     cerrarSelectorQty();
@@ -1917,7 +1949,8 @@ function confirmarSelectorQty() {
     document.getElementById('buscador').focus();
     renderVenta();
     guardarCarritoPendiente();
-    mostrarToast(`✅ ${p.name.substring(0,30)} ×${qty}`, 'verde');
+    const label = oferta.tieneOferta ? `${oferta.etiqueta} — ` : '';
+    mostrarToast(`✅ ${label}${p.name.substring(0,25)} ×${qty}`, oferta.tieneOferta ? 'naranja' : 'verde');
 }
 
 function cambiarCantidad(id, delta) {
@@ -1972,6 +2005,7 @@ function renderVenta() {
             <div class="item-venta-nombre">
                 ${item.name}
                 ${item.vencimiento ? badgeVencimiento(item) : ''}
+                ${item.ofertaEtiqueta ? `<span style="background:#f9a825;color:#000;font-size:.58rem;font-weight:900;padding:1px 5px;border-radius:8px;margin-left:3px">${item.ofertaEtiqueta}</span>` : ''}
             </div>
             <div class="item-venta-controles">
                 ${item.esPeso ? `
@@ -4040,6 +4074,83 @@ if ('serviceWorker' in navigator) {
 // ========== INIT ==========
 inicializarVendedor();
 cargarConfig();
+// ========== OFERTAS EN POS ==========
+// Espejo exacto de la lógica del carrito WA (index.html)
+
+const OFERTAS_RELAMPAGO_SISTEMA = {
+    '1':  { nombre:'2x1',   tipo:'nxm', cantidad:2, pagas:1    },
+    '2':  { nombre:'3x2',   tipo:'nxm', cantidad:3, pagas:2    },
+    '3':  { nombre:'4x3',   tipo:'nxm', cantidad:4, pagas:3    },
+    '4':  { nombre:'5x4',   tipo:'nxm', cantidad:5, pagas:4    },
+    '5':  { nombre:'6x5',   tipo:'nxm', cantidad:6, pagas:5    },
+    '6':  { nombre:'7x6',   tipo:'nxm', cantidad:7, pagas:6    },
+    '10': { nombre:'2da50', tipo:'nxm', cantidad:2, pagas:1.5  },
+    '11': { nombre:'10off', tipo:'pct', descuento:10            },
+    '12': { nombre:'15off', tipo:'pct', descuento:15            },
+    '13': { nombre:'20off', tipo:'pct', descuento:20            },
+    '14': { nombre:'25off', tipo:'pct', descuento:25            },
+};
+
+// Calcula precio y etiqueta de oferta para un producto en el POS
+// Retorna { precioUnitario, etiqueta, tieneOferta, tipoOferta }
+function calcularOfertaPOS(producto, qty) {
+    const r = { precioUnitario: producto.price, precioTotal: producto.price * qty, etiqueta: null, tieneOferta: false, tipoOferta: null };
+
+    // 1. RELÁMPAGO — usa tipo NxM o %
+    if (producto.relampago > 0 && _toggleEstado.relampago) {
+        const cfg = OFERTAS_RELAMPAGO_SISTEMA[String(producto.relampago)];
+        if (cfg) {
+            if (cfg.tipo === 'pct') {
+                r.precioUnitario = Math.round(producto.price * (1 - cfg.descuento / 100));
+                r.precioTotal    = r.precioUnitario * qty;
+                r.etiqueta       = `⚡ -${cfg.descuento}% OFF`;
+            } else if (cfg.tipo === 'nxm') {
+                // NxM: calcular total según ciclos
+                const ciclos    = Math.floor(qty / cfg.cantidad);
+                const resto     = qty % cfg.cantidad;
+                r.precioTotal   = Math.round((ciclos * cfg.pagas + resto) * producto.price);
+                r.precioUnitario = qty > 0 ? Math.round(r.precioTotal / qty) : producto.price;
+                r.etiqueta      = `⚡ ${cfg.nombre.toUpperCase()}`;
+            }
+            r.tieneOferta = true; r.tipoOferta = 'relampago';
+        }
+    }
+    // 2. DESTACADAS — % fijo en columna H
+    else if (producto.destacada > 0 && _toggleEstado.destacadas) {
+        r.precioUnitario = Math.round(producto.price * (1 - producto.destacada / 100));
+        r.precioTotal    = r.precioUnitario * qty;
+        r.etiqueta       = `🔥 -${producto.destacada}% OFF`;
+        r.tieneOferta = true; r.tipoOferta = 'destacadas';
+    }
+    // 3. ESPECIALES — siempre 10%
+    else if (producto.especial > 0 && _toggleEstado.especiales) {
+        r.precioUnitario = Math.round(producto.price * 0.9);
+        r.precioTotal    = r.precioUnitario * qty;
+        r.etiqueta       = `⭐ -10% OFF`;
+        r.tieneOferta = true; r.tipoOferta = 'especiales';
+    }
+    // 4. PRECIO NORMAL en columna K (oferta espontánea)
+    else if (producto.normal && producto.normal > producto.price) {
+        r.etiqueta  = `↓ -${Math.round((producto.normal - producto.price) / producto.normal * 100)}%`;
+        r.tieneOferta = true; r.tipoOferta = 'normal';
+    }
+
+    return r;
+}
+
+// Badge de oferta para el buscador
+function badgeOfertaPOS(producto) {
+    if (producto.relampago > 0 && _toggleEstado.relampago) {
+        const cfg = OFERTAS_RELAMPAGO_SISTEMA[String(producto.relampago)];
+        if (cfg) return `<span style="background:#f9a825;color:#000;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">⚡ ${cfg.nombre.toUpperCase()}</span>`;
+    }
+    if (producto.destacada > 0 && _toggleEstado.destacadas)
+        return `<span style="background:#ff6f00;color:#fff;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">🔥 -${producto.destacada}%</span>`;
+    if (producto.especial > 0 && _toggleEstado.especiales)
+        return `<span style="background:#00bcd4;color:#fff;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">⭐ -10%</span>`;
+    return '';
+}
+
 // ========== INTERRUPTORES DE OFERTAS ==========
 // Leen el estado real de la planilla (día actual) y escriben via GAS
 
