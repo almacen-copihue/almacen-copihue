@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Copihue · Reportes v1.17</title>
+<title>Copihue · Reportes v1.18</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -301,6 +301,7 @@ let metActivos=new Set(['TODOS']);
 let vendActivos=new Set(['TODOS']);
 let topOrden='venta'; // 'venta' | 'ganancia'
 let showVenc=false, showDiaSem=false, showHoras=false, showPDias=false;
+let prodSelIdx=-1; // índice del producto seleccionado en el top (-1 = ninguno)
 
 const fmt=n=>'$'+Math.round(n).toLocaleString('es-AR');
 const hoyStr=()=>{const h=new Date();return h.getFullYear()+'-'+String(h.getMonth()+1).padStart(2,'0')+'-'+String(h.getDate()).padStart(2,'0');};
@@ -527,7 +528,37 @@ function renderApp(){
   }
   const maxV=stats.top.length?stats.top[0].total:1;
   const maxG=Math.max(...stats.top.map(p=>p.conCosto?Math.max(p.ganReal,0):p.ganAprox),1);
-  _topNombres = stats.top.map(p=>p.nombre); // guardar nombres para tap seguro
+  _topNombres = stats.top.map(p=>p.nombre);
+
+  // Función helper: 30 días de un producto expandido
+  function prod30H(nombre){
+    const todayStr=hoyStr();
+    const DOW=['D','L','M','X','J','V','S'];
+    const dias30=[];
+    for(let i=29;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);dias30.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));}
+    const ventas={};
+    (raw?raw.items:[]).filter(it=>it.nombre===nombre&&dias30.includes(it.fechaStr))
+      .forEach(it=>{ventas[it.fechaStr]=(ventas[it.fechaStr]||0)+it.qty;});
+    const maxQ=Math.max(...Object.values(ventas),1);
+    const celdas=dias30.map(ds=>{
+      const q=ventas[ds]||0;
+      const qr=Math.round(q*10)/10;
+      const nivel=q===0?0:q<=maxQ*.2?1:q<=maxQ*.4?2:q<=maxQ*.6?3:q<=maxQ*.8?4:5;
+      const d=new Date(ds+'T12:00:00');
+      const esHoy=ds===todayStr;
+      return'<div style="display:flex;flex-direction:column;align-items:center;gap:1px;min-width:22px">'+
+        '<span style="font-size:.52rem;color:'+(esHoy?'var(--naranja)':'var(--gris)')+';font-weight:'+(esHoy?900:400)+'">'+d.getDate()+'</span>'+
+        '<span style="font-size:.55rem;color:var(--gris)">'+DOW[d.getDay()]+'</span>'+
+        '<span class="pdias-qty q'+nivel+'" style="font-size:.62rem">'+(q===0?'·':qr)+'</span>'+
+      '</div>';
+    }).join('');
+    const tot=Object.values(ventas).reduce((s,v)=>s+v,0);
+    return '<div style="background:var(--vl);border-radius:10px;padding:8px;margin-top:6px">'+
+      '<div style="font-size:.62rem;color:var(--gris);font-weight:700;margin-bottom:5px">📊 Últimos 30 días · Total: '+Math.round(tot*10)/10+' u</div>'+
+      '<div style="display:flex;gap:3px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px">'+celdas+'</div>'+
+    '</div>';
+  }
+
   const topsH=stats.top.length?stats.top.map((p,i)=>{
     const pctV=Math.round(p.total/maxV*100);
     const gan=p.conCosto?p.ganReal:p.ganAprox;
@@ -537,15 +568,19 @@ function renderApp(){
     const ganCls=colorGan(gan,p.total);
     const barGCls=p.conCosto&&gan<0?'bar-rojo':'bar-g';
     const etiqueta=p.conCosto?fmt(gan):'~'+fmt(gan);
-    return'<div class="prod-row prod-clickable" data-nombre="'+p.nombre.replace(/"/g,'&quot;')+'" style="cursor:pointer;border-radius:8px;padding:4px;margin:-4px;transition:background .15s">'+
-      '<div class="prod-hdr"><span class="prod-n">'+medal+' '+p.nombre.substring(0,28)+'</span><span class="prod-d">'+p.qty+' u</span></div>'+
-      stockBadge(p.nombre)+
-      '<div style="display:flex;gap:3px;align-items:center;margin-bottom:2px;"><div class="barra-bg" style="flex:1"><div class="barra-f bar-v" style="width:'+pctV+'%"></div></div><span style="font-size:.68rem;font-weight:700;color:var(--vd);min-width:60px;text-align:right">'+fmt(p.total)+'</span></div>'+
-      '<div style="display:flex;gap:3px;align-items:center;"><div class="barra-bg" style="flex:1"><div class="barra-f '+barGCls+'" style="width:'+pctG+'%"></div></div><span class="'+ganCls+'" style="font-size:.65rem;min-width:60px;text-align:right">'+etiqueta+'</span></div>'+
+    const sel=prodSelIdx===i&&topOrden==='venta';
+    return'<div style="border-radius:10px;padding:6px;margin-bottom:4px;background:'+(sel?'var(--vl)':'transparent')+';border:1px solid '+(sel?'var(--verde)':'transparent')+'">'+
+      '<button onclick="prodSelIdx='+(sel?-1:i)+';renderApp()" style="width:100%;background:none;border:none;padding:0;cursor:pointer;font-family:inherit;text-align:left">'+
+        '<div class="prod-hdr"><span class="prod-n">'+medal+' '+p.nombre.substring(0,28)+'</span><span class="prod-d">'+p.qty+' u</span></div>'+
+        stockBadge(p.nombre)+
+        '<div style="display:flex;gap:3px;align-items:center;margin-bottom:2px;"><div class="barra-bg" style="flex:1"><div class="barra-f bar-v" style="width:'+pctV+'%"></div></div><span style="font-size:.68rem;font-weight:700;color:var(--vd);min-width:60px;text-align:right">'+fmt(p.total)+'</span></div>'+
+        '<div style="display:flex;gap:3px;align-items:center;"><div class="barra-bg" style="flex:1"><div class="barra-f '+barGCls+'" style="width:'+pctG+'%"></div></div><span class="'+ganCls+'" style="font-size:.65rem;min-width:60px;text-align:right">'+etiqueta+'</span></div>'+
+      '</button>'+
+      (sel?prod30H(p.nombre):'')+
     '</div>';
   }).join(''):'<div class="empty">Sin datos para la selección</div>';
 
-  // Top por GANANCIA — mismo pool, ordenado por ganancia en vez de venta
+  // Top por GANANCIA
   const topGananciaArr=[...stats.top]
     .map(p=>({...p,ganancia:p.conCosto?p.ganReal:p.ganAprox}))
     .filter(p=>p.ganancia>0)
@@ -557,13 +592,17 @@ function renderApp(){
     const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':(i+1)+'.';
     const esReal=p.conCosto;
     const etiqueta=(esReal?'':'~')+fmt(p.ganancia);
-    return'<div class="prod-row prod-clickable" data-nombre="'+p.nombre.replace(/"/g,'&quot;')+'" style="cursor:pointer;border-radius:8px;padding:4px;margin:-4px;transition:background .15s">'+
-      '<div class="prod-hdr"><span class="prod-n">'+medal+' '+p.nombre.substring(0,28)+'</span><span class="prod-d" style="color:'+(esReal?'var(--naranja)':'var(--vd)')+';font-weight:900">'+etiqueta+(esReal?'':' ★')+'</span></div>'+
-      stockBadge(p.nombre)+
-      '<div style="display:flex;gap:3px;align-items:center;">'+
-        '<div class="barra-bg" style="flex:1"><div class="barra-f" style="width:'+pct+'%;background:'+(esReal?'var(--naranja)':'#a5d6a7')+'"></div></div>'+
-        '<span style="font-size:.65rem;color:var(--gris);min-width:60px;text-align:right">'+p.qty+' u · '+fmt(p.total)+'</span>'+
-      '</div>'+
+    const sel=prodSelIdx===i&&topOrden==='ganancia';
+    return'<div style="border-radius:10px;padding:6px;margin-bottom:4px;background:'+(sel?'var(--nl)':'transparent')+';border:1px solid '+(sel?'var(--naranja)':'transparent')+'">'+
+      '<button onclick="prodSelIdx='+(sel?-1:i)+';renderApp()" style="width:100%;background:none;border:none;padding:0;cursor:pointer;font-family:inherit;text-align:left">'+
+        '<div class="prod-hdr"><span class="prod-n">'+medal+' '+p.nombre.substring(0,28)+'</span><span class="prod-d" style="color:'+(esReal?'var(--naranja)':'var(--vd)')+';font-weight:900">'+etiqueta+(esReal?'':' ★')+'</span></div>'+
+        stockBadge(p.nombre)+
+        '<div style="display:flex;gap:3px;align-items:center;">'+
+          '<div class="barra-bg" style="flex:1"><div class="barra-f" style="width:'+pct+'%;background:'+(esReal?'var(--naranja)':'#a5d6a7')+'"></div></div>'+
+          '<span style="font-size:.65rem;color:var(--gris);min-width:60px;text-align:right">'+p.qty+' u · '+fmt(p.total)+'</span>'+
+        '</div>'+
+      '</button>'+
+      (sel?prod30H(p.nombre):'')+
     '</div>';
   }).join(''):'<div class="empty">Sin datos de ganancia en el período</div>';
 
@@ -864,8 +903,8 @@ function renderApp(){
         '<div class="tar-t" style="display:flex;align-items:center;justify-content:space-between">'+
           '<span style="color:'+(topOrden==='ganancia'?'var(--naranja)':'inherit')+'">'+(topOrden==='venta'?'🏆 Top por venta':'💰 Top por ganancia')+'</span>'+
           '<div style="display:flex;gap:4px">'+
-            '<button onclick="topOrden=\'venta\';renderApp()" style="padding:3px 10px;border-radius:20px;border:1px solid '+(topOrden==='venta'?'var(--verde)':'var(--borde)')+';background:'+(topOrden==='venta'?'var(--vl)':'#fff')+';color:'+(topOrden==='venta'?'var(--vd)':'var(--gris)')+';font-size:.65rem;font-weight:700;cursor:pointer;">🟩 Venta</button>'+
-            '<button onclick="topOrden=\'ganancia\';renderApp()" style="padding:3px 10px;border-radius:20px;border:1px solid '+(topOrden==='ganancia'?'var(--naranja)':'var(--borde)')+';background:'+(topOrden==='ganancia'?'var(--nl)':'#fff')+';color:'+(topOrden==='ganancia'?'#e65100':'var(--gris)')+';font-size:.65rem;font-weight:700;cursor:pointer;">🟧 Ganancia</button>'+
+            '<button onclick="topOrden=\'venta\';prodSelIdx=-1;renderApp()" style="padding:3px 10px;border-radius:20px;border:1px solid '+(topOrden==='venta'?'var(--verde)':'var(--borde)')+';background:'+(topOrden==='venta'?'var(--vl)':'#fff')+';color:'+(topOrden==='venta'?'var(--vd)':'var(--gris)')+';font-size:.65rem;font-weight:700;cursor:pointer;">🟩 Venta</button>'+
+            '<button onclick="topOrden=\'ganancia\';prodSelIdx=-1;renderApp()" style="padding:3px 10px;border-radius:20px;border:1px solid '+(topOrden==='ganancia'?'var(--naranja)':'var(--borde)')+';background:'+(topOrden==='ganancia'?'var(--nl)':'#fff')+';color:'+(topOrden==='ganancia'?'#e65100':'var(--gris)')+';font-size:.65rem;font-weight:700;cursor:pointer;">🟧 Ganancia</button>'+
           '</div>'+
         '</div>'+
         (topOrden==='venta'?topsH:topGanH)+
