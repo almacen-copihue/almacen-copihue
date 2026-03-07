@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — Punto de Venta v107</title>
+    <title>Copihue — Punto de Venta v108</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2404,19 +2404,28 @@ function abrirResumen() {
     const cantVentas = ventas.length;
     const ticketPromedio = cantVentas > 0 ? Math.round(totalDia / cantVentas) : 0;
 
-    // Ganancia real: solo items con precioCosto > 0
-    const gananciaBruta = ventas.reduce((s, v) => {
-        return s + v.items.reduce((ss, i) => {
-            if (i.precioCosto && i.precioCosto > 0) {
-                return ss + (i.price - i.precioCosto) * i.qty;
-            }
-            return ss;
-        }, 0);
-    }, 0);
-    const itemsConCosto = ventas.reduce((s, v) => s + v.items.filter(i => i.precioCosto > 0).length, 0);
-    const gananciaTexto = itemsConCosto > 0
-        ? '$' + gananciaBruta.toLocaleString('es-AR')
-        : '<span style="color:#bbb;font-size:0.85rem;">Sin datos de costo</span>';
+    // Ganancia real: precio de venta real (sin descuento) menos costo
+    let gananciaBruta = 0;
+    let itemsConCosto = 0;
+    let itemsRaros = 0;
+    ventas.forEach(v => {
+        (v.items || []).forEach(i => {
+            if (!i.precioCosto || i.precioCosto <= 0) return;
+            // Usar precioOriginal si había oferta (el descuento es ganancia cedida, no pérdida real)
+            const precioReal = (i.precioOriginal && i.precioOriginal > i.price) ? i.precioOriginal : i.price;
+            const ganancia = (precioReal - i.precioCosto) * (i.qty || 1);
+            // Detectar datos raros: costo mayor al doble del precio → probablemente escala incorrecta
+            if (i.precioCosto > precioReal * 2) { itemsRaros++; return; }
+            gananciaBruta += ganancia;
+            itemsConCosto++;
+        });
+    });
+    const pctGanancia = totalDia > 0 ? Math.round(gananciaBruta / totalDia * 100) : 0;
+    const gananciaTexto = itemsConCosto === 0
+        ? '<span style="color:#bbb;font-size:0.85rem;">Sin datos de costo</span>'
+        : itemsRaros > 0 && itemsConCosto === 0
+            ? '<span style="color:#f57c00;font-size:0.85rem;">⚠️ Datos de costo inconsistentes</span>'
+            : `$${gananciaBruta.toLocaleString('es-AR')} <span style="font-size:.75rem;opacity:.7">${pctGanancia}% · ${itemsConCosto} prod c/costo${itemsRaros > 0 ? ' · ⚠️ ' + itemsRaros + ' ignorados' : ''}</span>`;
 
     document.getElementById('resumenCard').innerHTML = `
         <div class="resumen-stat">
@@ -2425,7 +2434,7 @@ function abrirResumen() {
         </div>
         <div class="resumen-stat">
             <span class="resumen-stat-label">📈 Ganancia real (estimada)</span>
-            <span class="resumen-stat-valor" style="color:${gananciaBruta > 0 ? '#2e7d32' : '#e53935'};">${gananciaTexto}</span>
+            <span class="resumen-stat-valor" style="color:${gananciaBruta > 0 ? '#2e7d32' : gananciaBruta < 0 ? '#e53935' : '#888'};">${gananciaTexto}</span>
         </div>
         <div class="resumen-stat">
             <span class="resumen-stat-label">🛒 Ventas realizadas</span>
@@ -2794,16 +2803,20 @@ function confirmarPeso() {
 
     const precioPorKg = pesoProductoActual.price;
     const precioCalculado = Math.round((precioPorKg / 1000) * gramos);
+    // Costo también escalado por gramos (costo x kg → costo x gramos vendidos)
+    const costoPorKg = pesoProductoActual.precioCosto || 0;
+    const costoCalculado = costoPorKg > 0 ? Math.round((costoPorKg / 1000) * gramos) : 0;
 
     ventaActual.push({
-        id: `peso_${Date.now()}`,       // ID único para el carrito
-        idOriginal: pesoProductoActual.id, // ID real del producto en planilla
+        id: `peso_${Date.now()}`,
+        idOriginal: pesoProductoActual.id,
         name: `${pesoProductoActual.name} (${gramos}gr)`,
         price: precioCalculado,
         qty: 1,
         gramos: gramos,
         stockDisponible: 999,
-        esPeso: true
+        esPeso: true,
+        precioCosto: costoCalculado
     });
 
     cerrarPeso();
