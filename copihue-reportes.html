@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Copihue · Reportes v1.11</title>
+<title>Copihue · Reportes v1.12</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -32,13 +32,44 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
 
 /* PANEL SELECCIÓN */
 .sel-panel{margin:12px 12px 0;background:#fff;border-radius:18px;border:1px solid var(--borde);overflow:hidden;box-shadow:0 1px 6px rgba(46,125,50,.08)}
-.sel-titulo{background:linear-gradient(90deg,var(--vdp),var(--vd));color:#fff;padding:10px 16px;font-size:.82rem;font-weight:900;text-transform:uppercase;letter-spacing:1px}
+.sel-titulo{background:linear-gradient(90deg,var(--vdp),var(--vd));color:#fff;padding:10px 16px;font-size:.82rem;font-weight:900;text-transform:uppercase;letter-spacing:1px;display:flex;align-items:center;justify-content:space-between}
 .sel-body{padding:12px 12px 14px}
 
+/* BOTÓN HOY — sticky top standard */
+.btn-hoy-top{display:flex;align-items:center;gap:8px;background:var(--naranja);color:#fff;border:none;border-radius:12px;padding:10px 16px;font-size:.88rem;font-weight:900;cursor:pointer;font-family:inherit;width:100%;margin-bottom:12px;justify-content:center;box-shadow:0 2px 8px rgba(245,124,0,.3);transition:all .15s}
+.btn-hoy-top:active{transform:scale(.97)}
+.btn-hoy-top.activo{background:var(--vd)}
+
 /* MES NAV */
-.mes-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;background:var(--vl);border-radius:12px;padding:8px 10px}
+.mes-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;background:var(--vl);border-radius:12px;padding:8px 10px}
 .mes-nombre{font-size:1rem;font-weight:900;color:var(--vd)}
 .btn-mes{width:36px;height:36px;border:none;border-radius:50%;background:var(--verde);color:#fff;font-size:1.2rem;cursor:pointer;display:flex;align-items:center;justify-content:center;font-weight:900;box-shadow:0 2px 6px rgba(46,125,50,.3)}
+
+/* SECCIÓN JERÁRQUICA */
+.sel-sec{margin-bottom:8px}
+.sel-sec-lbl{font-size:.66rem;font-weight:900;color:var(--gris);text-transform:uppercase;letter-spacing:1.2px;margin-bottom:5px;display:flex;align-items:center;gap:5px}
+.sel-sec-lbl::before{content:'';display:block;width:3px;height:12px;background:var(--verde);border-radius:2px}
+
+/* SEMANAS */
+.sems-row{display:grid;grid-template-columns:repeat(6,1fr);gap:4px;margin-bottom:10px}
+.btn-sem{padding:7px 4px;border:1.5px solid var(--borde);border-radius:9px;background:#fff;font-size:.72rem;font-weight:800;cursor:pointer;color:var(--gris);font-family:inherit;text-align:center;transition:all .12s}
+.btn-sem:active,.btn-sem.activo{background:var(--verde);border-color:var(--vd);color:#fff}
+
+/* MESES FILA */
+.meses-row{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-bottom:10px}
+.btn-mes-sel{padding:8px 4px;border:1.5px solid var(--borde);border-radius:10px;background:#fff;font-size:.72rem;font-weight:700;cursor:pointer;color:var(--gris);font-family:inherit;text-align:center;transition:all .15s;line-height:1.3}
+.btn-mes-sel.tiene{background:var(--vl);border-color:var(--verde);color:var(--vd)}
+.btn-mes-sel.activo{background:var(--vd);border-color:var(--vdp);color:#fff}
+.btn-mes-sel.sin{opacity:.4}
+
+/* AÑOS ANTERIORES colapsable */
+.anios-wrap{margin-bottom:10px}
+.btn-anio-toggle{display:flex;align-items:center;justify-content:space-between;width:100%;background:var(--vl);border:1.5px solid var(--borde);border-radius:10px;padding:8px 12px;font-size:.78rem;font-weight:800;color:var(--vd);cursor:pointer;font-family:inherit;transition:all .12s}
+.btn-anio-toggle:active{background:var(--verde);color:#fff}
+.anio-panel{margin-top:5px;background:#f9fdf9;border:1.5px solid var(--borde);border-radius:10px;padding:10px;display:none}
+.anio-panel.open{display:block}
+.anio-titulo{font-size:.72rem;font-weight:900;color:var(--gris);margin-bottom:6px;text-transform:uppercase;letter-spacing:.8px}
+.anio-meses-row{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-bottom:8px}
 
 /* CHIPS */
 .chips-wrap{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
@@ -239,6 +270,7 @@ let raw=null;
 let mes=new Date().getMonth(), anio=new Date().getFullYear();
 let diasSel=new Set();
 let modoNav='mes'; // 'mes' | 'anio'
+let aniosAbiertos=new Set(); // años anteriores expandidos en el selector
 let metActivos=new Set(['TODOS']);
 let vendActivos=new Set(['TODOS']);
 let topOrden='venta'; // 'venta' | 'ganancia'
@@ -683,37 +715,112 @@ function renderApp(){
   const diasLabel=nSel===0?'Ningún día':nSel===1?'1 día':nSel+' días';
 
   document.getElementById('app').innerHTML=
-    // PANEL SELECCIÓN
+    // PANEL SELECCIÓN — jerarquía: HOY → Calendario → Semanas → Meses → Años anteriores
+    const hoySelec = diasSel.size===1 && diasSel.has(today);
+    const anioActual = new Date().getFullYear();
+
+    // Detectar años anteriores con datos
+    const aniosConDatos = raw ? [...new Set([
+      ...raw.totales.map(t=>t.fechaStr?t.fechaStr.slice(0,4):null),
+      ...raw.items.map(i=>i.fechaStr?i.fechaStr.slice(0,4):null)
+    ].filter(Boolean))].map(Number).filter(a=>a<anioActual).sort((a,b)=>b-a) : [];
+
+    // Semanas del mes actual
+    const semsH = Array.from({length:6},(_,i)=>{
+      const n=i+1, ini=(n-1)*7+1, fin=Math.min(n*7,diasEnMes);
+      if(ini>diasEnMes) return '';
+      // detectar si algún día de esta semana está seleccionado
+      let semSel=false;
+      for(let d=ini;d<=fin;d++){
+        if(diasSel.has(anio+'-'+String(mes+1).padStart(2,'0')+'-'+String(d).padStart(2,'0'))){semSel=true;break;}
+      }
+      return '<button class="btn-sem'+(semSel?' activo':'')+'" onclick="selSemana('+n+')">S'+n+'</button>';
+    }).join('');
+
+    // Meses del año actual
+    const mesesH = MESES.map((nm,mi)=>{
+      const prefix=anio+'-'+String(mi+1).padStart(2,'0');
+      const tieneData=raw&&raw.totales.some(t=>t.fechaStr&&t.fechaStr.startsWith(prefix));
+      const esSel=[...diasSel].some(d=>d.startsWith(prefix));
+      const esFuturo=new Date(anio,mi,1)>new Date();
+      if(esFuturo) return '';
+      let cls='btn-mes-sel'+(esSel?' activo':tieneData?' tiene':' sin');
+      return '<button class="'+cls+'" onclick="selMesCal('+anio+','+mi+')">'+nm.substring(0,3)+'</button>';
+    }).join('');
+
+    // Años anteriores colapsables
+    const aniosPanelH = aniosConDatos.length===0
+      ? '<div style="color:var(--gris);font-size:.75rem;padding:6px 0;opacity:.6">Sin datos de años anteriores</div>'
+      : aniosConDatos.map(a=>{
+          const abierto=aniosAbiertos.has(a);
+          const mesesAnioH=MESES.map((nm,mi)=>{
+            const prefix=a+'-'+String(mi+1).padStart(2,'0');
+            const tieneData=raw&&raw.totales.some(t=>t.fechaStr&&t.fechaStr.startsWith(prefix));
+            const esSel=[...diasSel].some(d=>d.startsWith(prefix));
+            if(!tieneData) return '';
+            let cls='btn-mes-sel'+(esSel?' activo':' tiene');
+            return '<button class="'+cls+'" onclick="selMesCal('+a+','+mi+')">'+nm.substring(0,3)+'</button>';
+          }).join('');
+          const hayMeses=mesesAnioH.trim().length>0;
+          return '<div class="anios-wrap">'+
+            '<button class="btn-anio-toggle" onclick="toggleAnio('+a+')">'+
+              '<span>📆 '+a+'</span>'+
+              '<span>'+(abierto?'▲':'▶')+'</span>'+
+            '</button>'+
+            '<div class="anio-panel'+(abierto?' open':'')+'">'+
+              (hayMeses
+                ? '<div class="anio-titulo">Meses con ventas</div><div class="anio-meses-row">'+mesesAnioH+'</div>'
+                : '<div style="color:var(--gris);font-size:.75rem;opacity:.6">Sin datos</div>')+
+            '</div>'+
+          '</div>';
+        }).join('');
+
     '<div class="sel-panel">'+
-      '<div class="sel-titulo">📋 Seleccioná tu informe</div>'+
+      '<div class="sel-titulo">'+
+        '<span>📋 Seleccioná tu informe</span>'+
+        '<button onclick="deselTodo()" style="background:rgba(255,255,255,.2);border:none;color:#fff;border-radius:8px;padding:3px 10px;font-size:.7rem;font-weight:700;cursor:pointer;font-family:inherit">✕ Limpiar</button>'+
+      '</div>'+
       '<div class="sel-body">'+
-        // Nav mes/año con selector
-        '<div class="mes-nav">'+
-          '<button class="btn-mes" onclick="cambMes(-1)">‹</button>'+
-          '<span class="mes-nombre" onclick="toggleModoNav()" style="cursor:pointer;user-select:none" title="Tocar para cambiar vista">'+
-            (modoNav==='anio' ? '📆 '+anio : MESES[mes]+' '+anio)+
-          '</span>'+
-          '<button class="btn-mes" onclick="cambMes(1)">›</button>'+
+
+        // 1. HOY — botón destacado arriba
+        '<button class="btn-hoy-top'+(hoySelec?' activo':'')+'" onclick="selHoy()">'+
+          '📍 Hoy — '+(()=>{const h=new Date();const ds=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];return ds[h.getDay()]+' '+h.getDate()+' de '+MESES[h.getMonth()];})()+''+
+        '</button>'+
+
+        // 2. Calendario del mes
+        '<div class="sel-sec">'+
+          '<div class="mes-nav" style="margin-bottom:8px">'+
+            '<button class="btn-mes" onclick="cambMes(-1)">‹</button>'+
+            '<span class="mes-nombre">'+MESES[mes]+' '+anio+'</span>'+
+            '<button class="btn-mes" onclick="cambMes(1)">›</button>'+
+          '</div>'+
+          '<div class="cal">'+calH+'</div>'+
         '</div>'+
-        // Método
+
+        // 3. Semanas
+        '<div class="sel-sec">'+
+          '<div class="sel-sec-lbl">Semanas</div>'+
+          '<div class="sems-row">'+semsH+
+            '<button class="btn-sem" onclick="selTodo()" title="Todo el mes" style="background:var(--vl);border-color:var(--verde);color:var(--vd)">✅ Mes</button>'+
+          '</div>'+
+        '</div>'+
+
+        // 4. Meses del año actual
+        '<div class="sel-sec">'+
+          '<div class="sel-sec-lbl">'+anio+'</div>'+
+          '<div class="meses-row">'+mesesH+'</div>'+
+        '</div>'+
+
+        // 5. Años anteriores colapsables
+        '<div class="sel-sec">'+
+          '<div class="sel-sec-lbl">Años anteriores</div>'+
+          aniosPanelH+
+        '</div>'+
+
+        // Filtros método y vendedor
+        (vendedores.length>1?'<div class="lbl">Vendedor</div>'+fVendH:'')+
         '<div class="lbl">Método de pago</div>'+fMetH+
-        // Vendedor
-        fVendH+
-        // Calendario — solo en modo mes
-        (modoNav==='mes' ?
-          '<div class="lbl">Días del mes</div><div class="cal">'+calH+'</div>' :
-          '<div class="lbl">Meses del año</div><div class="cal-meses">'+calMesesH+'</div>'
-        )+
-        // Atajos
-        '<div class="acc-grid" style="margin-top:8px">'+
-          '<button class="btn-acc verde" onclick="selHoy()">📍 Hoy</button>'+
-          '<button class="btn-acc verde" onclick="selTodo()">✅ '+(modoNav==='mes'?'Mes':'Año')+'</button>'+
-          (modoNav==='mes' ? semsHTML : '')+
-          '<button class="btn-acc '+(modoNav==='anio'?'naranja':'verde')+'" onclick="toggleModoNav()">'+
-            (modoNav==='mes'?'📆 Año':'📅 Mes')+
-          '</button>'+
-          '<button class="btn-acc verde" onclick="selAnual()">🗂 Todo</button>'+
-        '</div>'+
+
       '</div>'+
     '</div>'+
 
@@ -799,36 +906,34 @@ function cambMes(d){
 }
 function selTodo(){
   diasSel.clear();
-  if(modoNav==='anio'){
-    // Seleccionar todo el año
-    for(let m=0;m<12;m++){
-      const n=new Date(anio,m+1,0).getDate();
-      for(let d=1;d<=n;d++) diasSel.add(anio+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0'));
-    }
-  } else {
-    const n=new Date(anio,mes+1,0).getDate();
-    for(let d=1;d<=n;d++) diasSel.add(anio+'-'+String(mes+1).padStart(2,'0')+'-'+String(d).padStart(2,'0'));
-  }
+  const n=new Date(anio,mes+1,0).getDate();
+  for(let d=1;d<=n;d++) diasSel.add(anio+'-'+String(mes+1).padStart(2,'0')+'-'+String(d).padStart(2,'0'));
   renderApp();
 }
 function deselTodo(){diasSel.clear();renderApp();}
-function selHoy(){diasSel.clear();diasSel.add(hoyStr());renderApp();}
+function selHoy(){
+  mes=new Date().getMonth(); anio=new Date().getFullYear();
+  diasSel.clear(); diasSel.add(hoyStr()); renderApp();
+}
 function selSemana(n){
+  diasSel.clear();
   const ini=(n-1)*7+1;
   const fin=Math.min(n*7,new Date(anio,mes+1,0).getDate());
   for(let d=ini;d<=fin;d++)diasSel.add(anio+'-'+String(mes+1).padStart(2,'0')+'-'+String(d).padStart(2,'0'));
   renderApp();
 }
-function selMes(m){
-  // Toggle mes completo en modo año
-  const prefix=anio+'-'+String(m+1).padStart(2,'0');
-  const yaSelec=[...diasSel].some(d=>d.startsWith(prefix));
-  const n=new Date(anio,m+1,0).getDate();
-  if(yaSelec){
-    for(let d=1;d<=n;d++) diasSel.delete(prefix+'-'+String(d).padStart(2,'0'));
-  } else {
-    for(let d=1;d<=n;d++) diasSel.add(prefix+'-'+String(d).padStart(2,'0'));
-  }
+function selMesCal(a,m){
+  // Seleccionar mes completo de cualquier año
+  diasSel.clear();
+  const prefix=a+'-'+String(m+1).padStart(2,'0');
+  const n=new Date(a,m+1,0).getDate();
+  for(let d=1;d<=n;d++) diasSel.add(prefix+'-'+String(d).padStart(2,'0'));
+  mes=m; anio=a;
+  renderApp();
+}
+function selMes(m){selMesCal(anio,m);}
+function toggleAnio(a){
+  aniosAbiertos.has(a)?aniosAbiertos.delete(a):aniosAbiertos.add(a);
   renderApp();
 }
 function selAnual(){
