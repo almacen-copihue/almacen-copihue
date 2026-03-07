@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — Punto de Venta v106</title>
+    <title>Copihue — Punto de Venta v107</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -1532,7 +1532,7 @@ function sugerirPedidoPanadero() {
     const cfg = getProveedorPanadero(); if (!cfg) return;
     const stockPan = calcularStockTotalPan();
     if (stockPan > (cfg.stockMinimo || 1)) return;
-    const hoyKey = new Date().toISOString().split('T')[0];
+    const hoyKey = fechaArgentina();
     if (localStorage.getItem('pedido_panadero_sugerido_' + hoyKey)) return;
     if (document.getElementById('sugerenciaPanadero')) return;
     const notif = document.createElement('div');
@@ -1557,7 +1557,7 @@ function sugerirPedidoPanadero() {
 }
 
 function posponerPedidoPanadero() {
-    localStorage.setItem('pedido_panadero_sugerido_' + new Date().toISOString().split('T')[0], '1');
+    localStorage.setItem('pedido_panadero_sugerido_' + fechaArgentina(), '1');
     const n = document.getElementById('sugerenciaPanadero'); if (n) n.remove();
 }
 
@@ -1568,7 +1568,7 @@ function enviarPedidoPanadero() {
     const msg = (cfg.mensaje || 'Hola {nombre}! 🍞 Te pido {cantidad} kg de pan. ¡Gracias!')
         .replace('{nombre}', cfg.nombre).replace('{cantidad}', cant).replace('{productos}', '- Pan: ' + cant + ' kg');
     const tel = (cfg.telefono || '').replace(/\D/g, '');
-    localStorage.setItem('pedido_panadero_sugerido_' + new Date().toISOString().split('T')[0], '1');
+    localStorage.setItem('pedido_panadero_sugerido_' + fechaArgentina(), '1');
     const n = document.getElementById('sugerenciaPanadero'); if (n) n.remove();
     window.open(tel ? 'https://wa.me/'+tel+'?text='+encodeURIComponent(msg) : 'https://wa.me/?text='+encodeURIComponent(msg), '_blank');
     if (!tel) mostrarToast('⚠️ Agregá el teléfono en ⚙️ Configuración', 'naranja');
@@ -2346,7 +2346,38 @@ function cerrarConfirm() {
 }
 
 // ========== RESUMEN DEL DÍA ==========
-const HOY_KEY = 'copihue_ventas_' + new Date().toISOString().slice(0, 10);
+
+// ⚠️⚠️⚠️ ZONA HORARIA — LEÉ ESTO ANTES DE AGREGAR CÓDIGO ⚠️⚠️⚠️
+// NUNCA usar para fechas de keys localStorage:
+//   ❌ new Date().toISOString()          → UTC, en ARG noche da fecha de mañana
+//   ❌ new Date().toISOString().slice(0,10)
+//   ❌ fecha.toISOString().split('T')[0]
+//   ❌ new Date().getFullYear() + '-' + ...  → también UTC
+//
+// SIEMPRE usar:
+//   ✅ fechaArgentina()           → hoy en AR
+//   ✅ fechaArgentina(-1)         → ayer en AR
+//   ✅ fechaArgentina(+1)         → mañana en AR
+//
+// Este bug causó stock en 0 e historial perdido. Fue corregido 3+ veces.
+// ⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️
+
+function fechaArgentina(offsetDias = 0) {
+    const now = new Date();
+    if (offsetDias !== 0) now.setDate(now.getDate() + offsetDias);
+    return new Date(now.toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }))
+        .toISOString().slice(0, 10);
+}
+const HOY_KEY = 'copihue_ventas_' + fechaArgentina();
+
+// Guard: detectar si HOY_KEY tiene fecha incorrecta (UTC vs ARG)
+(function chequearFechaUTC() {
+    const utc = new Date().toISOString().slice(0, 10);
+    const arg = fechaArgentina();
+    if (utc !== arg) {
+        console.warn('⚠️ ZONA HORARIA: UTC=' + utc + ' vs ARG=' + arg + ' — diferencia detectada. HOY_KEY usa ARG correctamente.');
+    }
+})();
 
 function guardarVentaDia(venta) {
     const ventas = JSON.parse(localStorage.getItem(HOY_KEY) || '[]');
@@ -3343,7 +3374,7 @@ function programarRecordatorioCierre() {
 
     setTimeout(() => {
         // Verificar si ya cerró el día
-        const hoyKey = 'copihue_ventas_' + new Date().toISOString().slice(0, 10);
+        const hoyKey = 'copihue_ventas_' + fechaArgentina();
         const ventas = JSON.parse(localStorage.getItem(hoyKey) || '[]');
         if (ventas.length === 0) return; // sin ventas, no recordar
 
@@ -3534,10 +3565,8 @@ async function ponerStockEnCero(p) {
 
 // Al día siguiente: auto-poner en 0 los confirmados ayer
 async function procesarVencidosDeAyer() {
-    const hoy = new Date(); hoy.setHours(0,0,0,0);
-    const ayer = new Date(hoy); ayer.setDate(ayer.getDate() - 1);
-    const ayerKey = ayer.toISOString().split('T')[0];
-    const hoyKey  = hoy.toISOString().split('T')[0];
+    const hoyKey  = fechaArgentina(0);
+    const ayerKey = fechaArgentina(-1);
 
     if (localStorage.getItem(claveVencidosAutoZero(hoyKey))) return;
 
@@ -3581,8 +3610,8 @@ async function procesarVencidosDeAyer() {
 
 function alertarVencidosHoy() {
     if (!productos || productos.length === 0) return;
-    const hoy = new Date(); hoy.setHours(0,0,0,0);
-    const hoyKey = hoy.toISOString().split('T')[0];
+    const hoyKey = fechaArgentina();
+    const hoy = new Date(hoyKey + 'T12:00:00');
 
     // ¿Ya confirmó hoy? → solo mostrar en notificaciones, NO el modal
     if (localStorage.getItem(claveVencidosConfirmados(hoyKey))) {
@@ -3650,8 +3679,8 @@ function alertarVencidosHoy() {
 }
 
 async function confirmarVencidosRetirados() {
-    const hoy = new Date(); hoy.setHours(0,0,0,0);
-    const hoyKey = hoy.toISOString().split('T')[0];
+    const hoyKey = fechaArgentina();
+    const hoy = new Date(hoyKey + 'T12:00:00');
 
     const vencidos = productos.filter(p => {
         if (!p.vencimiento || p.stock <= 0) return false;
@@ -3697,7 +3726,7 @@ function verificarAlertasDelDia() {
     if (!productos || productos.length === 0) return;
 
     // Máximo 1 vez por día — guardar en localStorage
-    const hoyKey = new Date().toISOString().split('T')[0];
+    const hoyKey = fechaArgentina();
     const yaVisto = localStorage.getItem('alerta_reposicion_' + hoyKey);
     if (yaVisto) return;
 
@@ -3744,7 +3773,7 @@ function verificarAlertasDelDia() {
                     ${lista}
                 </div>
                 <div style="padding:16px 20px;border-top:1px solid #f0f0f0;">
-                    <button onclick="localStorage.setItem('alerta_reposicion_'+new Date().toISOString().split('T')[0],'1');this.closest('div').parentElement.parentElement.parentElement.remove()"
+                    <button onclick="localStorage.setItem('alerta_reposicion_'+fechaArgentina(),'1');this.closest('div').parentElement.parentElement.parentElement.remove()"
                             style="width:100%;padding:14px;border:none;border-radius:12px;
                                    background:#1b5e20;color:white;font-size:1rem;
                                    font-weight:700;cursor:pointer;">
@@ -3786,7 +3815,7 @@ function calcularPuntajeCandidato(p) {
 
 function sugerirRelampago() {
     // Verificar si ya hay uno activo hoy
-    const hoyKey = new Date().toISOString().split('T')[0];
+    const hoyKey = fechaArgentina();
     const yaActivado = localStorage.getItem('relampago_activado_' + hoyKey);
     const yaDescartado = localStorage.getItem('relampago_descartado_' + hoyKey);
     if (yaActivado || yaDescartado) return; // ya se activó o descartó hoy
@@ -3891,7 +3920,7 @@ function sugerirRelampago() {
                                            background:white;color:#666;font-weight:700;cursor:pointer;">
                                 🔄 Ver otro
                             </button>` : ''}
-                            <button onclick="localStorage.setItem('relampago_descartado_'+new Date().toISOString().split('T')[0],'1');document.getElementById('modalRelampago').remove();"
+                            <button onclick="localStorage.setItem('relampago_descartado_'+fechaArgentina(),'1');document.getElementById('modalRelampago').remove();"
                                     style="flex:1;padding:12px;border:1px solid #ddd;border-radius:14px;
                                            background:white;color:#666;font-weight:700;cursor:pointer;">
                                 Hoy no
@@ -3958,7 +3987,7 @@ function sugerirRelampago() {
 
 // ========== OFERTAS AUTOMÁTICAS POR VENCIMIENTO ==========
 async function verificarOfertasAutomaticas() {
-    const hoyKey = new Date().toISOString().split('T')[0];
+    const hoyKey = fechaArgentina();
     const yaRevisado = localStorage.getItem('ofertas_auto_' + hoyKey);
     if (yaRevisado) return;
 
@@ -4256,7 +4285,7 @@ function actualizarEstadisticaCliente(telefono, venta) {
 
     c.visitas = (c.visitas || 0) + 1;
     c.gastoTotal = (c.gastoTotal || 0) + (venta.total || 0);
-    c.ultimaVisita = new Date().toISOString().slice(0, 10);
+    c.ultimaVisita = fechaArgentina();
     c.ultimoMetodo = venta.metodo || '';
 
     // Top productos
@@ -4330,18 +4359,16 @@ function abrirInfoProd(id) {
     }
 
     // Ventas últimos 7 días desde localStorage
-    const hoy = new Date();
     let totalSemana = 0;
     const diasSemana = [];
     for (let d = 1; d <= 7; d++) {
-        const fecha = new Date(hoy);
-        fecha.setDate(hoy.getDate() - d);
-        const key = 'copihue_ventas_' + fecha.toISOString().slice(0, 10);
+        const fechaStr = fechaArgentina(-d);
+        const key = 'copihue_ventas_' + fechaStr;
         const ventas = JSON.parse(localStorage.getItem(key) || '[]');
         const qty = ventas.flatMap(v => (v.items || []))
             .filter(i => String(i.esPeso ? i.idOriginal : i.id) === String(id))
             .reduce((s, i) => s + (i.qty || 1), 0);
-        if (qty > 0) { diasSemana.push({ fecha: fecha.toISOString().slice(0,10), qty }); totalSemana += qty; }
+        if (qty > 0) { diasSemana.push({ fecha: fechaStr, qty }); totalSemana += qty; }
     }
 
     if (diasSemana.length > 0) {
