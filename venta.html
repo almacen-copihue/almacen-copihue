@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — Punto de Venta v101</title>
+    <title>Copihue — Punto de Venta v103</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -1216,6 +1216,26 @@
 
 <!-- MODAL CONFIRMACIÓN VENTA -->
 <!-- MODAL VENTA POR PESO -->
+<!-- MODAL INFO PRODUCTO POS -->
+<div id="modalInfoProd" onclick="cerrarInfoProd(event)" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:4000;align-items:flex-end;justify-content:center;">
+  <div onclick="event.stopPropagation()" style="background:#1e1e2e;border-radius:20px 20px 0 0;width:100%;max-width:480px;padding:20px;max-height:80vh;overflow-y:auto;">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+      <img id="infoProdImg" src="" onerror="this.style.display='none'" style="width:56px;height:56px;border-radius:12px;object-fit:cover;background:#2a2a3e;">
+      <div style="flex:1">
+        <div id="infoProdNombre" style="font-weight:900;font-size:1rem;color:#fff;line-height:1.2;"></div>
+        <div id="infoProdPrecio" style="font-size:.85rem;color:#aaa;margin-top:2px;"></div>
+      </div>
+      <button onclick="cerrarInfoProd()" style="background:rgba(255,255,255,0.1);border:none;border-radius:50%;width:32px;height:32px;color:#fff;font-size:1.1rem;cursor:pointer;">✕</button>
+    </div>
+    <!-- Stock y oferta -->
+    <div id="infoProdStock" style="background:rgba(255,255,255,0.07);border-radius:12px;padding:12px;margin-bottom:12px;"></div>
+    <!-- Ventas hoy -->
+    <div id="infoProdHoy" style="margin-bottom:12px;"></div>
+    <!-- Últimos 7 días -->
+    <div id="infoProdSemana"></div>
+  </div>
+</div>
+
 <div class="modal-bg" id="modalPeso" onclick="cerrarModalPeso(event)">
     <div class="modal-sheet" style="padding-bottom:20px;">
         <div class="modal-handle"></div>
@@ -1341,6 +1361,25 @@
         </div>
         <!-- Ticket WhatsApp (aparece después de confirmar) -->
         <div id="btnTicketWA" style="display:none;padding:0 20px 16px;">
+            <!-- Buscador de cliente -->
+            <div id="clientePanel" style="margin-bottom:10px;">
+                <div style="position:relative;">
+                    <input id="clienteBuscador" type="text" placeholder="👤 Buscar cliente o escribir nombre..."
+                        oninput="buscarCliente(this.value)"
+                        style="width:100%;box-sizing:border-box;padding:10px 14px;border-radius:12px;border:1.5px solid rgba(255,255,255,0.15);background:#2a2a3e;color:#fff;font-size:0.88rem;outline:none;">
+                    <div id="clienteResultados" style="display:none;position:absolute;bottom:100%;left:0;right:0;background:#2a2a3e;border-radius:12px;border:1px solid rgba(255,255,255,0.12);max-height:180px;overflow-y:auto;z-index:100;margin-bottom:4px;"></div>
+                </div>
+                <div id="clienteSeleccionado" style="display:none;margin-top:6px;background:rgba(37,211,102,0.12);border:1px solid rgba(37,211,102,0.3);border-radius:10px;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;">
+                    <span id="clienteSelNombre" style="color:#25D366;font-weight:700;font-size:.88rem;"></span>
+                    <button onclick="deseleccionarCliente()" style="background:none;border:none;color:#888;font-size:.8rem;cursor:pointer;">✕ quitar</button>
+                </div>
+                <!-- Nuevo cliente: aparece si no hay match -->
+                <div id="nuevoClientePanel" style="display:none;margin-top:6px;gap:6px;display:none;">
+                    <input id="nuevoClienteTel" type="tel" placeholder="📱 Número WhatsApp (ej: 2944123456)"
+                        style="width:100%;box-sizing:border-box;padding:8px 12px;border-radius:10px;border:1.5px solid rgba(255,193,7,0.4);background:#2a2a3e;color:#fff;font-size:.85rem;outline:none;margin-top:4px;">
+                    <button onclick="guardarNuevoCliente()" style="width:100%;margin-top:5px;padding:8px;border:none;border-radius:10px;background:rgba(255,193,7,0.2);color:#ffc107;font-size:.85rem;font-weight:700;cursor:pointer;">💾 Guardar cliente nuevo</button>
+                </div>
+            </div>
             <button onclick="enviarTicketWA()"
                     style="width:100%;padding:12px;border:none;border-radius:14px;
                            background:linear-gradient(135deg,#25D366,#128C7E);
@@ -1749,12 +1788,14 @@ function buscar(term) {
         const stockClase = stockBajo ? 'bajo' : '';
 
         return `
-        <div class="resultado-item ${sinStock ? 'sin-stock' : ''}" onclick="${sinStock ? '' : `abrirSelectorQty(${p.id}, event)`}">
+        <div class="resultado-item ${sinStock ? 'sin-stock' : ''}">
             <img class="resultado-img" src="${p.image}"
                  onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"
+                 onclick="event.stopPropagation();abrirInfoProd(${p.id})"
+                 style="cursor:pointer;"
                  alt="${p.name}">
-            <div class="resultado-img-placeholder" style="display:none;">🛒</div>
-            <div class="resultado-info">
+            <div class="resultado-img-placeholder" style="display:none;" onclick="event.stopPropagation();abrirInfoProd(${p.id})">🛒</div>
+            <div class="resultado-info" onclick="${sinStock ? `abrirInfoProd(${p.id})` : `abrirSelectorQty(${p.id}, event)`}" style="cursor:pointer;flex:1;">
                 <div class="resultado-nombre">${p.name} ${badgeVencimiento(p)}${badgeOfertaPOS(p)}</div>
                 <div class="resultado-stock ${stockClase}">${stockTexto}</div>
             </div>
@@ -2194,15 +2235,8 @@ async function confirmarVenta() {
     setTimeout(sugerirPedidoPanadero, 1200);
 }
 
-function cerrarConfirm() {
-    document.getElementById('modalConfirm').classList.remove('open');
-    // Reset modal para próxima venta
-    const btnTicket = document.getElementById('btnTicketWA');
-    if (btnTicket) btnTicket.style.display = 'none';
-    const btnOk = document.getElementById('btnOkConfirm');
-    if (btnOk) { btnOk.textContent = '✅ Confirmar cobro'; btnOk.disabled = false; btnOk.onclick = confirmarVenta; }
-    const btnCancelar = document.querySelector('.btn-cancelar-confirm');
-    if (btnCancelar) { btnCancelar.textContent = 'Cancelar'; btnCancelar.onclick = cerrarConfirm; }
+function cerrarModalConfirm(e) {
+    if (e.target === document.getElementById('modalConfirm')) cerrarConfirm();
 }
 
 function abrirWABusiness(texto) {
@@ -2234,18 +2268,47 @@ function enviarTicketWA() {
         ? '\n↓ Redondeo −$' + v.descuentoRedondeo.toLocaleString('es-AR')
         : '';
     var nroTicket = v.nroTicket ? ' · #' + v.nroTicket : '';
+    var saludo = _clienteActual ? '\n¡Hasta pronto, ' + _clienteActual.nombre.split(' ')[0] + '! 👋' : '\n¡Gracias por tu compra! 🙏';
     var mensaje = '🛒 *Almacén Copihue*' + nroTicket + '\n' +
         '📅 ' + fecha + ' · ' + v.hora + 'hs\n\n' +
         lineas +
         lineaRedondeo + '\n' +
         '─────────────────\n' +
         '*💰 Total: $' + v.total.toLocaleString('es-AR') + '*\n' +
-        metodoLabel + '\n\n' +
-        '¡Gracias por tu compra! 🙏';
-    abrirWABusiness(mensaje);
+        metodoLabel + saludo;
+
+    // Si hay cliente seleccionado → abrir WA con su número directo
+    if (_clienteActual && _clienteActual.telefono) {
+        actualizarEstadisticaCliente(_clienteActual.telefono, v);
+        const encoded = encodeURIComponent(mensaje);
+        const tel = '549' + _clienteActual.telefono.replace(/\D/g,'');
+        if (/android/i.test(navigator.userAgent)) {
+            window.location.href = 'intent://send?phone=' + tel + '&text=' + encoded +
+                '#Intent;package=com.whatsapp;scheme=whatsapp;end;';
+        } else {
+            window.open('https://wa.me/' + tel + '?text=' + encoded, '_blank');
+        }
+    } else {
+        abrirWABusiness(mensaje);
+    }
 }
-function cerrarModalConfirm(e) {
-    if (e.target === document.getElementById('modalConfirm')) cerrarConfirm();
+
+function cerrarConfirm() {
+    document.getElementById('modalConfirm').classList.remove('open');
+    const btnTicket = document.getElementById('btnTicketWA');
+    if (btnTicket) btnTicket.style.display = 'none';
+    const btnOk = document.getElementById('btnOkConfirm');
+    if (btnOk) { btnOk.textContent = '✅ Confirmar cobro'; btnOk.disabled = false; btnOk.onclick = confirmarVenta; }
+    const btnCancelar = document.querySelector('.btn-cancelar-confirm');
+    if (btnCancelar) { btnCancelar.textContent = 'Cancelar'; btnCancelar.onclick = cerrarConfirm; }
+    // Resetear cliente
+    _clienteActual = null;
+    const buscador = document.getElementById('clienteBuscador');
+    if (buscador) buscador.value = '';
+    const sel = document.getElementById('clienteSeleccionado');
+    if (sel) sel.style.display = 'none';
+    const nuevoPanel = document.getElementById('nuevoClientePanel');
+    if (nuevoPanel) nuevoPanel.style.display = 'none';
 }
 
 // ========== RESUMEN DEL DÍA ==========
@@ -4074,7 +4137,206 @@ if ('serviceWorker' in navigator) {
 // ========== INIT ==========
 inicializarVendedor();
 cargarConfig();
-// ========== OFERTAS EN POS ==========
+// ========== SISTEMA DE CLIENTES ==========
+const CLIENTES_KEY = 'copihue_clientes';
+let _clienteActual = null; // { nombre, telefono } seleccionado para esta venta
+
+function getClientes() {
+    return JSON.parse(localStorage.getItem(CLIENTES_KEY) || '[]');
+}
+function saveClientes(arr) {
+    localStorage.setItem(CLIENTES_KEY, JSON.stringify(arr));
+}
+
+function buscarCliente(q) {
+    const res = document.getElementById('clienteResultados');
+    const nuevoPanel = document.getElementById('nuevoClientePanel');
+    q = q.trim();
+    if (q.length < 2) { res.style.display = 'none'; nuevoPanel.style.display = 'none'; return; }
+
+    const clientes = getClientes();
+    const matches = clientes.filter(c =>
+        c.nombre.toLowerCase().includes(q.toLowerCase()) ||
+        (c.telefono || '').includes(q)
+    ).slice(0, 6);
+
+    if (matches.length > 0) {
+        res.innerHTML = matches.map(c => `
+            <div onclick="seleccionarCliente('${c.telefono}','${c.nombre.replace(/'/g,"\\'")}') "
+                 style="padding:10px 14px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.07);display:flex;justify-content:space-between;align-items:center;"
+                 onmouseenter="this.style.background='rgba(255,255,255,0.07)'" onmouseleave="this.style.background=''">
+                <div>
+                    <div style="color:#fff;font-size:.88rem;font-weight:700;">${c.nombre}</div>
+                    <div style="color:#888;font-size:.75rem;">${c.telefono}${c.visitas ? ' · ' + c.visitas + ' visitas' : ''}</div>
+                </div>
+                <div style="color:#25D366;font-size:.78rem;font-weight:700;">${c.gastoTotal ? '$' + Math.round(c.gastoTotal).toLocaleString('es-AR') : ''}</div>
+            </div>`).join('');
+        res.style.display = 'block';
+        nuevoPanel.style.display = 'none';
+    } else {
+        res.style.display = 'none';
+        // Ofrecer crear nuevo
+        nuevoPanel.style.display = 'block';
+        document.getElementById('nuevoClientePanel').style.display = 'flex';
+        document.getElementById('nuevoClientePanel').style.flexDirection = 'column';
+    }
+}
+
+function seleccionarCliente(tel, nombre) {
+    _clienteActual = { nombre, telefono: tel };
+    document.getElementById('clienteResultados').style.display = 'none';
+    document.getElementById('nuevoClientePanel').style.display = 'none';
+    document.getElementById('clienteBuscador').value = nombre;
+    const sel = document.getElementById('clienteSeleccionado');
+    document.getElementById('clienteSelNombre').textContent = '✅ ' + nombre + ' · ' + tel;
+    sel.style.display = 'flex';
+}
+
+function deseleccionarCliente() {
+    _clienteActual = null;
+    document.getElementById('clienteBuscador').value = '';
+    document.getElementById('clienteSeleccionado').style.display = 'none';
+}
+
+function guardarNuevoCliente() {
+    const nombre = document.getElementById('clienteBuscador').value.trim();
+    const tel = document.getElementById('nuevoClienteTel').value.trim().replace(/\D/g, '');
+    if (!nombre || !tel) { mostrarToast('⚠️ Completá nombre y teléfono', 'naranja'); return; }
+
+    const clientes = getClientes();
+    const existe = clientes.find(c => c.telefono === tel);
+    if (!existe) {
+        clientes.push({ nombre, telefono: tel, visitas: 0, gastoTotal: 0, ultimaVisita: '', productos: {} });
+        saveClientes(clientes);
+    }
+    seleccionarCliente(tel, nombre);
+    document.getElementById('nuevoClientePanel').style.display = 'none';
+    mostrarToast('✅ Cliente guardado', 'verde');
+}
+
+function actualizarEstadisticaCliente(telefono, venta) {
+    if (!telefono) return;
+    const clientes = getClientes();
+    let c = clientes.find(cl => cl.telefono === telefono);
+    if (!c) return;
+
+    c.visitas = (c.visitas || 0) + 1;
+    c.gastoTotal = (c.gastoTotal || 0) + (venta.total || 0);
+    c.ultimaVisita = new Date().toISOString().slice(0, 10);
+    c.ultimoMetodo = venta.metodo || '';
+
+    // Top productos
+    if (!c.productos) c.productos = {};
+    (venta.items || []).forEach(i => {
+        const nom = i.name.substring(0, 40);
+        c.productos[nom] = (c.productos[nom] || 0) + (i.qty || 1);
+    });
+
+    saveClientes(clientes);
+
+    // Backup en planilla GAS (fire and forget)
+    try {
+        const datos = { accion: 'upsertCliente', cliente: c };
+        fetch(API_URL + '?action=cliente&data=' + encodeURIComponent(JSON.stringify(datos)), { redirect: 'follow' })
+            .catch(() => {});
+    } catch(e) {}
+}
+
+// Resetear cliente al cerrar el modal
+const _cerrarConfirmOrig = cerrarConfirm;
+
+
+function abrirInfoProd(id) {
+    const p = productos.find(pr => pr.id === id);
+    if (!p) return;
+
+    // Datos básicos
+    document.getElementById('infoProdImg').src = p.image;
+    document.getElementById('infoProdImg').style.display = 'block';
+    document.getElementById('infoProdNombre').textContent = p.name;
+
+    // Precio con oferta si aplica
+    const oferta = calcularOfertaPOS(p, 1);
+    document.getElementById('infoProdPrecio').innerHTML = oferta.tieneOferta
+        ? `<span style="text-decoration:line-through;color:#666">$${p.price.toLocaleString('es-AR')}</span> <strong style="color:#f9a825">$${oferta.precioUnitario.toLocaleString('es-AR')}</strong> <span style="color:#f9a825">${oferta.etiqueta}</span>`
+        : `$${p.price.toLocaleString('es-AR')}${p.precioCosto > 0 ? ` · costo $${p.precioCosto.toLocaleString('es-AR')}` : ''}`;
+
+    // Stock
+    const stockColor = p.stock === 0 ? '#e53935' : p.stock <= 3 ? '#ff6f00' : '#43a047';
+    document.getElementById('infoProdStock').innerHTML =
+        `<div style="display:flex;justify-content:space-between;align-items:center;">` +
+        `<span style="color:#aaa;font-size:.8rem;">STOCK ACTUAL</span>` +
+        `<span style="font-size:1.4rem;font-weight:900;color:${stockColor}">${p.stock === 0 ? '❌ Sin stock' : p.stock + ' unidades'}</span>` +
+        `</div>` +
+        (p.vencimiento ? `<div style="color:#aaa;font-size:.75rem;margin-top:4px;">Vence: ${p.vencimiento}</div>` : '');
+
+    // Ventas de hoy desde historial local
+    const ventasHoy = JSON.parse(localStorage.getItem(HOY_KEY) || '[]');
+    const itemsHoy = ventasHoy.flatMap(v =>
+        (v.items || []).filter(i => {
+            const idBuscar = i.esPeso ? i.idOriginal : i.id;
+            return String(idBuscar) === String(id);
+        }).map(i => ({ hora: v.hora, qty: i.qty, precio: i.price, vendedor: v.metodoPago?.includes('Victor') || v.vendedor || '' }))
+    );
+    const totalHoy = itemsHoy.reduce((s, i) => s + (i.qty || 1), 0);
+
+    if (itemsHoy.length > 0) {
+        const filas = itemsHoy.slice().reverse().map(i =>
+            `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.06);">` +
+            `<span style="color:#ccc;font-size:.82rem;">🕐 ${i.hora}${i.vendedor ? ' · ' + i.vendedor : ''}</span>` +
+            `<span style="color:#fff;font-size:.82rem;font-weight:700;">${i.qty > 1 ? i.qty + '×' : ''} $${(i.precio * (i.qty||1)).toLocaleString('es-AR')}</span>` +
+            `</div>`
+        ).join('');
+        document.getElementById('infoProdHoy').innerHTML =
+            `<div style="font-size:.75rem;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">HOY — ${totalHoy} vendido${totalHoy !== 1 ? 's' : ''}</div>` +
+            filas;
+    } else {
+        document.getElementById('infoProdHoy').innerHTML =
+            `<div style="color:#555;font-size:.82rem;text-align:center;padding:8px 0;">Sin ventas hoy</div>`;
+    }
+
+    // Ventas últimos 7 días desde localStorage
+    const hoy = new Date();
+    let totalSemana = 0;
+    const diasSemana = [];
+    for (let d = 1; d <= 7; d++) {
+        const fecha = new Date(hoy);
+        fecha.setDate(hoy.getDate() - d);
+        const key = 'copihue_ventas_' + fecha.toISOString().slice(0, 10);
+        const ventas = JSON.parse(localStorage.getItem(key) || '[]');
+        const qty = ventas.flatMap(v => (v.items || []))
+            .filter(i => String(i.esPeso ? i.idOriginal : i.id) === String(id))
+            .reduce((s, i) => s + (i.qty || 1), 0);
+        if (qty > 0) { diasSemana.push({ fecha: fecha.toISOString().slice(0,10), qty }); totalSemana += qty; }
+    }
+
+    if (diasSemana.length > 0) {
+        const filasSem = diasSemana.map(d => {
+            const [,, dia] = d.fecha.split('-');
+            const dw = new Date(d.fecha + 'T12:00:00').getDay();
+            const dn = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][dw];
+            return `<div style="display:flex;justify-content:space-between;padding:4px 0;">` +
+                `<span style="color:#888;font-size:.8rem;">${dn} ${parseInt(dia)}</span>` +
+                `<span style="color:#ccc;font-size:.8rem;font-weight:700;">${d.qty} u</span></div>`;
+        }).join('');
+        document.getElementById('infoProdSemana').innerHTML =
+            `<div style="font-size:.75rem;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">ÚLTIMOS 7 DÍAS — ${totalSemana} total</div>` +
+            filasSem;
+    } else {
+        document.getElementById('infoProdSemana').innerHTML =
+            `<div style="color:#555;font-size:.78rem;text-align:center;padding:4px 0;">Sin ventas en 7 días</div>`;
+    }
+
+    const modal = document.getElementById('modalInfoProd');
+    modal.style.display = 'flex';
+}
+
+function cerrarInfoProd(e) {
+    if (e && e.target !== document.getElementById('modalInfoProd')) return;
+    document.getElementById('modalInfoProd').style.display = 'none';
+}
+
+
 // Espejo exacto de la lógica del carrito WA (index.html)
 
 const OFERTAS_RELAMPAGO_SISTEMA = {
