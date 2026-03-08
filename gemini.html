@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>POS Copihue v2026</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: system-ui, -apple-system, sans-serif; overflow: hidden; }
+        .grid-productos { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
+        .carrito-container { height: calc(100vh - 240px); }
+        /* Animación para el toque */
+        .card-active:active { transform: scale(0.95); background-color: #fef2f2; }
+    </style>
+</head>
+<body class="bg-gray-100 flex flex-col h-screen">
+
+    <header class="bg-red-900 text-white p-3 flex justify-between items-center shadow-md">
+        <h1 class="font-bold tracking-tight">COPIHUE <span class="text-red-400">POS</span></h1>
+        <div id="status" class="flex items-center gap-2 text-xs">
+            <span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span> Offline
+        </div>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden">
+        
+        <main class="w-full md:w-2/3 p-3 flex flex-col gap-3">
+            <div class="relative">
+                <input type="text" id="inputBusqueda" placeholder="Escribe nombre o presiona ENTER..." 
+                    class="w-full p-4 text-xl rounded-2xl shadow-inner border-none focus:ring-4 focus:ring-red-200 outline-none" autocomplete="off">
+            </div>
+
+            <div id="gridProductos" class="grid-productos overflow-y-auto flex-1 pr-1">
+                </div>
+        </main>
+
+        <aside class="hidden md:flex w-1/3 bg-white shadow-2xl flex-col border-l border-gray-200">
+            <div class="p-4 border-b bg-gray-50 flex justify-between items-center">
+                <span class="font-bold text-gray-500 text-sm">CARRITO ACTUAL</span>
+                <button onclick="limpiarTodo()" class="text-xs text-red-600 font-bold hover:underline">VACIAR</button>
+            </div>
+
+            <div id="carritoItems" class="carrito-container overflow-y-auto p-3 space-y-2">
+                </div>
+
+            <div class="p-5 border-t bg-white space-y-3">
+                <div class="flex justify-between items-baseline">
+                    <span class="text-gray-400 font-medium">TOTAL</span>
+                    <span id="txtTotal" class="text-4xl font-black text-gray-900">$0</span>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-3">
+                    <button onclick="cerrarVenta('EFECTIVO')" class="bg-green-600 hover:bg-green-700 text-white py-4 rounded-2xl font-black shadow-lg transition-all active:scale-95">💵 EFECTIVO</button>
+                    <button onclick="cerrarVenta('TRANSF')" class="bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-2xl font-black shadow-lg transition-all active:scale-95">📱 TRANSF.</button>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <script>
+        // --- CONFIGURACIÓN ---
+        const API_URL = "https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec";
+        
+        let DB = []; 
+        let Carrito = [];
+
+        // --- MOTOR DE DATOS ---
+        async function conectar() {
+            try {
+                const res = await fetch(API_URL + "?action=read");
+                const data = await res.json();
+                DB = data.map(p => ({
+                    id: p[0],      // Columna A
+                    nombre: p[1],  // Columna B
+                    precio: parseFloat(p[3] || 0), // Columna D
+                    stock: parseInt(p[5] || 0)     // Columna F (TU PEDIDO)
+                }));
+                actualizarStatus(true);
+                render(DB);
+            } catch (e) {
+                actualizarStatus(false);
+                console.warn("Fallo de conexión. Modo offline activo.");
+            }
+        }
+
+        function render(lista) {
+            const container = document.getElementById('gridProductos');
+            container.innerHTML = lista.map(p => `
+                <div onclick="agregar(${p.id})" class="card-active bg-white p-3 rounded-xl border border-gray-100 shadow-sm cursor-pointer transition-all">
+                    <div class="text-[10px] font-bold text-gray-400 truncate uppercase">${p.nombre}</div>
+                    <div class="text-lg font-black text-gray-800">$${p.precio}</div>
+                    <div class="text-[9px] mt-1 ${p.stock <= 0 ? 'text-red-500 font-bold' : 'text-gray-400'}">STOCK: ${p.stock}</div>
+                </div>
+            `).join('');
+        }
+
+        // --- BÚSQUEDA INTELIGENTE ---
+        document.getElementById('inputBusqueda').addEventListener('input', (e) => {
+            const query = e.target.value.toLowerCase();
+            const filtrados = DB.filter(p => p.nombre.toLowerCase().includes(query));
+            render(filtrados);
+        });
+
+        // ATAJO: Presionar ENTER para agregar el primer resultado
+        document.getElementById('inputBusqueda').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const query = e.target.value.toLowerCase();
+                const filtrados = DB.filter(p => p.nombre.toLowerCase().includes(query));
+                if (filtrados.length > 0) {
+                    agregar(filtrados[0].id);
+                    e.target.value = '';
+                    render(DB);
+                }
+            }
+        });
+
+        // --- LÓGICA DE VENTA ---
+        function agregar(id) {
+            const producto = DB.find(p => p.id === id);
+            const existe = Carrito.find(item => item.id === id);
+            
+            if (existe) {
+                existe.cant++;
+            } else {
+                Carrito.push({ ...producto, cant: 1 });
+            }
+            dibujarCarrito();
+        }
+
+        function dibujarCarrito() {
+            const container = document.getElementById('carritoItems');
+            container.innerHTML = Carrito.map(item => `
+                <div class="flex justify-between items-center bg-gray-50 p-3 rounded-xl border border-gray-100">
+                    <div class="flex-1">
+                        <div class="text-sm font-bold text-gray-800">${item.nombre}</div>
+                        <div class="text-xs text-gray-400">$${item.precio} x ${item.cant}</div>
+                    </div>
+                    <div class="text-right font-black text-red-800">$${item.precio * item.cant}</div>
+                </div>
+            `).join('');
+
+            const total = Carrito.reduce((sum, i) => sum + (i.precio * i.cant), 0);
+            document.getElementById('txtTotal').textContent = `$${total}`;
+        }
+
+        async function cerrarVenta(metodo) {
+            if (Carrito.length === 0) return;
+
+            const venta = {
+                fecha: new Date().toLocaleString(),
+                items: Carrito,
+                total: document.getElementById('txtTotal').textContent,
+                pago: metodo
+            };
+
+            // Efecto visual de carga
+            const btn = event.target;
+            const originalText = btn.innerHTML;
+            btn.innerHTML = "⌛...";
+            btn.disabled = true;
+
+            try {
+                // Usamos no-cors para evitar problemas de seguridad del navegador
+                await fetch(API_URL, {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    body: JSON.stringify(venta)
+                });
+                
+                alert("✅ Venta enviada a Google Sheets");
+                limpiarTodo();
+            } catch (err) {
+                alert("❌ Error de envío, pero se guardó en memoria local.");
+                localStorage.setItem('v_' + Date.now(), JSON.stringify(venta));
+            } finally {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        }
+
+        function limpiarTodo() {
+            Carrito = [];
+            dibujarCarrito();
+            document.getElementById('inputBusqueda').focus();
+        }
+
+        function actualizarStatus(on) {
+            const st = document.getElementById('status');
+            st.innerHTML = on ? 
+                `<span class="w-2 h-2 rounded-full bg-green-500"></span> Online` : 
+                `<span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span> Offline`;
+        }
+
+        window.onload = conectar;
+    </script>
+</body>
+</html>
