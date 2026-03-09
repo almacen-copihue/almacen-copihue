@@ -4915,9 +4915,56 @@ document.getElementById('modalWifiQR').addEventListener('click', function(e) {
 
 <script>
 const GAS_URL_FLYER = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
+const GITHUB_IMAGES_BASE = 'https://raw.githubusercontent.com/almacen-copihue/almacen-copihue/main/imagenes-productos/';
+
 let _flyerCanvasAdmin = null;
 let _flyerProductos = [];
 let _flyerHoraCierre = 22;
+let _imagesCache = {}; // Cache de imágenes cargadas
+
+// Generar URL de foto basándose en nombre de producto
+function _generarURLFoto(nombreProducto) {
+    if (!nombreProducto) return null;
+    
+    // Extraer marca y ml del nombre
+    // Ej: "Quilmes Clásica 473ml" -> "cerveza-x-lata-quilmes-clasica-473cc.jpg"
+    const mlMatch = nombreProducto.match(/(\d+)\s*ml/i);
+    const ml = mlMatch ? mlMatch[1] : '473';
+    
+    // Construir marca simplificada
+    let partes = nombreProducto.toLowerCase()
+        .replace(/\s+/g, '-')
+        .replace(/[áéíóú]/g, (m) => {'á':'a','é':'e','í':'i','ó':'o','ú':'u'}[m])
+        .replace(/ml/i, '')
+        .trim()
+        .split('-')
+        .filter(p => p && p !== 'cc');
+    
+    let filename = `cerveza-x-lata-${partes.join('-')}-${ml}cc.jpg`;
+    
+    return GITHUB_IMAGES_BASE + filename;
+}
+
+// Cargar imagen de forma asincrónica
+function _cargarImagen(src) {
+    return new Promise((resolve) => {
+        if (_imagesCache[src]) {
+            resolve(_imagesCache[src]);
+            return;
+        }
+        
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+            _imagesCache[src] = img;
+            resolve(img);
+        };
+        img.onerror = () => {
+            resolve(null); // Retorna null si no carga
+        };
+        img.src = src;
+    });
+}
 
 async function abrirFlyerAdmin() {
     mostrarToast('⏳ Cargando cervezas...', 'verde');
@@ -4936,16 +4983,248 @@ async function abrirFlyerAdmin() {
             if (b.descuento !== a.descuento) return b.descuento - a.descuento;
             return (b.rotacion || 0) - (a.rotacion || 0);
         });
+        
+        // === PRECARGAR IMÁGENES ===
+        mostrarToast('🖼️ Cargando fotos...', 'verde');
+        for (let p of _flyerProductos) {
+            const fotoURL = _generarURLFoto(p.nombre);
+            if (fotoURL) {
+                await _cargarImagen(fotoURL);
+            }
+        }
     } catch(e) {
         mostrarToast('❌ Error cargando datos', 'rojo'); return;
     }
 
-    const canvas = _generarCanvasFlyer(_flyerProductos, _flyerHoraCierre);
+    const canvas = await _generarCanvasFlyerConFotos(_flyerProductos, _flyerHoraCierre);
     _flyerCanvasAdmin = canvas;
     const wrap = document.getElementById('flyerWrapAdmin');
     wrap.innerHTML = '';
     wrap.appendChild(canvas);
     document.getElementById('flyerOverlayAdmin').classList.add('open');
+}
+
+async function _generarCanvasFlyerConFotos(prods, horaCierre) {
+    const W = 600, PADDING = 32, ROW_H = 95, HEADER_H = 160, FOOTER_H = 100;
+    const H = HEADER_H + prods.length * ROW_H + FOOTER_H + PADDING;
+    const canvas = document.createElement('canvas');
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+
+    // === FONDO: Atmósfera bar nocturno ===
+    const bg = ctx.createLinearGradient(0,0,0,H);
+    bg.addColorStop(0,'#0b0b0b');
+    bg.addColorStop(0.5,'#1a1208');
+    bg.addColorStop(1,'#000000');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0,0,W,H);
+
+    // Textura sutil de ruido
+    ctx.fillStyle = 'rgba(255,255,255,0.01)';
+    for(let i=0;i<H;i+=4){
+        ctx.fillRect(0,i,W,1);
+    }
+
+    // === HEADER: Marca premium ===
+    const glow = ctx.createLinearGradient(0,0,W,0);
+    glow.addColorStop(0,'rgba(249,168,37,0)');
+    glow.addColorStop(0.5,'rgba(249,168,37,0.8)');
+    glow.addColorStop(1,'rgba(249,168,37,0)');
+    ctx.strokeStyle = glow;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0,12);
+    ctx.lineTo(W,12);
+    ctx.stroke();
+
+    ctx.font = 'bold 48px sans-serif';
+    ctx.fillStyle = '#f9a825';
+    ctx.textAlign = 'center';
+    ctx.fillText('🍺 JUEVES CERVECERO', W/2, 70);
+
+    ctx.font = '18px sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText('PROMOS ESPECIALES', W/2, 100);
+
+    ctx.font = 'bold 16px sans-serif';
+    ctx.fillStyle = '#f9a825';
+    ctx.fillText(`⏰ Hasta las ${horaCierre}:00hs`, W/2, 128);
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(PADDING,145);
+    ctx.lineTo(W-PADDING,145);
+    ctx.stroke();
+
+    // === PRODUCTOS CON FOTOS ===
+    for (let idx = 0; idx < prods.length; idx++) {
+        const p = prods[idx];
+        const y = HEADER_H + idx * ROW_H;
+        const cy = y + 48;
+
+        // Fondo alterno sutil
+        ctx.fillStyle = idx%2===0 ? 'rgba(255,255,255,0.02)':'rgba(249,168,37,0.02)';
+        ctx.fillRect(0,y,W,ROW_H);
+
+        // === GLOW PARA PRODUCTO ESTRELLA ===
+        if(idx === 0 && p.descuento >= 20){
+            ctx.shadowColor = 'rgba(249,168,37,0.4)';
+            ctx.shadowBlur = 20;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+            ctx.fillStyle = 'rgba(249,168,37,0.08)';
+            ctx.fillRect(0, y, W, ROW_H);
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+        }
+
+        // === IMAGEN DE LA CERVEZA (izquierda) ===
+        const fotoURL = _generarURLFoto(p.nombre);
+        if (fotoURL && _imagesCache[fotoURL]) {
+            const img = _imagesCache[fotoURL];
+            // Dibujar imagen recortada como botella (altura: 70px, ancho proporcional)
+            const imgW = 45;
+            const imgH = 75;
+            const imgX = PADDING;
+            const imgY = cy - 38;
+            
+            // Fondo circular para la imagen (efecto spotlight)
+            ctx.fillStyle = 'rgba(255,255,255,0.1)';
+            ctx.beginPath();
+            ctx.roundRect(imgX-5, imgY-5, imgW+10, imgH+10, 8);
+            ctx.fill();
+            
+            // Dibujar imagen
+            try {
+                ctx.drawImage(img, imgX, imgY, imgW, imgH);
+            } catch(e) {
+                // Si falla, dibuja un placeholder
+                ctx.fillStyle = 'rgba(255,255,255,0.2)';
+                ctx.fillRect(imgX, imgY, imgW, imgH);
+            }
+        }
+
+        // === BADGE DESCUENTO: ESCALA PSICOLÓGICA ===
+        let badgeW, badgeH, badgeX, badgeY, discountFontSize, offFontSize;
+        let badgeColor;
+
+        if(p.descuento >= 25){
+            badgeColor = '#ff3b30';
+            badgeW = 110; badgeH = 52;
+            badgeX = W - PADDING - 120;
+            badgeY = cy - 26;
+            discountFontSize = 'bold 38px sans-serif';
+            offFontSize = 'bold 14px sans-serif';
+        } else if(p.descuento >= 20){
+            badgeColor = '#ff3b30';
+            badgeW = 100; badgeH = 48;
+            badgeX = W - PADDING - 110;
+            badgeY = cy - 24;
+            discountFontSize = 'bold 32px sans-serif';
+            offFontSize = 'bold 13px sans-serif';
+        } else {
+            badgeColor = '#d32f2f';
+            badgeW = 85; badgeH = 40;
+            badgeX = W - PADDING - 95;
+            badgeY = cy - 20;
+            discountFontSize = 'bold 24px sans-serif';
+            offFontSize = 'bold 11px sans-serif';
+        }
+
+        ctx.fillStyle = badgeColor;
+        ctx.beginPath();
+        ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 10);
+        ctx.fill();
+
+        if(p.descuento >= 20){
+            ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 10);
+            ctx.stroke();
+        }
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = discountFontSize;
+        ctx.textAlign = 'center';
+        ctx.fillText(`${p.descuento}%`, badgeX + badgeW/2, cy+6);
+
+        ctx.font = offFontSize;
+        ctx.fillStyle = 'rgba(255,255,255,0.95)';
+        ctx.fillText('OFF', badgeX + badgeW/2, cy+22);
+        ctx.textAlign = 'left';
+
+        // === NOMBRE PRODUCTO (desplazado para espacio de foto) ===
+        const nom = p.nombre.length>30?p.nombre.substring(0,30)+'…':p.nombre;
+        ctx.font = 'bold 22px sans-serif';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(nom, PADDING+60, cy-22);
+
+        // === PRECIO ORIGINAL (superposición) ===
+        ctx.font = '16px sans-serif';
+        ctx.fillStyle = '#9e9e9e';
+        ctx.textAlign = 'left';
+        const precioOrigStr = `$${p.precio.toLocaleString('es-AR')}`;
+        ctx.fillText(precioOrigStr, PADDING+60, cy-4);
+        
+        const origWidth = ctx.measureText(precioOrigStr).width;
+        ctx.strokeStyle = '#9e9e9e';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(PADDING+60, cy-8);
+        ctx.lineTo(PADDING+60 + origWidth, cy-8);
+        ctx.stroke();
+
+        // === PRECIO PROMO: Verde neón ===
+        ctx.font = 'bold 42px sans-serif';
+        ctx.fillStyle = '#00e676';
+        ctx.textAlign = 'left';
+        ctx.fillText(`$${p.precioPromo.toLocaleString('es-AR')}`, PADDING+60, cy+30);
+
+        // === AHORRO ===
+        ctx.font = '13px sans-serif';
+        ctx.fillStyle = 'rgba(0,230,118,0.8)';
+        ctx.fillText(`Ahorras $${(p.precio-p.precioPromo).toLocaleString('es-AR')}`, PADDING+60, cy+50);
+
+        // === LÍNEA SEPARADORA ===
+        if(idx < prods.length-1){
+            ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(PADDING, y+ROW_H-4);
+            ctx.lineTo(W-PADDING, y+ROW_H-4);
+            ctx.stroke();
+        }
+
+        ctx.textAlign = 'left';
+    }
+
+    // === FOOTER ===
+    const fy = HEADER_H + prods.length * ROW_H;
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(PADDING,fy+10);
+    ctx.lineTo(W-PADDING,fy+10);
+    ctx.stroke();
+
+    ctx.font = 'bold 26px sans-serif';
+    ctx.fillStyle = '#f9a825';
+    ctx.textAlign = 'center';
+    ctx.fillText('🔥 SOLO POR HOY', W/2, fy+50);
+
+    ctx.font = '14px sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText('Stock limitado • Hasta agotar', W/2, fy+72);
+
+    ctx.font = '12px sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.fillText('🛒 almacen-copihue.vercel.app', W/2, fy+92);
+
+    ctx.textAlign = 'left';
+    return canvas;
 }
 
 function _generarCanvasFlyer(prods, horaCierre) {
