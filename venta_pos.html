@@ -867,33 +867,36 @@
 <!-- RESULTADOS BÚSQUEDA -->
 <div class="resultados" id="resultados"></div>
 
-<!-- FAB COBRAR — flotante abajo derecha -->
-<div id="fabCobrar" style="display:none;position:fixed;bottom:76px;right:16px;z-index:3500;">
-    <button onclick="abrirConfirmacion()"
-            style="background:linear-gradient(135deg,#1b5e20,#2e7d32);
-                   color:white;border:none;border-radius:50%;
-                   width:56px;height:56px;
-                   cursor:pointer;font-family:inherit;
-                   box-shadow:0 4px 16px rgba(27,94,32,0.55);
-                   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;"
-            title="Cobrar">
-        <span style="font-size:1.3rem;line-height:1;">✅</span>
-        <span id="btnCobrarTotal"
-              style="font-size:0.48rem;font-weight:900;line-height:1;
-                     opacity:0.9;letter-spacing:-0.3px;max-width:50px;
-                     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">$0</span>
-    </button>
-</div>
-
-<!-- FAB LIMPIAR — flotante abajo derecha, encima del cobrar -->
-<div id="fabLimpiar" style="display:none;position:fixed;bottom:130px;right:16px;z-index:3500;">
-    <button onclick="limpiarVenta()"
-            style="background:#c62828;color:white;border:none;
-                   border-radius:50%;width:44px;height:44px;
-                   font-size:1.1rem;cursor:pointer;
-                   box-shadow:0 3px 10px rgba(198,40,40,0.5);
-                   display:flex;align-items:center;justify-content:center;"
-            title="Limpiar carrito">🗑</button>
+<!-- FABs flotantes — stack abajo derecha -->
+<div id="fabStack" style="display:none;position:fixed;bottom:76px;right:16px;z-index:3500;
+                           display:none;flex-direction:column;align-items:center;gap:10px;">
+    <!-- FAB LIMPIAR (arriba) -->
+    <div id="fabLimpiar">
+        <button onclick="limpiarVenta()"
+                style="background:#c62828;color:white;border:none;
+                       border-radius:50%;width:44px;height:44px;
+                       font-size:1.1rem;cursor:pointer;
+                       box-shadow:0 3px 10px rgba(198,40,40,0.5);
+                       display:flex;align-items:center;justify-content:center;"
+                title="Limpiar carrito">🗑</button>
+    </div>
+    <!-- FAB COBRAR (abajo) -->
+    <div id="fabCobrar">
+        <button onclick="abrirConfirmacion()"
+                style="background:linear-gradient(135deg,#1b5e20,#2e7d32);
+                       color:white;border:none;border-radius:50%;
+                       width:56px;height:56px;
+                       cursor:pointer;font-family:inherit;
+                       box-shadow:0 4px 16px rgba(27,94,32,0.55);
+                       display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;"
+                title="Cobrar">
+            <span style="font-size:1.3rem;line-height:1;">✅</span>
+            <span id="btnCobrarTotal"
+                  style="font-size:0.48rem;font-weight:900;line-height:1;
+                         opacity:0.9;letter-spacing:-0.3px;max-width:50px;
+                         overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">$0</span>
+        </button>
+    </div>
 </div>
 
 <!-- PANEL VENTA — visible en desktop, oculto en mobile -->
@@ -1820,6 +1823,55 @@ function esPorPeso(producto) {
            (cat.includes('FRUTA') || cat.includes('VERDURA')) && nombre.includes('KG');
 }
 
+// Refresca badges de qty en la lista de resultados actual sin borrarla si no hay búsqueda
+function _refreshResultadosBadges() {
+    const termActual = document.getElementById('buscador').value.trim();
+    if (termActual.length >= 1) {
+        // Hay búsqueda activa: re-renderizar filtrado
+        renderResultados(buscarProductos(termActual), termActual);
+        return;
+    }
+    // Sin búsqueda: verificar si hay items en el DOM
+    const hayItems = document.querySelectorAll('button[data-prod-id]').length > 0;
+    if (!hayItems) {
+        // Lista vacía o "Sin resultados" — re-renderizar lista completa
+        renderResultados([...productos].sort((a, b) => {
+            const ac = ventaActual.find(i=>i.id===a.id) ? 1 : 0;
+            const bc = ventaActual.find(i=>i.id===b.id) ? 1 : 0;
+            if (bc !== ac) return bc - ac;
+            if (a.stock === 0 && b.stock > 0) return 1;
+            if (a.stock > 0 && b.stock === 0) return -1;
+            return rankScore(b.id) - rankScore(a.id);
+        }));
+        return;
+    }
+    // Hay items: solo actualizar badges en el DOM sin re-renderizar
+    const idsEnCarrito = {};
+    ventaActual.forEach(i => { idsEnCarrito[i.id] = i.qty; });
+    document.querySelectorAll('button[data-prod-id]').forEach(btn => {
+        const id = parseInt(btn.dataset.prodId);
+        const qty = idsEnCarrito[id] || 0;
+        const imgWrap = btn.querySelector('div[style*="position:relative"]');
+        if (!imgWrap) return;
+        let badge = imgWrap.querySelector('.qty-badge');
+        if (qty > 0) {
+            if (!badge) {
+                badge = document.createElement('div');
+                badge.className = 'qty-badge';
+                badge.style.cssText = 'position:absolute;top:-5px;left:-5px;background:#e53935;color:white;border-radius:50%;width:20px;height:20px;font-size:0.68rem;font-weight:900;display:flex;align-items:center;justify-content:center;border:2px solid white;z-index:2;line-height:1;';
+                imgWrap.appendChild(badge);
+            }
+            badge.textContent = qty;
+            btn.style.background = '#f1f8e9';
+            btn.style.borderLeft = '3px solid #43a047';
+        } else {
+            if (badge) badge.remove();
+            btn.style.background = 'white';
+            btn.style.borderLeft = '3px solid transparent';
+        }
+    });
+}
+
 function agregarProducto(id) {
     const producto = productos.find(p => p.id === id);
     if (!producto || producto.stock === 0) return;
@@ -1868,9 +1920,8 @@ function agregarProducto(id) {
     renderVenta();
     guardarCarritoPendiente();
     mostrarToast(`✅ ${producto.name.substring(0, 30)}`, 'verde');
-    // Re-renderizar resultados para actualizar badge de qty en foto
-    const termActual = document.getElementById('buscador').value;
-    renderResultados(buscarProductos(termActual), termActual);
+    // Re-renderizar resultados para actualizar badge en foto (solo si hay búsqueda activa)
+    _refreshResultadosBadges();
     // NO scroll al top — usuario sigue eligiendo productos
 }
 
@@ -2001,8 +2052,7 @@ function renderVenta() {
         desactivarGuardiaAtras();
         _setHeaderModoVenta(false);
         if (MOBILE) {
-            document.getElementById('fabCobrar').style.display = 'none';
-            document.getElementById('fabLimpiar').style.display = 'none';
+            document.getElementById('fabStack').style.display = 'none';
         } else {
             const pv = document.getElementById('panelVenta');
             if (pv) pv.style.display = 'none';
@@ -2019,8 +2069,7 @@ function renderVenta() {
     activarGuardiaAtras();
 
     if (MOBILE) {
-        document.getElementById('fabCobrar').style.display = 'block';
-        document.getElementById('fabLimpiar').style.display = 'block';
+        document.getElementById('fabStack').style.display = 'flex';
         document.getElementById('btnCobrarTotal').textContent = '$' + Math.round(total).toLocaleString('es-AR');
     } else {
         const pv = document.getElementById('panelVenta');
@@ -4776,8 +4825,7 @@ function cerrarBuscadorFlotante() {
                 guardarCarritoPendiente();
                 mostrarToast('🗑 Quitado', 'rojo');
                 // Re-renderizar para actualizar badge en foto
-                const termActual = document.getElementById('buscador').value;
-                renderResultados(buscarProductos(termActual), termActual);
+                _refreshResultadosBadges();
             } else {
                 mostrarToast('No está en el carrito', '');
             }
