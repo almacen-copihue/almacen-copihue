@@ -978,21 +978,46 @@ async function guardarAjuste() {
     if (!ajusteProductoActual) return;
     const btn = document.getElementById('ajusteBtn');
     btn.disabled = true; btn.textContent = '⏳ Guardando...';
+
     const nuevoNombre = document.getElementById('ajusteNombreNuevo').value.trim().toUpperCase();
-    const nuevoStock = parseInt(document.getElementById('ajusteNuevo').textContent) || 0;
+    const nuevoStock  = parseInt(document.getElementById('ajusteNuevo').textContent) || 0;
     const nuevoPrecio = parseInt(document.getElementById('ajustePrecioNuevo').value) || ajusteProductoActual.price;
-    const nuevaCat = document.getElementById('ajusteCategoria').value || ajusteProductoActual.category;
-    const payload = { id: ajusteProductoActual.id, name: nuevoNombre, stock: nuevoStock, price: nuevoPrecio, category: nuevaCat };
+    const nuevaCat    = document.getElementById('ajusteCategoria').value || ajusteProductoActual.category;
+
+    // Payload que espera el GAS: action=ajusteRapido con campo "producto" (nombre) no "id"
+    const datos = {
+        producto:        ajusteProductoActual.name,
+        nombreNuevo:     nuevoNombre !== ajusteProductoActual.name ? nuevoNombre : null,
+        stockAntes:      ajusteProductoActual.stock,
+        stockDespues:    nuevoStock,
+        precioAntes:     ajusteProductoActual.price,
+        precioDespues:   nuevoPrecio !== ajusteProductoActual.price ? nuevoPrecio : null,
+        categoriaAntes:  ajusteProductoActual.category,
+        categoriaDespues: nuevaCat !== ajusteProductoActual.category ? nuevaCat : null
+    };
+
     try {
-        const r = await fetch(API_URL + '?action=updateProduct&data=' + encodeURIComponent(JSON.stringify(payload)), { signal: AbortSignal.timeout(10000) });
+        const url = API_URL + '?action=ajusteRapido&data=' + encodeURIComponent(JSON.stringify(datos));
+        const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
         const resp = await r.json();
         if (resp.success) {
-            mostrarToast('✅ Guardado en planilla', 'verde');
-            const p = productos.find(x => x.id == ajusteProductoActual.id);
-            if (p) { p.stock = nuevoStock; p.price = nuevoPrecio; p.name = nuevoNombre; p.category = nuevaCat; }
+            // Actualizar cache local
+            const p = productos.find(x => String(x.id) === String(ajusteProductoActual.id));
+            if (p) {
+                p.stock    = nuevoStock;
+                p.price    = nuevoPrecio;
+                p.name     = nuevoNombre;
+                p.category = nuevaCat;
+            }
+            mostrarToast('✅ ' + (resp.mensaje || 'Ajuste guardado'), 'verde');
             cerrarAjuste();
-        } else { mostrarToast('❌ ' + (resp.error || 'Error al guardar'), 'rojo'); }
-    } catch(e) { mostrarToast('❌ Sin conexión', 'rojo'); }
+        } else {
+            mostrarToast('❌ ' + (resp.mensaje || 'Error al guardar'), 'rojo');
+        }
+    } catch(e) {
+        mostrarToast('❌ Sin conexión — reintentá', 'rojo');
+        console.error('guardarAjuste error:', e);
+    }
     btn.disabled = false; btn.textContent = '✅ Guardar en planilla';
 }
 
@@ -1093,24 +1118,23 @@ async function guardarIngreso() {
     const btn = document.getElementById('ingBtnGuardar');
     btn.disabled = true; btn.textContent = '⏳ Guardando...';
     const payload = {
-        id: ingProductoSel.id,
-        cantidadIngresada: cant,
-        precioCosto: parseInt(document.getElementById('ingCosto').value) || ingProductoSel.precioCosto || 0,
-        precioVenta: parseInt(document.getElementById('ingVenta').value) || ingProductoSel.price,
-        proveedor: document.getElementById('ingProveedor').value.trim().toUpperCase(),
-        categoria: document.getElementById('ingCategoria').value || ingProductoSel.category,
-        vencimiento: document.getElementById('ingVencimiento').value || '',
-        fecha: fechaArgentina()
+        producto:         ingProductoSel.name,
+        cantidad:         cant,
+        precioCosto:      parseInt(document.getElementById('ingCosto').value) || ingProductoSel.precioCosto || 0,
+        precioVenta:      parseInt(document.getElementById('ingVenta').value) || 0,
+        proveedor:        document.getElementById('ingProveedor').value.trim().toUpperCase(),
+        categoria:        document.getElementById('ingCategoria').value || ingProductoSel.category,
+        fechaVencimiento: document.getElementById('ingVencimiento').value || ''
     };
     try {
-        const r = await fetch(API_URL + '?action=ingresarMercaderia&data=' + encodeURIComponent(JSON.stringify(payload)), { signal: AbortSignal.timeout(12000) });
+        const r = await fetch(API_URL + '?action=ingresar&data=' + encodeURIComponent(JSON.stringify(payload)), { redirect: 'follow', signal: AbortSignal.timeout(15000) });
         const resp = await r.json();
         if (resp.success) {
             const p = productos.find(x => x.id == ingProductoSel.id);
             if (p) { p.stock = (resp.nuevoStock !== undefined) ? resp.nuevoStock : p.stock + cant; }
-            mostrarToast(`✅ Ingreso guardado (+${cant} unidades)`, 'verde');
+            mostrarToast('✅ ' + (resp.mensaje ? resp.mensaje.split('\n')[0] : 'Ingreso guardado'), 'verde');
             cerrarIngreso();
-        } else { errEl.textContent = resp.error || 'Error al guardar'; errEl.style.display = 'block'; }
+        } else { errEl.textContent = resp.mensaje || resp.error || 'Error al guardar'; errEl.style.display = 'block'; }
     } catch(e) { errEl.textContent = 'Sin conexión — intentá de nuevo'; errEl.style.display = 'block'; }
     btn.disabled = false; btn.textContent = '📦 Guardar ingreso';
 }
