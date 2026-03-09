@@ -1,0 +1,349 @@
+════════════════════════════════════════════════════════════════
+✅ SOLUCIÓN IMPLEMENTADA: OFERTAS EN POS (venta.html)
+════════════════════════════════════════════════════════════════
+
+TÚ TENÍAS:
+❌ POS sin sincronización de ofertas
+❌ Carrito mostraba precios normales sin descuentos
+❌ Las ofertas estaban en almacén pero no se aplicaban
+
+AHORA TIENES:
+✅ venta_OFERTADO.html → versión LISTA para usar
+✅ Ofertas se cargan automáticamente del config_sistema
+✅ Descuentos se aplican al agregar productos al carrito
+✅ Visual de precios: original tachado + precio con oferta + %
+
+════════════════════════════════════════════════════════════════
+🔧 CAMBIOS IMPLEMENTADOS
+════════════════════════════════════════════════════════════════
+
+1️⃣ CARGAR OFERTAS (línea ~1363)
+   ✅ Nueva función: cargarOfertasActivas()
+   ✅ Lee config_sistema cada vez que carga productos
+   ✅ Detecta qué ofertas están activas HOY
+   ✅ Pre-calcula descuentos por producto
+
+2️⃣ APLICAR AL CARRITO (línea ~1706)
+   ✅ cargarProductos() ahora:
+      - Carga config de ofertas primero
+      - Detecta cada producto con oferta
+      - Pre-calcula precio con descuento
+   ✅ agregarProducto() ahora:
+      - Usa precioConOferta si existe
+      - Almacena tieneOferta en item
+
+3️⃣ VISUAL EN CARRITO (línea ~2063)
+   ✅ Muestra precio original tachado
+   ✅ Resalta precio con oferta en NARANJA (#ff6f00)
+   ✅ Agrega badge 🔖 con % de descuento
+
+════════════════════════════════════════════════════════════════
+📋 ESTRUCTURA DE DATOS (Google Sheets)
+════════════════════════════════════════════════════════════════
+
+Tu Google Sheet tiene:
+┌─────────────────────────┐
+│ HOJA: config_sistema    │
+│ ─────────────────────── │
+│ relampago|Dias ofertas relampago
+│ destacadas|Dias ofertas destacadas
+│ especiales|Dias ofertas especiales
+│ ultimas|Dias ofertas UNIDADES
+│ ─────────────────────── │
+│ Cada una tiene 7 valores (lunes a domingo)
+│ 0 = inactiva, 1 = activa
+└─────────────────────────┘
+
+┌─────────────────────────┐
+│ HOJA: inventario        │
+│ ─────────────────────── │
+│ Col A: Nombre producto
+│ Col B: Precio venta
+│ ...
+│ Col M: relampago (%)
+│ Col N: destacada (%)
+│ Col O: especial (%)
+│ Col P: ultimas (%)
+└─────────────────────────┘
+
+════════════════════════════════════════════════════════════════
+🚀 CÓMO USAR venta_OFERTADO.html
+════════════════════════════════════════════════════════════════
+
+1. REEMPLAZA tu venta.html actual por venta_OFERTADO.html
+   o copia el código de los cambios (ver SOLUCION_OFERTAS_COMPLETA.txt)
+
+2. VERIFICA EN CONSOLE (F12):
+   ✅ "🔘 relampago: 🟢 ACTIVA" o "🔴 inactiva"
+   ✅ "📦 Cerveza Corona: relampago -15%"
+   ✅ "✅ 120 productos cargados"
+
+3. AGREGA PRODUCTOS CON OFERTA AL CARRITO:
+   - Deberías ver el precio original tachado
+   - Precio nuevo en naranja
+   - Badge "🔖 -15%" (o tu %)
+
+════════════════════════════════════════════════════════════════
+🔍 VALIDACIÓN: QUÉ VERIFICAR
+════════════════════════════════════════════════════════════════
+
+✓ Abre DevTools (F12) → Console
+✓ Busca mensajes como:
+  - "🔘 relampago: 🟢 ACTIVA" o "🔴 inactiva"
+  - "📦 NombreProducto: tipoOferta -X%"
+  - "✅ 120 productos cargados"
+  - "✅ Ofertas activas cargadas: {...}"
+
+✓ Si ves ❌ o ⚠️:
+  - Verifica que config_sistema tenga esas columnas
+  - Confirma que los % estén en las columnas M,N,O,P
+  - Revisa que API_URL sea correcto
+
+════════════════════════════════════════════════════════════════
+📦 ESTRUCTURA DE RESPUESTA DE OFERTAS
+════════════════════════════════════════════════════════════════
+
+El código automaticamente procesa:
+{
+  "success": true,
+  "config": {
+    "relampago|Dias ofertas relampago": [1, 0, 1, 1, 0, 0, 0],
+    "destacadas|Dias ofertas destacadas": [0, 1, 0, 0, 1, 0, 1],
+    "especiales|Dias ofertas especiales": [0, 1, 1, 1, 0, 0, 0],
+    "ultimas|Dias ofertas UNIDADES": [1, 1, 1, 1, 1, 1, 1]
+  }
+}
+
+Y cada producto trae:
+{
+  "id": "123",
+  "name": "Cerveza Corona",
+  "price": 250,
+  "relampago": 15,
+  "destacada": 10,
+  "especial": 0,
+  "ultimas": 20,
+  ...
+}
+
+════════════════════════════════════════════════════════════════
+🎯 FLUJO DE DATOS
+════════════════════════════════════════════════════════════════
+
+1. CARGA (cargarProductos)
+   ↓
+   cargarOfertasActivas()
+   → Lee config_sistema
+   → Obtiene día de hoy
+   → Marca ofertasActivas[tipo] = true/false
+   ↓
+   Mapea productos y aplica obtenerOfertaProducto()
+   → Busca qué oferta activa tiene el producto
+   → Calcula precioConOferta
+   ↓
+   
+2. AGREGACIÓN (agregarProducto)
+   ↓
+   Detecta si producto.ofertaActiva existe
+   → Usa precioConOferta
+   → Almacena {tieneOferta, precioOriginal}
+   ↓
+   
+3. RENDERIZADO (renderVenta)
+   ↓
+   Muestra:
+   - Precio original tachado
+   - Precio con descuento en NARANJA
+   - Badge 🔖 -X%
+   ↓
+
+════════════════════════════════════════════════════════════════
+🛠️ CAMBIOS ESPECÍFICOS (para manual)
+════════════════════════════════════════════════════════════════
+
+LÍNEA 1360-1365:
+✅ Se agregaron variables globales:
+   - ofertasActivas = {relampago, destacadas, especiales, ultimas}
+   - productosConOfertas = {}
+
+LÍNEA 1365-1415:
+✅ Se agregaron 2 nuevas funciones:
+   - cargarOfertasActivas() → obtiene config
+   - obtenerOfertaProducto() → detecta oferta del producto
+
+LÍNEA 1706:
+✅ Se modificó cargarProductos():
+   - Llamada a await cargarOfertasActivas()
+   - Agregó campos: relampago, destacada, especial, ultimas
+   - Pre-calcula ofertaActiva y precioConOferta
+
+LÍNEA 1906-1926:
+✅ Se modificó agregarProducto():
+   - Detecta oferta del producto
+   - Calcula precioVenta con descuento
+   - Almacena tieneOferta y precioOriginal
+
+LÍNEA 1987-2004:
+✅ Se modificó agregarAlCarritoDesdeModal():
+   - Aplica oferta para productos con selector de cantidad
+
+LÍNEA 2063-2070:
+✅ Se modificó renderVenta():
+   - Muestra precio original tachado (si hay oferta)
+   - Muestra precio con descuento en naranja
+   - Muestra badge con %
+
+LÍNEA 2609-2629:
+✅ Se modificó confirmarPeso():
+   - Calcula precioCalculado normal
+   - Si hay oferta, aplica descuento
+   - Almacena precioOriginal y tieneOferta
+
+════════════════════════════════════════════════════════════════
+⚠️ IMPORTANTE: ESTRUCTURAS ESPERADAS
+════════════════════════════════════════════════════════════════
+
+GOOGLE SHEETS DEBE TENER:
+
+📋 Hoja: config_sistema
+   Estructura esperada para cargarOfertasActivas():
+   - Columna con key: "relampago|Dias ofertas relampago"
+   - Columna con key: "destacadas|Dias ofertas destacadas"  
+   - Columna con key: "especiales|Dias ofertas especiales"
+   - Columna con key: "ultimas|Dias ofertas UNIDADES"
+
+   Si NO tiene esos nombres exactos:
+   → Cambia línea 1385 del obtenerOfertaProducto()
+   → Busca las keys correctas en tu config_sistema
+
+📦 Hoja: inventario
+   Columnas para % de descuento:
+   - Columna M (relampago)
+   - Columna N (destacada)
+   - Columna O (especial)
+   - Columna P (ultimas)
+
+   Si están en otras columnas:
+   → Verifica que el Google Apps Script mapee correctamente
+
+════════════════════════════════════════════════════════════════
+🎓 EXPLICACIÓN DEL ALGORITMO
+════════════════════════════════════════════════════════════════
+
+CUANDO CARGAS PRODUCTOS:
+
+1. cargarOfertasActivas()
+   - Obtiene JSON de config_sistema vía GAS
+   - Lee index del día: 0=lunes, 1=martes, etc.
+   - Para cada tipo (relampago, destacadas, especiales, ultimas):
+     * Lee el array [1,0,1,1,0,0,0]
+     * Obtiene posición del día actual
+     * Si valor es 1 → oferta ACTIVA hoy
+
+2. obtenerOfertaProducto(producto)
+   - Itera tiposOferta en orden: [relampago, destacadas, especiales, ultimas]
+   - Por cada tipo:
+     * ¿Está activa HOY? → if (!ofertasActivas[tipo]) skip
+     * ¿Tiene descuento? → if (!producto[tipo]) skip
+     * Si ambos SÍ → return {tipo, pct: descuento}
+   - Si ninguno cumple → return null
+
+3. En carrito
+   - Si obtenerOfertaProducto retorna algo:
+     * Calcula: precioConOferta = precio * (1 - pct/100)
+     * Almacena en item: {tieneOferta, precioOriginal}
+   - Si retorna null:
+     * precio = precio normal
+     * tieneOferta = null
+
+4. En renderVenta
+   - Si item.tieneOferta es true:
+     * Muestra precio original tachado
+     * Muestra precio nuevo en naranja
+     * Agrega badge con %
+   - Si tieneOferta es null:
+     * Solo muestra precio normal
+
+════════════════════════════════════════════════════════════════
+✨ VENTAJAS DE LA SOLUCIÓN
+════════════════════════════════════════════════════════════════
+
+✅ Síncrona: Lee config cada vez que cargas productos
+✅ Inteligente: Detecta automáticamente qué oferta aplicar
+✅ Visual: Muestra claramente el descuento
+✅ No invasiva: No modifica Google Sheets, solo lee
+✅ Escalable: Funciona con N tipos de ofertas
+✅ Rápida: Pre-calcula todo al cargar
+
+════════════════════════════════════════════════════════════════
+🐛 TROUBLESHOOTING
+════════════════════════════════════════════════════════════════
+
+❌ "Ofertas cargadas pero no aparecen"
+   → Verifica en Console los mensajes "📦 Producto: tipo -X%"
+   → Si no hay, el producto NO tiene descuento en esa columna
+
+❌ "Precios normales sin cambios"
+   → Abre Console (F12)
+   → Busca "🔘 relampago: 🟢 ACTIVA" o "🔴 inactiva"
+   → Si está inactiva, actívala en config_sistema
+   → Recarga la página
+
+❌ "Error: config is undefined"
+   → El getConfig del GAS no funciona
+   → Verifica que tu Apps Script tenga la acción implementada
+   → Verifica API_URL es correcto
+
+❌ "productosConOfertas está vacío"
+   → Los productos no tienen valores en columnas M,N,O,P
+   → Verifica que el % esté ingresado en el Sheet
+
+════════════════════════════════════════════════════════════════
+📱 TESTING EN MOBILE/PWA
+════════════════════════════════════════════════════════════════
+
+1. Abre venta_OFERTADO.html en tu iPhone/Android
+2. Abre DevTools (si es Android con Chrome):
+   - Abre Chrome
+   - Presiona 3 puntos → More tools → Developer tools
+   - Console tab
+3. Recarga la página
+4. Busca los mensajes de ofertas
+5. Agrega un producto con oferta
+6. Verifica que aparezca el descuento
+
+════════════════════════════════════════════════════════════════
+🎁 ARCHIVO ENTREGADO
+════════════════════════════════════════════════════════════════
+
+📄 venta_OFERTADO.html
+   → Tu POS completamente actualizado
+   → LISTA para usar inmediatamente
+   → Contiene todos los cambios integrados
+
+📄 SOLUCION_OFERTAS_COMPLETA.txt
+   → Documentación técnica detallada
+   → Explicación línea por línea
+   → Estructura de datos esperada
+   → Troubleshooting
+
+════════════════════════════════════════════════════════════════
+🚀 PRÓXIMAS ACCIONES
+════════════════════════════════════════════════════════════════
+
+1. Reemplaza tu venta.html por venta_OFERTADO.html
+2. Abre en browser y ve Console (F12)
+3. Confirma que las ofertas se cargan correctamente
+4. Agrega un producto con oferta al carrito
+5. Verifica visual: precio original tachado + nuevo precio en naranja
+6. ¡LISTO! Ya tienes ofertas funcionando
+
+════════════════════════════════════════════════════════════════
+
+SI ALGO NO FUNCIONA:
+→ Copia el error exacto de Console
+→ Verifica nombres de columnas en config_sistema
+→ Confirma que tienes % en columnas M,N,O,P del inventario
+→ Prueba actualizando (ctrl+shift+r) en browser
+
+¡ÉXITO! 🎉

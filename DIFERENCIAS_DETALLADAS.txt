@@ -1,0 +1,493 @@
+════════════════════════════════════════════════════════════════════════════════════
+DIFERENCIAS: venta.html original vs venta_OFERTADO.html
+════════════════════════════════════════════════════════════════════════════════════
+
+📊 RESUMEN DE CAMBIOS:
+─────────────────────────────────────────────────────────────────────────────────
++ 3 nuevas funciones
++ ~50 líneas de código
+~ 3 funciones modificadas
+~ 1 template HTML modificado
+
+════════════════════════════════════════════════════════════════════════════════════
+CAMBIO #1: AGREGAR VARIABLES GLOBALES (después de línea 1360)
+════════════════════════════════════════════════════════════════════════════════════
+
+NUEVO (insertar después de API_URL):
+
+```javascript
+// ===== 🎯 OFERTAS ACTIVAS =====
+let ofertasActivas = {
+    relampago:  false,
+    destacadas: false,
+    especiales: false,
+    ultimas:    false
+};
+let productosConOfertas = {}; // {productId: {tipo: 'relampago', pct: 15}}
+```
+
+POR QUÉ: Guardar el estado de qué ofertas están activas HOY
+
+
+════════════════════════════════════════════════════════════════════════════════════
+CAMBIO #2: AGREGAR FUNCIÓN cargarOfertasActivas() (después de Variables)
+════════════════════════════════════════════════════════════════════════════════════
+
+NUEVO:
+
+```javascript
+// ===== CARGAR CONFIG DE OFERTAS =====
+async function cargarOfertasActivas() {
+    try {
+        const r = await fetch(API_URL + '?action=getConfig&t=' + Date.now(), 
+                              { signal: AbortSignal.timeout(8000) });
+        const data = await r.json();
+        
+        if (!data.success || !data.config) {
+            console.warn('⚠️ config_sistema no disponible');
+            return;
+        }
+        
+        const cfg = data.config;
+        const hoy = new Date();
+        const diaIdx = hoy.getDay(); // 0=domingo, 1=lunes, etc.
+        const diaAjustado = diaIdx === 0 ? 6 : diaIdx - 1; // 0=lunes, 6=domingo
+        
+        // Leer estado de ofertas para HOY
+        const tiposOferta = ['relampago', 'destacadas', 'especiales', 'ultimas'];
+        tiposOferta.forEach(tipo => {
+            const key = tipo + '|Dias ofertas ' + (tipo === 'ultimas' ? 'UNIDADES' : tipo);
+            const row = cfg[key];
+            if (row && Array.isArray(row)) {
+                const valor = row[diaAjustado];
+                ofertasActivas[tipo] = (valor === 1 || valor === '1' || valor === true);
+                console.log(`🔘 ${tipo}: ${ofertasActivas[tipo] ? '🟢 ACTIVA' : '🔴 inactiva'}`);
+            }
+        });
+        
+        console.log('✅ Ofertas activas cargadas:', ofertasActivas);
+    } catch(e) {
+        console.warn('⚠️ Error cargando config de ofertas:', e.message);
+    }
+}
+```
+
+POR QUÉ: Leer la configuración de ofertas desde Google Sheets cada vez que se cargan productos
+
+
+════════════════════════════════════════════════════════════════════════════════════
+CAMBIO #3: AGREGAR FUNCIÓN obtenerOfertaProducto() (después de anterior)
+════════════════════════════════════════════════════════════════════════════════════
+
+NUEVO:
+
+```javascript
+// ===== DETERMINAR OFERTA DE UN PRODUCTO =====
+// Retorna: {tipo: 'relampago', pct: 15} o null
+function obtenerOfertaProducto(producto) {
+    const tiposOferta = ['relampago', 'destacadas', 'especiales', 'ultimas'];
+    
+    for (let tipo of tiposOferta) {
+        // 1. Verificar que la oferta esté ACTIVA hoy
+        if (!ofertasActivas[tipo]) continue;
+        
+        // 2. Verificar que el producto TENGA este descuento
+        const colNombre = tipo === 'destacadas' ? 'destacada' : tipo;
+        const descuento = parseInt(producto[colNombre]) || 0;
+        
+        if (descuento > 0) {
+            console.log(`📦 ${producto.name}: ${tipo} -${descuento}%`);
+            return { tipo, pct: descuento };
+        }
+    }
+    
+    return null;
+}
+```
+
+POR QUÉ: Determinar si un producto específico tiene oferta activada
+
+
+════════════════════════════════════════════════════════════════════════════════════
+CAMBIO #4: MODIFICAR cargarProductos() (línea ~1705)
+════════════════════════════════════════════════════════════════════════════════════
+
+ANTES:
+```javascript
+async function cargarProductos() {
+    const ind = document.getElementById('indicadorCarga');
+    if (ind) { ind.classList.remove('ok'); ind.classList.add('cargando'); }
+    try {
+        const r = await fetch(API_URL + '?cache=' + Date.now());
+        const data = await r.json();
+        const arr = data.productos || data;
+        productos = arr
+            .filter(p => p.name && p.price > 0)
+            .map(p => ({
+                id: p.id,
+                name: String(p.name).trim(),
+                price: parseInt(p.price) || 0,
+                stock: parseInt(p.stock) || 0,
+                // ... más campos ...
+            }));
+        // ... resto del código ...
+    } catch(e) { ... }
+}
+```
+
+DESPUÉS:
+```javascript
+async function cargarProductos() {
+    const ind = document.getElementById('indicadorCarga');
+    if (ind) { ind.classList.remove('ok'); ind.classList.add('cargando'); }
+    try {
+        // 🎯 NUEVO: Cargar config de ofertas PRIMERO
+        await cargarOfertasActivas();
+        
+        const r = await fetch(API_URL + '?cache=' + Date.now());
+        const data = await r.json();
+        const arr = data.productos || data;
+        productos = arr
+            .filter(p => p.name && p.price > 0)
+            .map(p => {
+                const base = {
+                    id: p.id,
+                    name: String(p.name).trim(),
+                    price: parseInt(p.price) || 0,
+                    stock: parseInt(p.stock) || 0,
+                    // ... campos anteriores ...
+                    // 🎯 NUEVO: campos de ofertas
+                    relampago: parseInt(p.relampago) || 0,
+                    destacada: parseInt(p.destacada) || 0,
+                    especial: parseInt(p.especial) || 0,
+                    ultimas: parseInt(p.ultimas) || 0
+                };
+                
+                // 🎯 NUEVO: pre-calcular oferta del producto
+                const oferta = obtenerOfertaProducto(base);
+                if (oferta) {
+                    base.ofertaActiva = oferta;
+                    base.precioConOferta = Math.round(base.price * (1 - oferta.pct / 100));
+                }
+                
+                return base;
+            });
+        // ... resto igual ...
+    } catch(e) { ... }
+}
+```
+
+CAMBIOS ESPECÍFICOS:
++ await cargarOfertasActivas(); → carga config antes de procesar productos
++ relampago, destacada, especial, ultimas → campos nuevos del producto
++ oferta = obtenerOfertaProducto(base); → detecta si producto tiene oferta
++ if (oferta) {...} → calcula precioConOferta
+
+POR QUÉ: Cargar ofertas activas y pre-calcular precios con descuento
+
+
+════════════════════════════════════════════════════════════════════════════════════
+CAMBIO #5: MODIFICAR agregarProducto() (línea ~1896)
+════════════════════════════════════════════════════════════════════════════════════
+
+ANTES:
+```javascript
+    } else {
+        ventaActual.push({
+            id: producto.id,
+            name: producto.name,
+            price: producto.price,
+            qty: 1,
+            stockDisponible: producto.stock,
+            vencimiento: producto.vencimiento || '',
+            rotacion: producto.rotacion || 3,
+            precioCosto: producto.precioCosto || 0
+        });
+    }
+```
+
+DESPUÉS:
+```javascript
+    } else {
+        // 🎯 NUEVO: Determinar precio con oferta
+        let precioVenta = producto.price;
+        let tienOferta = null;
+        
+        if (producto.ofertaActiva) {
+            precioVenta = producto.precioConOferta;
+            tienOferta = producto.ofertaActiva;
+        }
+        
+        ventaActual.push({
+            id: producto.id,
+            name: producto.name,
+            price: precioVenta,
+            precioOriginal: producto.price,
+            tieneOferta: tienOferta,
+            qty: 1,
+            stockDisponible: producto.stock,
+            vencimiento: producto.vencimiento || '',
+            rotacion: producto.rotacion || 3,
+            precioCosto: producto.precioCosto || 0
+        });
+    }
+```
+
+CAMBIOS ESPECÍFICOS:
++ let precioVenta = producto.price; → variable temporal
++ if (producto.ofertaActiva) → verifica si hay oferta
++ precioVenta = producto.precioConOferta; → usa precio con descuento
++ price: precioVenta, → guarda precio con descuento
++ precioOriginal: producto.price, → guarda precio original
++ tieneOferta: tienOferta, → guarda info de la oferta
+
+POR QUÉ: Al agregar producto, detectar oferta y aplicar precio correcto
+
+
+════════════════════════════════════════════════════════════════════════════════════
+CAMBIO #6: MODIFICAR agregarAlCarritoDesdeModal() (línea ~1987)
+════════════════════════════════════════════════════════════════════════════════════
+
+ANTES:
+```javascript
+    } else {
+        ventaActual.push({
+            id: p.id, name: p.name, price: p.price, qty,
+            stockDisponible: p.stock,
+            vencimiento: p.vencimiento || '',
+            rotacion: p.rotacion || 3,
+            precioCosto: p.precioCosto || 0
+        });
+    }
+```
+
+DESPUÉS:
+```javascript
+    } else {
+        // 🎯 NUEVO: Aplicar oferta si existe
+        let precioVenta = p.price;
+        let tienOferta = null;
+        if (p.ofertaActiva) {
+            precioVenta = p.precioConOferta;
+            tienOferta = p.ofertaActiva;
+        }
+        
+        ventaActual.push({
+            id: p.id, name: p.name, price: precioVenta, qty,
+            precioOriginal: p.price,
+            tieneOferta: tienOferta,
+            stockDisponible: p.stock,
+            vencimiento: p.vencimiento || '',
+            rotacion: p.rotacion || 3,
+            precioCosto: p.precioCosto || 0
+        });
+    }
+```
+
+CAMBIOS: Idéntico a agregarProducto(), para productos con selector de cantidad
+
+
+════════════════════════════════════════════════════════════════════════════════════
+CAMBIO #7: MODIFICAR renderVenta() template (línea ~2063)
+════════════════════════════════════════════════════════════════════════════════════
+
+ANTES:
+```html
+            <span class="item-precio-editable ${item.precioModificado ? 'modificado' : ''}"
+                  onclick="editarPrecioCarrito('${item.id}')"
+                  title="Tocar para cambiar precio de esta venta">
+                $${item.price.toLocaleString('es-AR')}
+            </span>
+```
+
+DESPUÉS:
+```html
+            <span class="item-precio-editable ${item.precioModificado ? 'modificado' : ''}"
+                  onclick="editarPrecioCarrito('${item.id}')"
+                  title="Tocar para cambiar precio de esta venta">
+                ${item.tieneOferta ? `<span style="text-decoration:line-through;opacity:0.6;font-size:0.9rem;">$${item.precioOriginal.toLocaleString('es-AR')}</span> ` : ''}
+                <span style="${item.tieneOferta ? 'color:#ff6f00;font-weight:bold;' : ''}">
+                    $${item.price.toLocaleString('es-AR')}
+                </span>
+                ${item.tieneOferta ? `<span style="color:#ff6f00;font-size:0.75rem;margin-left:4px;font-weight:600;">🔖 -${item.tieneOferta.pct}%</span>` : ''}
+            </span>
+```
+
+CAMBIOS ESPECÍFICOS:
++ ${item.tieneOferta ? ...} → muestra precio original tachado si hay oferta
++ color:#ff6f00 → color naranja para nuevo precio
++ 🔖 -${item.tieneOferta.pct}% → muestra badge con porcentaje
+
+POR QUÉ: Visual mejorado en el carrito para mostrar descuentos
+
+
+════════════════════════════════════════════════════════════════════════════════════
+CAMBIO #8: MODIFICAR confirmarPeso() (línea ~2609)
+════════════════════════════════════════════════════════════════════════════════════
+
+ANTES:
+```javascript
+function confirmarPeso() {
+    const gramos = parseInt(pesoValor) || 0;
+    if (gramos <= 0 || !pesoProductoActual) return;
+
+    const precioPorKg = pesoProductoActual.price;
+    const precioCalculado = Math.round((precioPorKg / 1000) * gramos);
+
+    ventaActual.push({
+        id: `peso_${Date.now()}`,
+        idOriginal: pesoProductoActual.id,
+        name: `${pesoProductoActual.name} (${gramos}gr)`,
+        price: precioCalculado,
+        qty: 1,
+        gramos: gramos,
+        stockDisponible: 999,
+        esPeso: true
+    });
+```
+
+DESPUÉS:
+```javascript
+function confirmarPeso() {
+    const gramos = parseInt(pesoValor) || 0;
+    if (gramos <= 0 || !pesoProductoActual) return;
+
+    const precioPorKg = pesoProductoActual.price;
+    let precioCalculado = Math.round((precioPorKg / 1000) * gramos);
+    
+    // 🎯 NUEVO: Aplicar oferta si existe
+    let tienOferta = null;
+    let precioOriginal = precioCalculado;
+    if (pesoProductoActual.ofertaActiva) {
+        precioCalculado = Math.round(precioCalculado * (1 - pesoProductoActual.ofertaActiva.pct / 100));
+        tienOferta = pesoProductoActual.ofertaActiva;
+    }
+
+    ventaActual.push({
+        id: `peso_${Date.now()}`,
+        idOriginal: pesoProductoActual.id,
+        name: `${pesoProductoActual.name} (${gramos}gr)`,
+        price: precioCalculado,
+        precioOriginal: precioOriginal,
+        tieneOferta: tienOferta,
+        qty: 1,
+        gramos: gramos,
+        stockDisponible: 999,
+        esPeso: true
+    });
+```
+
+CAMBIOS ESPECÍFICOS:
++ let precioCalculado = ... → cambió de const a let para poder modificar
++ if (pesoProductoActual.ofertaActiva) → verifica oferta
++ precioCalculado = Math.round(...) → aplica descuento
++ precioOriginal, tieneOferta → campos nuevos
+
+POR QUÉ: Productos por peso también deben mostrar descuentos
+
+
+════════════════════════════════════════════════════════════════════════════════════
+📊 RESUMEN DE CAMBIOS
+════════════════════════════════════════════════════════════════════════════════════
+
+NUEVAS VARIABLES:
+✅ ofertasActivas → {relampago, destacadas, especiales, ultimas}
+✅ productosConOfertas → {}
+
+NUEVAS FUNCIONES:
+✅ cargarOfertasActivas() → carga config de Google Sheets
+✅ obtenerOfertaProducto() → detecta oferta de un producto
+
+FUNCIONES MODIFICADAS:
+✅ cargarProductos() → agrega campos de ofertas y pre-calcula precios
+✅ agregarProducto() → aplica precio con descuento
+✅ agregarAlCarritoDesdeModal() → aplica precio con descuento (selector qty)
+✅ renderVenta() → muestra descuentos visualmente
+✅ confirmarPeso() → aplica descuentos a productos por peso
+
+NUEVOS CAMPOS EN PRODUCTOS:
+✅ relampago (%)
+✅ destacada (%)
+✅ especial (%)
+✅ ultimas (%)
+✅ ofertaActiva → {tipo, pct}
+✅ precioConOferta
+
+NUEVOS CAMPOS EN ITEMS DEL CARRITO:
+✅ precioOriginal
+✅ tieneOferta → {tipo, pct}
+
+════════════════════════════════════════════════════════════════════════════════════
+🎯 FLUJO DE EJECUCIÓN
+════════════════════════════════════════════════════════════════════════════════════
+
+1. INICIO DE PÁGINA
+   ↓
+   DOMContentLoaded → cargarProductos()
+   ↓
+
+2. DENTRO DE cargarProductos()
+   ↓
+   cargarOfertasActivas()
+   → Obtiene config_sistema del GAS
+   → Lee oferta para cada tipo
+   → Marca ofertasActivas[tipo] = true/false
+   ↓
+   Mapea productos y para cada uno:
+   → obtenerOfertaProducto(producto)
+   → Si retorna oferta: calcula precioConOferta
+   ↓
+
+3. USUARIO AGREGA PRODUCTO AL CARRITO
+   ↓
+   agregarProducto(id)
+   → Detecta si producto.ofertaActiva existe
+   → Si existe: usa precioConOferta
+   → Almacena: {tieneOferta, precioOriginal}
+   ↓
+
+4. RENDERIZADO DEL CARRITO
+   ↓
+   renderVenta()
+   → Si item.tieneOferta:
+     • Muestra precio original tachado
+     • Muestra nuevo precio en NARANJA
+     • Agrega badge 🔖 -X%
+   ↓
+
+════════════════════════════════════════════════════════════════════════════════════
+⚙️ OPTIMIZACIÓN
+════════════════════════════════════════════════════════════════════════════════════
+
+EFICIENCIA:
+✅ cargarOfertasActivas() se ejecuta UNA VEZ por carga de productos
+✅ obtenerOfertaProducto() pre-calcula descuentos AL CARGAR
+✅ No hay cálculos extras en el carrito (usa precioConOferta pre-calculado)
+✅ Template renderVenta() solo hace renders condicionales
+
+RENDIMIENTO:
+✅ Sin loops innecesarios
+✅ Sin fetch en agregación al carrito
+✅ Cálculos matemáticos simples
+✅ DOM updating optimizado
+
+
+════════════════════════════════════════════════════════════════════════════════════
+✨ COMPATIBILIDAD
+════════════════════════════════════════════════════════════════════════════════════
+
+✅ Compatible con:
+   - Productos normales (cantidad)
+   - Productos por peso (kg/gr)
+   - Modificación de precios manual en carrito
+   - Múltiples tipos de ofertas simultáneas
+   - PWA/Mobile
+
+✅ NO rompe:
+   - Transacciones de venta
+   - Guardado de carrito temporal
+   - Integración con Google Sheets
+   - Sistema de relámpago existente
+   - Sistema de vencimientos
+
+════════════════════════════════════════════════════════════════════════════════════

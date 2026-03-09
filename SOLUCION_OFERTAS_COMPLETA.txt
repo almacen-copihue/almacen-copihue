@@ -1,0 +1,333 @@
+============================================================
+🔧 SOLUCIÓN INTEGRADA: CARGAR OFERTAS EN venta.html
+============================================================
+
+TU PROBLEMA:
+❌ El POS carga productos pero NO aplica las ofertas activas
+❌ El carrito muestra precios normales sin descuentos
+❌ Las ofertas están en almacen-copihue.vercel.app pero no se sincronizan
+
+LA SOLUCIÓN:
+Necesitas agregar código que:
+1. Obtenga las ofertas activas del config_sistema de Google Sheets
+2. Detecte qué productos tienen ofertas
+3. Aplique automáticamente el descuento al agregar productos al carrito
+
+============================================================
+📋 ESTRUCTURA DE OFERTAS (Google Sheets)
+============================================================
+
+Tu Google Apps Script ya tiene todo estructurado:
+- Hoja: config_sistema
+- Columnas: relampago, destacadas, especiales, ultimas
+- Cada columna tiene 7 celdas (uno por día de la semana)
+- Valor: 0 (inactiva) o 1 (activa)
+
+Ejemplo:
+┌─────────────┬───────┬───────┬───────┬───────┐
+│ Día/Oferta  │ Lunes │ Martes│ Miér. │ Jueves│
+├─────────────┼───────┼───────┼───────┼───────┤
+│ relampago   │   1   │   0   │   1   │   1   │
+│ destacadas  │   0   │   1   │   0   │   0   │
+│ especiales  │   0   │   1   │   1   │   1   │
+│ ultimas     │   1   │   1   │   1   │   1   │
+└─────────────┴───────┴───────┴───────┴───────┘
+
+============================================================
+📦 ESTRUCTURA DE PRODUCTOS EN GOOGLE SHEETS
+============================================================
+
+Inventario debe tener estas columnas adicionales:
+- Columna M: relampago (%) — descuento relámpago
+- Columna N: destacada (%) — descuento destacado
+- Columna O: especial (%) — descuento especial
+- Columna P: ultimas (%) — descuento últimas unidades
+
+Ejemplo de producto:
+┌──────────────────┬────────┬──────────┬─────┬────────────┐
+│ Nombre           │ Precio │ Stock    │...  │relampago(%)│
+├──────────────────┼────────┼──────────┼─────┼────────────┤
+│ Cerveza Corona   │  250   │   30     │...  │    15      │
+└──────────────────┴────────┴──────────┴─────┴────────────┘
+
+============================================================
+🔧 CÓDIGO A INSERTAR EN venta.html
+============================================================
+
+PASO 1: Agregar estas variables globales ANTES de cargarProductos()
+────────────────────────────────────────────────────────────────
+
+// ===== OFERTAS ACTIVAS =====
+let ofertasActivas = {
+    relampago:  false,
+    destacadas: false,
+    especiales: false,
+    ultimas:    false
+};
+let productosConOfertas = {}; // {productId: {tipo: 'relampago', pct: 15}}
+
+// ===== CARGAR CONFIG DE OFERTAS =====
+async function cargarOfertasActivas() {
+    try {
+        const r = await fetch(API_URL + '?action=getConfig&t=' + Date.now(), 
+                              { signal: AbortSignal.timeout(8000) });
+        const data = await r.json();
+        
+        if (!data.success || !data.config) {
+            console.warn('⚠️ config_sistema no disponible');
+            return;
+        }
+        
+        const cfg = data.config;
+        const hoy = new Date();
+        const diaIdx = hoy.getDay(); // 0=domingo, 1=lunes, etc.
+        // Ajustar: si el sheet empieza en lunes (idx 1), restar 1
+        const diaAjustado = diaIdx === 0 ? 6 : diaIdx - 1; // 0=lunes, 6=domingo
+        
+        // Leer estado de ofertas para HOY
+        const tiposOferta = ['relampago', 'destacadas', 'especiales', 'ultimas'];
+        tiposOferta.forEach(tipo => {
+            const key = tipo + '|Dias ofertas ' + (tipo === 'ultimas' ? 'UNIDADES' : tipo);
+            const row = cfg[key];
+            if (row && Array.isArray(row)) {
+                const valor = row[diaAjustado];
+                ofertasActivas[tipo] = (valor === 1 || valor === '1' || valor === true);
+                console.log(`🔘 ${tipo}: ${ofertasActivas[tipo] ? '🟢 ACTIVA' : '🔴 inactiva'}`);
+            }
+        });
+        
+        console.log('✅ Ofertas activas cargadas:', ofertasActivas);
+    } catch(e) {
+        console.warn('⚠️ Error cargando config de ofertas:', e.message);
+    }
+}
+
+// ===== DETERMINAR OFERTA DE UN PRODUCTO =====
+// Retorna: {tipo: 'relampago', pct: 15} o null
+function obtenerOfertaProducto(producto) {
+    const tiposOferta = ['relampago', 'destacadas', 'especiales', 'ultimas'];
+    
+    for (let tipo of tiposOferta) {
+        // 1. Verificar que la oferta esté ACTIVA hoy
+        if (!ofertasActivas[tipo]) continue;
+        
+        // 2. Verificar que el producto TENGA este descuento
+        const colNombre = tipo === 'destacadas' ? 'destacada' : tipo;
+        const descuento = parseInt(producto[colNombre]) || 0;
+        
+        if (descuento > 0) {
+            console.log(`📦 ${producto.name}: ${tipo} -${descuento}%`);
+            return { tipo, pct: descuento };
+        }
+    }
+    
+    return null;
+}
+
+
+PASO 2: Modificar cargarProductos() para cargar también ofertas
+──────────────────────────────────────────────────────────────
+
+BUSCA ESTA LÍNEA (aproximadamente línea 1640):
+    async function cargarProductos() {
+
+Y MODIFICA PARA QUE LLAME A cargarOfertasActivas():
+
+    async function cargarProductos() {
+        const ind = document.getElementById('indicadorCarga');
+        if (ind) { ind.classList.remove('ok'); ind.classList.add('cargando'); ind.title = 'Cargando...'; }
+        
+        try {
+            // NUEVO: Cargar config de ofertas PRIMERO
+            await cargarOfertasActivas();
+            
+            // LUEGO: Cargar productos normalmente
+            const r = await fetch(API_URL + '?cache=' + Date.now());
+            const data = await r.json();
+            const arr = data.productos || data;
+            
+            productos = arr
+                .filter(p => p.name && p.price > 0)
+                .map(p => {
+                    const base = {
+                        id: p.id,
+                        name: String(p.name).trim(),
+                        price: parseInt(p.price) || 0,
+                        stock: parseInt(p.stock) || 0,
+                        image: `imagenes-productos/${simplificarNombre(String(p.name).trim())}.jpg`,
+                        category: String(p.category || 'ALMACEN').trim().toUpperCase(),
+                        rotacion: parseInt(p.rotacion) || 3,
+                        vencimiento: p.vencimiento || '',
+                        diaCritico: (p.diaCritico || '').toLowerCase().trim(),
+                        precioCosto: parseInt(p.precioCosto) || 0,
+                        stockMin: parseInt(p.stockMin) || 0,
+                        // NUEVO: campos de ofertas
+                        relampago: parseInt(p.relampago) || 0,
+                        destacada: parseInt(p.destacada) || 0,
+                        especial: parseInt(p.especial) || 0,
+                        ultimas: parseInt(p.ultimas) || 0
+                    };
+                    
+                    // NUEVO: pre-calcular oferta del producto
+                    const oferta = obtenerOfertaProducto(base);
+                    if (oferta) {
+                        base.ofertaActiva = oferta;
+                        base.precioConOferta = Math.round(base.price * (1 - oferta.pct / 100));
+                    }
+                    
+                    return base;
+                });
+            
+            const indOk = document.getElementById('indicadorCarga');
+            if (indOk) { indOk.classList.remove('cargando'); indOk.classList.add('ok'); indOk.title = `${productos.length} productos cargados`; }
+            console.log(`✅ ${productos.length} productos cargados`);
+            
+            // ... resto del código igual ...
+            setTimeout(alertarVencidosHoy, 500);
+            setTimeout(procesarVencidosDeAyer, 1500);
+            setTimeout(verificarAlertasDelDia, 800);
+            programarRecordatorioCierre();
+            setTimeout(sugerirRelampago, 2000);
+            setTimeout(verificarOfertasAutomaticas, 3500);
+        } catch(e) {
+            mostrarToast('❌ Error al cargar productos', 'rojo');
+            const indErr = document.getElementById('indicadorCarga');
+            if (indErr) { indErr.classList.remove('cargando'); indErr.title = 'Error de conexión'; }
+            console.error(e);
+        }
+    }
+
+
+PASO 3: Modificar agregarProducto() para aplicar descuentos
+────────────────────────────────────────────────────────────
+
+BUSCA LA FUNCIÓN agregarProducto (aproximadamente línea 1820) Y REEMPLAZA ESTA PARTE:
+
+ANTES:
+    } else {
+        ventaActual.push({
+            id: producto.id,
+            name: producto.name,
+            price: producto.price,
+            qty: 1,
+            stockDisponible: producto.stock,
+            vencimiento: producto.vencimiento || '',
+            rotacion: producto.rotacion || 3,
+            precioCosto: producto.precioCosto || 0
+        });
+    }
+
+DESPUÉS:
+    } else {
+        // NUEVO: Determinar precio con oferta
+        let precioVenta = producto.price;
+        let tienOferta = null;
+        
+        if (producto.ofertaActiva) {
+            precioVenta = producto.precioConOferta;
+            tienOferta = producto.ofertaActiva;
+        }
+        
+        ventaActual.push({
+            id: producto.id,
+            name: producto.name,
+            price: precioVenta,
+            precioOriginal: producto.price,
+            tieneOferta: tienOferta,
+            qty: 1,
+            stockDisponible: producto.stock,
+            vencimiento: producto.vencimiento || '',
+            rotacion: producto.rotacion || 3,
+            precioCosto: producto.precioCosto || 0
+        });
+    }
+
+
+PASO 4: Modificar renderVenta() para mostrar el descuento visualmente
+─────────────────────────────────────────────────────────────────────
+
+BUSCA LA FUNCIÓN renderVenta (aproximadamente línea 1932) Y MODIFICA ESTA SECCIÓN:
+
+ANTES:
+            <span class=\"item-precio-editable ${item.precioModificado ? 'modificado' : ''}\"\n                  onclick=\"editarPrecioCarrito('${item.id}')\"\n                  title=\"Tocar para cambiar precio de esta venta\">\n                $${item.price.toLocaleString('es-AR')}\n            </span>
+
+DESPUÉS:
+            <span class=\"item-precio-editable ${item.precioModificado ? 'modificado' : ''}\"\n                  onclick=\"editarPrecioCarrito('${item.id}')\"\n                  title=\"Tocar para cambiar precio de esta venta\">\n                ${item.tieneOferta ? `<span style=\"text-decoration:line-through;opacity:0.6;\">$${item.precioOriginal.toLocaleString('es-AR')}</span> ` : ''}\n                <span style=\"${item.tieneOferta ? 'color:#ff6f00;font-weight:bold;' : ''}\">$${item.price.toLocaleString('es-AR')}</span>\n                ${item.tieneOferta ? `<span style=\"color:#ff6f00;font-size:0.8rem;margin-left:4px;\">🔖 -${item.tieneOferta.pct}%</span>` : ''}\n            </span>
+
+PASO 5: Actualizar también en abrirSelectorQty
+──────────────────────────────────────────────
+
+En agregarAlCarritoDesdeModal() (después de abrir modal), asegúrate de que al agregar se aplique la oferta:
+
+BUSCA:
+    ventaActual.push({
+        id: p.id,
+        name: p.name,
+        price: p.price,
+        ...
+
+Y REEMPLAZA CON:
+    let precioVenta = p.price;
+    let tienOferta = null;
+    if (p.ofertaActiva) {
+        precioVenta = p.precioConOferta;
+        tienOferta = p.ofertaActiva;
+    }
+    
+    ventaActual.push({
+        id: p.id,
+        name: p.name,
+        price: precioVenta,
+        precioOriginal: p.price,
+        tieneOferta: tienOferta,
+        ...
+
+
+============================================================
+✅ VERIFICACIÓN
+============================================================
+
+1. Abre tu POS (venta.html)
+2. Abre DevTools (F12) → Console
+3. Deberías ver:
+   ✅ Ofertas activas cargadas: {relampago: true, destacadas: false, ...}
+   ✅ 📦 Cerveza Corona: relampago -15%
+   ✅ 120 productos cargados
+
+4. Agrega un producto con oferta al carrito
+5. Deberías ver:
+   - Precio original tachado
+   - Precio con descuento en naranja
+   - Badge con el % de descuento (ej: 🔖 -15%)
+
+============================================================
+🎯 PROBLEMAS COMUNES Y SOLUCIONES
+============================================================
+
+PROBLEMA: "No aparece la oferta"
+SOLUCIÓN:
+1. Verifica que la oferta esté ACTIVA en config_sistema para HOY
+2. Verifica que el producto tenga un valor % en columna relampago/destacada/etc.
+3. Abre Console y busca el mensaje "📦 NombreProducto: relampago -X%"
+
+PROBLEMA: "Ofertas cargadas pero precios no cambian"
+SOLUCIÓN:
+1. Verifica que sea el mismo Google Apps Script ID (API_URL)
+2. Probablemente no realizaste TODOS los cambios en agregarProducto()
+3. Verifica console que dice: "⚠️ Ofertas activas cargadas"
+
+PROBLEMA: "Falla al cargar config"
+SOLUCIÓN:
+1. El Google Apps Script podría no tener action=getConfig implementado
+2. Necesita estar en tu Apps Script (línea ~2290 del codegs.txt)
+
+============================================================
+📞 PRÓXIMOS PASOS
+============================================================
+
+1. Implementa los cambios en tu venta.html
+2. Prueba en Chrome DevTools (Console)
+3. Si hay errores, copia el error exacto y compartilo
+4. Verifica que columnas tiene tu Google Sheet para ofertas
+   (¿relampago, destacada, especial, ultimas?)
+5. Confirma que el config_sistema tenga esas columnas
