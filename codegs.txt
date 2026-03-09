@@ -1,6 +1,14 @@
 // ======================
-// ALMACÉN COPIHUE - SISTEMA COMPLETO v6.0
-// v6.0: Jueves Cervecero — score automático, descuentos y log evento
+// ALMACÉN COPIHUE - SISTEMA COMPLETO v6.9
+// v6.9: Fix gananciaReal histórica — qty en gramos (ej: 800) se convierte a kg (0.8) para cálculo correcto
+// v6.8: Fix costo productos por peso — nomLimpio no sacaba "(800gr)", no matcheaba con inventario
+// v6.7: Fix top histórico — ticket "184" vs "0184" no matcheaban
+// v6.6: qty por peso guarda número puro (0.8) en vez de texto (0.8kg)
+// v6.5: Fix stock por peso — usaba id "peso_TIMESTAMP" en vez de idOriginal, nunca encontraba la fila
+// v6.4: Fix qty esPeso — guardaba gramos (800) en vez de kg (0.8), inflaba top productos
+// v6.3: Carrito temporal — guardarCarritoTemp + getCarritoTemp (backup en planilla)
+// v6.2: Jueves Cervecero — 1 solo gancho (mejor margen) al 20%, resto 10-15%
+// v6.1: Jueves Cervecero — estrategia gancho top 2
 // v5.9: setConfig + logInterruptor + rebaja stock kg productos por peso
 // v5.8: Nueva hoja Ajuste_Rapido separada de Historial
 // ======================
@@ -431,7 +439,7 @@ function calcularRotacionAuto() {
         if (nombre.includes('TOTAL TICKET') || nombre.startsWith('─')) continue;
         const fecha = f[1] instanceof Date ? f[1] : new Date(f[1]);
         if (isNaN(fecha.getTime()) || fecha < hace30) continue;
-        const qty = parseFloat(String(f[4]).replace('gr','')) || 0;
+        const qty = parseFloat(String(f[4]).replace('gr','').replace('kg','')) || 0;
         ventasMap[nombre] = (ventasMap[nombre] || 0) + qty;
       }
     }
@@ -929,23 +937,30 @@ function getJuevesCervecero() {
 
       const promoScore = (rotScore * 0.35) + (stockScore * 0.25) + (margenScore * 0.20) + (ticketScore * 0.20);
 
-      // Lógica de descuento — nunca vender por debajo del costo
-      let descuento = 10;
-      if (c.margen > 0.40 && rotScore < 0.5)       descuento = 20;
-      else if (c.margen > 0.30 && rotScore >= 0.5)  descuento = 15;
-
-      const precioPromo = Math.max(
-        Math.round(c.precio * (1 - descuento / 100)),
-        c.costo > 0 ? Math.ceil(c.costo * 1.05) : 0  // mínimo 5% sobre costo
-      );
-
-      return { ...c, promoScore, descuento, precioPromo, ventas30: vd.qty };
+      return { ...c, promoScore, ventas30: vd.qty };
     });
 
-    // Top 6 por score
+    // Top 6 por score — solo 1 gancho al 20%, el resto 10-15%
     const top6 = scored.sort((a, b) => b.promoScore - a.promoScore).slice(0, 6);
 
-    return { success: true, productos: top6, horaCierre };
+    // Encontrar el de mejor margen → ese es el único gancho
+    const idxGancho = top6.reduce((bestIdx, c, i) => c.margen > top6[bestIdx].margen ? i : bestIdx, 0);
+
+    const top6Final = top6.map((c, idx) => {
+        let descuento;
+        if (idx === idxGancho) {
+            descuento = 20; // único gancho
+        } else {
+            descuento = c.margen > 0.30 ? 15 : 10; // resto conservador
+        }
+        const precioPromo = Math.max(
+            Math.round(c.precio * (1 - descuento / 100)),
+            c.costo > 0 ? Math.ceil(c.costo * 1.05) : 0
+        );
+        return { ...c, descuento, precioPromo, esGancho: idx === idxGancho };
+    });
+
+    return { success: true, productos: top6Final, horaCierre };
   } catch(e) {
     return { success: false, mensaje: e.toString() };
   }
@@ -1118,6 +1133,15 @@ function doGet(e) {
       return respuestaJSON(guardarProveedor(datos));
     }
 
+    if (e && e.parameter && e.parameter.action === 'guardarCarritoTemp') {
+      const datos = JSON.parse(decodeURIComponent(e.parameter.data));
+      return respuestaJSON(guardarCarritoTemp(datos));
+    }
+
+    if (e && e.parameter && e.parameter.action === 'getCarritoTemp') {
+      return respuestaJSON(getCarritoTemp());
+    }
+
     // ────────────────────────────────────────────────────────────────────────
 
     // ACCIÓN: GET PRODUCTOS (carga la tienda)
@@ -1221,7 +1245,8 @@ function procesarVenta(dataStr) {
     let totalVenta = 0;
 
     for (const item of items) {
-      const filaIndex = item.id;
+      // Para productos por peso el id del carrito es "peso_TIMESTAMP" — usar idOriginal
+      const filaIndex = item.esPeso ? (item.idOriginal || item.id) : item.id;
       if (filaIndex < 1 || filaIndex >= datos.length) { errores.push(`ID ${item.id} no encontrado`); continue; }
       const fila = datos[filaIndex];
       const nombreEnSheet = String(fila[0] || '').trim();
@@ -1233,7 +1258,8 @@ function procesarVenta(dataStr) {
       const precioVenta = item.precioVenta !== undefined && item.precioVenta !== null && item.precioVenta !== '' ? parseInt(item.precioVenta) : precioUnit;
       const precioOriginal = parseInt(item.precioOriginal) || 0;
       const precioModificado = item.precioModificado === true;
-      if (qty <= 0) continue;
+      if (esPeso && gramos <= 0) { errores.push(`${nombreEnSheet}: gramos inválidos`); continue; }
+      if (!esPeso && qty <= 0) continue;
 
       if (esPeso) {
         const kgVendidos = gramos / 1000;
@@ -1241,8 +1267,9 @@ function procesarVenta(dataStr) {
         const nuevoStockKg = Math.max(0, Math.round((stockEnKg - kgVendidos) * 1000) / 1000);
         sheetInventario.getRange(filaIndex + 1, 6).setValue(nuevoStockKg);
         const nombreConPeso = gramos > 0 ? `${nombreEnSheet} (${gramos}gr)` : nombreEnSheet;
+        const kgDisplay = Math.round(kgVendidos * 1000) / 1000; // ej: 0.8
         totalVenta += precioVenta;
-        procesados.push({ name: nombreConPeso, qty: gramos, nuevoStock: nuevoStockKg, precio: precioVenta, esPeso: true });
+        procesados.push({ name: nombreConPeso, qty: kgDisplay, nuevoStock: nuevoStockKg, precio: precioVenta, esPeso: true, gramos });
       } else {
         if (stockActual < qty) errores.push(`${nombreEnSheet}: stock insuficiente (tiene ${stockActual}, vendió ${qty})`);
         const nuevoStock = Math.max(0, stockActual - qty);
@@ -1274,7 +1301,7 @@ function procesarVenta(dataStr) {
           celdaTicket.setNumberFormat('@STRING@');
           celdaTicket.setValue(ticketStr);
           const subtotal = p.esPeso ? p.precio : p.precio * p.qty;
-          const cantDisplay = p.esPeso ? p.qty + 'gr' : p.qty;
+          const cantDisplay = p.esPeso ? p.qty : p.qty;
           const nombreDisplay = p.precioModificado
             ? p.name + (p.precioOriginal ? ' [PRECIO ESP: $' + p.precioOriginal + '→$' + p.precio + ']' : ' [PRECIO ESPECIAL]')
             : p.name;
@@ -1436,12 +1463,19 @@ function getReportes() {
         const total    = parseFloat(f[7]) || 0;
         totales.push({ fechaStr, hora, ticket, metodo, vendedor, total });
       } else if (nombre && !nombre.startsWith('─')) {
-        const ticket   = colA;
+        const ticketRaw = String(colA||'').trim();
+        const ticket    = ticketRaw.match(/^\d+$/) ? ticketRaw.padStart(4,'0') : ticketRaw;
         const qtyRaw   = f[4];
-        const qty      = parseFloat(String(qtyRaw).replace('gr','')) || 0;
+        const qtyStr   = String(qtyRaw||'').trim();
+        let qty        = parseFloat(qtyStr.replace('gr','').replace('kg','')) || 0;
+
+        // Fix histórico: si qty parece gramos (ej: 800) pero el nombre tiene "(Ngr)" o es un producto por kg
+        // detectar por nombre con sufijo de gramos en el histórico
+        const esQtyEnGramos = /\(\d+gr\)/i.test(nombre) && qty >= 50;
+        if (esQtyEnGramos) qty = qty / 1000; // convertir a kg para cálculo correcto
         const precio   = parseFloat(f[5]) || 0;
         const subtotal = parseFloat(f[6]) || 0;
-        const nomLimpio = nombre.replace(/\[PRECIO ESP[^]]*\]/,'').trim().toUpperCase();
+        const nomLimpio = nombre.replace(/\[PRECIO ESP[^]]*\]/,'').replace(/\s*\(\d+gr\)/i,'').replace(/\s*\(\d+\.?\d*kg\)/i,'').trim().toUpperCase();
         const costo    = costos[nomLimpio] || 0;
         const tieneCosto = costo > 0;
         const gananciaReal = tieneCosto ? subtotal - (costo * qty) : null;
@@ -1512,5 +1546,54 @@ function crearOrdenMP(monto) {
     return { ok: false, error: JSON.stringify(data) };
   } catch(e) {
     return { ok: false, error: e.toString() };
+  }
+}
+
+// ========== CARRITO TEMPORAL ==========
+// Guarda el carrito en curso como backup por si la app se cierra
+function guardarCarritoTemp(payload) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let sh = ss.getSheetByName('carrito_temp');
+    if (!sh) {
+      sh = ss.insertSheet('carrito_temp');
+      sh.getRange(1,1,1,3).setValues([['timestamp','vendedor','items_json']]);
+    }
+    // Siempre una sola fila de datos (sobreescribir)
+    const data = typeof payload === 'string' ? JSON.parse(payload) : payload;
+    if (!data.items || data.items.length === 0) {
+      // Carrito vacío — limpiar fila
+      if (sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow()-1, 3).clearContent();
+      return { success: true, action: 'cleared' };
+    }
+    if (sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow()-1, 3).clearContent();
+    sh.getRange(2,1,1,3).setValues([[
+      new Date().toISOString(),
+      data.vendedor || '',
+      JSON.stringify(data.items)
+    ]]);
+    return { success: true, action: 'saved', count: data.items.length };
+  } catch(e) {
+    return { success: false, error: e.toString() };
+  }
+}
+
+// Recupera el carrito temporal guardado
+function getCarritoTemp() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sh = ss.getSheetByName('carrito_temp');
+    if (!sh || sh.getLastRow() < 2) return { success: true, items: [] };
+    const row = sh.getRange(2,1,1,3).getValues()[0];
+    const ts = row[0];
+    // Si el backup tiene más de 8 horas, ignorar (probablemente del día anterior)
+    if (ts && (Date.now() - new Date(ts).getTime()) > 8 * 60 * 60 * 1000) {
+      sh.getRange(2, 1, 1, 3).clearContent();
+      return { success: true, items: [] };
+    }
+    const items = row[2] ? JSON.parse(row[2]) : [];
+    return { success: true, items, vendedor: row[1] || '', ts: ts ? new Date(ts).toISOString() : '' };
+  } catch(e) {
+    return { success: false, error: e.toString(), items: [] };
   }
 }

@@ -1,12 +1,27 @@
 // ======================
-// ALMACÉN COPIHUE - SISTEMA COMPLETO v5.5
-// v5.5: Hoja Proveedores → action=proveedores para leer/escribir desde el POS
+// ALMACÉN COPIHUE - SISTEMA COMPLETO v7.0
+// v7.0: calcularOfertas() retorna los 4 pools completos:
+//       relampagoActivo, ultimasUnidades, destacadasActivas, especialesActivas
+//       FIX: pools de destacadas y especiales siempre estaban vacíos en el POS
+//       Los precios del POS (venta.html) ahora son espejo exacto de index.html
+// v6.9: Fix gananciaReal histórica — qty en gramos (ej: 800) se convierte a kg (0.8) para cálculo correcto
+// v6.8: Fix costo productos por peso — nomLimpio no sacaba "(800gr)", no matcheaba con inventario
+// v6.7: Fix top histórico — ticket "184" vs "0184" no matcheaban
+// v6.6: qty por peso guarda número puro (0.8) en vez de texto (0.8kg)
+// v6.5: Fix stock por peso — usaba id "peso_TIMESTAMP" en vez de idOriginal, nunca encontraba la fila
+// v6.4: Fix qty esPeso — guardaba gramos (800) en vez de kg (0.8), inflaba top productos
+// v6.3: Carrito temporal — guardarCarritoTemp + getCarritoTemp (backup en planilla)
+// v6.2: Jueves Cervecero — 1 solo gancho (mejor margen) al 20%, resto 10-15%
+// v6.1: Jueves Cervecero — estrategia gancho top 2
+// v5.9: setConfig + logInterruptor + rebaja stock kg productos por peso
+// v5.8: Nueva hoja Ajuste_Rapido separada de Historial
 // ======================
 
 const SS_ID = '1hKeM-13t6wyGD5Ya4Rx9NeUJXsgJoVN4dOb-rklPznA';
 const HOJA_INVENTARIO = 'inventario';
 const HOJA_CONFIG     = 'config_sistema';
 const HOJA_HISTORIAL = 'Historial';
+const HOJA_AJUSTE_RAPIDO = 'Ajuste_Rapido';
 const HOJA_PROVEEDORES = 'Proveedores';
 const MP_ACCESS_TOKEN = 'APP_USR-5614141351834158-022520-6ad6dd5ed431ca58fa841bfd74f0945b-213611899';
 
@@ -134,22 +149,17 @@ function obtenerUltimoCosto(nombreProducto) {
 }
 
 // ========== LEER PROVEEDORES ==========
-// Devuelve array de { nombre, telefono, mensaje, activo }
-// Si la hoja no existe, la crea con encabezados y proveedores únicos del inventario
 function leerProveedores() {
   try {
     const ss = SpreadsheetApp.openById(SS_ID);
     let sheet = ss.getSheetByName(HOJA_PROVEEDORES);
 
-    // Si no existe la hoja, crearla automáticamente
     if (!sheet) {
       sheet = ss.insertSheet(HOJA_PROVEEDORES);
-      // Encabezados
       sheet.getRange(1, 1, 1, 5).setValues([['PROVEEDOR', 'TELEFONO_WA', 'MENSAJE', 'ACTIVO', 'NOTAS']]);
       sheet.getRange(1, 1, 1, 5).setFontWeight('bold');
       sheet.setFrozenRows(1);
 
-      // Pre-poblar con proveedores únicos del inventario
       const invSheet = ss.getSheetByName(HOJA_INVENTARIO);
       const invDatos = invSheet.getDataRange().getValues();
       const provSet = new Set();
@@ -166,7 +176,6 @@ function leerProveedores() {
       console.log('✅ Hoja Proveedores creada con ' + provSet.size + ' proveedores');
     }
 
-    // Leer datos
     const datos = sheet.getDataRange().getValues();
     const proveedores = [];
     for (let i = 1; i < datos.length; i++) {
@@ -189,7 +198,6 @@ function leerProveedores() {
 }
 
 // ========== GUARDAR PROVEEDOR ==========
-// Actualiza un proveedor existente o agrega uno nuevo
 function guardarProveedor(datos) {
   try {
     const ss = SpreadsheetApp.openById(SS_ID);
@@ -320,6 +328,87 @@ function ingresarMercaderia(datos) {
   }
 }
 
+// ========== AJUSTE RÁPIDO ==========
+function ajustarProducto(datos) {
+  try {
+    const ss = SpreadsheetApp.openById(SS_ID);
+    const sheetInventario = ss.getSheetByName(HOJA_INVENTARIO);
+
+    let sheetAjuste = ss.getSheetByName(HOJA_AJUSTE_RAPIDO);
+    if (!sheetAjuste) {
+      sheetAjuste = ss.insertSheet(HOJA_AJUSTE_RAPIDO);
+      sheetAjuste.appendRow([
+        'FECHA', 'PRODUCTO', 'NOMBRE ANTES', 'NOMBRE DESPUÉS',
+        'STOCK ANTES', 'STOCK DESPUÉS', 'PRECIO ANTES', 'PRECIO DESPUÉS',
+        'CATEGORÍA ANTES', 'CATEGORÍA DESPUÉS', 'USUARIO'
+      ]);
+      sheetAjuste.getRange(1, 1, 1, 11).setBackground('#37474f').setFontColor('white').setFontWeight('bold');
+    }
+
+    const producto = String(datos.producto || '').trim();
+    if (!producto) return { success: false, mensaje: 'Nombre de producto vacío' };
+
+    const datosInv = sheetInventario.getDataRange().getValues();
+    let filaProducto = -1;
+    let stockActual = 0, precioActual = 0, catActual = '', nombreActual = '';
+    const productoNorm = producto.toUpperCase().replace(/\s+/g, ' ');
+
+    for (let i = 1; i < datosInv.length; i++) {
+      if (!datosInv[i][0]) continue;
+      const nombreEnSheet = String(datosInv[i][0]).trim().toUpperCase().replace(/\s+/g, ' ');
+      if (nombreEnSheet === productoNorm) {
+        filaProducto = i + 1;
+        nombreActual = String(datosInv[i][0]).trim();
+        precioActual = Number(datosInv[i][1]) || 0;
+        catActual    = String(datosInv[i][2] || '').trim();
+        stockActual  = Number(datosInv[i][5]) || 0;
+        break;
+      }
+    }
+
+    if (filaProducto === -1) return { success: false, mensaje: 'Producto no encontrado: ' + producto };
+
+    const stockNuevo  = (datos.stockDespues !== undefined && datos.stockDespues !== null) ? Number(datos.stockDespues) : stockActual;
+    const precioNuevo = datos.precioDespues ? Number(datos.precioDespues) : precioActual;
+    const nombreNuevo = datos.nombreNuevo   ? String(datos.nombreNuevo).trim().toUpperCase() : nombreActual;
+    const catNueva    = datos.categoriaDespues ? String(datos.categoriaDespues).trim().toUpperCase() : catActual;
+
+    const stockRegistroAntes  = (datos.stockAntes !== undefined && datos.stockAntes !== null) ? Number(datos.stockAntes) : stockActual;
+    const precioRegistroAntes = datos.precioAntes ? Number(datos.precioAntes) : precioActual;
+
+    sheetInventario.getRange(filaProducto, 6).setValue(stockNuevo);
+    if (precioNuevo !== precioActual)   sheetInventario.getRange(filaProducto, 2).setValue(precioNuevo);
+    if (nombreNuevo !== nombreActual)   sheetInventario.getRange(filaProducto, 1).setValue(nombreNuevo);
+    if (catNueva    !== catActual)      sheetInventario.getRange(filaProducto, 3).setValue(catNueva);
+
+    const fecha = new Date();
+    sheetAjuste.appendRow([
+      fecha,
+      producto,
+      nombreActual,          nombreNuevo  !== nombreActual  ? nombreNuevo  : '',
+      stockRegistroAntes,    stockNuevo,
+      precioRegistroAntes,   precioNuevo  !== precioRegistroAntes ? precioNuevo : '',
+      catActual,             catNueva     !== catActual     ? catNueva     : '',
+      'POS'
+    ]);
+
+    let cambios = [];
+    if (stockNuevo !== stockRegistroAntes)   cambios.push('Stock: ' + stockRegistroAntes + ' → ' + stockNuevo);
+    if (precioNuevo !== precioRegistroAntes)  cambios.push('Precio: $' + precioRegistroAntes + ' → $' + precioNuevo);
+    if (nombreNuevo !== nombreActual)         cambios.push('Nombre: ' + nombreActual + ' → ' + nombreNuevo);
+    if (catNueva    !== catActual)            cambios.push('Categoría: ' + catActual + ' → ' + catNueva);
+
+    return {
+      success: true,
+      mensaje: '✅ Ajuste guardado\n' + cambios.join('\n'),
+      stockNuevo: stockNuevo
+    };
+  } catch (error) {
+    console.error('Error ajustarProducto:', error);
+    return { success: false, mensaje: 'Error: ' + error.toString() };
+  }
+}
+
 // ========== ROTACIÓN AUTOMÁTICA ==========
 function calcularRotacionAuto() {
   try {
@@ -338,7 +427,7 @@ function calcularRotacionAuto() {
         if (nombre.includes('TOTAL TICKET') || nombre.startsWith('─')) continue;
         const fecha = f[1] instanceof Date ? f[1] : new Date(f[1]);
         if (isNaN(fecha.getTime()) || fecha < hace30) continue;
-        const qty = parseFloat(String(f[4]).replace('gr','')) || 0;
+        const qty = parseFloat(String(f[4]).replace('gr','').replace('kg','')) || 0;
         ventasMap[nombre] = (ventasMap[nombre] || 0) + qty;
       }
     }
@@ -476,6 +565,8 @@ function _ofertaBuildProducto_(fila, i) {
     category: String(fila[2] || 'ALMACEN').trim().toUpperCase(),
     stock: parseInt(fila[5]) || 0,
     relampago: parseInt(fila[6]) || 0,
+    destacada: parseInt(fila[7]) || 0,
+    especial: parseInt(fila[8]) || 0,
     rotacion: fila.length > 14 ? (parseInt(fila[14]) || 0) : 0,
     vencimiento: venc,
     diasParaVencer: _ofertaDiasVencer_(fila),
@@ -483,15 +574,30 @@ function _ofertaBuildProducto_(fila, i) {
   };
 }
 
+// ========== CALCULAR OFERTAS — retorna los 4 pools completos ==========
+// v7.0: Ahora retorna los 4 arrays que necesitan index.html y venta.html
+//
+// Pool 1 — relampagoActivo:   top 4 por score (relampago > 0, stock > 0)
+// Pool 2 — ultimasUnidades:   top 6 por score (vencimiento ≤ 3 días O stock ≤ 5)
+// Pool 3 — destacadasActivas: TODOS con destacada > 0 y stock > 0
+//                             El % de descuento está en fila[7] (ej: 15, 20, 25)
+// Pool 4 — especialesActivas: TODOS con especial > 0 y stock > 0 (-10% fijo)
+//
+// Regla del pool: "lo que ven los clientes en index.html = lo que ve el POS"
+// El toggle (activo/inactivo ese día) lo gestiona el frontend leyendo config_sistema
 function calcularOfertas() {
   var ss = SpreadsheetApp.openById(SS_ID);
   var sheet = ss.getSheetByName(HOJA_INVENTARIO);
   var datos = sheet.getDataRange().getValues();
 
-  var relampagoActivo = [];
-  var ultimasUnidades = [];
+  var relampagoActivo   = [];
+  var ultimasUnidades   = [];
+  var destacadasActivas = [];
+  var especialesActivas = [];
   var idsUsados = {};
 
+  // ── POOL 2: ÚLTIMAS UNIDADES ──────────────────────────────────────────────
+  // Criterio A: vencimiento ≤ 3 días (urgencia alta)
   var candidatosUltimas = [];
   for (var i = 1; i < datos.length; i++) {
     var fila = datos[i];
@@ -502,7 +608,7 @@ function calcularOfertas() {
     if (dv === null || dv > 3) continue;
     candidatosUltimas.push({ fila: fila, i: i, p: _ofertaPuntaje_(fila) + 10 });
   }
-
+  // Criterio B: stock ≤ 5 Y tiene relampago configurado
   for (var i2 = 1; i2 < datos.length; i2++) {
     var fila2 = datos[i2];
     if (!fila2[0]) continue;
@@ -510,12 +616,11 @@ function calcularOfertas() {
     var relampago2 = parseInt(fila2[6]) || 0;
     if (stock2 <= 0 || stock2 > 5 || relampago2 <= 0) continue;
     var dv2 = _ofertaDiasVencer_(fila2);
-    if (dv2 !== null && dv2 <= 3) continue;
+    if (dv2 !== null && dv2 <= 3) continue; // ya está en criterio A
     var p2 = _ofertaPuntaje_(fila2);
     if (p2 <= -99) continue;
     candidatosUltimas.push({ fila: fila2, i: i2, p: p2 });
   }
-
   candidatosUltimas
     .sort(function(a, b) { return b.p - a.p; })
     .slice(0, 6)
@@ -524,11 +629,12 @@ function calcularOfertas() {
       idsUsados[c.i] = true;
     });
 
+  // ── POOL 1: RELÁMPAGO — top 4 por score ──────────────────────────────────
   var candidatosRelampago = [];
   for (var i3 = 1; i3 < datos.length; i3++) {
     var fila3 = datos[i3];
     if (!fila3[0]) continue;
-    if (idsUsados[i3]) continue;
+    if (idsUsados[i3]) continue; // ya está en últimas unidades
     var stock3 = parseInt(fila3[5]) || 0;
     var relampago3 = parseInt(fila3[6]) || 0;
     if (stock3 <= 0 || relampago3 <= 0) continue;
@@ -536,7 +642,6 @@ function calcularOfertas() {
     if (p3 <= -99) continue;
     candidatosRelampago.push({ fila: fila3, i: i3, p: p3 });
   }
-
   candidatosRelampago
     .sort(function(a, b) { return b.p - a.p; })
     .slice(0, 4)
@@ -544,14 +649,43 @@ function calcularOfertas() {
       relampagoActivo.push(_ofertaBuildProducto_(c.fila, c.i));
     });
 
+  // ── POOL 3: DESTACADAS — todos con destacada > 0 y stock > 0 ─────────────
+  // fila[7] = el % de descuento directo (ej: 15 → -15%, 20 → -20%, 25 → -25%)
+  for (var i4 = 1; i4 < datos.length; i4++) {
+    var fila4 = datos[i4];
+    if (!fila4[0]) continue;
+    var stock4    = parseInt(fila4[5]) || 0;
+    var destacada4 = parseInt(fila4[7]) || 0;
+    if (stock4 <= 0 || destacada4 <= 0) continue;
+    var prod4 = _ofertaBuildProducto_(fila4, i4);
+    prod4.precioOferta = Math.round((parseInt(fila4[1]) || 0) * (1 - destacada4 / 100));
+    destacadasActivas.push(prod4);
+  }
+
+  // ── POOL 4: ESPECIALES — todos con especial > 0 y stock > 0, -10% fijo ───
+  for (var i5 = 1; i5 < datos.length; i5++) {
+    var fila5 = datos[i5];
+    if (!fila5[0]) continue;
+    var stock5    = parseInt(fila5[5]) || 0;
+    var especial5 = parseInt(fila5[8]) || 0;
+    if (stock5 <= 0 || especial5 <= 0) continue;
+    var prod5 = _ofertaBuildProducto_(fila5, i5);
+    prod5.precioOferta = Math.round((parseInt(fila5[1]) || 0) * 0.9);
+    especialesActivas.push(prod5);
+  }
+
   return {
     success: true,
-    relampagoActivo: relampagoActivo,
-    ultimasUnidades: ultimasUnidades,
+    relampagoActivo:   relampagoActivo,
+    ultimasUnidades:   ultimasUnidades,
+    destacadasActivas: destacadasActivas,
+    especialesActivas: especialesActivas,
     fecha: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm'),
     stats: {
-      totalRelampago: relampagoActivo.length,
-      totalUltimas: ultimasUnidades.length
+      totalRelampago:  relampagoActivo.length,
+      totalUltimas:    ultimasUnidades.length,
+      totalDestacadas: destacadasActivas.length,
+      totalEspeciales: especialesActivas.length
     }
   };
 }
@@ -644,8 +778,7 @@ function activarRelampago(datos) {
   }
 }
 
-// ========== API PRINCIPAL doGet ==========
-// ── v5.6: Leer configuración desde hoja config_sistema ──────────────────────
+// ========== GET CONFIG ==========
 function getConfig() {
   try {
     const ss = SpreadsheetApp.openById(SS_ID);
@@ -653,16 +786,27 @@ function getConfig() {
     if (!sheet) return { success: false, mensaje: 'Hoja config_sistema no encontrada' };
     const datos = sheet.getDataRange().getValues();
     const config = {};
+    let seccionActual = 'general';
     for (let i = 1; i < datos.length; i++) {
       const clave = String(datos[i][0] || '').trim();
       if (!clave) continue;
-      // Columnas B a H = L M M J V S D (índices 1 a 7)
+      if (clave.startsWith('──') || clave.startsWith('─') || clave.startsWith('📌')) {
+        const c = clave.toLowerCase();
+        if (c.includes('relámpago') || c.includes('relampago')) seccionActual = 'relampago';
+        else if (c.includes('destacada')) seccionActual = 'destacadas';
+        else if (c.includes('especial')) seccionActual = 'especiales';
+        else if (c.includes('unidad') || c.includes('última') || c.includes('ultima')) seccionActual = 'ultimas';
+        else if (c.includes('horario')) seccionActual = 'horario';
+        continue;
+      }
       const vals = [];
       for (let c = 1; c <= 7; c++) {
         const v = datos[i][c];
         vals.push(v !== '' && v !== null && v !== undefined ? v : null);
       }
-      config[clave] = vals;
+      const claveUnica = seccionActual + '|' + clave;
+      config[claveUnica] = vals;
+      if (!config[clave]) config[clave] = vals;
     }
     return { success: true, config };
   } catch(e) {
@@ -670,33 +814,265 @@ function getConfig() {
   }
 }
 
+// ========== SET CONFIG ==========
+function setConfig(datos) {
+  try {
+    const ss = SpreadsheetApp.openById(SS_ID);
+    const sheet = ss.getSheetByName(HOJA_CONFIG);
+    if (!sheet) return { success: false, mensaje: 'Hoja config_sistema no encontrada' };
+
+    const seccion  = String(datos.seccion || '').toLowerCase();
+    const clave    = String(datos.clave   || '').trim();
+    const diaIdx   = parseInt(datos.dia);
+    const valor    = datos.valor === 1 || datos.valor === '1' ? 1 : 0;
+
+    if (isNaN(diaIdx) || diaIdx < 0 || diaIdx > 6) return { success: false, mensaje: 'Día inválido' };
+
+    const hojaData = sheet.getDataRange().getValues();
+    let seccionActual = 'general';
+    let filaObjetivo = -1;
+
+    for (let i = 1; i < hojaData.length; i++) {
+      const celda = String(hojaData[i][0] || '').trim();
+      if (!celda) continue;
+      if (celda.startsWith('──') || celda.startsWith('─') || celda.startsWith('📌')) {
+        const c = celda.toLowerCase();
+        if (c.includes('relámpago') || c.includes('relampago')) seccionActual = 'relampago';
+        else if (c.includes('destacada')) seccionActual = 'destacadas';
+        else if (c.includes('especial')) seccionActual = 'especiales';
+        else if (c.includes('unidad') || c.includes('última') || c.includes('ultima')) seccionActual = 'ultimas';
+        else if (c.includes('horario')) seccionActual = 'horario';
+        continue;
+      }
+      if (seccionActual === seccion && celda === clave) {
+        filaObjetivo = i + 1;
+        break;
+      }
+    }
+
+    if (filaObjetivo === -1) return { success: false, mensaje: 'No se encontró: ' + seccion + '|' + clave };
+
+    const columna = diaIdx + 2;
+    sheet.getRange(filaObjetivo, columna).setValue(valor);
+
+    return { success: true, mensaje: 'OK: ' + seccion + '|' + clave + '[' + diaIdx + '] = ' + valor };
+  } catch(e) {
+    return { success: false, mensaje: e.toString() };
+  }
+}
+
+// ========== JUEVES CERVECERO ==========
+function getJuevesCervecero() {
+  try {
+    const ss = SpreadsheetApp.openById(SS_ID);
+    const sheetInv    = ss.getSheetByName(HOJA_INVENTARIO);
+    const sheetVentas = ss.getSheetByName('Ventas');
+    const sheetCfg    = ss.getSheetByName(HOJA_CONFIG);
+    if (!sheetInv) return { success: false, mensaje: 'Sin inventario' };
+
+    let horaCierre = 22;
+    if (sheetCfg) {
+      const cfgData = sheetCfg.getDataRange().getValues();
+      let enHorario = false;
+      for (let i = 0; i < cfgData.length; i++) {
+        const clave = String(cfgData[i][0] || '').trim().toLowerCase();
+        if (clave.includes('horario local') || clave.includes('── horario')) { enHorario = true; continue; }
+        if (enHorario && clave.includes('cierre local')) {
+          const v = cfgData[i][4];
+          if (v !== null && v !== '') {
+            const parsed = parseFloat(String(v).split(':')[0]);
+            if (!isNaN(parsed)) horaCierre = parsed;
+          }
+          break;
+        }
+      }
+    }
+
+    const inv = sheetInv.getDataRange().getValues();
+    const cervezas = [];
+    for (let i = 1; i < inv.length; i++) {
+      const nombre = String(inv[i][0] || '').trim();
+      const cat    = String(inv[i][2] || '').trim().toUpperCase();
+      const precio = parseFloat(inv[i][1]) || 0;
+      const stock  = parseInt(inv[i][5]) || 0;
+      const costo  = parseFloat(inv[i][18]) || 0;
+      if (!nombre || stock < 3 || precio <= 0) continue;
+      const esCerveza = cat.includes('CERV') ||
+                        nombre.toUpperCase().includes('CERVEZA') ||
+                        nombre.toUpperCase().includes(' LATA') ||
+                        nombre.toUpperCase().includes('BIRRA') ||
+                        nombre.toUpperCase().includes(' IPA') ||
+                        nombre.toUpperCase().includes(' STOUT') ||
+                        nombre.toUpperCase().includes(' PORTER');
+      if (!esCerveza) continue;
+      const margen = costo > 0 ? (precio - costo) / precio : 0.35;
+      cervezas.push({ i, nombre, precio, stock, costo, margen });
+    }
+
+    if (!cervezas.length) return { success: true, productos: [], horaCierre };
+
+    const ventasProd = {};
+    const ticketTotales = {};
+    if (sheetVentas) {
+      const hoy    = new Date();
+      const hace30 = new Date(hoy - 30 * 86400000);
+      const ventas = sheetVentas.getDataRange().getValues();
+      for (let i = 1; i < ventas.length; i++) {
+        const f = ventas[i];
+        const nombre = String(f[3] || '').trim();
+        if (nombre.includes('TOTAL TICKET')) {
+          ticketTotales[String(f[0] || '').trim()] = parseFloat(f[7]) || 0;
+        }
+      }
+      for (let i = 1; i < ventas.length; i++) {
+        const f = ventas[i];
+        const fecha = f[1];
+        if (!(fecha instanceof Date) || fecha < hace30) continue;
+        const nombre = String(f[3] || '').trim().toUpperCase();
+        const qty    = parseFloat(f[4]) || 0;
+        const tk     = String(f[0] || '').trim();
+        if (!nombre || nombre.startsWith('─')) continue;
+        if (!ventasProd[nombre]) ventasProd[nombre] = { qty: 0, tickets: 0, ticketTotal: 0 };
+        ventasProd[nombre].qty += qty;
+        ventasProd[nombre].tickets++;
+        ventasProd[nombre].ticketTotal += ticketTotales[tk] || 0;
+      }
+    }
+
+    const maxQty    = Math.max(...cervezas.map(c => (ventasProd[c.nombre.toUpperCase()] || {qty:0}).qty), 1);
+    const maxStock  = Math.max(...cervezas.map(c => c.stock), 1);
+    const maxTicket = Math.max(...cervezas.map(c => (ventasProd[c.nombre.toUpperCase()] || {ticketTotal:0}).ticketTotal), 1);
+
+    const scored = cervezas.map(c => {
+      const vd        = ventasProd[c.nombre.toUpperCase()] || { qty: 0, tickets: 0, ticketTotal: 0 };
+      const rotScore  = vd.qty / maxQty;
+      const stockScore = c.stock / maxStock;
+      const margenScore = Math.min(c.margen, 1);
+      const ticketScore = vd.ticketTotal / maxTicket;
+      const promoScore = (rotScore * 0.35) + (stockScore * 0.25) + (margenScore * 0.20) + (ticketScore * 0.20);
+      return { ...c, promoScore, ventas30: vd.qty };
+    });
+
+    const top6 = scored.sort((a, b) => b.promoScore - a.promoScore).slice(0, 6);
+    const idxGancho = top6.reduce((bestIdx, c, i) => c.margen > top6[bestIdx].margen ? i : bestIdx, 0);
+
+    const top6Final = top6.map((c, idx) => {
+      let descuento = idx === idxGancho ? 20 : (c.margen > 0.30 ? 15 : 10);
+      const precioPromo = Math.max(
+        Math.round(c.precio * (1 - descuento / 100)),
+        c.costo > 0 ? Math.ceil(c.costo * 1.05) : 0
+      );
+      return { ...c, descuento, precioPromo, esGancho: idx === idxGancho };
+    });
+
+    return { success: true, productos: top6Final, horaCierre };
+  } catch(e) {
+    return { success: false, mensaje: e.toString() };
+  }
+}
+
+function logEventoCerveza(datos) {
+  try {
+    const ss = SpreadsheetApp.openById(SS_ID);
+    const HOJA_LOG = 'evento_cerveza_log';
+    let sheet = ss.getSheetByName(HOJA_LOG);
+    if (!sheet) {
+      sheet = ss.insertSheet(HOJA_LOG);
+      sheet.appendRow(['FECHA', 'PRODUCTOS', 'UNIDADES VENDIDAS', 'FACTURACIÓN', 'GANANCIA', 'TICKET PROMEDIO', 'DESCUENTO APLICADO']);
+      sheet.getRange(1, 1, 1, 7).setBackground('#4a148c').setFontColor('white').setFontWeight('bold');
+      [120, 200, 80, 100, 100, 100, 100].forEach((w, i) => sheet.setColumnWidth(i + 1, w));
+    }
+    const tz = Session.getScriptTimeZone();
+    const fecha = Utilities.formatDate(new Date(), tz, 'dd/MM/yyyy HH:mm');
+    sheet.appendRow([
+      fecha,
+      String(datos.productos || ''),
+      datos.unidades || 0,
+      datos.facturacion || 0,
+      datos.ganancia || 0,
+      datos.ticketPromedio || 0,
+      String(datos.descuentos || '')
+    ]);
+    return { success: true };
+  } catch(e) {
+    return { success: false, mensaje: e.toString() };
+  }
+}
+
+function logInterruptor(datos) {
+  try {
+    const ss = SpreadsheetApp.openById(SS_ID);
+    const HOJA_LOG = 'Interruptores_Log';
+    let sheet = ss.getSheetByName(HOJA_LOG);
+    if (!sheet) {
+      sheet = ss.insertSheet(HOJA_LOG);
+      sheet.appendRow(['FECHA', 'HORA', 'OFERTA', 'ACCIÓN', 'DÍA SEMANA', 'VENDEDOR']);
+      sheet.getRange(1, 1, 1, 6)
+           .setBackground('#1a237e').setFontColor('white').setFontWeight('bold');
+      sheet.setColumnWidth(1, 110);
+      sheet.setColumnWidth(2, 80);
+      sheet.setColumnWidth(3, 120);
+      sheet.setColumnWidth(4, 100);
+      sheet.setColumnWidth(5, 120);
+      sheet.setColumnWidth(6, 120);
+    }
+
+    const tz = Session.getScriptTimeZone();
+    const ahora = new Date();
+    const fecha = Utilities.formatDate(ahora, tz, 'dd/MM/yyyy');
+    const hora  = Utilities.formatDate(ahora, tz, 'HH:mm:ss');
+    const diasNombres = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+    const diaSemana = diasNombres[ahora.getDay()];
+
+    const oferta   = String(datos.tipo     || '').toUpperCase();
+    const accion   = datos.estado === 1 ? '🟢 ACTIVADO' : '🔴 DESACTIVADO';
+    const vendedor = String(datos.vendedor || 'Desconocido');
+
+    sheet.appendRow([fecha, hora, oferta, accion, diaSemana, vendedor]);
+    return { success: true };
+  } catch(e) {
+    return { success: false, mensaje: e.toString() };
+  }
+}
+
+// ========== API PRINCIPAL doGet ==========
 function doGet(e) {
   try {
 
-    // ACCIÓN: VENDER
     if (e && e.parameter && e.parameter.action === 'vender') {
       return procesarVenta(e.parameter.data);
     }
-
-    // ACCIÓN: AGREGAR PRODUCTO NUEVO
     if (e && e.parameter && e.parameter.action === 'agregar') {
       return agregarProducto(e.parameter.data);
     }
-
-    // ACCIÓN: INGRESO DE MERCADERÍA
     if (e && e.parameter && e.parameter.action === 'ingresar') {
       const datos = JSON.parse(decodeURIComponent(e.parameter.data));
       return respuestaJSON(ingresarMercaderia(datos));
     }
-
-    // ACCIÓN: CREAR ORDEN MP
+    if (e && e.parameter && e.parameter.action === 'ajusteRapido') {
+      const datos = JSON.parse(decodeURIComponent(e.parameter.data));
+      return respuestaJSON(ajustarProducto(datos));
+    }
+    if (e && e.parameter && e.parameter.action === 'setConfig') {
+      const datos = JSON.parse(decodeURIComponent(e.parameter.data));
+      return respuestaJSON(setConfig(datos));
+    }
+    if (e && e.parameter && e.parameter.action === 'getJuevesCervecero') {
+      return respuestaJSON(getJuevesCervecero());
+    }
+    if (e && e.parameter && e.parameter.action === 'logEventoCerveza') {
+      const datos = JSON.parse(decodeURIComponent(e.parameter.data));
+      return respuestaJSON(logEventoCerveza(datos));
+    }
+    if (e && e.parameter && e.parameter.action === 'logInterruptor') {
+      const datos = JSON.parse(decodeURIComponent(e.parameter.data));
+      return respuestaJSON(logInterruptor(datos));
+    }
     if (e && e.parameter && e.parameter.action === 'crearOrdenMP') {
       const monto = parseFloat(e.parameter.monto) || 0;
       if (monto <= 0) return respuestaJSON({ ok: false, error: 'Monto inválido' });
       return respuestaJSON(crearOrdenMP(monto));
     }
-
-    // ACCIÓN: REPORTES
     if (e && e.parameter && e.parameter.action === 'getReportes') {
       try {
         return respuestaJSON(getReportes());
@@ -704,8 +1080,6 @@ function doGet(e) {
         return respuestaJSON({ error: true, mensaje: 'Error en reportes: ' + errReportes.toString() });
       }
     }
-
-    // ACCIÓN: OFERTAS
     if (e && e.parameter && e.parameter.action === 'getOfertas') {
       try {
         return respuestaJSON(calcularOfertas());
@@ -713,41 +1087,32 @@ function doGet(e) {
         return respuestaJSON({ error: true, mensaje: 'Error en ofertas: ' + errOfertas.toString() });
       }
     }
-
-    // ACCIÓN: MOTOR SUGERENCIAS
     if (e && e.parameter && e.parameter.action === 'motorSugerencias') {
       return respuestaJSON(calcularMotorSugerencias());
     }
-
-    // ACCIÓN: RELÁMPAGO
     if (e && e.parameter && e.parameter.action === 'relampago') {
       const datos = JSON.parse(decodeURIComponent(e.parameter.data));
       return respuestaJSON(activarRelampago(datos));
     }
-
-    // ── NUEVO v5.6 ──────────────────────────────────────────────────────────
-
-    // ACCIÓN: GET CONFIG SISTEMA
     if (e && e.parameter && e.parameter.action === 'getConfig') {
       return respuestaJSON(getConfig());
     }
-
-    // ── NUEVO v5.5 ──────────────────────────────────────────────────────────
-
-    // ACCIÓN: LEER PROVEEDORES
     if (e && e.parameter && e.parameter.action === 'getProveedores') {
       return respuestaJSON(leerProveedores());
     }
-
-    // ACCIÓN: GUARDAR PROVEEDOR (nombre + telefono + mensaje + activo)
     if (e && e.parameter && e.parameter.action === 'guardarProveedor') {
       const datos = JSON.parse(decodeURIComponent(e.parameter.data));
       return respuestaJSON(guardarProveedor(datos));
     }
+    if (e && e.parameter && e.parameter.action === 'guardarCarritoTemp') {
+      const datos = JSON.parse(decodeURIComponent(e.parameter.data));
+      return respuestaJSON(guardarCarritoTemp(datos));
+    }
+    if (e && e.parameter && e.parameter.action === 'getCarritoTemp') {
+      return respuestaJSON(getCarritoTemp());
+    }
 
-    // ────────────────────────────────────────────────────────────────────────
-
-    // ACCIÓN: GET PRODUCTOS (carga la tienda)
+    // ── GET PRODUCTOS (carga principal) ──────────────────────────────────────
     const ss = SpreadsheetApp.openById(SS_ID);
     const sheet = ss.getSheetByName(HOJA_INVENTARIO);
     const datos = sheet.getDataRange().getValues();
@@ -770,7 +1135,7 @@ function doGet(e) {
         image: '',
         relampago: parseInt(fila[6]) || 0,
         destacada: parseInt(fila[7]) || 0,
-        especial: parseInt(fila[8]) || 0,
+        especial:  parseInt(fila[8]) || 0,
         normal: 0,
         proveedor: String(fila[4] || '').trim(),
         vencimiento: (() => {
@@ -817,7 +1182,7 @@ function doGet(e) {
         productos: productos,
         total: productos.length,
         fecha: new Date().toISOString(),
-        version: '5.5'
+        version: '7.0'
       }))
       .setMimeType(ContentService.MimeType.JSON);
 
@@ -848,7 +1213,7 @@ function procesarVenta(dataStr) {
     let totalVenta = 0;
 
     for (const item of items) {
-      const filaIndex = item.id;
+      const filaIndex = item.esPeso ? (item.idOriginal || item.id) : item.id;
       if (filaIndex < 1 || filaIndex >= datos.length) { errores.push(`ID ${item.id} no encontrado`); continue; }
       const fila = datos[filaIndex];
       const nombreEnSheet = String(fila[0] || '').trim();
@@ -860,12 +1225,18 @@ function procesarVenta(dataStr) {
       const precioVenta = item.precioVenta !== undefined && item.precioVenta !== null && item.precioVenta !== '' ? parseInt(item.precioVenta) : precioUnit;
       const precioOriginal = parseInt(item.precioOriginal) || 0;
       const precioModificado = item.precioModificado === true;
-      if (qty <= 0) continue;
+      if (esPeso && gramos <= 0) { errores.push(`${nombreEnSheet}: gramos inválidos`); continue; }
+      if (!esPeso && qty <= 0) continue;
 
       if (esPeso) {
+        const kgVendidos = gramos / 1000;
+        const stockEnKg  = parseFloat(fila[5]) || 0;
+        const nuevoStockKg = Math.max(0, Math.round((stockEnKg - kgVendidos) * 1000) / 1000);
+        sheetInventario.getRange(filaIndex + 1, 6).setValue(nuevoStockKg);
         const nombreConPeso = gramos > 0 ? `${nombreEnSheet} (${gramos}gr)` : nombreEnSheet;
+        const kgDisplay = Math.round(kgVendidos * 1000) / 1000;
         totalVenta += precioVenta;
-        procesados.push({ name: nombreConPeso, qty: gramos, nuevoStock: stockActual, precio: precioVenta, esPeso: true });
+        procesados.push({ name: nombreConPeso, qty: kgDisplay, nuevoStock: nuevoStockKg, precio: precioVenta, esPeso: true, gramos });
       } else {
         if (stockActual < qty) errores.push(`${nombreEnSheet}: stock insuficiente (tiene ${stockActual}, vendió ${qty})`);
         const nuevoStock = Math.max(0, stockActual - qty);
@@ -897,7 +1268,7 @@ function procesarVenta(dataStr) {
           celdaTicket.setNumberFormat('@STRING@');
           celdaTicket.setValue(ticketStr);
           const subtotal = p.esPeso ? p.precio : p.precio * p.qty;
-          const cantDisplay = p.esPeso ? p.qty + 'gr' : p.qty;
+          const cantDisplay = p.esPeso ? p.qty : p.qty;
           const nombreDisplay = p.precioModificado
             ? p.name + (p.precioOriginal ? ' [PRECIO ESP: $' + p.precioOriginal + '→$' + p.precio + ']' : ' [PRECIO ESPECIAL]')
             : p.name;
@@ -980,6 +1351,18 @@ function pruebaRapida() {
   return json;
 }
 
+// ========== PRUEBA DE OFERTAS ==========
+function pruebaOfertas() {
+  const resultado = calcularOfertas();
+  console.log('✅ Ofertas calculadas:');
+  console.log('  Relámpago:', resultado.relampagoActivo.length);
+  console.log('  Últimas unidades:', resultado.ultimasUnidades.length);
+  console.log('  Destacadas:', resultado.destacadasActivas.length);
+  console.log('  Especiales:', resultado.especialesActivas.length);
+  console.log(JSON.stringify(resultado.stats));
+  return resultado;
+}
+
 // ========== REPORTES COMPLETOS ==========
 function getReportes() {
   try {
@@ -1059,12 +1442,16 @@ function getReportes() {
         const total    = parseFloat(f[7]) || 0;
         totales.push({ fechaStr, hora, ticket, metodo, vendedor, total });
       } else if (nombre && !nombre.startsWith('─')) {
-        const ticket   = colA;
+        const ticketRaw = String(colA||'').trim();
+        const ticket    = ticketRaw.match(/^\d+$/) ? ticketRaw.padStart(4,'0') : ticketRaw;
         const qtyRaw   = f[4];
-        const qty      = parseFloat(String(qtyRaw).replace('gr','')) || 0;
+        const qtyStr   = String(qtyRaw||'').trim();
+        let qty        = parseFloat(qtyStr.replace('gr','').replace('kg','')) || 0;
+        const esQtyEnGramos = /\(\d+gr\)/i.test(nombre) && qty >= 50;
+        if (esQtyEnGramos) qty = qty / 1000;
         const precio   = parseFloat(f[5]) || 0;
         const subtotal = parseFloat(f[6]) || 0;
-        const nomLimpio = nombre.replace(/\[PRECIO ESP[^]]*\]/,'').trim().toUpperCase();
+        const nomLimpio = nombre.replace(/\[PRECIO ESP[^]]*\]/,'').replace(/\s*\(\d+gr\)/i,'').replace(/\s*\(\d+\.?\d*kg\)/i,'').trim().toUpperCase();
         const costo    = costos[nomLimpio] || 0;
         const tieneCosto = costo > 0;
         const gananciaReal = tieneCosto ? subtotal - (costo * qty) : null;
@@ -1073,7 +1460,40 @@ function getReportes() {
       }
     }
 
-    return { items, totales, vencProximos, stockInfo };
+    const mapaGanancia = {};
+    for (const it of items) {
+      if (!mapaGanancia[it.nombre]) {
+        mapaGanancia[it.nombre] = {
+          nombre: it.nombre,
+          qtdVendida: 0,
+          ingresos: 0,
+          gananciaReal: 0,
+          gananciaAprox: 0,
+          tieneCosto: it.tieneCosto,
+          costo: it.costo
+        };
+      }
+      const m = mapaGanancia[it.nombre];
+      m.qtdVendida  += it.qty;
+      m.ingresos    += it.subtotal;
+      m.gananciaAprox += it.gananciaAprox;
+      if (it.gananciaReal !== null) {
+        m.gananciaReal += it.gananciaReal;
+        m.tieneCosto = true;
+      }
+    }
+
+    const topGanancia = Object.values(mapaGanancia)
+      .map(p => ({
+        ...p,
+        ganancia: p.tieneCosto ? p.gananciaReal : p.gananciaAprox,
+        esReal: p.tieneCosto
+      }))
+      .filter(p => p.ganancia > 0)
+      .sort((a, b) => b.ganancia - a.ganancia)
+      .slice(0, 20);
+
+    return { items, totales, vencProximos, stockInfo, topGanancia };
   } catch(e) {
     return { error: e.toString() };
   }
@@ -1101,5 +1521,49 @@ function crearOrdenMP(monto) {
     return { ok: false, error: JSON.stringify(data) };
   } catch(e) {
     return { ok: false, error: e.toString() };
+  }
+}
+
+// ========== CARRITO TEMPORAL ==========
+function guardarCarritoTemp(payload) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let sh = ss.getSheetByName('carrito_temp');
+    if (!sh) {
+      sh = ss.insertSheet('carrito_temp');
+      sh.getRange(1,1,1,3).setValues([['timestamp','vendedor','items_json']]);
+    }
+    const data = typeof payload === 'string' ? JSON.parse(payload) : payload;
+    if (!data.items || data.items.length === 0) {
+      if (sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow()-1, 3).clearContent();
+      return { success: true, action: 'cleared' };
+    }
+    if (sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow()-1, 3).clearContent();
+    sh.getRange(2,1,1,3).setValues([[
+      new Date().toISOString(),
+      data.vendedor || '',
+      JSON.stringify(data.items)
+    ]]);
+    return { success: true, action: 'saved', count: data.items.length };
+  } catch(e) {
+    return { success: false, error: e.toString() };
+  }
+}
+
+function getCarritoTemp() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sh = ss.getSheetByName('carrito_temp');
+    if (!sh || sh.getLastRow() < 2) return { success: true, items: [] };
+    const row = sh.getRange(2,1,1,3).getValues()[0];
+    const ts = row[0];
+    if (ts && (Date.now() - new Date(ts).getTime()) > 8 * 60 * 60 * 1000) {
+      sh.getRange(2, 1, 1, 3).clearContent();
+      return { success: true, items: [] };
+    }
+    const items = row[2] ? JSON.parse(row[2]) : [];
+    return { success: true, items, vendedor: row[1] || '', ts: ts ? new Date(ts).toISOString() : '' };
+  } catch(e) {
+    return { success: false, error: e.toString(), items: [] };
   }
 }
