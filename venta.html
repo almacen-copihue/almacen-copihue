@@ -4930,6 +4930,12 @@ async function abrirFlyerAdmin() {
         }
         _flyerProductos  = data.productos;
         _flyerHoraCierre = data.horaCierre || 22;
+        
+        // === ORDENAR POR DESCUENTO DESC, LUEGO ROTACIÓN DESC ===
+        _flyerProductos.sort((a, b) => {
+            if (b.descuento !== a.descuento) return b.descuento - a.descuento;
+            return (b.rotacion || 0) - (a.rotacion || 0);
+        });
     } catch(e) {
         mostrarToast('❌ Error cargando datos', 'rojo'); return;
     }
@@ -4943,7 +4949,7 @@ async function abrirFlyerAdmin() {
 }
 
 function _generarCanvasFlyer(prods, horaCierre) {
-    const W = 600, PADDING = 32, ROW_H = 88, HEADER_H = 160, FOOTER_H = 100;
+    const W = 600, PADDING = 32, ROW_H = 95, HEADER_H = 160, FOOTER_H = 100;
     const H = HEADER_H + prods.length * ROW_H + FOOTER_H + PADDING;
     const canvas = document.createElement('canvas');
     canvas.width = W; canvas.height = H;
@@ -4957,7 +4963,7 @@ function _generarCanvasFlyer(prods, horaCierre) {
     ctx.fillStyle = bg;
     ctx.fillRect(0,0,W,H);
 
-    // Textura sutil de ruido (simulado con patrón diagonal suave)
+    // Textura sutil de ruido
     ctx.fillStyle = 'rgba(255,255,255,0.01)';
     for(let i=0;i<H;i+=4){
         ctx.fillRect(0,i,W,1);
@@ -4976,7 +4982,7 @@ function _generarCanvasFlyer(prods, horaCierre) {
     ctx.lineTo(W,12);
     ctx.stroke();
 
-    // Título principal (centrado, ámbar cerveza)
+    // Título principal
     ctx.font = 'bold 48px sans-serif';
     ctx.fillStyle = '#f9a825';
     ctx.textAlign = 'center';
@@ -4985,15 +4991,15 @@ function _generarCanvasFlyer(prods, horaCierre) {
     // Subtítulo
     ctx.font = '18px sans-serif';
     ctx.fillStyle = '#ffffff';
-    ctx.fillText('PROMOS ESPECIALES DE HOY', W/2, 100);
+    ctx.fillText('PROMOS ESPECIALES', W/2, 100);
 
-    // Hora limite (destacada)
+    // Hora limite (ámbar destacada)
     ctx.font = 'bold 16px sans-serif';
     ctx.fillStyle = '#f9a825';
-    ctx.fillText(`⏰ Válido hasta las ${horaCierre}:00hs`, W/2, 128);
+    ctx.fillText(`⏰ Hasta las ${horaCierre}:00hs`, W/2, 128);
 
     // Línea separadora elegante
-    ctx.strokeStyle = '#3a3a3a';
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(PADDING,145);
@@ -5003,75 +5009,129 @@ function _generarCanvasFlyer(prods, horaCierre) {
     // === PRODUCTOS ===
     prods.forEach((p,idx) => {
         const y = HEADER_H + idx * ROW_H;
-        const cy = y + ROW_H/2;
+        const cy = y + 48;
 
-        // Fondo alterno sutil
-        ctx.fillStyle = idx%2===0 ? 'rgba(255,255,255,0.02)':'rgba(249,168,37,0.03)';
+        // Fondo alterno sutil (más transparente)
+        ctx.fillStyle = idx%2===0 ? 'rgba(255,255,255,0.02)':'rgba(249,168,37,0.02)';
         ctx.fillRect(0,y,W,ROW_H);
 
-        // Badge descuento: ROJO PROMO (derecha)
-        ctx.fillStyle = '#d32f2f';
+        // === GLOW PARA PRODUCTO ESTRELLA (mayor descuento) ===
+        if(idx === 0 && p.descuento >= 20){
+            ctx.shadowColor = 'rgba(249,168,37,0.4)';
+            ctx.shadowBlur = 20;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+            ctx.fillStyle = 'rgba(249,168,37,0.08)';
+            ctx.fillRect(0, y, W, ROW_H);
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+        }
+
+        // === BADGE DESCUENTO: ESCALA PSICOLÓGICA ===
+        let badgeW, badgeH, badgeX, badgeY, discountFontSize, offFontSize;
+        let badgeColor;
+
+        if(p.descuento >= 25){
+            // GIGANTE: 25%+
+            badgeColor = '#ff3b30';
+            badgeW = 110; badgeH = 52;
+            badgeX = W - PADDING - 120;
+            badgeY = cy - 26;
+            discountFontSize = 'bold 38px sans-serif';
+            offFontSize = 'bold 14px sans-serif';
+        } else if(p.descuento >= 20){
+            // GRANDE: 20-24%
+            badgeColor = '#ff3b30';
+            badgeW = 100; badgeH = 48;
+            badgeX = W - PADDING - 110;
+            badgeY = cy - 24;
+            discountFontSize = 'bold 32px sans-serif';
+            offFontSize = 'bold 13px sans-serif';
+        } else {
+            // NORMAL: <20%
+            badgeColor = '#d32f2f';
+            badgeW = 85; badgeH = 40;
+            badgeX = W - PADDING - 95;
+            badgeY = cy - 20;
+            discountFontSize = 'bold 24px sans-serif';
+            offFontSize = 'bold 11px sans-serif';
+        }
+
+        ctx.fillStyle = badgeColor;
         ctx.beginPath();
-        ctx.roundRect(W-PADDING-90, cy-22, 80, 44, 8);
+        ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 10);
         ctx.fill();
 
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 28px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(`${p.descuento}%`, W-PADDING-50, cy+8);
+        // Brillo extra si es 20%+
+        if(p.descuento >= 20){
+            ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 10);
+            ctx.stroke();
+        }
 
-        ctx.font = 'bold 12px sans-serif';
-        ctx.fillStyle = 'rgba(255,255,255,0.9)';
-        ctx.fillText('OFF', W-PADDING-50, cy+20);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = discountFontSize;
+        ctx.textAlign = 'center';
+        ctx.fillText(`${p.descuento}%`, badgeX + badgeW/2, cy+6);
+
+        ctx.font = offFontSize;
+        ctx.fillStyle = 'rgba(255,255,255,0.95)';
+        ctx.fillText('OFF', badgeX + badgeW/2, cy+22);
         ctx.textAlign = 'left';
 
-        // Nombre producto (blanco, bold)
-        const nom = p.nombre.length>28?p.nombre.substring(0,28)+'…':p.nombre;
+        // === NOMBRE PRODUCTO ===
+        const nom = p.nombre.length>30?p.nombre.substring(0,30)+'…':p.nombre;
         ctx.font = 'bold 22px sans-serif';
         ctx.fillStyle = '#ffffff';
-        ctx.fillText(nom, PADDING, cy-12);
+        ctx.fillText(nom, PADDING, cy-22);
 
-        // Precio normal tachado
-        ctx.font = '14px sans-serif';
-        ctx.fillStyle = 'rgba(255,255,255,0.4)';
-        const antesStr = `$${p.precio.toLocaleString('es-AR')}`;
-        ctx.fillText(antesStr, PADDING, cy+8);
-        const tw = ctx.measureText(antesStr).width;
-        ctx.strokeStyle = 'rgba(255,255,255,0.4)';
-        ctx.lineWidth = 1.5;
+        // === PRECIO ORIGINAL (superposición: arriba, tachado, gris) ===
+        ctx.font = '16px sans-serif';
+        ctx.fillStyle = '#9e9e9e';
+        ctx.textAlign = 'left';
+        const precioOrigStr = `$${p.precio.toLocaleString('es-AR')}`;
+        ctx.fillText(precioOrigStr, PADDING, cy-4);
+        
+        // Línea tachada sobre precio original
+        const origWidth = ctx.measureText(precioOrigStr).width;
+        ctx.strokeStyle = '#9e9e9e';
+        ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(PADDING, cy+2);
-        ctx.lineTo(PADDING+tw, cy+2);
+        ctx.moveTo(PADDING, cy-8);
+        ctx.lineTo(PADDING + origWidth, cy-8);
         ctx.stroke();
 
-        // Precio PROMO: Verde neón (asociado con oferta/ahorro)
-        ctx.font = 'bold 32px sans-serif';
+        // === PRECIO PROMO: Verde neón GIGANTE ===
+        ctx.font = 'bold 42px sans-serif';
         ctx.fillStyle = '#00e676';
         ctx.textAlign = 'left';
-        ctx.fillText(`$${p.precioPromo.toLocaleString('es-AR')}`, PADDING, cy+26);
+        ctx.fillText(`$${p.precioPromo.toLocaleString('es-AR')}`, PADDING, cy+30);
 
-        // Ahorro (pequeño, debajo)
-        ctx.font = '12px sans-serif';
-        ctx.fillStyle = 'rgba(0,230,118,0.7)';
-        ctx.fillText(`Ahorras $${(p.precio-p.precioPromo).toLocaleString('es-AR')}`, PADDING, cy+44);
-        ctx.textAlign = 'left';
+        // === AHORRO CALCULADO (verde claro) ===
+        ctx.font = '13px sans-serif';
+        ctx.fillStyle = 'rgba(0,230,118,0.8)';
+        ctx.fillText(`Ahorras $${(p.precio-p.precioPromo).toLocaleString('es-AR')}`, PADDING, cy+50);
 
-        // Línea separadora entre productos (discreta)
+        // === LÍNEA SEPARADORA PREMIUM ===
         if(idx < prods.length-1){
-            ctx.strokeStyle = '#3a3a3a';
+            ctx.strokeStyle = 'rgba(255,255,255,0.12)';
             ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.moveTo(PADDING, y+ROW_H-4);
             ctx.lineTo(W-PADDING, y+ROW_H-4);
             ctx.stroke();
         }
+
+        ctx.textAlign = 'left';
     });
 
     // === FOOTER: Call to action con urgencia ===
     const fy = HEADER_H + prods.length * ROW_H;
 
     // Línea decorativa
-    ctx.strokeStyle = '#3a3a3a';
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(PADDING,fy+10);
@@ -5079,10 +5139,10 @@ function _generarCanvasFlyer(prods, horaCierre) {
     ctx.stroke();
 
     // Texto urgencia
-    ctx.font = 'bold 24px sans-serif';
+    ctx.font = 'bold 26px sans-serif';
     ctx.fillStyle = '#f9a825';
     ctx.textAlign = 'center';
-    ctx.fillText('SOLO POR HOY', W/2, fy+50);
+    ctx.fillText('🔥 SOLO POR HOY', W/2, fy+50);
 
     ctx.font = '14px sans-serif';
     ctx.fillStyle = '#ffffff';
