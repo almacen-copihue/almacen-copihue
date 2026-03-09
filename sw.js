@@ -1,10 +1,9 @@
-const CACHE_VERSION = 'v2.5-250127';
+const CACHE_VERSION = 'v2.6-c0001a';
 const CACHE_NAME = `almacen-copihue-${CACHE_VERSION}`;
 
 // Archivos esenciales para cachear
 const ESSENTIAL_FILES = [
-    './',
-    './index.html',
+    './venta_pos.html',
     './manifest.json',
     './iconos-pwa/android/android-launchericon-48-48.png',
     './iconos-pwa/android/android-launchericon-192-192.png',
