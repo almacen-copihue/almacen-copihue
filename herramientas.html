@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — Herramientas</title>
+    <title>Copihue — Herramientas c0001a</title>
     <meta name="theme-color" content="1565c0">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -380,6 +380,11 @@
                     <div class="accion-label">Notificaciones</div>
                     <div class="accion-desc">Alertas y vencidos</div>
                 </button>
+                <a href="changelog.html" class="accion-btn" style="background:linear-gradient(135deg,#0d1117,#161b22);color:#58a6ff;box-shadow:0 2px 8px rgba(0,0,0,0.3);border:1px solid #30363d;">
+                    <div class="accion-icon">📋</div>
+                    <div class="accion-label">Changelog</div>
+                    <div class="accion-desc">c0001a · fixes y avances</div>
+                </a>
             </div>
         </div>
     </div>
@@ -692,78 +697,142 @@ function simplificarNombre(nombre) {
 }
 
 // ========== TOGGLES OFERTAS ==========
-const TOGGLE_KEYS = {
-    relampago:  'copihue_toggle_relampago',
-    destacadas: 'copihue_toggle_destacadas',
-    especiales: 'copihue_toggle_especiales',
-    ultimas:    'copihue_toggle_ultimas',
+// Leen y escriben estado real en la planilla (igual que venta_pos.html)
+
+const _TOGGLE_CONFIG = {
+    relampago:  { id: 'toggleRelampago',  emoji: '⚡', label: 'REL',  clave: 'Dias ofertas relampago',  colorActivo: 'rgba(249,168,37,0.5)',  bordeActivo: '#f9a825'  },
+    destacadas: { id: 'toggleDestacadas', emoji: '🔥', label: 'DEST', clave: 'Dias ofertas destacadas', colorActivo: 'rgba(255,111,0,0.5)',   bordeActivo: '#ff6f00'  },
+    especiales: { id: 'toggleEspeciales', emoji: '⭐', label: 'ESP',  clave: 'Dias ofertas especiales', colorActivo: 'rgba(0,188,212,0.5)',    bordeActivo: '#00bcd4'  },
+    ultimas:    { id: 'toggleUltimas',    emoji: '🏷️', label: 'ULT',  clave: 'Dias ofertas UNIDADES',  colorActivo: 'rgba(229,57,53,0.5)',    bordeActivo: '#e53935'  }
 };
 
-function inicializarToggles() {
-    Object.keys(TOGGLE_KEYS).forEach(tipo => {
-        const activo = localStorage.getItem(TOGGLE_KEYS[tipo]) !== '0';
-        _actualizarUIToggle(tipo, activo);
-    });
-    // Cervecero
-    const cerv = localStorage.getItem('copihue_cervecero_override');
-    const hoyKey = fechaArgentina();
-    const esCervecero = cerv === hoyKey;
-    _actualizarUIToggleCervecero(esCervecero);
+const _toggleEstado = { relampago: null, destacadas: null, especiales: null, ultimas: null };
+
+function _diaActualIdx() {
+    const js = new Date().getDay();
+    return [1,2,3,4,5,6,0].indexOf(js);
 }
 
-function _actualizarUIToggle(tipo, activo) {
-    const card = document.getElementById('toggle' + tipo.charAt(0).toUpperCase() + tipo.slice(1));
-    const estado = document.getElementById('estado' + tipo.charAt(0).toUpperCase() + tipo.slice(1));
-    if (!card || !estado) return;
+function _pintarToggle(tipo, activo) {
+    const cfg = _TOGGLE_CONFIG[tipo];
+    const card = document.getElementById(cfg.id);
+    const estadoEl = document.getElementById('estado' + tipo.charAt(0).toUpperCase() + tipo.slice(1));
+    if (!card) return;
+    if (activo === null) {
+        card.classList.remove('activo');
+        if (estadoEl) estadoEl.textContent = '...';
+        return;
+    }
     if (activo) {
         card.classList.add('activo');
-        estado.textContent = 'ACTIVO';
+        if (estadoEl) estadoEl.textContent = 'ACTIVO';
     } else {
         card.classList.remove('activo');
-        estado.textContent = 'Inactivo';
+        if (estadoEl) estadoEl.textContent = 'Inactivo';
     }
 }
 
-function _actualizarUIToggleCervecero(activo) {
-    const card = document.getElementById('toggleCervecero');
-    const estado = document.getElementById('estadoCervecero');
-    if (!card || !estado) return;
-    if (activo) {
-        card.classList.add('activo');
-        estado.textContent = 'ACTIVO';
-    } else {
-        card.classList.remove('activo');
-        estado.textContent = 'Inactivo';
+async function cargarEstadoToggles() {
+    Object.keys(_TOGGLE_CONFIG).forEach(tipo => _pintarToggle(tipo, null));
+    try {
+        const r = await fetch(API_URL + '?action=getConfig&t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(8000) });
+        const data = await r.json();
+        if (!data.success) return;
+        const cfg = data.config;
+        const diaIdx = _diaActualIdx();
+        Object.keys(_TOGGLE_CONFIG).forEach(tipo => {
+            const clave = _TOGGLE_CONFIG[tipo].clave;
+            const row = cfg[tipo + '|' + clave] || cfg[clave];
+            const activo = row ? (row[diaIdx] === 1 || row[diaIdx] === '1' || row[diaIdx] === true) : false;
+            _toggleEstado[tipo] = activo;
+            _pintarToggle(tipo, activo);
+        });
+    } catch(e) {
+        console.warn('⚠️ No se pudo cargar estado toggles:', e.message);
+        Object.keys(_TOGGLE_CONFIG).forEach(tipo => _pintarToggle(tipo, false));
     }
 }
 
 async function toggleOferta(tipo) {
-    const key = TOGGLE_KEYS[tipo];
-    const actual = localStorage.getItem(key) !== '0';
-    const nuevo = !actual;
-    localStorage.setItem(key, nuevo ? '1' : '0');
-    _actualizarUIToggle(tipo, nuevo);
-    mostrarToast(`${nuevo ? '✅' : '🔴'} ${tipo.charAt(0).toUpperCase() + tipo.slice(1)} ${nuevo ? 'activado' : 'desactivado'}`, nuevo ? 'verde' : 'rojo');
+    const cfg = _TOGGLE_CONFIG[tipo];
+    const nuevoValor = _toggleEstado[tipo] ? 0 : 1;
+    const diaIdx = _diaActualIdx();
+
+    // Actualizar UI optimistamente
+    _toggleEstado[tipo] = nuevoValor === 1;
+    _pintarToggle(tipo, _toggleEstado[tipo]);
+
+    const card = document.getElementById(cfg.id);
+    if (card) card.style.opacity = '0.6';
+
     try {
-        await fetch(`${API_URL}?action=setToggle&tipo=${tipo}&valor=${nuevo ? 1 : 0}`, { signal: AbortSignal.timeout(5000) });
-    } catch(e) {}
+        const datos = { seccion: tipo, clave: cfg.clave, dia: diaIdx, valor: nuevoValor };
+        const url = API_URL + '?action=setConfig&data=' + encodeURIComponent(JSON.stringify(datos));
+        const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(10000) });
+        const resp = await r.json();
+        if (resp.success) {
+            mostrarToast((nuevoValor ? '🟢 ' : '🔴 ') + cfg.emoji + ' ' + tipo + (nuevoValor ? ' activada' : ' desactivada'), nuevoValor ? 'verde' : 'rojo');
+        } else {
+            // Revertir si falló
+            _toggleEstado[tipo] = !_toggleEstado[tipo];
+            _pintarToggle(tipo, _toggleEstado[tipo]);
+            mostrarToast('❌ Error: ' + (resp.mensaje || 'no guardado'), 'rojo');
+        }
+    } catch(e) {
+        _toggleEstado[tipo] = !_toggleEstado[tipo];
+        _pintarToggle(tipo, _toggleEstado[tipo]);
+        mostrarToast('❌ Sin conexión', 'rojo');
+    }
+    if (card) card.style.opacity = '1';
 }
 
-async function toggleCervecero() {
-    const hoyKey = fechaArgentina();
-    const cerv = localStorage.getItem('copihue_cervecero_override');
-    const eraActivo = cerv === hoyKey;
-    const nuevoEstado = !eraActivo;
-    if (nuevoEstado) {
-        localStorage.setItem('copihue_cervecero_override', hoyKey);
+// ── Jueves Cervecero ──
+let _cerveceroOverride = localStorage.getItem('cervecero_override');
+if (_cerveceroOverride === 'true')  _cerveceroOverride = true;
+else if (_cerveceroOverride === 'false') _cerveceroOverride = false;
+else _cerveceroOverride = null;
+
+function _esCerveceroAutoActivo() {
+    const now = new Date();
+    const arg = new Date(now.toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+    return arg.getDay() === 4 && arg.getHours() >= 18;
+}
+
+function _pintarToggleCervecero() {
+    const card = document.getElementById('toggleCervecero');
+    const estadoEl = document.getElementById('estadoCervecero');
+    if (!card) return;
+    const autoActivo = _esCerveceroAutoActivo();
+    const activo = _cerveceroOverride !== null ? _cerveceroOverride : autoActivo;
+    if (activo) {
+        card.classList.add('activo');
+        if (estadoEl) estadoEl.textContent = 'ACTIVO' + (_cerveceroOverride !== null ? ' ⚡' : ' auto');
     } else {
-        localStorage.removeItem('copihue_cervecero_override');
+        card.classList.remove('activo');
+        if (estadoEl) estadoEl.textContent = _cerveceroOverride !== null ? 'Forzado OFF' : 'Inactivo';
     }
-    _actualizarUIToggleCervecero(nuevoEstado);
-    mostrarToast(`🍺 Jueves Cervecero ${nuevoEstado ? 'activado' : 'desactivado'}`, nuevoEstado ? 'verde' : 'rojo');
-    try {
-        await fetch(`${API_URL}?action=setToggle&tipo=cervecero&valor=${nuevoEstado ? 1 : 0}`, { signal: AbortSignal.timeout(5000) });
-    } catch(e) {}
+}
+
+function toggleCervecero() {
+    const autoActivo = _esCerveceroAutoActivo();
+    if (_cerveceroOverride === null) {
+        _cerveceroOverride = !autoActivo;
+    } else {
+        _cerveceroOverride = null;
+    }
+    if (_cerveceroOverride === null) localStorage.removeItem('cervecero_override');
+    else localStorage.setItem('cervecero_override', String(_cerveceroOverride));
+    _pintarToggleCervecero();
+    const nuevoEstado = _cerveceroOverride !== null ? _cerveceroOverride : autoActivo;
+    const msg = _cerveceroOverride === null
+        ? '🔄 Cervecero en modo automático'
+        : (nuevoEstado ? '🟢 🍺 Cervecero activado (manual)' : '🔴 🍺 Cervecero desactivado (manual)');
+    mostrarToast(msg, nuevoEstado ? 'verde' : 'rojo');
+}
+
+function inicializarToggles() {
+    cargarEstadoToggles();
+    _pintarToggleCervecero();
 }
 
 // ========== UTILS ==========
@@ -1318,6 +1387,23 @@ async function compartirFlyerAdminWA() {
 }
 
 // ========== INIT ==========
+// Al volver desde POS con producto preseleccionado para ajuste
+window.addEventListener('DOMContentLoaded', function() {
+    const presel = localStorage.getItem('herr_ajuste_presel');
+    if (presel) {
+        localStorage.removeItem('herr_ajuste_presel');
+        // Esperar a que productos carguen, luego abrir ajuste
+        const waitAndOpen = setInterval(() => {
+            if (productos.length > 0) {
+                clearInterval(waitAndOpen);
+                abrirAjuste();
+                setTimeout(() => seleccionarAjuste(presel), 400);
+            }
+        }, 200);
+        setTimeout(() => clearInterval(waitAndOpen), 8000); // timeout 8s
+    }
+});
+
 init();
 </script>
 </body>
