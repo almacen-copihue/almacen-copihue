@@ -840,6 +840,9 @@
             <button id="btnToggleHeader" onclick="toggleHeader()" style="display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);border-radius:20px;padding:4px 12px;color:white;font-size:1rem;font-weight:700;cursor:pointer;gap:4px;">
                 ⚙️
             </button>
+            <button onclick="abrirConfigTeclado()" style="display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.25);border-radius:20px;padding:4px 10px;color:white;font-size:1rem;cursor:pointer;">
+                ⌨️
+            </button>
         </div>
         <button class="btn-resumen" onclick="cambiarVendedor()" id="vendedorBadge"
                 style="background:rgba(255,255,255,0.15);border-color:rgba(255,255,255,0.4);">👤 Víctor</button>
@@ -872,6 +875,7 @@
                     background:#e53935;color:white;border-radius:50%;width:16px;height:16px;
                     font-size:0.6rem;font-weight:900;align-items:center;justify-content:center;line-height:1;"></span>
             </button>
+            <button class="btn-resumen" onclick="abrirConfigTeclado()" title="Teclado" style="background:rgba(100,181,246,0.2);border-color:rgba(100,181,246,0.5);flex:1;text-align:center;">⌨️</button>
             <button class="btn-resumen" onclick="limpiarVenta()" title="Limpiar venta" style="background:rgba(183,28,28,0.3);border-color:rgba(183,28,28,0.6);flex:1;text-align:center;color:#ffcdd2;">🗑</button>
         </div>
 
@@ -1038,9 +1042,13 @@
 
             <div id="ajustePanel" style="display:none;margin-top:12px;">
 
-                <!-- Nombre del producto (solo lectura, referencia) -->
-                <div id="ajusteNombre" style="font-weight:700;font-size:0.95rem;color:#555;text-align:center;margin-bottom:2px;letter-spacing:0.2px;"></div>
+                <!-- Nombre editable — visible directo, sin teclado hasta que lo tocás -->
+                <input type="text" id="ajusteNombreNuevo"
+                       autocomplete="off" autocorrect="off"
+                       style="width:100%;font-size:0.95rem;font-weight:700;border:1.5px solid #ddd;border-radius:10px;padding:9px 14px;margin-bottom:6px;text-transform:uppercase;box-sizing:border-box;color:#333;background:#fafafa;">
                 <div id="ajusteStockActual" style="font-size:0.82rem;color:#888;text-align:center;margin-bottom:14px;"></div>
+                <!-- id oculto para compatibilidad -->
+                <div id="ajusteNombre" style="display:none;"></div>
 
                 <!-- STOCK -->
                 <div style="font-size:0.7rem;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;text-align:center;">📦 Stock</div>
@@ -1067,17 +1075,12 @@
                     ✅ Guardar
                 </button>
 
-                <!-- MÁS OPCIONES colapsado -->
+                <!-- Categoría colapsada -->
                 <button onclick="toggleAjusteExtra()" id="ajusteExtraBtn"
                         style="width:100%;padding:9px;border:1px solid #ddd;border-radius:10px;background:#fafafa;color:#999;font-size:0.8rem;font-weight:600;cursor:pointer;margin-bottom:0;letter-spacing:0.3px;">
-                    ▸ Editar nombre y categoría
+                    ▸ Categoría
                 </button>
                 <div id="ajusteExtra" style="display:none;margin-top:10px;">
-                    <input type="text" id="ajusteNombreNuevo"
-                           autocomplete="off" autocorrect="off"
-                           placeholder="Nombre del producto"
-                           style="width:100%;font-size:0.95rem;font-weight:600;border:2px solid #1976d2;border-radius:10px;padding:10px 14px;margin-bottom:14px;text-transform:uppercase;box-sizing:border-box;">
-                    <div style="font-size:0.7rem;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">🏷️ Categoría</div>
                     <div class="categorias-grid" id="ajusteCatGrid" style="margin-bottom:8px;"></div>
                     <input type="hidden" id="ajusteCategoria">
                 </div>
@@ -3653,6 +3656,7 @@ function seleccionarAjuste(id) {
     document.getElementById('ajusteNuevo').textContent = ajusteValor;
     document.getElementById('ajustePrecioNuevo').value = p.price;
     document.getElementById('ajusteNombreNuevo').value = p.name;
+    document.getElementById('ajusteNombreNuevo').blur();
     // Categoría actual
     ajusteCategoriaSeleccionada = p.category || '';
     document.getElementById('ajusteCategoria').value = ajusteCategoriaSeleccionada;
@@ -5511,6 +5515,172 @@ async function compartirFlyerAdminWA() {
 }
 </script>
 
+<!-- ===== TECLADO QWERTY + AZ (opción vendedor) ===== -->
+<style>
+#kbd-container {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    background: #111318;
+    border-top: 2px solid #2e7d32;
+    z-index: 10000;
+    box-shadow: 0 -4px 24px rgba(0,0,0,0.6);
+    padding: 4px 38px 8px 4px;
+    display: none;
+    transition: transform 0.22s ease;
+}
+#kbd-container.oculto { transform: translateY(100%); pointer-events:none; }
+#kbd-az-panel {
+    position: absolute;
+    right: 0; top: 0; bottom: 0;
+    width: 34px;
+    background: #0d1a0d;
+    border-left: 1px solid #2e7d32;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-around;
+    padding: 3px 0;
+    touch-action: none;
+    user-select: none;
+}
+.az-l {
+    font-size: 0.58rem; font-weight: 700; color: #66bb6a;
+    width: 100%; text-align: center; padding: 1px 0; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+.az-l.activa { color: white; background: #2e7d32; border-radius: 3px; }
+.kbd-fila { display:flex; justify-content:center; gap:3px; margin-bottom:3px; }
+.ktecla {
+    background:#1e2128; border:1px solid #2a2a3a; border-radius:7px;
+    color:white; font-size:0.95rem; font-weight:700;
+    flex:1; max-width:40px; height:36px;
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer; user-select:none; -webkit-user-select:none;
+    touch-action:manipulation; font-family:inherit;
+    -webkit-tap-highlight-color:transparent;
+}
+.ktecla:active { background:#2e7d32; transform:scale(0.9); }
+.ktecla.k-borrar { background:#1a0e0e; border-color:#5a1a1a; max-width:54px; flex:1.4; }
+.ktecla.k-borrar:active { background:#c62828; }
+.ktecla.k-limpiar { background:#0d1a2e; border-color:#1a3a5a; font-size:0.65rem; color:#64b5f6; max-width:54px; flex:1.4; }
+.ktecla.k-espacio { max-width:999px; flex:3; font-size:0.75rem; color:#81c784; background:#0e1a14; border-color:#1a4a28; }
+.ktecla.k-espacio:active { background:#1b5e20; }
+body.kbd-visible #resultados { padding-bottom: 175px; }
+</style>
+
+<div id="kbd-container">
+    <div class="kbd-fila">
+        <button class="ktecla" data-l="Q">Q</button><button class="ktecla" data-l="W">W</button>
+        <button class="ktecla" data-l="E">E</button><button class="ktecla" data-l="R">R</button>
+        <button class="ktecla" data-l="T">T</button><button class="ktecla" data-l="Y">Y</button>
+        <button class="ktecla" data-l="U">U</button><button class="ktecla" data-l="I">I</button>
+        <button class="ktecla" data-l="O">O</button><button class="ktecla" data-l="P">P</button>
+    </div>
+    <div class="kbd-fila">
+        <button class="ktecla" data-l="A">A</button><button class="ktecla" data-l="S">S</button>
+        <button class="ktecla" data-l="D">D</button><button class="ktecla" data-l="F">F</button>
+        <button class="ktecla" data-l="G">G</button><button class="ktecla" data-l="H">H</button>
+        <button class="ktecla" data-l="J">J</button><button class="ktecla" data-l="K">K</button>
+        <button class="ktecla" data-l="L">L</button>
+    </div>
+    <div class="kbd-fila">
+        <button class="ktecla" data-l="Z">Z</button><button class="ktecla" data-l="X">X</button>
+        <button class="ktecla" data-l="C">C</button><button class="ktecla" data-l="V">V</button>
+        <button class="ktecla" data-l="B">B</button><button class="ktecla" data-l="N">N</button>
+        <button class="ktecla" data-l="M">M</button>
+        <button class="ktecla k-borrar" id="kbd-del">⌫</button>
+    </div>
+    <div class="kbd-fila">
+        <button class="ktecla k-limpiar" id="kbd-clear">✕ borrar</button>
+        <button class="ktecla k-espacio" data-l=" ">␣</button>
+    </div>
+    <!-- Índice A-Z lateral -->
+    <div id="kbd-az-panel"></div>
+</div>
+
+<script>
+(function initKbd() {
+    if (window.innerWidth >= 768) return;
+    const cont   = document.getElementById('kbd-container');
+    const azPanel= document.getElementById('kbd-az-panel');
+    const input  = document.getElementById('buscador');
+    if (!cont || !azPanel || !input) return;
+
+    // Construir A-Z
+    'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').forEach(l => {
+        const el = document.createElement('div');
+        el.className = 'az-l'; el.textContent = l; el.dataset.az = l;
+        azPanel.appendChild(el);
+    });
+
+    let azActiva = null;
+
+    function dispInput() { input.dispatchEvent(new Event('input',{bubbles:true})); }
+
+    function activarAZ(letra) {
+        if (letra === azActiva) return;
+        azActiva = letra;
+        document.querySelectorAll('.az-l').forEach(el => el.classList.toggle('activa', el.dataset.az === letra));
+        const norm = normalizarBusqueda(letra);
+        const res = [...productos].filter(p => {
+            const n = normalizarBusqueda(p.name);
+            return n.startsWith(norm) || n.split(' ').some(w => w.startsWith(norm));
+        }).sort((a,b) => {
+            const sa = normalizarBusqueda(a.name).startsWith(norm)?1:0;
+            const sb = normalizarBusqueda(b.name).startsWith(norm)?1:0;
+            if(sb!==sa) return sb-sa;
+            if(a.stock===0&&b.stock>0) return 1;
+            if(a.stock>0&&b.stock===0) return -1;
+            return rankScore(b.id)-rankScore(a.id);
+        });
+        input.value = letra;
+        renderResultados(res, letra);
+    }
+
+    azPanel.addEventListener('touchstart', e => { e.preventDefault(); const el=document.elementFromPoint(e.touches[0].clientX,e.touches[0].clientY); if(el&&el.dataset.az) activarAZ(el.dataset.az); },{passive:false});
+    azPanel.addEventListener('touchmove',  e => { e.preventDefault(); const el=document.elementFromPoint(e.touches[0].clientX,e.touches[0].clientY); if(el&&el.dataset.az) activarAZ(el.dataset.az); },{passive:false});
+    azPanel.addEventListener('click', e => { const el=e.target.closest('.az-l'); if(el&&el.dataset.az) activarAZ(el.dataset.az); });
+
+    cont.addEventListener('mousedown', e => e.preventDefault());
+    cont.addEventListener('click', function(e) {
+        const btn = e.target.closest('button');
+        if (!btn || btn.id==='kbd-del' || btn.id==='kbd-clear') return;
+        const l = btn.dataset.l;
+        if (l !== undefined) {
+            azActiva = null;
+            document.querySelectorAll('.az-l.activa').forEach(el=>el.classList.remove('activa'));
+            const s=input.selectionStart??input.value.length, en=input.selectionEnd??input.value.length;
+            input.value = input.value.substring(0,s)+l+input.value.substring(en);
+            try{input.setSelectionRange(s+1,s+1);}catch(e){}
+            dispInput();
+        }
+    });
+
+    const delBtn = document.getElementById('kbd-del');
+    delBtn.addEventListener('click', () => { if(input.value.length>0){input.value=input.value.slice(0,-1);dispInput();} });
+    let delTimer;
+    delBtn.addEventListener('touchstart', ()=>{ delTimer=setInterval(()=>{ if(input.value.length>0){input.value=input.value.slice(0,-1);dispInput();}else clearInterval(delTimer); },80); },{passive:true});
+    delBtn.addEventListener('touchend', ()=>clearInterval(delTimer));
+
+    document.getElementById('kbd-clear').addEventListener('click', ()=>{ input.value=''; azActiva=null; document.querySelectorAll('.az-l.activa').forEach(el=>el.classList.remove('activa')); dispInput(); });
+
+    // Scroll ocultar
+    const resultadosEl = document.getElementById('resultados');
+    if (resultadosEl) {
+        let lastY=0;
+        resultadosEl.addEventListener('scroll', function(){
+            const y=resultadosEl.scrollTop;
+            if(y>lastY&&y>40&&cont.style.display!=='none'&&!cont.classList.contains('oculto')) {
+                cont.classList.add('oculto'); document.body.classList.remove('kbd-visible');
+            }
+            lastY=y;
+        },{passive:true});
+        resultadosEl.addEventListener('touchend', ()=>{ if(cont.classList.contains('oculto')){ cont.classList.remove('oculto'); document.body.classList.add('kbd-visible'); } },{passive:true});
+    }
+})();
+</script>
+<!-- ===== FIN TECLADO QWERTY+AZ ===== -->
+
 <!-- ===== TECLADO T9 POS ===== -->
 <style>
 #t9-wrap {
@@ -5819,6 +5989,147 @@ body.t9-on .panel-venta { padding-bottom: 175px; }
 })();
 </script>
 <!-- ===== FIN TECLADO T9 POS ===== -->
+
+
+<!-- MODAL CONFIGURACIÓN TECLADO -->
+<div class="modal-bg" id="modalConfigTeclado" onclick="if(event.target===this)cerrarConfigTeclado()">
+    <div class="modal-sheet" style="padding-bottom:24px;">
+        <div class="modal-handle"></div>
+        <div class="modal-header">
+            <span class="modal-titulo">⌨️ Tipo de teclado</span>
+            <button class="modal-cerrar" onclick="cerrarConfigTeclado()">✕</button>
+        </div>
+        <div style="padding:16px 20px 0;">
+            <p style="font-size:0.85rem;color:#888;margin:0 0 16px;text-align:center;">
+                Cada vendedor puede elegir el suyo. Se guarda automáticamente.
+            </p>
+            <div id="teclado-opciones" style="display:flex;flex-direction:column;gap:10px;">
+                <button onclick="elegirTeclado('t9')" class="teclado-opcion" id="opt-t9">
+                    <span class="top-opt-icon">📟</span>
+                    <div>
+                        <div class="top-opt-title">T9</div>
+                        <div class="top-opt-desc">9 teclas numéricas — rápido cuando se aprende</div>
+                    </div>
+                </button>
+                <button onclick="elegirTeclado('qwerty')" class="teclado-opcion" id="opt-qwerty">
+                    <span class="top-opt-icon">🔡</span>
+                    <div>
+                        <div class="top-opt-title">QWERTY</div>
+                        <div class="top-opt-desc">Teclado de letras clásico con índice A-Z</div>
+                    </div>
+                </button>
+                <button onclick="elegirTeclado('az')" class="teclado-opcion" id="opt-az">
+                    <span class="top-opt-icon">🔤</span>
+                    <div>
+                        <div class="top-opt-title">Índice A-Z</div>
+                        <div class="top-opt-desc">Deslizás el dedo por las letras — sin escribir</div>
+                    </div>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+<style>
+.teclado-opcion {
+    width:100%;display:flex;align-items:center;gap:14px;
+    padding:14px 16px;border:2px solid #e0e0e0;border-radius:14px;
+    background:white;cursor:pointer;text-align:left;font-family:inherit;
+    transition:border-color 0.15s,background 0.15s;
+}
+.teclado-opcion.activo { border-color:#1976d2;background:#e3f2fd; }
+.teclado-opcion:active { background:#f5f5f5; }
+.top-opt-icon { font-size:1.6rem;flex-shrink:0; }
+.top-opt-title { font-size:1rem;font-weight:800;color:#222;margin-bottom:2px; }
+.top-opt-desc  { font-size:0.78rem;color:#888;font-weight:500; }
+</style>
+
+
+// ========== CONFIG TECLADO POR VENDEDOR ==========
+function _tecladoKey() {
+    const v = typeof vendedorActual !== 'undefined' ? vendedorActual : 'default';
+    return 'teclado_tipo_' + v;
+}
+
+function getTipoTeclado() {
+    return localStorage.getItem(_tecladoKey()) || 't9';
+}
+
+function abrirConfigTeclado() {
+    // Marcar opción activa
+    const tipo = getTipoTeclado();
+    ['t9','qwerty','az'].forEach(t => {
+        const el = document.getElementById('opt-' + t);
+        if (el) el.classList.toggle('activo', t === tipo);
+    });
+    document.getElementById('modalConfigTeclado').classList.add('open');
+    toggleHeader(); // cerrar header
+}
+
+function cerrarConfigTeclado() {
+    document.getElementById('modalConfigTeclado').classList.remove('open');
+}
+
+function elegirTeclado(tipo) {
+    localStorage.setItem(_tecladoKey(), tipo);
+    ['t9','qwerty','az'].forEach(t => {
+        const el = document.getElementById('opt-' + t);
+        if (el) el.classList.toggle('activo', t === tipo);
+    });
+    aplicarTipoTeclado(tipo);
+    setTimeout(cerrarConfigTeclado, 300);
+}
+
+function aplicarTipoTeclado(tipo) {
+    const t9   = document.getElementById('t9-wrap');
+    const kbd  = document.getElementById('kbd-container');
+    const kbdFilas  = document.getElementById('kbd-container') ? kbd.querySelectorAll('.kbd-fila') : [];
+    const azPanel   = document.getElementById('kbd-az-panel');
+
+    if (tipo === 't9') {
+        if (t9)  { t9.style.display = 'block'; document.body.classList.add('t9-on'); }
+        if (kbd) { kbd.style.display = 'none'; document.body.classList.remove('kbd-visible'); }
+    } else if (tipo === 'qwerty') {
+        if (t9)  { t9.style.display = 'none'; document.body.classList.remove('t9-on'); }
+        if (kbd) {
+            kbd.style.display = 'block'; kbd.style.paddingRight = '38px';
+            document.body.classList.add('kbd-visible');
+            kbdFilas.forEach(f => f.style.display = 'flex');
+            if (azPanel) azPanel.style.display = 'flex';
+        }
+    } else if (tipo === 'az') {
+        if (t9)  { t9.style.display = 'none'; document.body.classList.remove('t9-on'); }
+        if (kbd) {
+            kbd.style.display = 'block'; kbd.style.paddingRight = '0';
+            document.body.classList.add('kbd-visible');
+            // Solo mostrar el panel AZ — ocultar filas de letras
+            kbdFilas.forEach(f => f.style.display = 'none');
+            if (azPanel) {
+                azPanel.style.display = 'flex';
+                azPanel.style.position = 'static';
+                azPanel.style.width = '100%';
+                azPanel.style.flexDirection = 'row';
+                azPanel.style.flexWrap = 'wrap';
+                azPanel.style.justifyContent = 'center';
+                azPanel.style.height = 'auto';
+                azPanel.style.padding = '6px 4px';
+                azPanel.style.borderLeft = 'none';
+                azPanel.style.borderTop = '1px solid #2e7d32';
+                // letras más grandes cuando es modo solo AZ
+                azPanel.querySelectorAll('.az-l').forEach(el => {
+                    el.style.fontSize = '1rem';
+                    el.style.padding = '5px 6px';
+                    el.style.width = 'auto';
+                    el.style.borderRadius = '6px';
+                });
+            }
+        }
+    }
+}
+
+// Aplicar al cargar
+document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(() => aplicarTipoTeclado(getTipoTeclado()), 500);
+});
 
 </body>
 </html>
