@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v120-c0003d</title>
+    <title>Copihue — POS v120-c0003e</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -1914,20 +1914,32 @@ function renderResultados(results, term = '') {
     }
 
     const idsEnCarrito = {};
-    ventaActual.forEach(i => { idsEnCarrito[i.id] = i.qty; });
+    ventaActual.forEach(i => {
+        if (i.esPeso && i.idOriginal != null) {
+            // Producto por peso: acumular gramos para mostrar qty
+            idsEnCarrito[i.idOriginal] = (idsEnCarrito[i.idOriginal] || 0) + i.gramos;
+        } else {
+            idsEnCarrito[i.id] = (idsEnCarrito[i.id] || 0) + i.qty;
+        }
+    });
 
     // Separar en-carrito del resto — último agregado primero
     const ordenCarrito = {};
-    ventaActual.forEach((i, idx) => { ordenCarrito[i.id] = idx; });
+    ventaActual.forEach((i, idx) => {
+        const key = i.esPeso ? i.idOriginal : i.id;
+        if (!(key in ordenCarrito)) ordenCarrito[key] = idx;
+        ordenCarrito[key] = Math.max(ordenCarrito[key], idx);
+    });
     const enCarrito = results
         .filter(p => idsEnCarrito[p.id])
-        .sort((a, b) => ordenCarrito[b.id] - ordenCarrito[a.id]);
+        .sort((a, b) => (ordenCarrito[b.id] || 0) - (ordenCarrito[a.id] || 0));
     const resto     = results.filter(p => !idsEnCarrito[p.id]);
 
     function cardHTML(p) {
         const sinStock  = p.stock === 0;
         const stockBajo = p.stock > 0 && p.stock <= 3;
         const qty       = idsEnCarrito[p.id] || 0;
+        const esPesoCard = ventaActual.some(i => i.esPeso && i.idOriginal === p.id);
         const oferta    = calcularOfertaPOS(p, 1);
         const precio    = oferta.precioUnitario || p.price;
         const totalCart = qty > 0 ? precio * qty : null;
@@ -1935,12 +1947,15 @@ function renderResultados(results, term = '') {
         const nombreLen  = p.name.length;
         const nombreSize = nombreLen > 30 ? '0.72rem' : nombreLen > 20 ? '0.82rem' : '0.9rem';
 
+        const badgeQtyLabel = esPesoCard
+            ? `${qty}g`
+            : qty;
         const badgeFoto = qty > 0
             ? `<div style="position:absolute;top:-5px;left:-5px;
                            background:#e53935;color:white;border-radius:50%;
-                           width:20px;height:20px;font-size:0.68rem;font-weight:900;
+                           width:${esPesoCard?'28px':'20px'};height:20px;font-size:0.6rem;font-weight:900;
                            display:flex;align-items:center;justify-content:center;
-                           border:2px solid white;z-index:2;line-height:1;">${qty}</div>`
+                           border:2px solid white;z-index:2;line-height:1;border-radius:10px;">${badgeQtyLabel}</div>`
             : '';
 
         const precioUnitHTML = oferta.tieneOferta
@@ -2077,7 +2092,8 @@ function _refreshResultadosBadges() {
     if (termActual.length >= 1) {
         renderResultados(buscarProductos(termActual), termActual);
     } else {
-        const idsEnCarrito = new Set(ventaActual.map(i => i.id));
+        const idsEnCarrito = new Set();
+        ventaActual.forEach(i => idsEnCarrito.add(i.esPeso ? i.idOriginal : i.id));
         renderResultados([...productos].sort((a, b) => {
             const ac = idsEnCarrito.has(a.id) ? 1 : 0, bc = idsEnCarrito.has(b.id) ? 1 : 0;
             if (bc !== ac) return bc - ac;
@@ -4956,7 +4972,7 @@ function toggleCervecero() {
 // Sincronizar badge de versión desde el <title>
 (function(){
     const el = document.getElementById('versionTag');
-    if (el) el.textContent = 'c0003d';
+    if (el) el.textContent = 'c0003e';
 })();
 
 // ── WakeLock: mantener pantalla encendida mientras la app está activa ──
@@ -5028,7 +5044,7 @@ function cerrarBuscadorFlotante() {
         if (!didSwipe || Math.abs(dx) < UMBRAL) return;
         if (Math.abs(dx) < Math.abs(dy) * RATIO) return;
 
-        // Solo swipe izquierda activo — derecha reservado
+        // Solo swipe izquierda — derecha reservado
         if (dx > 0) return;
 
         // Feedback visual
@@ -5037,6 +5053,21 @@ function cerrarBuscadorFlotante() {
         setTimeout(() => { btn.style.transform = ''; btn.style.transition = ''; }, 200);
 
         const id = parseInt(btn.dataset.prodId);
+        // Para productos por peso: quitar la última entrada de ese producto
+        const idxPeso = ventaActual.findLastIndex ? ventaActual.findLastIndex(i => i.esPeso && i.idOriginal === id)
+                      : [...ventaActual].reverse().findIndex(i => i.esPeso && i.idOriginal === id);
+        if (idxPeso !== -1 && idxPeso >= 0) {
+            const realIdx = ventaActual.findLastIndex
+                ? ventaActual.findLastIndex(i => i.esPeso && i.idOriginal === id)
+                : ventaActual.length - 1 - [...ventaActual].reverse().findIndex(i => i.esPeso && i.idOriginal === id);
+            const item = ventaActual[realIdx];
+            mostrarToast(`🗑 Quitado ${item.gramos}gr — ${item.name.substring(0,20)}`, 'rojo');
+            ventaActual.splice(realIdx, 1);
+            renderVenta();
+            guardarCarritoPendiente();
+            _refreshResultadosBadges();
+            return;
+        }
         const idx = ventaActual.findIndex(i => i.id === id);
         if (idx !== -1) {
             if (ventaActual[idx].qty > 1) {
