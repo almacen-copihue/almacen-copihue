@@ -1468,10 +1468,30 @@ async function cargarProductos() {
     const arr = datos.productos || (Array.isArray(datos) ? datos : []);
     
     products = arr.map((item, idx) => {
-      // Adaptar nombres (igual que index.html)
-      if (item.oferta1 !== undefined && item.relampago === undefined) item.relampago = parseInt(item.oferta1)||0;
-      if (item.oferta2 !== undefined && item.destacada === undefined) item.destacada = parseInt(item.oferta2)||0;
-      if (item.categoriaOferta !== undefined && item.especial === undefined) item.especial = parseInt(item.categoriaOferta)||0;
+      // ── Adaptador de nombres de columnas (igual que index.html) ──
+      if (item.oferta1 !== undefined && item.relampago === undefined)
+        item.relampago = parseInt(item.oferta1)||0;
+      if (item.oferta2 !== undefined && item.destacada === undefined)
+        item.destacada = parseInt(item.oferta2)||0;
+
+      // categoriaOferta puede ser texto ('especial','relampago 3x2', etc.)
+      // o el campo 'especial' puede venir numérico (1) directamente
+      // Prioridad: especial numérico > categoriaOferta texto
+      if (item.especial === undefined || item.especial === null) {
+        const catOf = String(item.categoriaOferta || '').toLowerCase().trim();
+        item.especial = catOf === 'especial' ? 1 : 0;
+      }
+      // Si categoriaOferta describe un relámpago y Relampago numérico no vino, mapear
+      if (!item.relampago) {
+        const catOf = String(item.categoriaOferta || '').toLowerCase().trim();
+        const mapCatOf = {
+          'relampago 2x1':'1','relampago 3x2':'2','relampago 4x3':'3',
+          'relampago 5x4':'4','relampago 6x5':'5','relampago 7x6':'6',
+          '2da50off':'10','relampago 10%':'11','relampago 15%':'12',
+          'relampago 20%':'13','relampago 25%':'14',
+        };
+        if (mapCatOf[catOf]) item.relampago = parseInt(mapCatOf[catOf]);
+      }
 
       return {
         id: item.id || idx+1,
@@ -1497,6 +1517,20 @@ async function cargarProductos() {
     renderListaOfertasActivas();
     renderUltimasUnidades();
     actualizarCounts();
+
+    // ── Diagnóstico en consola para validar contra planilla ──
+    const { poolRelampago, poolDestacadas, poolEspeciales } = calcularPools();
+    const poolUlt = construirPoolUltimas();
+    console.table({
+      '⚡ Relampago pool': poolRelampago.length,
+      '🔥 Destacadas pool': poolDestacadas.length,
+      '⭐ Especiales pool': poolEspeciales.length,
+      '🏷 Ultimas pool': poolUlt.length,
+      'Total productos API': products.length,
+      'Con stock': products.filter(p=>p.stockNumber>0).length,
+    });
+    console.log('🔍 Planilla fuente verdad: Relampago=54, Destacadas=26, Especiales=51, Ultimas=28');
+    console.log('📦 Primer producto de la API:', products[0]);
 
     // Correr algoritmo de alertas una vez por día
     correrAlgoritmoAlertas(false);
@@ -2213,29 +2247,30 @@ function renderUltimasUnidades() {
 
 function renderListaOfertasActivas() {
   const container = document.getElementById('listaOfertasActivas');
-  
-  const activos = products.filter(p => {
-    if (p.stockNumber===0) return false;
-    if (p.relampago>0 && OFERTA_ACTIVA.relampago) return true;
-    if (p.destacada>0 && OFERTA_ACTIVA.destacadas) return true;
-    if (p.especial===1 && OFERTA_ACTIVA.especiales) return true;
-    return false;
-  });
+
+  // Usar pools ya calculados (misma lógica que index.html)
+  const { poolRelampago, poolDestacadas, poolEspeciales } = calcularPools();
+
+  const activos = [];
+  if (OFERTA_ACTIVA.relampago)   poolRelampago.forEach(p  => activos.push({ p, tipo:'relampago'  }));
+  if (OFERTA_ACTIVA.destacadas)  poolDestacadas.forEach(p => activos.push({ p, tipo:'destacadas' }));
+  if (OFERTA_ACTIVA.especiales)  poolEspeciales.forEach(p => activos.push({ p, tipo:'especiales' }));
 
   if (activos.length===0) {
     container.innerHTML = `<div style="text-align:center;padding:20px;color:#aaa;font-size:0.82rem;">Sin ofertas activas ahora</div>`;
+    actualizarCountsDesdePool(poolRelampago, poolDestacadas, poolEspeciales);
     return;
   }
 
-  container.innerHTML = `<div class="oferta-prod-list">` + activos.map(p => {
+  container.innerHTML = `<div class="oferta-prod-list">` + activos.map(({ p, tipo }) => {
     let badge, badgeClass, precioOferta, precioAntes;
-    if (p.relampago>0 && OFERTA_ACTIVA.relampago) {
+    if (tipo==='relampago') {
       const of = OFERTAS_RELAMPAGO_SISTEMA[p.relampago];
       badge = of ? '⚡ '+of.nombre : '⚡';
       badgeClass='badge-r';
       precioOferta = '$'+calcularPT(p,1).toLocaleString('es-AR');
       precioAntes = '$'+p.price.toLocaleString('es-AR');
-    } else if (p.destacada>0 && OFERTA_ACTIVA.destacadas) {
+    } else if (tipo==='destacadas') {
       badge='🔥 '+p.destacada+'%'; badgeClass='badge-d';
       precioOferta = '$'+Math.round(p.price*(1-p.destacada/100)).toLocaleString('es-AR');
       precioAntes = '$'+p.price.toLocaleString('es-AR');
@@ -2255,24 +2290,54 @@ function renderListaOfertasActivas() {
     </div>`;
   }).join('') + '</div>';
 
-  // Counts
-  const rel = activos.filter(p=>p.relampago>0&&OFERTA_ACTIVA.relampago).length;
-  const dest= activos.filter(p=>p.destacada>0&&OFERTA_ACTIVA.destacadas).length;
-  const esp = activos.filter(p=>p.especial===1&&OFERTA_ACTIVA.especiales).length;
-  document.getElementById('countRelampago').textContent = rel ? `${rel} productos activos` : '';
-  document.getElementById('countDestacadas').textContent = dest ? `${dest} productos activos` : '';
-  document.getElementById('countEspeciales').textContent = esp ? `${esp} productos activos` : '';
+  actualizarCountsDesdePool(poolRelampago, poolDestacadas, poolEspeciales);
+}
+
+// Pool calculation — misma lógica anti-conflicto que index.html
+function calcularPools() {
+  const hoy = new Date(); hoy.setHours(0,0,0,0);
+
+  // IDs con vencimiento crítico (≤3 días) → van solo a Últimas, NO a relámpago
+  const idsVencCritico = new Set(
+    products.filter(p => esVencimientoCritico(p)).map(p => p.id)
+  );
+
+  const poolRelampago = products.filter(p =>
+    p.relampago > 0 &&
+    p.stockNumber > 0 &&
+    OFERTAS_RELAMPAGO_SISTEMA[p.relampago] &&
+    !idsVencCritico.has(p.id)
+  ).map(p => ({ ...p, _puntaje: calcularPuntaje(p) }))
+   .filter(p => p._puntaje >= 0)
+   .sort((a,b) => b._puntaje - a._puntaje);
+
+  const poolDestacadas = products.filter(p =>
+    p.destacada > 0 && p.stockNumber > 0
+  ).sort((a,b) => b.destacada - a.destacada);
+
+  const poolEspeciales = products.filter(p =>
+    p.especial === 1 && p.stockNumber > 0
+  );
+
+  return { poolRelampago, poolDestacadas, poolEspeciales, idsVencCritico };
+}
+
+function actualizarCountsDesdePool(poolR, poolD, poolE) {
+  const ult = construirPoolUltimas().length;
+  // Mostrar: visibles/total en pool
+  document.getElementById('countRelampago').textContent =
+    poolR.length ? `${poolR.length} en pool` : '';
+  document.getElementById('countDestacadas').textContent =
+    poolD.length ? `${poolD.length} en pool` : '';
+  document.getElementById('countEspeciales').textContent =
+    poolE.length ? `${poolE.length} en pool` : '';
+  document.getElementById('countUltimas').textContent =
+    ult ? `${ult} en pool` : '';
 }
 
 function actualizarCounts() {
-  const rel  = products.filter(p=>p.relampago>0&&p.stockNumber>0).length;
-  const dest = products.filter(p=>p.destacada>0&&p.stockNumber>0).length;
-  const esp  = products.filter(p=>p.especial===1&&p.stockNumber>0).length;
-  const ult  = construirPoolUltimas().length;
-  document.getElementById('countRelampago').textContent = rel ? `${rel} en pool` : '';
-  document.getElementById('countDestacadas').textContent = dest ? `${dest} en pool` : '';
-  document.getElementById('countEspeciales').textContent = esp ? `${esp} en pool` : '';
-  document.getElementById('countUltimas').textContent = ult ? `${ult} en pool` : '';
+  const { poolRelampago, poolDestacadas, poolEspeciales } = calcularPools();
+  actualizarCountsDesdePool(poolRelampago, poolDestacadas, poolEspeciales);
 }
 
 function actualizarDotsOfertas() {
