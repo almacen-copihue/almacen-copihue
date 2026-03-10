@@ -548,25 +548,29 @@
         /* ===== TOAST ===== */
         .toast {
             position: fixed;
-            top: 160px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: #333;
+            top: 6px;
+            right: 8px;
+            left: auto;
+            transform: none;
+            background: rgba(40,40,40,0.82);
             color: white;
-            padding: 10px 20px;
-            border-radius: 20px;
-            font-size: 0.9rem;
+            padding: 5px 12px;
+            border-radius: 14px;
+            font-size: 0.72rem;
             font-weight: 600;
             z-index: 2000;
             opacity: 0;
-            transition: opacity 0.3s;
+            transition: opacity 0.2s;
             white-space: nowrap;
             pointer-events: none;
+            max-width: 55vw;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         .toast.visible { opacity: 1; }
-        .toast.verde { background: var(--verde); }
-        .toast.rojo { background: var(--rojo); }
-        .toast.naranja { background: #e65100; }
+        .toast.verde { background: rgba(27,94,32,0.88); }
+        .toast.rojo { background: rgba(183,28,28,0.92); }
+        .toast.naranja { background: rgba(230,81,0,0.92); }
 
         /* ===== FORMULARIO NUEVO PRODUCTO ===== */
         .form-grupo {
@@ -1887,8 +1891,7 @@ let searchTimeout;
 document.getElementById('buscador').addEventListener('input', function() {
     clearTimeout(searchTimeout);
     const term = this.value.trim();
-    searchTimeout = setTimeout(() => {
-        if (term.length < 1) {
+    searchTimeout = setTimeout(() => {        if (term.length < 1) {
             // Sin búsqueda: mostrar todos ordenados por más vendido + carrito arriba
             const idsEnCarrito = new Set(ventaActual.map(i => i.id));
             renderResultados([...productos].sort((a, b) => {
@@ -1901,7 +1904,7 @@ document.getElementById('buscador').addEventListener('input', function() {
         } else {
             renderResultados(buscarProductos(term), term);
         }
-    }, 150);
+    }, 0);
 });
 
 function renderResultados(results, term = '') {
@@ -2084,7 +2087,56 @@ function esPorPeso(producto) {
            (cat.includes('FRUTA') || cat.includes('VERDURA')) && nombre.includes('KG');
 }
 
-function _refreshResultadosBadges() {
+function _refreshResultadosBadges(idActualizado) {
+    // Actualización quirúrgica: solo repinta el badge del item tocado
+    // sin redibujar toda la lista
+    if (idActualizado != null) {
+        const item = ventaActual.find(i => (i.esPeso ? i.idOriginal : i.id) === idActualizado);
+        const qty = item ? item.qty : 0;
+        const gramos = item && item.esPeso ? item.gramos : 0;
+
+        // Actualizar el card del producto en la lista
+        const card = document.querySelector(`.resultado-item[data-prod-id="${idActualizado}"], [data-prod-id="${idActualizado}"]`);
+        if (card) {
+            // Badge de cantidad sobre la foto
+            const badgeEl = card.querySelector('[data-badge]');
+            const imgWrap = card.querySelector('div[style*="position:relative"]');
+            if (imgWrap) {
+                let badge = imgWrap.querySelector('[data-badge]');
+                if (qty > 0) {
+                    const label = gramos ? `${gramos}g` : qty;
+                    if (!badge) {
+                        badge = document.createElement('div');
+                        badge.dataset.badge = '1';
+                        badge.style.cssText = `position:absolute;top:-5px;left:-5px;background:#e53935;color:white;border-radius:10px;width:${gramos?'28px':'20px'};height:20px;font-size:0.6rem;font-weight:900;display:flex;align-items:center;justify-content:center;border:2px solid white;z-index:2;line-height:1;`;
+                        imgWrap.insertBefore(badge, imgWrap.firstChild);
+                    }
+                    badge.textContent = label;
+                    badge.style.width = gramos ? '28px' : '20px';
+                } else if (badge) {
+                    badge.remove();
+                }
+            }
+            // Fondo y borde verde si está en carrito
+            card.style.background = qty > 0 ? '#f1f8e9' : 'white';
+            card.style.borderLeft = qty > 0 ? '3px solid #43a047' : '3px solid transparent';
+            // Total en carrito
+            const p = productos.find(pr => pr.id === idActualizado);
+            const totalDiv = card.querySelector('[data-total]');
+            if (p && qty > 0) {
+                const precio = item ? item.price : p.price;
+                const totalVal = precio * qty;
+                if (totalDiv) {
+                    totalDiv.querySelector('div:last-child').textContent = '$' + totalVal.toLocaleString('es-AR');
+                }
+            } else if (totalDiv) {
+                totalDiv.remove();
+            }
+        }
+        return; // listo, sin re-render completo
+    }
+
+    // Fallback: re-render completo (solo cuando no hay id específico)
     const termActual = document.getElementById('buscador').value.trim();
     const contenedor = document.getElementById('resultados');
     const scrollPos = contenedor ? contenedor.scrollTop : 0;
@@ -2152,8 +2204,15 @@ function agregarProducto(id) {
 
     renderVenta();
     guardarCarritoPendiente();
-    mostrarToast(`✅ ${producto.name.substring(0, 30)}`, 'verde');
-    _refreshResultadosBadges();
+    // Limpiar buscador para siguiente producto
+    const buscadorEl = document.getElementById('buscador');
+    if (buscadorEl && buscadorEl.value.trim().length > 0) {
+        buscadorEl.value = '';
+        // Re-render lista completa porque cambió el término
+        _refreshResultadosBadges();
+    } else {
+        _refreshResultadosBadges(producto.id);
+    }
 }
 
 // ===== SELECTOR DE CANTIDAD ANTES DE AGREGAR =====
@@ -2262,6 +2321,7 @@ function cambiarCantidad(id, delta) {
     }
     renderVenta();
     guardarCarritoPendiente();
+    _refreshResultadosBadges(typeof id === 'string' && id.startsWith('peso_') ? null : Number(id));
 }
 
 function limpiarVenta() {
@@ -2784,12 +2844,13 @@ function mostrarBannerRecuperado(total) {
 }
 
 function mostrarToast(msg, tipo = '') {
+    // Verde: sin toast — la confirmación visual está en el badge y el fondo del carrito
+    if (tipo === 'verde') return;
     const t = document.getElementById('toast');
     t.textContent = msg;
     t.className = 'toast visible ' + tipo;
     clearTimeout(toastTimeout);
-    // Confirmaciones de producto agregado → 800ms, resto → 2000ms
-    const duracion = (tipo === 'verde' && msg.startsWith('✅')) ? 800 : 2000;
+    const duracion = tipo === 'rojo' ? 1400 : 1200;
     toastTimeout = setTimeout(() => t.classList.remove('visible'), duracion);
 }
 
