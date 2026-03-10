@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v120-c0003b</title>
+    <title>Copihue — POS v120-c0003d</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2076,46 +2076,17 @@ function _refreshResultadosBadges() {
     const scrollPos = contenedor ? contenedor.scrollTop : 0;
     if (termActual.length >= 1) {
         renderResultados(buscarProductos(termActual), termActual);
-        if (contenedor) contenedor.scrollTop = scrollPos;
-        return;
-    }
-    // Sin búsqueda: actualizar badges directamente en el DOM
-    const hayItems = document.querySelectorAll('button[data-prod-id]').length > 0;
-    if (!hayItems) {
-        renderResultados([...productos].sort((a,b) => {
-            const ac=ventaActual.find(i=>i.id===a.id)?1:0, bc=ventaActual.find(i=>i.id===b.id)?1:0;
-            if(bc!==ac) return bc-ac;
-            if(a.stock===0&&b.stock>0) return 1;
-            if(a.stock>0&&b.stock===0) return -1;
-            return rankScore(b.id)-rankScore(a.id);
+    } else {
+        const idsEnCarrito = new Set(ventaActual.map(i => i.id));
+        renderResultados([...productos].sort((a, b) => {
+            const ac = idsEnCarrito.has(a.id) ? 1 : 0, bc = idsEnCarrito.has(b.id) ? 1 : 0;
+            if (bc !== ac) return bc - ac;
+            if (a.stock === 0 && b.stock > 0) return 1;
+            if (a.stock > 0 && b.stock === 0) return -1;
+            return rankScore(b.id) - rankScore(a.id);
         }));
-        if (contenedor) contenedor.scrollTop = scrollPos;
-        return;
     }
-    const idsEnCarrito = {};
-    ventaActual.forEach(i => { idsEnCarrito[i.id] = i.qty; });
-    document.querySelectorAll('button[data-prod-id]').forEach(btn => {
-        const id = parseInt(btn.dataset.prodId);
-        const qty = idsEnCarrito[id] || 0;
-        const imgWrap = btn.querySelector('div[style*="position:relative"]');
-        if (!imgWrap) return;
-        let badge = imgWrap.querySelector('.qty-badge');
-        if (qty > 0) {
-            if (!badge) {
-                badge = document.createElement('div');
-                badge.className = 'qty-badge';
-                badge.style.cssText = 'position:absolute;top:-5px;left:-5px;background:#e53935;color:white;border-radius:50%;width:20px;height:20px;font-size:0.68rem;font-weight:900;display:flex;align-items:center;justify-content:center;border:2px solid white;z-index:2;line-height:1;';
-                imgWrap.appendChild(badge);
-            }
-            badge.textContent = qty;
-            btn.style.background = '#f1f8e9';
-            btn.style.borderLeft = '3px solid #43a047';
-        } else {
-            if (badge) badge.remove();
-            btn.style.background = 'white';
-            btn.style.borderLeft = '3px solid transparent';
-        }
-    });
+    if (contenedor) contenedor.scrollTop = scrollPos;
 }
 
 function agregarProducto(id) {
@@ -4985,7 +4956,7 @@ function toggleCervecero() {
 // Sincronizar badge de versión desde el <title>
 (function(){
     const el = document.getElementById('versionTag');
-    if (el) el.textContent = 'c0003b';
+    if (el) el.textContent = 'c0003d';
 })();
 
 // ── WakeLock: mantener pantalla encendida mientras la app está activa ──
@@ -5029,7 +5000,7 @@ function cerrarBuscadorFlotante() {
     const RATIO  = 1.2; // horizontal debe superar 1.2× vertical
 
     document.addEventListener('touchstart', function(e) {
-        const btn = e.target.closest('button[data-prod-id]');
+        const btn = e.target.closest('[data-prod-id]');
         if (!btn) { startEl = null; return; }
         sx = e.touches[0].clientX;
         sy = e.touches[0].clientY;
@@ -5057,30 +5028,29 @@ function cerrarBuscadorFlotante() {
         if (!didSwipe || Math.abs(dx) < UMBRAL) return;
         if (Math.abs(dx) < Math.abs(dy) * RATIO) return;
 
+        // Solo swipe izquierda activo — derecha reservado
+        if (dx > 0) return;
+
         // Feedback visual
         btn.style.transition = 'transform 0.15s';
-        btn.style.transform = dx > 0 ? 'translateX(12px)' : 'translateX(-12px)';
-        setTimeout(() => { btn.style.transform = ''; }, 200);
+        btn.style.transform = 'translateX(-12px)';
+        setTimeout(() => { btn.style.transform = ''; btn.style.transition = ''; }, 200);
 
         const id = parseInt(btn.dataset.prodId);
-        if (dx > 0) {
-            agregarProducto(id);
-        } else {
-            const idx = ventaActual.findIndex(i => i.id === id);
-            if (idx !== -1) {
-                if (ventaActual[idx].qty > 1) {
-                    ventaActual[idx].qty--;
-                    mostrarToast('−1 ' + ventaActual[idx].name.substring(0,25), 'rojo');
-                } else {
-                    ventaActual.splice(idx, 1);
-                    mostrarToast('🗑 Quitado', 'rojo');
-                }
-                renderVenta();
-                guardarCarritoPendiente();
-                _refreshResultadosBadges();
+        const idx = ventaActual.findIndex(i => i.id === id);
+        if (idx !== -1) {
+            if (ventaActual[idx].qty > 1) {
+                ventaActual[idx].qty--;
+                mostrarToast('−1 ' + ventaActual[idx].name.substring(0,25), 'rojo');
             } else {
-                mostrarToast('No está en el carrito', '');
+                ventaActual.splice(idx, 1);
+                mostrarToast('🗑 Quitado', 'rojo');
             }
+            renderVenta();
+            guardarCarritoPendiente();
+            _refreshResultadosBadges();
+        } else {
+            mostrarToast('No está en el carrito', '');
         }
     }, { passive: true });
 
