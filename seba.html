@@ -837,16 +837,16 @@
                 <div class="indicador-carga" id="indicadorCarga" title="Cargando..."></div>
             </div>
             <!-- Botón expandir/colapsar header — solo visible cuando hay carrito -->
-            <button id="btnToggleHeader" onclick="toggleHeader()" style="display:none;background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);border-radius:20px;padding:3px 10px;color:white;font-size:0.75rem;font-weight:700;cursor:pointer;">
-                ⋯
+            <button id="btnToggleHeader" onclick="toggleHeader()" style="display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);border-radius:20px;padding:4px 12px;color:white;font-size:1rem;font-weight:700;cursor:pointer;gap:4px;">
+                ⚙️
             </button>
         </div>
         <button class="btn-resumen" onclick="cambiarVendedor()" id="vendedorBadge"
                 style="background:rgba(255,255,255,0.15);border-color:rgba(255,255,255,0.4);">👤 Víctor</button>
     </div>
 
-    <!-- FILAS COLAPSABLES -->
-    <div id="headerFilas" style="width:100%;display:flex;flex-direction:column;gap:6px;overflow:hidden;transition:max-height 0.25s ease,opacity 0.25s ease;max-height:200px;opacity:1;">
+    <!-- PANEL HERRAMIENTAS — colapsado tras ⚙️ -->
+    <div id="headerFilas" style="width:100%;display:flex;flex-direction:column;gap:6px;overflow:hidden;transition:max-height 0.3s ease,opacity 0.3s ease;max-height:0px;opacity:0;pointer-events:none;">
         <!-- FILA 1: Mercadería del local -->
         <div class="header-right" style="width:100%;justify-content:space-between;gap:4px;">
             <button class="btn-resumen" onclick="abrirIngreso()" title="Ingreso mercadería"
@@ -906,14 +906,9 @@
     </div>
 </div>
 
-<div id="buscadorFlotante"
-     style="display:flex;background:white;padding:6px 10px;
-            border-bottom:1px solid #eee;align-items:center;gap:6px;flex-shrink:0;">
-    <input type="text" class="buscador-input" id="buscador"
-           placeholder="🔍 Buscar..."
-           autocomplete="off" autocorrect="off" spellcheck="false"
-           style="flex:1;height:36px;font-size:0.88rem;">
-</div>
+<!-- buscador oculto — el T9 escribe aquí internamente -->
+<input type="text" id="buscador" style="display:none;"
+       autocomplete="off" autocorrect="off" spellcheck="false" readonly>
 
 <!-- BANNER VENTA PENDIENTE — desaparece solo en 3s -->
 <div id="bannerPendiente" style="display:none;background:#ff6f00;color:white;padding:6px 14px;font-size:0.82rem;font-weight:600;align-items:center;justify-content:space-between;flex-shrink:0;">
@@ -2995,34 +2990,31 @@ function cerrarModalNuevo(e) {
 const CARRITO_KEY = 'copihue_carrito_pendiente';
 
 // ========== HEADER COLAPSABLE ==========
+// Por defecto siempre colapsado — ⚙️ lo expande
 let _headerExpandido = false;
 
-function _setHeaderModoVenta(hayCarrito) {
-    const filas = document.getElementById('headerFilas');
-    const btn   = document.getElementById('btnToggleHeader');
-    if (!filas || !btn) return;
-    if (hayCarrito && !_headerExpandido) {
-        // Colapsar filas
-        filas.style.maxHeight = '0';
-        filas.style.opacity   = '0';
-        filas.style.overflow  = 'hidden';
-        filas.style.marginTop = '0';
-        btn.style.display = 'inline-flex';
-        btn.textContent   = '⋯';
-    } else {
-        // Expandir filas
-        filas.style.maxHeight = '200px';
-        filas.style.opacity   = '1';
-        filas.style.overflow  = 'visible';
-        filas.style.marginTop = '';
-        btn.style.display = hayCarrito ? 'inline-flex' : 'none';
-        btn.textContent   = '✕';
-    }
+function _setHeaderModoVenta(_hayCarrito) {
+    // ignorado — el header ahora siempre arranca colapsado, solo toggle manual
 }
 
 function toggleHeader() {
+    const filas = document.getElementById('headerFilas');
+    const btn   = document.getElementById('btnToggleHeader');
+    if (!filas || !btn) return;
     _headerExpandido = !_headerExpandido;
-    _setHeaderModoVenta(ventaActual && ventaActual.length > 0);
+    if (_headerExpandido) {
+        filas.style.maxHeight  = '300px';
+        filas.style.opacity    = '1';
+        filas.style.overflow   = 'visible';
+        filas.style.pointerEvents = 'auto';
+        btn.textContent = '✕';
+    } else {
+        filas.style.maxHeight  = '0';
+        filas.style.opacity    = '0';
+        filas.style.overflow   = 'hidden';
+        filas.style.pointerEvents = 'none';
+        btn.textContent = '⚙️';
+    }
 }
 
 function guardarCarritoPendiente() {
@@ -5486,329 +5478,255 @@ async function compartirFlyerAdminWA() {
 }
 </script>
 
-<!-- ===== TECLADO DUAL POS: LETRAS + ÍNDICE A-Z ===== -->
+<!-- ===== TECLADO T9 POS ===== -->
 <style>
-#kbd-container {
+#t9-wrap {
     position: fixed;
     bottom: 0; left: 0; right: 0;
     background: #111318;
     border-top: 2px solid #2e7d32;
     z-index: 10000;
-    display: none;
     box-shadow: 0 -4px 24px rgba(0,0,0,0.6);
-    animation: slideUpKbd 0.15s ease;
-    /* deja espacio para el índice lateral */
-    padding-right: 36px;
+    padding: 6px 6px 10px;
+    /* siempre visible en mobile — no se oculta */
 }
-@keyframes slideUpKbd {
-    from { transform: translateY(100%); }
-    to   { transform: translateY(0); }
+/* Display lo que va escribiendo */
+#t9-display {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 500px;
+    margin: 0 auto 6px;
+    padding: 0 2px;
 }
+#t9-preview {
+    flex: 1;
+    background: rgba(255,255,255,0.07);
+    border-radius: 8px;
+    padding: 5px 10px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #aaa;
+    font-family: monospace;
+    letter-spacing: 1px;
+    min-height: 28px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#t9-preview.activo { color: #fff; }
+#t9-btn-clear {
+    background: #1a0e0e; border: 1px solid #5a1a1a; border-radius: 8px;
+    color: #ef9a9a; font-size: 0.75rem; font-weight: 700;
+    padding: 5px 10px; cursor: pointer; white-space: nowrap;
+    touch-action: manipulation;
+}
+#t9-btn-clear:active { background: #c62828; color: white; }
 
-/* ── TECLADO DE LETRAS ── */
-#kbd-letras {
-    padding: 5px 4px 8px;
+/* Grid 3×3 + fila inferior */
+#t9-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 5px;
     max-width: 500px;
     margin: 0 auto;
 }
-.kbd-fila {
-    display: flex;
-    justify-content: center;
-    gap: 4px;
-    margin-bottom: 4px;
-}
-.kbd-tecla {
+.t9k {
     background: #1e2128;
     border: 1px solid #333;
-    border-radius: 8px;
+    border-radius: 10px;
     color: white;
-    font-size: 1.05rem;
-    font-weight: 700;
-    min-width: 0;
-    flex: 1;
-    height: 40px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
     cursor: pointer;
     user-select: none;
     -webkit-user-select: none;
     touch-action: manipulation;
     font-family: inherit;
-    transition: background 0.06s, transform 0.06s;
-    -webkit-tap-highlight-color: transparent;
-    max-width: 44px;
-}
-.kbd-tecla:active, .kbd-tecla.pulsada {
-    background: #2e7d32;
-    transform: scale(0.9);
-    border-color: #66bb6a;
-}
-.kbd-tecla.kbd-borrar {
-    background: #1a0e0e; border-color: #5a1a1a;
-    font-size: 1.2rem; color: #ef9a9a; max-width: 60px; flex: 1.4;
-}
-.kbd-tecla.kbd-borrar:active { background: #c62828; color: white; }
-.kbd-tecla.kbd-limpiar {
-    background: #0d1a2e; border-color: #1a3a5a;
-    font-size: 0.7rem; color: #64b5f6; max-width: 60px; flex: 1.4;
-}
-.kbd-tecla.kbd-limpiar:active { background: #1565c0; color: white; }
-.kbd-tecla.kbd-espacio {
-    max-width: 999px; flex: 3;
-    font-size: 0.75rem; color: #81c784;
-    background: #0e1a14; border-color: #1a4a28;
-}
-.kbd-tecla.kbd-espacio:active { background: #1b5e20; }
-
-/* ── ÍNDICE A-Z LATERAL ── */
-#kbd-az {
-    position: absolute;
-    right: 0; top: 0; bottom: 0;
-    width: 34px;
-    background: #0d1a0d;
-    border-left: 1px solid #2e7d32;
+    padding: 9px 4px 7px;
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: space-around;
-    padding: 4px 0;
-    touch-action: none;
-    user-select: none;
-    -webkit-user-select: none;
-}
-.az-letra {
-    font-size: 0.62rem;
-    font-weight: 700;
-    color: #66bb6a;
-    width: 100%;
-    text-align: center;
-    padding: 1px 0;
-    cursor: pointer;
+    justify-content: center;
+    gap: 2px;
     -webkit-tap-highlight-color: transparent;
-    transition: color 0.06s;
+    transition: background 0.06s, transform 0.06s;
 }
-.az-letra.activa {
-    color: white;
-    background: #2e7d32;
-    border-radius: 4px;
-}
-
-/* empujar lista */
-body.kbd-visible #resultados { padding-bottom: 210px; }
+.t9k:active, .t9k.tap { background: #2e7d32; transform: scale(0.92); border-color: #66bb6a; }
+.t9n { font-size: 1.35rem; font-weight: 900; line-height: 1; }
+.t9l { font-size: 0.55rem; color: #777; letter-spacing: 1.5px; font-weight: 700; }
+.t9k.t9-del  { background: #1a0e0e; border-color: #5a1a1a; }
+.t9k.t9-del:active, .t9k.t9-del.tap { background: #c62828; }
+.t9k.t9-del .t9n  { color: #ef9a9a; font-size: 1.5rem; }
+.t9k.t9-spc  { background: #0e1a14; border-color: #1a4a28; grid-column: span 2; }
+.t9k.t9-spc:active, .t9k.t9-spc.tap { background: #1b5e20; }
+.t9k.t9-spc .t9n { font-size: 0.9rem; color: #81c784; }
+/* empujar contenido */
+body.t9-on #resultados { padding-bottom: 200px; }
+body.t9-on .panel-venta { padding-bottom: 200px; }
 </style>
 
-<div id="kbd-container">
-    <!-- Teclado de letras -->
-    <div id="kbd-letras">
-        <div class="kbd-fila">
-            <button class="kbd-tecla" data-l="Q">Q</button>
-            <button class="kbd-tecla" data-l="W">W</button>
-            <button class="kbd-tecla" data-l="E">E</button>
-            <button class="kbd-tecla" data-l="R">R</button>
-            <button class="kbd-tecla" data-l="T">T</button>
-            <button class="kbd-tecla" data-l="Y">Y</button>
-            <button class="kbd-tecla" data-l="U">U</button>
-            <button class="kbd-tecla" data-l="I">I</button>
-            <button class="kbd-tecla" data-l="O">O</button>
-            <button class="kbd-tecla" data-l="P">P</button>
-        </div>
-        <div class="kbd-fila">
-            <button class="kbd-tecla" data-l="A">A</button>
-            <button class="kbd-tecla" data-l="S">S</button>
-            <button class="kbd-tecla" data-l="D">D</button>
-            <button class="kbd-tecla" data-l="F">F</button>
-            <button class="kbd-tecla" data-l="G">G</button>
-            <button class="kbd-tecla" data-l="H">H</button>
-            <button class="kbd-tecla" data-l="J">J</button>
-            <button class="kbd-tecla" data-l="K">K</button>
-            <button class="kbd-tecla" data-l="L">L</button>
-        </div>
-        <div class="kbd-fila">
-            <button class="kbd-tecla" data-l="Z">Z</button>
-            <button class="kbd-tecla" data-l="X">X</button>
-            <button class="kbd-tecla" data-l="C">C</button>
-            <button class="kbd-tecla" data-l="V">V</button>
-            <button class="kbd-tecla" data-l="B">B</button>
-            <button class="kbd-tecla" data-l="N">N</button>
-            <button class="kbd-tecla" data-l="M">M</button>
-            <button class="kbd-tecla kbd-borrar" id="kbd-borrar">⌫</button>
-        </div>
-        <div class="kbd-fila">
-            <button class="kbd-tecla kbd-limpiar" id="kbd-limpiar">✕ borrar</button>
-            <button class="kbd-tecla kbd-espacio" data-l=" ">␣</button>
-        </div>
+<div id="t9-wrap">
+    <div id="t9-display">
+        <div id="t9-preview">Más vendidos →</div>
+        <button id="t9-btn-clear" onclick="t9Limpiar()">✕ borrar</button>
     </div>
-
-    <!-- Índice A-Z lateral -->
-    <div id="kbd-az"></div>
+    <div id="t9-grid">
+        <button class="t9k" data-d="2"><span class="t9n">2</span><span class="t9l">ABC</span></button>
+        <button class="t9k" data-d="3"><span class="t9n">3</span><span class="t9l">DEF</span></button>
+        <button class="t9k" data-d="4"><span class="t9n">4</span><span class="t9l">GHI</span></button>
+        <button class="t9k" data-d="5"><span class="t9n">5</span><span class="t9l">JKL</span></button>
+        <button class="t9k" data-d="6"><span class="t9n">6</span><span class="t9l">MNO</span></button>
+        <button class="t9k" data-d="7"><span class="t9n">7</span><span class="t9l">PQRS</span></button>
+        <button class="t9k" data-d="8"><span class="t9n">8</span><span class="t9l">TUV</span></button>
+        <button class="t9k" data-d="9"><span class="t9n">9</span><span class="t9l">WXYZ</span></button>
+        <button class="t9k t9-del" id="t9-del"><span class="t9n">⌫</span></button>
+        <button class="t9k t9-spc" data-d="0"><span class="t9n">␣  espacio</span></button>
+    </div>
 </div>
 
 <script>
-(function initKbdDual() {
+(function() {
+    // Solo mobile
     if (window.innerWidth >= 768) return;
 
-    const input    = document.getElementById('buscador');
-    const cont     = document.getElementById('kbd-container');
-    const azPanel  = document.getElementById('kbd-az');
-    if (!input || !cont || !azPanel) return;
+    const T9 = { '2':'ABC','3':'DEF','4':'GHI','5':'JKL','6':'MNO','7':'PQRS','8':'TUV','9':'WXYZ' };
+    let seq = '';  // dígitos acumulados
+    let spaceText = ''; // texto antes del espacio
 
-    // Construir índice A-Z
-    const letrasAZ = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
-    letrasAZ.forEach(l => {
-        const el = document.createElement('div');
-        el.className = 'az-letra';
-        el.textContent = l;
-        el.dataset.az = l;
-        azPanel.appendChild(el);
-    });
+    const preview  = document.getElementById('t9-preview');
+    const input    = document.getElementById('buscador'); // oculto
+    const wrap     = document.getElementById('t9-wrap');
 
-    let visible = false;
-    let azActiva = null;
+    document.body.classList.add('t9-on');
 
-    function mostrar() {
-        if (visible) return;
-        visible = true;
-        cont.style.display = 'block';
-        document.body.classList.add('kbd-visible');
-    }
-    function ocultar() {
-        if (!visible) return;
-        visible = false;
-        cont.style.display = 'none';
-        document.body.classList.remove('kbd-visible');
+    function combinar(digits) {
+        if (!digits) return [''];
+        const letters = T9[digits[0]];
+        if (!letters) return [''];
+        const rest = combinar(digits.slice(1));
+        const out = [];
+        for (const l of letters) for (const r of rest) out.push(l + r);
+        return out;
     }
 
-    input.setAttribute('inputmode', 'none');
-    input.setAttribute('readonly', 'readonly');
-    input.addEventListener('focus', mostrar);
-    input.addEventListener('click', e => { e.preventDefault(); mostrar(); });
-    input.addEventListener('touchstart', mostrar, { passive: true });
-
-    document.addEventListener('touchstart', function(e) {
-        if (!visible) return;
-        if (!input.contains(e.target) && !cont.contains(e.target)) ocultar();
-    }, { passive: true });
-
-    function dispararInput() {
-        input.dispatchEvent(new Event('input', { bubbles: true }));
+    function primerMatch(seq) {
+        if (!seq) return '';
+        return combinar(seq)[0] || '';
     }
 
-    // ── Teclado de letras ──
-    cont.addEventListener('mousedown', e => e.preventDefault());
+    function aplicar() {
+        // Construir texto: parte anterior al espacio + combinación actual
+        const parteActual = primerMatch(seq);
+        const textoCompleto = spaceText + parteActual;
 
-    cont.addEventListener('click', function(e) {
-        const btn = e.target.closest('button');
-        if (!btn) return;
+        // Actualizar preview
+        if (!seq && !spaceText) {
+            preview.textContent = 'Más vendidos →';
+            preview.className = '';
+        } else {
+            const combis = seq ? combinar(seq).slice(0, 5).join(' · ') : '';
+            preview.textContent = (spaceText || '') + (combis || '');
+            preview.className = 'activo';
+        }
 
-        // Feedback
-        btn.classList.add('pulsada');
-        setTimeout(() => btn.classList.remove('pulsada'), 120);
-
-        if (btn.id === 'kbd-limpiar') {
-            input.value = '';
-            azActiva = null;
-            document.querySelectorAll('.az-letra.activa').forEach(el => el.classList.remove('activa'));
-            dispararInput();
+        // Si no hay nada → más vendidos
+        if (!textoCompleto.trim()) {
+            renderResultados([...productos]
+                .filter(p => p.stock > 0)
+                .sort((a, b) => rankScore(b.id) - rankScore(a.id))
+                .slice(0, 40), '');
             return;
         }
-        if (btn.id === 'kbd-borrar') return; // manejado abajo
 
-        const l = btn.dataset.l;
-        if (l !== undefined) {
-            const s = input.selectionStart ?? input.value.length;
-            const en = input.selectionEnd ?? input.value.length;
-            const v = input.value;
-            input.value = v.substring(0, s) + l + v.substring(en);
-            try { input.setSelectionRange(s + 1, s + 1); } catch(e){}
-            dispararInput();
-        }
-    });
+        // Buscar con todas las combinaciones
+        const allCombis = seq ? combinar(seq) : [''];
+        const scored = productos.map(p => {
+            const n = normalizarBusqueda(p.name);
+            const base = normalizarBusqueda(spaceText || '');
+            let score = 0;
+            for (const c of allCombis) {
+                const full = (base + c).toLowerCase().trim();
+                if (!full) continue;
+                if (n.startsWith(full)) score += 100;
+                else if (n.split(' ').some(w => w.startsWith(full))) score += 60;
+                else if (n.includes(full)) score += 20;
+            }
+            return { p, score };
+        }).filter(x => x.score > 0)
+          .sort((a, b) => b.score !== a.score ? b.score - a.score : rankScore(b.p.id) - rankScore(a.p.id))
+          .map(x => x.p).slice(0, 40);
 
-    // Borrar — click y long press
-    const btnBorrar = document.getElementById('kbd-borrar');
-    let borrarTimer = null;
-    btnBorrar.addEventListener('mousedown', e => e.preventDefault());
-    btnBorrar.addEventListener('click', function() {
-        const v = input.value;
-        if (v.length > 0) {
-            input.value = v.slice(0, -1);
-            dispararInput();
-        }
-    });
-    btnBorrar.addEventListener('touchstart', function(e) {
-        e.preventDefault();
-        borrarTimer = setInterval(() => {
-            if (input.value.length > 0) {
-                input.value = input.value.slice(0, -1);
-                dispararInput();
-            } else clearInterval(borrarTimer);
-        }, 80);
-    }, { passive: false });
-    btnBorrar.addEventListener('touchend',   () => clearInterval(borrarTimer));
-    btnBorrar.addEventListener('touchcancel',() => clearInterval(borrarTimer));
-
-    // ── Índice A-Z — tap y slide ──
-    function activarLetraAZ(letra) {
-        if (letra === azActiva) return;
-        azActiva = letra;
-        // Marcar activa
-        document.querySelectorAll('.az-letra').forEach(el => {
-            el.classList.toggle('activa', el.dataset.az === letra);
-        });
-        // Filtrar productos que empiecen por esa letra (en cualquier palabra)
-        const norm = normalizarBusqueda(letra);
-        const resultados = [...productos]
-            .filter(p => {
-                const n = normalizarBusqueda(p.name);
-                return n.startsWith(norm) || n.split(' ').some(w => w.startsWith(norm));
-            })
-            .sort((a, b) => {
-                const na = normalizarBusqueda(a.name), nb = normalizarBusqueda(b.name);
-                // Primero los que empiezan con la letra exacta
-                const sa = na.startsWith(norm) ? 1 : 0;
-                const sb = nb.startsWith(norm) ? 1 : 0;
-                if (sb !== sa) return sb - sa;
-                if (a.stock === 0 && b.stock > 0) return 1;
-                if (a.stock > 0 && b.stock === 0) return -1;
-                return rankScore(b.id) - rankScore(a.id);
-            });
-        // Actualizar input visual
-        input.value = letra;
-        renderResultados(resultados, letra);
+        renderResultados(scored, primerMatch(seq));
     }
 
-    // Touch slide sobre el panel A-Z
-    azPanel.addEventListener('touchstart', function(e) {
-        e.preventDefault();
-        const t = e.touches[0];
-        const el = document.elementFromPoint(t.clientX, t.clientY);
-        if (el && el.dataset.az) activarLetraAZ(el.dataset.az);
-    }, { passive: false });
+    window.t9Limpiar = function() {
+        seq = ''; spaceText = '';
+        aplicar();
+    };
 
-    azPanel.addEventListener('touchmove', function(e) {
-        e.preventDefault();
-        const t = e.touches[0];
-        const el = document.elementFromPoint(t.clientX, t.clientY);
-        if (el && el.dataset.az) activarLetraAZ(el.dataset.az);
-    }, { passive: false });
+    // Cuando se agrega un producto → limpiar T9
+    const _orig = window.agregarProducto;
+    if (_orig) {
+        window.agregarProducto = function(id) {
+            _orig(id);
+            seq = ''; spaceText = '';
+            aplicar();
+        };
+    }
 
-    azPanel.addEventListener('click', function(e) {
-        const el = e.target.closest('.az-letra');
-        if (el && el.dataset.az) activarLetraAZ(el.dataset.az);
-    });
+    // Teclas
+    wrap.addEventListener('mousedown', e => e.preventDefault());
+    wrap.addEventListener('click', function(e) {
+        const btn = e.target.closest('.t9k, #t9-btn-clear');
+        if (!btn) return;
+        btn.classList.add('tap');
+        setTimeout(() => btn.classList.remove('tap'), 120);
 
-    // Limpiar A-Z activa cuando se escribe con letras
-    input.addEventListener('input', function() {
-        if (input.value === '') {
-            azActiva = null;
-            document.querySelectorAll('.az-letra.activa').forEach(el => el.classList.remove('activa'));
+        const d = btn.dataset.d;
+        if (d === '0') {
+            // Espacio — congela lo actual y empieza nueva palabra
+            spaceText = (spaceText + primerMatch(seq) + ' ');
+            seq = '';
+            aplicar();
+        } else if (d) {
+            seq += d;
+            aplicar();
         }
     });
 
+    // Borrar
+    const delBtn = document.getElementById('t9-del');
+    delBtn.addEventListener('mousedown', e => e.preventDefault());
+    delBtn.addEventListener('click', function() {
+        if (seq.length > 0) {
+            seq = seq.slice(0, -1);
+        } else if (spaceText.length > 0) {
+            // retroceder al texto anterior al espacio
+            const parts = spaceText.trimEnd().split(' ');
+            parts.pop();
+            spaceText = parts.length ? parts.join(' ') + ' ' : '';
+        }
+        aplicar();
+    });
+    // Long press → borrar todo
+    let delTimer;
+    delBtn.addEventListener('touchstart', () => {
+        delTimer = setTimeout(() => { seq=''; spaceText=''; aplicar(); }, 600);
+    }, { passive: true });
+    delBtn.addEventListener('touchend',   () => clearTimeout(delTimer));
+    delBtn.addEventListener('touchcancel',() => clearTimeout(delTimer));
+
+    // Arrancar mostrando más vendidos en cuanto productos cargue
+    function arrancar() {
+        if (typeof productos !== 'undefined' && productos.length > 0) {
+            aplicar();
+        } else {
+            setTimeout(arrancar, 300);
+        }
+    }
+    arrancar();
 })();
 </script>
-<!-- ===== FIN TECLADO DUAL POS ===== -->
+<!-- ===== FIN TECLADO T9 POS ===== -->
 
 </body>
 </html>
