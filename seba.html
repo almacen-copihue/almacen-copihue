@@ -442,10 +442,13 @@
         }
         .modal-titulo { font-weight: 700; font-size: 1.1rem; color: var(--verde-oscuro); }
         .modal-cerrar {
-            background: #f5f5f5; border: none;
-            border-radius: 50%; width: 32px; height: 32px;
-            font-size: 1rem; cursor: pointer; color: #555;
+            background: #e53935; border: none;
+            border-radius: 50%; width: 42px; height: 42px;
+            font-size: 1.2rem; cursor: pointer; color: white;
+            font-weight: 900; flex-shrink: 0;
+            box-shadow: 0 2px 8px rgba(229,57,53,0.4);
         }
+        .modal-cerrar:active { background: #b71c1c; transform: scale(0.93); }
         .resumen-card {
             margin: 16px 20px 0;
             background: linear-gradient(135deg, #e8f5e9, #f1f8e9);
@@ -869,7 +872,7 @@
                     background:#e53935;color:white;border-radius:50%;width:16px;height:16px;
                     font-size:0.6rem;font-weight:900;align-items:center;justify-content:center;line-height:1;"></span>
             </button>
-            <button class="btn-resumen" onclick="abrirModalCerrar()" title="Cerrar POS" style="background:rgba(183,28,28,0.3);border-color:rgba(183,28,28,0.6);flex:1;text-align:center;color:#ffcdd2;">🚪</button>
+            <button class="btn-resumen" onclick="limpiarVenta()" title="Limpiar venta" style="background:rgba(183,28,28,0.3);border-color:rgba(183,28,28,0.6);flex:1;text-align:center;color:#ffcdd2;">🗑</button>
         </div>
 
         <!-- FILA 3: Interruptores de ofertas -->
@@ -1639,56 +1642,43 @@ function actualizarBarraMinimizada() {
 
 // ── PROTECCIÓN CONTRA SALIDA ACCIDENTAL ──────────────────────────────────────
 // Advertencia al cerrar pestaña/recargar si hay venta en curso
-window.addEventListener('beforeunload', function(e) {
-    if (ventaActual && ventaActual.length > 0) {
-        e.preventDefault();
-        e.returnValue = '';
+// ── Botón atrás: interceptar siempre para no salir de la app ──
+// Al cargar se inserta un estado extra en el historial.
+// Si el usuario presiona atrás: cierra el modal abierto, o no hace nada.
+// Nunca sale de la página ni muestra modal de confirmación.
+(function() {
+    history.pushState({ pos: true }, '');
+})();
+
+window.addEventListener('popstate', function() {
+    // Reinsertar estado para seguir capturando futuros "atrás"
+    history.pushState({ pos: true }, '');
+
+    // Cerrar cualquier modal abierto, en orden de prioridad
+    const modales = [
+        'modalConfirm', 'modalAjuste', 'modalIngreso', 'modalNuevoProducto',
+        'modalResumen', 'modalVendedor', 'modalPeso', 'modalNotifPos',
+        'modalInfoProd', 'modalCerrarSesion', 'modalWifiQR', 'flyerOverlayAdmin'
+    ];
+    for (const id of modales) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        const visible = el.classList.contains('open') ||
+                        el.style.display === 'flex' ||
+                        el.style.display === 'block';
+        if (visible) {
+            el.classList.remove('open');
+            el.style.display = 'none';
+            return;
+        }
     }
+    // Sin modal abierto → no hacer nada (quedarse en la página)
 });
 
-// ── BFCACHE: cuando Android restaura la app desde segundo plano,
-//    pageshow dispara con persisted=true — NO recargamos, solo sincronizamos UI
-window.addEventListener('pageshow', function(e) {
-    if (e.persisted) {
-        console.log('[PWA] Restaurado desde bfcache — restaurando estado');
-        if (ventaActual && ventaActual.length > 0) {
-            renderVenta();
-            activarGuardiaAtras();
-        }
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.getRegistrations().then(function(regs) {
-                regs.forEach(function(r) { r.update(); });
-            });
-        }
-    }
-});
+function activarGuardiaAtras() {}   // no-op — ya no se necesita
+function desactivarGuardiaAtras() {} // no-op
 
-// Botón atrás: interceptar con pushState para bloquear navegación hacia atrás
-let _backGuardActive = false;
-function activarGuardiaAtras() {
-    if (_backGuardActive) return;
-    _backGuardActive = true;
-    history.pushState({ guard: true }, '');
-}
-function desactivarGuardiaAtras() {
-    _backGuardActive = false;
-}
-window.addEventListener('popstate', function(e) {
-    if (!_backGuardActive) return;
-    // Re-insertar estado para seguir bloqueando
-    history.pushState({ guard: true }, '');
-    // Si hay modal abierto → solo cerrarlo
-    const modalCerrar = document.getElementById('modalCerrarSesion');
-    const modalConfirm = document.getElementById('modalConfirmacion');
-    if (modalCerrar && modalCerrar.style.display === 'flex') {
-        modalCerrar.style.display = 'none'; return;
-    }
-    if (modalConfirm && modalConfirm.style.display === 'flex') {
-        modalConfirm.style.display = 'none'; return;
-    }
-    // Sin modal → abrir modal de cierre para que usuario elija minimizar o cerrar
-    abrirModalCerrar();
-});
+
 
 let productos = [];
 let ventaActual = []; // [{id, name, price, qty, stockDisponible}]
@@ -5328,42 +5318,6 @@ document.getElementById('modalWifiQR').addEventListener('click', function(e) {
 </script>
 
 <!-- MODAL CERRAR SESIÓN -->
-<div id="modalCerrarSesion" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);
-     z-index:10100;align-items:center;justify-content:center;padding:20px;">
-    <div style="background:white;border-radius:20px;width:100%;max-width:360px;overflow:hidden;
-                box-shadow:0 8px 32px rgba(0,0,0,0.4);">
-        <div style="background:linear-gradient(135deg,#b71c1c,#e53935);padding:20px 24px;text-align:center;">
-            <div style="font-size:2rem;margin-bottom:6px;">⚠️</div>
-            <div style="color:white;font-weight:900;font-size:1rem;">¿Cerrar el POS?</div>
-        </div>
-        <div style="padding:16px 20px;" id="modalCerrarTexto">
-            <div style="font-size:0.88rem;color:#555;text-align:center;margin-bottom:16px;">
-                Tenés una venta en curso. Si cerrás vas a perder los datos.
-            </div>
-        </div>
-        <div style="padding:0 16px 16px;display:flex;flex-direction:column;gap:8px;">
-            <button onclick="confirmarCerrarPOS()"
-                    style="width:100%;padding:13px;background:linear-gradient(135deg,#b71c1c,#e53935);
-                           border:none;border-radius:12px;color:white;font-size:0.95rem;
-                           font-weight:900;cursor:pointer;">
-                🚪 Sí, cerrar igual
-            </button>
-            <button onclick="cerrarModalYMinimizar()"
-                    style="width:100%;padding:13px;background:#e8f5e9;border:1.5px solid #a5d6a7;
-                           border-radius:12px;color:#2e7d32;font-size:0.95rem;
-                           font-weight:900;cursor:pointer;">
-                ⊟ Minimizar y seguir
-            </button>
-            <button onclick="document.getElementById('modalCerrarSesion').style.display='none';"
-                    style="width:100%;padding:11px;background:none;border:1.5px solid #ddd;
-                           border-radius:12px;color:#888;font-size:0.88rem;
-                           font-weight:700;cursor:pointer;">
-                Cancelar
-            </button>
-        </div>
-    </div>
-</div>
-
 <!-- FLYER ADMIN CERVECERO -->
 <style>
 .flyer-overlay-admin{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:9999;align-items:center;justify-content:center;flex-direction:column;gap:12px;padding:16px}
