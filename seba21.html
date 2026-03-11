@@ -5609,6 +5609,13 @@ async function compartirFlyerAdminWA() {
           <div style="font-size:0.72rem;color:#999;margin-bottom:10px;line-height:1.5;">
             💡 <strong>github.com → Settings → Developer settings → Personal access tokens → Fine-grained</strong>. Permiso: <strong>Contents: Read &amp; Write</strong>.
           </div>
+          <div style="border-top:1px solid #e0e0e0;margin:12px 0 12px;"></div>
+          <div style="font-size:0.8rem;font-weight:700;color:#333;margin-bottom:8px;">🤖 API Key Anthropic (para buscar fotos en internet)</div>
+          <input type="password" id="anthropicKey" placeholder="sk-ant-..."
+                 style="width:100%;border:1.5px solid #ddd;border-radius:8px;padding:8px 10px;font-size:0.88rem;margin-bottom:6px;box-sizing:border-box;font-family:monospace;">
+          <div style="font-size:0.72rem;color:#999;margin-bottom:10px;line-height:1.5;">
+            💡 <strong>console.anthropic.com → API Keys → Create Key</strong>. Empieza con <strong>sk-ant-</strong>.
+          </div>
           <button onclick="guardarConfigGH()"
                   style="width:100%;padding:11px;border:none;border-radius:10px;background:#24292e;color:white;font-size:0.9rem;font-weight:700;cursor:pointer;">
             💾 Guardar configuración
@@ -5720,7 +5727,13 @@ async function buscarEnInternet() {
     document.getElementById('fotosStatus').innerHTML = '<div style="display:flex;align-items:center;justify-content:center;gap:10px;"><div style="width:18px;height:18px;border:2px solid #eee;border-top-color:#1565c0;border-radius:50%;animation:spin 0.7s linear infinite;"></div> Buscando <strong>'+nombre+'</strong>...</div>';
     document.getElementById('btnBuscarNet').disabled = true;
     try {
-        var resp = await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1000,tools:[{type:'web_search_20250305',name:'web_search'}],messages:[{role:'user',content:'Necesito URLs de imágenes del producto de supermercado: "'+nombre+'". Busca en mercadolibre.com.ar, coto.com.ar, carrefour.com.ar. Devuelve SOLO un JSON array con 6 URLs directas a imágenes (.jpg .png .webp). Sin texto extra.'}]})});
+        var _ak = localStorage.getItem('copihue_anthropic_key') || '';
+        if (!_ak) {
+            document.getElementById('fotosStatus').innerHTML = '⚠️ Configurá tu API Key de Anthropic primero. Tocá <strong>Publicar en GitHub</strong> → aparece el panel de config.';
+            document.getElementById('btnBuscarNet').disabled = false;
+            return;
+        }
+        var resp = await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':_ak,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1000,tools:[{type:'web_search_20250305',name:'web_search'}],messages:[{role:'user',content:'Necesito URLs de imágenes del producto de supermercado: "'+nombre+'". Busca en mercadolibre.com.ar, coto.com.ar, carrefour.com.ar. Devuelve SOLO un JSON array con 6 URLs directas a imágenes (.jpg .png .webp). Sin texto extra.'}]})});
         var data = await resp.json();
         var texto = (data.content||[]).filter(function(b){return b.type==='text';}).map(function(b){return b.text;}).join('\n');
         var urls = _extraerUrlsFotos(texto);
@@ -5820,14 +5833,17 @@ function guardarConfigGH(){
     if(!owner||!repo||!token){mostrarToast('⚠️ Completá todos los campos','naranja');return;}
     _ghConfig={owner:owner,repo:repo,branch:branch,token:token};
     localStorage.setItem('copihue_gh_config',JSON.stringify(_ghConfig));
+    var ak=document.getElementById('anthropicKey').value.trim();
+    if(ak) localStorage.setItem('copihue_anthropic_key', ak);
     document.getElementById('fotosGHConfig').style.display='none';
-    mostrarToast('✅ Config GitHub guardada','verde');
+    mostrarToast('✅ Config guardada','verde');
     publicarEnGitHub();
 }
 
 function _mostrarConfigGH(){
     var cfg=_cargarConfigGH();
     if(cfg){document.getElementById('ghOwner').value=cfg.owner||'';document.getElementById('ghRepo').value=cfg.repo||'';document.getElementById('ghBranch').value=cfg.branch||'main';document.getElementById('ghToken').value=cfg.token||'';}
+    var ak=localStorage.getItem('copihue_anthropic_key')||''; document.getElementById('anthropicKey').value=ak;
     document.getElementById('fotosGHConfig').style.display='block';
     document.getElementById('fotosGHConfig').scrollIntoView({behavior:'smooth',block:'nearest'});
 }
