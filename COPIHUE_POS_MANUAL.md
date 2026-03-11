@@ -13,17 +13,17 @@ almacen-copihue.vercel.app/seba-25.html   ← URL permanente en producción
 └── imagenes-productos/*.jpg               ← Fotos de productos (no tocar)
 ```
 
-**Regla de oro:** el archivo se llama siempre `seba-25.html` para que la URL no cambie. La versión interna se trackea con el badge `vXXX` en el header (ej: `v121`). Cada entrega suma +1.
+**Regla de oro:** el archivo se llama siempre `seba-25.html` para que la URL no cambie. La versión interna se trackea con el badge `vXXX` en el header. Cada entrega suma +1.
 
 ---
 
-## 🔢 VERSIÓN ACTUAL
+## 🔢 VERSIÓN ACTUAL: v125
 
 Buscar en el archivo:
-- `<title>Copihue — POS v120-c0003e</title>` → cambiar número
-- `if (el) el.textContent = 'v121';` → cambiar a nueva versión
+- `<title>Copihue — POS v125-c0003e</title>` → cambiar número
+- `if (el) el.textContent = 'v125';` → cambiar a nueva versión
 
-**Siempre sumar +1 al entregar.** El usuario lo usa para confirmar que cargó la versión correcta.
+**Siempre sumar +1 al entregar.**
 
 ---
 
@@ -41,41 +41,38 @@ seba-25.html (toda la lógica)
 Chrome mobile Android (cliente)
 ```
 
-**API_URL:** `https://script.google.com/macros/s/AKfycb.../exec`
+---
+
+## 👥 VENDEDORES
+
+- `VENDEDORES_DEFAULT = ['Víctor', 'Sebastián']`
+- `VENDEDOR_KEY = 'copihue_vendedor'` → localStorage
+- `VENDEDORES_KEY = 'copihue_vendedores'` → localStorage
+- **No hay sistema de teclados por vendedor** — eliminado en v124
 
 ---
 
-## 👥 VENDEDORES Y TECLADOS
+## ⌨️ BÚSQUEDA — QWERTY NATIVO (desde v124)
 
-### Sistema de vendedores
-- `VENDEDORES_DEFAULT = ['Víctor', 'Sebastián']`
-- `VENDEDOR_KEY = 'copihue_vendedor'` → localStorage
-- `VENDEDORES_KEY = 'copihue_vendedores'` → localStorage (lista)
-- Al seleccionar vendedor → se aplica su teclado automáticamente
+**El T9 fue eliminado completamente en v124. No reimplementar nunca.**
 
-### Sistema de teclados (por vendedor, independiente)
-- Clave localStorage: `pos_teclado_{nombre}` (ej: `pos_teclado_Víctor`)
-- Valores: `'t9'` | `'qwerty'`
-- **Defaults hardcodeados:**
-  ```js
-  const TECLADO_DEFAULTS = { 'Sebastián': 'qwerty' };
-  // El resto → 't9'
-  ```
-- `getTipoTeclado()` → lee localStorage primero, luego TECLADO_DEFAULTS, luego `'t9'`
+- Barra `#pos-barra-wrap` **siempre visible** debajo del header
+- Input `#pos-barra-input` conectado al `#buscador` oculto via evento `input`
+- Atributos: `autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="search" enterkeyhint="search"`
+- El scroll de resultados pasa naturalmente detrás de los FABs
 
-### Modo T9
-- Teclado numérico fijo abajo (`#pos-t9`), siempre visible
-- `body.t9-on` → clase que activa padding-bottom y posición FABs
-- Auto-reset texto tras 2 segundos de inactividad
-- Al scrollear lista → T9 se oculta, al soltar → vuelve
-- **NUNCA se oculta si hay un modal abierto** (función `hayModalAbierto()`)
+**Funciones que existen como no-ops (compatibilidad):**
+```js
+function getTipoTeclado() { return 'qwerty'; }
+function aplicarTeclado() { /* solo muestra barra */ }
+function ocultarTecladoPos() {}
+function _ocultarKbdEnModal() {}
+function _restaurarKbd() {}
+window.t9Limpiar = function(){};
+```
 
-### Modo QWERTY
-- **Barra oculta por defecto** — aparece solo al tocar 🔍 en el FAB stack
-- El FAB 🔍 siempre visible en modo QWERTY aunque carrito esté vacío
-- Al cerrar cualquier modal → `_ocultarBarraQwerty()` para resetear estado
-- Al blur con campo vacío → oculta la barra automáticamente
-- `body.qwerty-on` → clase activa
+**NO existe más:** `pos-t9`, `t9-on`, `modalConfigTeclado`, `TECLADO_DEFAULTS`,
+`_toggleTecladoVendedor`, `fabBuscar`, `_ocultarBarraQwerty`, CSS `body.t9-on`, CSS `body.qwerty-on`.
 
 ---
 
@@ -84,212 +81,160 @@ Chrome mobile Android (cliente)
 ```
 #fabStack  position:fixed, bottom:24px, right:16px, z-index:3500
   ├── #fabSubir   (↑ azul, solo si hay múltiples qty)
-  ├── #fabBuscar  (🔍 azul, solo en modo QWERTY)
-  ├── #fabLimpiar (🗑 rojo, siempre cuando hay carrito)
-  └── #fabCobrar  (✅ verde, siempre cuando hay carrito)
+  ├── #fabLimpiar (🗑 rojo)
+  └── #fabCobrar  (✅ verde con total)
 ```
 
-**CSS crítico que DEBE estar:**
-```css
-body.t9-on #fabStack { bottom: calc(185px + 16px); }
-body.qwerty-on #fabStack { bottom: calc(60px + 16px); }
-```
-Sin esto los botones quedan tapados por el teclado.
+- Solo visibles cuando hay items en el carrito
+- Scroll pasa detrás naturalmente (sin padding-bottom forzado)
+- `#modalAjuste` tiene `z-index:4500` para quedar encima de los FABs
 
 ---
 
 ## ⚖️ VENTA POR PESO
 
-### Cómo funciona
-- Productos con nombre que termina en `KG` o `X KG` (sin número antes) → modal de peso
-- `esPorPeso(producto)` → detecta automáticamente
-- El usuario tipea gramos (200 = 200gr, 1000 = 1kg)
-
-### Precios en la planilla para productos KG
-- **`price` = precio por KG** (entero, ej: `3000` = $3.000/kg)
-- **`stock` = kg disponibles** (entero, ej: `5` = 5kg)
+- Productos con nombre `KG` o `X KG` (sin número antes) → modal de peso
+- `esPorPeso(producto)` detecta automáticamente
+- **`price` = precio por KG** (ej: `3000` = $3.000/kg)
+- **`stock` = kg disponibles** (ej: `5` = 5kg)
 - Fórmula precio: `Math.round((precioPorKg / 1000) * gramos)`
-- Fórmula stock restado: `p.stock - (gramos / 1000)` → puede quedar decimal (ej: 4.8kg)
+- Fórmula stock: `p.stock - (gramos / 1000)` → puede ser decimal
 
-### ⚠️ BUG RESUELTO en v122 — totalCart en cards
-En la lista de resultados, el total mostrado en la card de un producto KG usaba:
+**⚠️ NUNCA usar `precio * qty` para KG en totalCart** — `qty` = gramos, da x1000:
 ```js
-const totalCart = precio * qty  // MALO: qty = gramos, precio = $/kg → resultado x1000
-```
-**Corrección:**
-```js
+// CORRECTO:
 const totalCart = esPesoCard
-    ? Math.round((precio / 1000) * qty)   // espejo exacto del modal
+    ? Math.round((precio / 1000) * qty)
     : precio * qty
 ```
-**Regla:** cualquier cálculo de precio para productos KG en la lista de resultados DEBE usar `(precio/1000)*gramos`, igual que el modal de peso.
 
-### Modal peso z-index
-```html
-<div id="modalPeso" style="z-index:8000; max-height:96vh;">
-```
-Debe ser mayor que el T9 (z-index:10000 el teclado, pero el modal va encima del overlay).
+Modal peso: `z-index:8000; max-height:96vh`
 
 ---
 
-## 🔄 CONEXIÓN Y RECONEXIÓN
+## 🔔 NOTIFICACIONES
 
-### cargarProductos()
-- Carga inicial al arrancar
-- Actualiza `productos[]` global
-- Lanza alertas del día, ranking, ofertas después de cargar
+- `agregarNotifPos(icono, titulo, detalle, color)` → panel + **persiste en localStorage**
+- Clave: `copihue_notif_pos` → `[{icono, titulo, detalle, color, ts}]`
+- Al abrir panel → `_renderNotifGuardadas()` filtra solo las de hoy
+- Al arrancar → badge se restaura con count del día
+- Sin notificaciones → muestra "Sin notificaciones hoy"
+- **NUNCA modal bloqueante** — siempre al panel 🔔
 
-### forzarActualizacion() — botón 🔄
-- **NO hace `window.location.reload()`** — actualiza solo los datos
-- Limpia SW y caches, luego llama `cargarProductos()` + `renderVenta()`
-- Solo hace reload como último recurso si falla
+---
 
-### _recargaSilenciosa()
-- Se dispara al volver a la pestaña (`visibilitychange`) y al recuperar wifi (`online`)
-- **Mínimo 5 minutos entre recargas automáticas** (`_MIN_ENTRE_CARGAS`)
-- Solo actualiza `stock` y `price` de productos existentes — **no toca el carrito**
-- Si falla, no muestra error (silenciosa)
+## 🔄 CONEXIÓN
 
-### Eventos de conexión
-```js
-window.addEventListener('online', ...)   // toast verde + recarga silenciosa
-window.addEventListener('offline', ...)  // toast rojo
-visibilitychange → visible               // wakeLock + recarga silenciosa
-```
+- `forzarActualizacion()` → **NO reload** — actualiza datos silenciosamente
+- `_recargaSilenciosa()` → mínimo 5min entre recargas, no toca el carrito
+- `online` → toast verde + recarga silenciosa
+- `offline` → toast rojo
 
 ---
 
 ## 🛡️ ANTI-CIERRE
 
-```js
-window.addEventListener('beforeunload', ...)  // bloquea si hay carrito activo
-window.addEventListener('pagehide', ...)       // respaldo para Android
-window.addEventListener('popstate', ...)       // captura botón ← del celu → cierra modal o no hace nada
-```
-El botón ← del celular **nunca sale de la app** — solo cierra el modal abierto más reciente.
+- `beforeunload` + `pagehide` → bloquea si hay carrito activo
+- `popstate` → botón ← del celu cierra modal, nunca sale de la app
 
 ---
 
-## 🔔 NOTIFICACIONES (panel 🔔)
-
-- `agregarNotifPos(icono, titulo, detalle, color)` → agrega al panel
-- Badge rojo en botón 🔔 del header cuando hay notificaciones
-- **Reposición urgente**: una vez por día, va al panel 🔔 silenciosamente — **NUNCA modal bloqueante**
-- LocalStorage key: `alerta_reposicion_{fechaArgentina()}`
-
----
-
-## 📋 MODALES — lista completa
+## 📋 MODALES
 
 ```
-modalResumen      — Resumen del día
-modalVendedor     — Selector de vendedor
-modalAjuste       — Ajuste rápido de stock/precio
-modalIngreso      — Ingreso de mercadería
+modalResumen       — Resumen del día
+modalVendedor      — Selector de vendedor
+modalAjuste        — Ajuste stock/precio (z-index:4500)
+modalIngreso       — Ingreso de mercadería
 modalNuevoProducto — Crear producto nuevo
-modalConfigTeclado — Selector de tipo de teclado
-modalPeso         — Venta por peso (z-index:8000)
-modalConfirm      — Confirmación de venta/cobro
-modalInfoProd     — Info detallada de producto
-modalNotifPos     — Panel de notificaciones
-modalCerrarSesion — (existe en popstate list)
-modalWifiQR       — (existe en popstate list)
-flyerOverlayAdmin — Flyer Jueves Cervecero
-```
-
-**Función `hayModalAbierto()`** — usada por T9 scroll para no reactivar teclado:
-```js
-const ids = ['modalNotifPos','modalResumen','modalVendedor','modalAjuste',
-             'modalIngreso','modalNuevoProducto','modalConfigTeclado','modalPeso','modalConfirm'];
+modalPeso          — Venta por peso (z-index:8000)
+modalConfirm       — Confirmación cobro
+modalInfoProd      — Info producto
+modalNotifPos      — Notificaciones (z-index:4000)
+flyerOverlayAdmin  — Flyer Jueves Cervecero
 ```
 
 ---
 
-## 🎨 CSS CLASES CLAVE
-
-| Clase | Efecto |
-|-------|--------|
-| `body.t9-on` | padding-bottom 185px en resultados, FABs suben |
-| `body.qwerty-on` | padding-bottom 60px en resultados, FABs suben |
-| `.resultado-item.en-carrito` | borde verde izquierdo, fondo verde claro |
-| `.resultado-item.sin-stock` | opacidad 0.6, nombre en rojo |
-| `.panel-venta.minimizado` | max-height:0, oculto |
-
----
-
-## 🗃️ LOCALSTORAGE — claves usadas
+## 🗃️ LOCALSTORAGE
 
 | Clave | Contenido |
 |-------|-----------|
-| `copihue_vendedor` | nombre del vendedor activo |
-| `copihue_vendedores` | JSON array de vendedores |
-| `pos_teclado_{nombre}` | `'t9'` o `'qwerty'` por vendedor |
-| `copihue_carrito_pendiente_{vendedor}` | carrito guardado al salir |
-| `alerta_reposicion_{fecha}` | flag "ya mostré alerta hoy" |
-| `relampago_activado_{fecha}` | flag relámpago del día |
+| `copihue_vendedor` | vendedor activo |
+| `copihue_vendedores` | JSON array vendedores |
+| `copihue_notif_pos` | JSON array notificaciones |
+| `copihue_carrito_pendiente_{vendedor}` | carrito guardado |
+| `alerta_reposicion_{fecha}` | flag alerta diaria |
+| `relampago_activado_{fecha}` | flag relámpago |
 | `relampago_descartado_{fecha}` | flag descartado |
-| `vencidos_confirmados_{fecha}` | productos vencidos confirmados |
-| `vencidos_autozero_{fecha}` | flag auto-zero ejecutado |
-| `pos_rank_{id}` | ranking de ventas por producto |
+| `vencidos_confirmados_{fecha}` | vencidos confirmados |
+| `vencidos_autozero_{fecha}` | auto-zero ejecutado |
+| `pos_rank_{id}` | ranking ventas |
 
 ---
 
-## ⚡ REGLAS PARA IA — CHECKLIST ANTES DE TOCAR
+## ⚡ CHECKLIST ANTES DE TOCAR
 
 ```
 [ ] ¿Leí el manual completo?
-[ ] ¿Identifiqué la versión actual del archivo subido?
-[ ] ¿Estoy trabajando desde el archivo más reciente del usuario (no de sesiones anteriores)?
-[ ] ¿El cambio afecta teclados? → Revisar T9, QWERTY, hayModalAbierto, aplicarTeclado
-[ ] ¿El cambio afecta modales? → Agregar a lista de hayModalAbierto si es nuevo
-[ ] ¿El cambio afecta FABs? → Verificar CSS body.t9-on y body.qwerty-on
-[ ] ¿El cambio afecta venta por peso? → Precio en planilla = $/kg, stock en kg
-[ ] ¿El cambio afecta cargarProductos? → _recargaSilenciosa NO toca el carrito
-[ ] ¿Usé python3 con replace exacto para los patches? → Siempre verificar "OK" vs "NOT FOUND"
-[ ] ¿Sumé +1 a la versión?
+[ ] ¿Tengo el archivo más reciente del usuario?
+[ ] ¿Identifiqué la versión actual?
+[ ] ¿El cambio afecta modales? → z-index: ajuste 4500, peso 8000, notif 4000
+[ ] ¿El cambio afecta FABs? → Solo con carrito activo
+[ ] ¿El cambio afecta venta por peso? → Fórmula (price/1000)*gramos
+[ ] ¿El cambio afecta notificaciones? → Persistir en localStorage
+[ ] ¿Verifiqué "OK" vs "NOT FOUND" en cada patch?
+[ ] ¿Sumé +1 a la versión (título Y versionTag)?
 [ ] ¿El archivo de salida se llama seba-25.html?
 ```
 
 ---
 
-## 🚨 COSAS QUE NO HACER NUNCA
+## 🚨 NUNCA HACER
 
-1. **No agregar `window.location.reload()` automático** — rompe el carrito en curso
-2. **No mostrar modal bloqueante para alertas del día** — van al panel 🔔
-3. **No cambiar el nombre del archivo de salida** — siempre `seba-25.html`
-4. **No asumir que el archivo en memoria es el actual** — siempre trabajar desde el upload del usuario
-5. **No hacer `inp.focus()` en modo QWERTY al arrancar** — la barra empieza oculta
-6. **No quitar `hayModalAbierto()` del scroll listener del T9** — el scroll de notificaciones reactiva el teclado
-7. **No cambiar la fórmula de precio por peso** — es `(price/1000)*gramos` donde price=$/kg
-8. **No restar stock en enteros para productos KG** — restar `gramos/1000` (puede quedar decimal)
-9. **No hacer patch sobre un archivo que no es el más reciente** — preguntar al usuario qué versión tiene activa
+1. `window.location.reload()` automático — rompe el carrito
+2. Modal bloqueante para alertas — van al panel 🔔
+3. Cambiar nombre del archivo — siempre `seba-25.html`
+4. Trabajar sobre archivo de sesión anterior — siempre del upload del usuario
+5. **Reimplementar T9** — eliminado por problemático
+6. `precio * qty` para productos KG — siempre `(precio/1000)*gramos`
+7. Restar stock entero para KG — restar `gramos/1000`
+8. Patchear sin verificar "OK"
 
 ---
 
-## 🔧 FLUJO DE TRABAJO CORRECTO
+## 🔧 FLUJO DE TRABAJO
 
 ```
-1. Usuario sube archivo → trabajar SOLO sobre ese archivo
-2. Identificar versión actual (badge en header o título)
-3. Aplicar cambios con python3 replace (verificar cada "OK")
-4. Sumar +1 a versión
-5. Guardar como seba-25.html en outputs
-6. Usuario sube a GitHub → Vercel despliega en segundos
-7. Confirmar con badge que cargó la versión correcta
+1. Usuario sube seba-25.html + manual
+2. cp /mnt/user-data/uploads/seba-25-XX.html /home/claude/seba-25.html
+3. Identificar versión actual
+4. Aplicar patches con python3 (verificar OK/ERR)
+5. Sumar +1 en título Y versionTag
+6. cp /home/claude/seba-25.html /mnt/user-data/outputs/seba-25.html
+7. Usuario sube a GitHub → Vercel despliega
+8. Confirmar badge correcto
 ```
 
 ---
 
-## 📱 ENTORNO DE USO
+## 📱 ENTORNO
 
-- **Dispositivo:** Android, Chrome mobile
-- **Resolución:** ~390px ancho
-- **Orientación:** vertical siempre
-- **Conexión:** WiFi del local (puede ser inestable)
-- **PWA:** instalada como app en pantalla de inicio
-- **Vendedores:** Víctor (T9), Sebastián (QWERTY)
-- **Productos KG:** Pepino, Tomate Cherry, Remolacha, etc. — verduras y frutas al peso
+- Android, Chrome mobile, ~390px, vertical
+- Vendedores: **Víctor** y **Sebastián** (ambos QWERTY nativo)
+- WiFi local (puede ser inestable)
+- PWA instalada en pantalla de inicio
 
 ---
 
-*Manual generado en sesión activa. Actualizar cuando se agreguen features importantes.*
+## 📝 HISTORIAL
+
+| Versión | Cambio clave |
+|---------|-------------|
+| v122 | Fix totalCart KG: `(precio/1000)*gramos` |
+| v123 | Notificaciones persistentes. Scroll modal ajuste. |
+| v124 | **T9 eliminado.** Barra QWERTY siempre visible. |
+| v125 | Anti-micrófono: `inputmode="search"`, `autocapitalize="off"` |
+
+---
+*Almacén Copihue — Víctor y Sebastián*
