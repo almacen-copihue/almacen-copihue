@@ -294,7 +294,6 @@
 
         .items-venta {
             overflow-y: auto;
-            overflow-x: auto;
             flex: 1;
         }
 
@@ -4112,7 +4111,7 @@ async function confirmarVencidosRetirados() {
 function verificarAlertasDelDia() {
     if (!productos || productos.length === 0) return;
 
-    // Máximo 1 vez por día — guardar en localStorage
+    // Solo 1 vez por día
     const hoyKey = fechaArgentina();
     const yaVisto = localStorage.getItem('alerta_reposicion_' + hoyKey);
     if (yaVisto) return;
@@ -4128,48 +4127,26 @@ function verificarAlertasDelDia() {
 
     if (alertas.length === 0) return;
 
-    // Modal de alerta
-    const lista = alertas.map(p => {
+    // Marcar como visto — no vuelve a aparecer hoy
+    localStorage.setItem('alerta_reposicion_' + hoyKey, '1');
+
+    // Armar lista compacta para el panel 🔔
+    const lineas = alertas.map(p => {
         const min = p.stockMin > 0 ? p.stockMin : 3;
+        const tag = p.stock === 0 ? '❌ sin stock' : `⚠️ stock ${p.stock} (mín ${min})`;
         const color = p.stock === 0 ? '#e53935' : '#e65100';
-        return `<div style="display:flex;justify-content:space-between;align-items:center;
-                            padding:10px 0;border-bottom:1px solid #f0f0f0;">
-                    <span style="font-weight:600;font-size:0.9rem;">${p.name}</span>
-                    <span style="color:${color};font-weight:700;font-size:0.85rem;margin-left:10px;white-space:nowrap;">
-                        ${p.stock === 0 ? '❌ SIN STOCK' : '⚠️ Stock: ' + p.stock}
-                        <span style="color:#999;font-weight:400;">(mín ${min})</span>
-                    </span>
+        return `<div style="padding:4px 0;border-bottom:1px solid rgba(0,0,0,0.06);font-size:0.78rem;">
+                    <span style="font-weight:600;">${p.name}</span>
+                    <span style="color:${color};margin-left:6px;">${tag}</span>
                 </div>`;
     }).join('');
 
-    const overlay = document.createElement('div');
-    overlay.innerHTML = `
-        <div style="position:fixed;inset:0;background:rgba(0,0,0,0.75);
-                    display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px;">
-            <div style="background:white;border-radius:20px;width:100%;max-width:420px;
-                        box-shadow:0 8px 32px rgba(0,0,0,0.3);overflow:hidden;">
-                <div style="background:linear-gradient(135deg,#e53935,#c62828);
-                            padding:20px 24px;color:white;">
-                    <div style="font-size:1.5rem;margin-bottom:4px;">🚨 Reposición urgente</div>
-                    <div style="opacity:0.9;font-size:0.9rem;">
-                        Hoy es <strong>${hoy.charAt(0).toUpperCase() + hoy.slice(1)}</strong> — 
-                        ${alertas.length} producto${alertas.length > 1 ? 's' : ''} bajo mínimo
-                    </div>
-                </div>
-                <div style="padding:16px 20px;max-height:50vh;overflow-y:auto;">
-                    ${lista}
-                </div>
-                <div style="padding:16px 20px;border-top:1px solid #f0f0f0;">
-                    <button onclick="localStorage.setItem('alerta_reposicion_'+fechaArgentina(),'1');this.closest('div').parentElement.parentElement.parentElement.remove()"
-                            style="width:100%;padding:14px;border:none;border-radius:12px;
-                                   background:#1b5e20;color:white;font-size:1rem;
-                                   font-weight:700;cursor:pointer;">
-                        ✅ Entendido
-                    </button>
-                </div>
-            </div>
-        </div>`;
-    document.body.appendChild(overlay);
+    const diaCapit = hoy.charAt(0).toUpperCase() + hoy.slice(1);
+    const titulo = `🚨 Reposición urgente (${alertas.length} producto${alertas.length>1?'s':''})`;
+    const detalle = `Hoy es <strong>${diaCapit}</strong><div style="margin-top:5px;">${lineas}</div>`;
+
+    // Agregar al panel de notificaciones — sin modal bloqueante
+    agregarNotifPos('🚨', titulo, detalle, '#c62828');
 }
 
 // ========== RELÁMPAGO INTELIGENTE ==========
@@ -5556,8 +5533,6 @@ async function compartirFlyerAdminWA() {
 .t9k:active { background:#2e7d32 !important; transform:scale(0.92); }
 body.t9-on #resultados { padding-bottom: 185px; }
 body.qwerty-on #resultados { padding-bottom: 60px; }
-body.t9-on #fabStack { bottom: calc(185px + 16px); }
-body.qwerty-on #fabStack { bottom: calc(60px + 16px); }
 </style>
 
 <script>
@@ -5627,16 +5602,6 @@ window.t9Limpiar = function(){};
 (function initT9() {
     const T9_MAP = {'2':'ABC','3':'DEF','4':'GHI','5':'JKL','6':'MNO','7':'PQRS','8':'TUV','9':'WXYZ'};
     let seq = '', spaceText = '';
-    let t9InactividadTimer = null;
-
-    function resetearInactividad() {
-        if (t9InactividadTimer) clearTimeout(t9InactividadTimer);
-        t9InactividadTimer = setTimeout(() => {
-            seq = '';
-            spaceText = '';
-            aplicarT9();
-        }, 2000);
-    }
 
     function combinar(digits) {
         if (!digits) return [''];
@@ -5698,14 +5663,12 @@ window.t9Limpiar = function(){};
             e.preventDefault();
             seq += btn.dataset.n;
             aplicarT9();
-            resetearInactividad();
         });
     });
 
     const delBtn = document.getElementById('t9-del');
     delBtn.addEventListener('click', e => {
         e.preventDefault();
-        if (t9InactividadTimer) clearTimeout(t9InactividadTimer);
         if (seq.length > 0) { seq = seq.slice(0,-1); }
         else if (spaceText.length > 0) { spaceText = spaceText.slice(0,-1); }
         aplicarT9();
@@ -5718,7 +5681,6 @@ window.t9Limpiar = function(){};
 
     document.getElementById('t9-espacio').addEventListener('click', e => {
         e.preventDefault();
-        if (t9InactividadTimer) clearTimeout(t9InactividadTimer);
         const combis = combinar(seq);
         if (seq) spaceText = (spaceText ? spaceText + ' ' : '') + (combis[0]||seq);
         seq = '';
