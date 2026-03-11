@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v122-c0003e</title>
+    <title>Copihue — POS v123-c0003e</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -1029,14 +1029,14 @@
 </div>
 
 <!-- MODAL AJUSTE RÁPIDO DE STOCK -->
-<div class="modal-bg" id="modalAjuste" onclick="if(event.target===this)cerrarAjuste()">
+<div class="modal-bg" id="modalAjuste" onclick="if(event.target===this)cerrarAjuste()" style="z-index:4500;">
     <div class="modal-sheet" style="padding-bottom:20px;">
         <div class="modal-handle"></div>
         <div class="modal-header">
             <span class="modal-titulo">✏️ Ajuste rápido</span>
             <button class="modal-cerrar" onclick="cerrarAjuste()">✕</button>
         </div>
-        <div style="padding:12px 20px 0;">
+        <div style="padding:12px 20px 0;overflow-y:auto;max-height:calc(100vh - 80px);">
             <input type="text" class="form-input" id="ajusteQ"
                    placeholder="Buscar producto..."
                    oninput="buscarAjuste()"
@@ -2410,6 +2410,9 @@ function renderVenta() {
         const hayMultiple = ventaActual.some(i => i.qty > 1);
         document.getElementById('fabSubir').style.display = hayMultiple ? 'block' : 'none';
         document.getElementById('btnCobrarTotal').textContent = '$' + Math.round(total).toLocaleString('es-AR');
+        // 🔍 solo en QWERTY
+        const _fb = document.getElementById('fabBuscar');
+        if (_fb) _fb.style.display = getTipoTeclado() === 'qwerty' ? 'block' : 'none';
     } else {
         const pv = document.getElementById('panelVenta');
         if (pv) pv.style.display = 'flex';
@@ -3957,7 +3960,37 @@ function claveVencidosAutoZero(fechaStr)     { return 'vencidos_autozero_' + fec
 
 let _cantNotifPos = 0;
 
+function _renderNotifGuardadas() {
+    const lista = document.getElementById('listaNotifPos');
+    if (!lista) return;
+    const arr = _cargarNotifPos();
+    // Solo del día de hoy
+    const hoy = fechaArgentina(0);
+    const deHoy = arr.filter(n => {
+        const d = new Date(n.ts);
+        const key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+        return key === hoy;
+    });
+    lista.innerHTML = '';
+    _cantNotifPos = 0;
+    if (deHoy.length === 0) {
+        lista.innerHTML = '<div style="color:#aaa;font-size:0.85rem;text-align:center;padding:30px 0;">Sin notificaciones hoy</div>';
+    } else {
+        deHoy.forEach(n => {
+            const item = document.createElement('div');
+            item.style.cssText = 'display:flex;align-items:flex-start;gap:8px;padding:8px 0;border-bottom:1px solid #ffe082;font-size:0.82rem;';
+            item.innerHTML = `<span style="font-size:1.2rem;flex-shrink:0;">${n.icono}</span>
+                <div><div style="font-weight:700;color:${n.color};">${n.titulo}</div>
+                <div style="color:#555;margin-top:2px;line-height:1.4;">${n.detalle}</div></div>`;
+            lista.appendChild(item);
+            _cantNotifPos++;
+        });
+    }
+    _actualizarBadgeNotif();
+}
+
 function abrirNotifPos() {
+    _renderNotifGuardadas();
     document.getElementById('modalNotifPos').style.display = 'block';
 }
 function cerrarNotifPos() {
@@ -3981,6 +4014,16 @@ function _actualizarBadgeNotif() {
 }
 
 // Agregar notificación al panel (modal)
+const NOTIF_POS_KEY = 'copihue_notif_pos';
+
+function _cargarNotifPos() {
+    try { return JSON.parse(localStorage.getItem(NOTIF_POS_KEY)) || []; }
+    catch(e) { return []; }
+}
+function _guardarNotifPos(arr) {
+    localStorage.setItem(NOTIF_POS_KEY, JSON.stringify(arr));
+}
+
 function agregarNotifPos(icono, titulo, detalle, color) {
     const lista = document.getElementById('listaNotifPos');
     if (!lista) return;
@@ -3992,6 +4035,10 @@ function agregarNotifPos(icono, titulo, detalle, color) {
     lista.appendChild(item);
     _cantNotifPos++;
     _actualizarBadgeNotif();
+    // Persistir en localStorage
+    const arr = _cargarNotifPos();
+    arr.push({ icono, titulo, detalle, color, ts: Date.now() });
+    _guardarNotifPos(arr);
 }
 
 // Poner stock en 0 via API
@@ -5070,7 +5117,7 @@ function toggleCervecero() {
 // Sincronizar badge de versión desde el <title>
 (function(){
     const el = document.getElementById('versionTag');
-    if (el) el.textContent = 'v122';
+    if (el) el.textContent = 'v123';
 })();
 
 // ── WakeLock: mantener pantalla encendida mientras la app está activa ──
@@ -5852,6 +5899,22 @@ function _restaurarKbd() { setTimeout(() => aplicarTeclado(getTipoTeclado()), 15
 // Aplicar al cargar
 document.addEventListener('DOMContentLoaded', function() {
     setTimeout(() => aplicarTeclado(getTipoTeclado()), 400);
+    // Restaurar badge de notificaciones del día al arrancar
+    setTimeout(() => {
+        const arr = _cargarNotifPos();
+        const hoy = fechaArgentina(0);
+        const deHoy = arr.filter(n => {
+            try {
+                const d = new Date(n.ts);
+                const key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+                return key === hoy;
+            } catch(e) { return false; }
+        });
+        if (deHoy.length > 0) {
+            _cantNotifPos = deHoy.length;
+            _actualizarBadgeNotif();
+        }
+    }, 600);
 });
 
 // Vendedor: ocultar/restaurar teclado
