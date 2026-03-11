@@ -839,8 +839,12 @@
             <!-- Botón expandir/colapsar header — solo visible cuando hay carrito -->
             <button id="btnToggleHeader" onclick="toggleHeader()" style="display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);border-radius:20px;padding:4px 12px;color:white;font-size:1rem;font-weight:700;cursor:pointer;">⚙️</button>
         </div>
-        <button class="btn-resumen" onclick="cambiarVendedor()" id="vendedorBadge"
-                style="background:rgba(255,255,255,0.15);border-color:rgba(255,255,255,0.4);">👤 Víctor</button>
+        <div style="display:flex;gap:4px;align-items:center;">
+            <button onclick="limpiarVenta()" title="Limpiar venta"
+                    style="background:rgba(183,28,28,0.35);border:1.5px solid rgba(183,28,28,0.7);border-radius:12px;padding:6px 10px;color:#ffcdd2;font-size:1rem;cursor:pointer;line-height:1;">🗑</button>
+            <button class="btn-resumen" onclick="cambiarVendedor()" id="vendedorBadge"
+                    style="background:rgba(255,255,255,0.15);border-color:rgba(255,255,255,0.4);">👤 Víctor</button>
+        </div>
     </div>
 
     <!-- FILAS COLAPSABLES -->
@@ -875,7 +879,7 @@
                     style="background:rgba(255,152,0,0.3);border-color:rgba(255,152,0,0.6);flex:1;text-align:center;position:relative;display:flex;align-items:center;justify-content:center;">
                 🛒<span id="badgeListaCompra" style="display:none;position:absolute;top:-4px;right:-4px;background:#e65100;color:white;border-radius:50%;min-width:16px;height:16px;font-size:0.6rem;font-weight:900;align-items:center;justify-content:center;line-height:1;padding:0 2px;"></span>
             </button>
-            <button class="btn-resumen" onclick="limpiarVenta()" title="Limpiar venta" style="background:rgba(183,28,28,0.3);border-color:rgba(183,28,28,0.6);flex:1;text-align:center;color:#ffcdd2;">🗑</button>
+
         </div>
 
         <!-- FILA 3: Interruptores de ofertas -->
@@ -1118,7 +1122,10 @@
             <div class="form-grupo">
                 <label class="form-label">Cantidad a ingresar *</label>
                 <input type="number" class="form-input" id="ingCantidad"
-                       placeholder="1" min="1" value="1">
+                       placeholder="1" min="1" max="9999" step="1" value="1"
+                       oninput="validarCantidadIngreso(this)"
+                       style="font-size:1.1rem;font-weight:700;">
+                <div id="ingCantidadWarn" style="color:#e65100;font-size:0.78rem;margin-top:3px;display:none;"></div>
             </div>
 
             <div class="form-grupo">
@@ -1134,14 +1141,21 @@
             <div class="form-grupo">
                 <label class="form-label">Precio de VENTA</label>
                 <input type="number" class="form-input" id="ingVenta"
-                       placeholder="Dejar vacío para mantener actual" min="0">
+                       placeholder="Dejar vacío para mantener actual" min="1"
+                       oninput="validarPrecioVenta(this, 'ingCosto', 'ingVentaWarn')">
+                <div id="ingVentaWarn" style="color:#e65100;font-size:0.78rem;margin-top:3px;display:none;"></div>
             </div>
 
             <div class="form-grupo">
                 <label class="form-label">Proveedor</label>
                 <input type="text" class="form-input" id="ingProveedor"
-                       placeholder="Opcional"
+                       placeholder="Seleccioná o escribí"
+                       list="ingProveedoresList"
+                       autocomplete="off"
+                       oninput="validarProveedorInput(this)"
                        style="text-transform:uppercase;">
+                <datalist id="ingProveedoresList"></datalist>
+                <div id="ingProveedorWarn" style="color:#e65100;font-size:0.78rem;margin-top:3px;display:none;"></div>
             </div>
 
             <div class="form-grupo" id="ingCategoriaGrupo">
@@ -1203,7 +1217,9 @@
             <div class="form-grupo">
                 <label class="form-label">Precio VENTA *</label>
                 <input type="number" class="form-input" id="npPrecio"
-                       placeholder="$0" min="1">
+                       placeholder="$0" min="1"
+                       oninput="validarPrecioVenta(this, 'npCosto', 'npPrecioWarn')">
+                <div id="npPrecioWarn" style="color:#e65100;font-size:0.78rem;margin-top:3px;display:none;"></div>
             </div>
 
             <div class="form-grupo">
@@ -1217,8 +1233,13 @@
             <div class="form-grupo">
                 <label class="form-label">Proveedor</label>
                 <input type="text" class="form-input" id="npProveedor"
-                       placeholder="Ej: MAXICONSUMO"
+                       placeholder="Seleccioná o escribí"
+                       list="npProveedoresList"
+                       autocomplete="off"
+                       oninput="validarProveedorInput(this)"
                        style="text-transform:uppercase;">
+                <datalist id="npProveedoresList"></datalist>
+                <div id="npProveedorWarn" style="color:#e65100;font-size:0.78rem;margin-top:3px;display:none;"></div>
             </div>
 
             <div class="form-grupo">
@@ -2797,8 +2818,17 @@ function guardarVentaDia(venta) {
 }
 
 function abrirResumen() {
-    const ventas = getVentasHoy();
-    const totalDia = ventas.reduce((s, v) => s + v.total, 0);
+    const ventasHoy = getVentasHoy();
+    // Excluir ELECTRONICA de estadísticas (hobby, no es mercadería del almacén)
+    const CATS_EXCLUIDAS_STATS = ['ELECTRONICA'];
+    const ventas = ventasHoy.map(v => ({
+        ...v,
+        items: (v.items || []).filter(i => {
+            const prod = productos.find(p => String(p.id) === String(i.esPeso ? i.idOriginal : i.id));
+            return !prod || !CATS_EXCLUIDAS_STATS.includes((prod.category || '').toUpperCase());
+        })
+    })).filter(v => v.items.length > 0);
+    const totalDia = ventasHoy.reduce((s, v) => s + v.total, 0); // total real (con electrónica)
     const cantVentas = ventas.length;
     const ticketPromedio = cantVentas > 0 ? Math.round(totalDia / cantVentas) : 0;
 
@@ -5897,6 +5927,106 @@ function lcCompartirWA() {
 
   window.open('https://wa.me/?text=' + encodeURIComponent(texto), '_blank');
 }
+</script>
+
+<script>
+// ── VALIDACIONES INGRESO / NUEVO PRODUCTO ────────────────────
+
+function validarCantidadIngreso(input) {
+    const warn = document.getElementById('ingCantidadWarn');
+    const v = parseInt(input.value);
+    if (!warn) return;
+    if (isNaN(v) || v <= 0) {
+        input.value = '';
+        warn.textContent = '⚠️ Ingresá un número mayor a 0';
+        warn.style.display = 'block';
+    } else if (v > 9999) {
+        input.value = 9999;
+        warn.textContent = '⚠️ Cantidad máxima: 9999';
+        warn.style.display = 'block';
+    } else if (v > 500) {
+        warn.textContent = '⚠️ Cantidad alta — confirmá que es correcta';
+        warn.style.display = 'block';
+    } else {
+        warn.style.display = 'none';
+    }
+}
+
+function validarProveedorInput(input) {
+    const warnId = input.id + 'Warn'; // ingProveedorWarn o npProveedorWarn
+    const warn = document.getElementById(warnId);
+    if (!warn) return;
+    const v = input.value.trim();
+    // Bloquear si es solo números
+    if (v && /^\d+$/.test(v)) {
+        warn.textContent = '⚠️ El proveedor no puede ser un número';
+        warn.style.display = 'block';
+        input.style.borderColor = '#e53935';
+    } else {
+        warn.style.display = 'none';
+        input.style.borderColor = '';
+    }
+    // Pasar a mayúsculas
+    const pos = input.selectionStart;
+    input.value = v.toUpperCase();
+    try { input.setSelectionRange(pos, pos); } catch(e) {}
+}
+
+function validarPrecioVenta(input, costoId, warnId) {
+    const warn = document.getElementById(warnId);
+    if (!warn) return;
+    const venta = parseFloat(input.value);
+    const costo = parseFloat((document.getElementById(costoId) || {}).value) || 0;
+    if (!input.value) { warn.style.display = 'none'; return; }
+    if (isNaN(venta) || venta <= 0) {
+        warn.textContent = '⚠️ El precio de venta debe ser mayor a $0';
+        warn.style.display = 'block';
+        input.style.borderColor = '#e53935';
+        return;
+    }
+    if (costo > 0 && venta < costo) {
+        warn.textContent = '⚠️ El precio de venta es menor al costo — ¿es correcto?';
+        warn.style.display = 'block';
+        input.style.borderColor = '#e65100';
+        return;
+    }
+    if (costo > 0 && venta < costo * 1.05) {
+        warn.textContent = '⚠️ Margen muy bajo (menos del 5%)';
+        warn.style.display = 'block';
+        input.style.borderColor = '#ff9800';
+        return;
+    }
+    warn.style.display = 'none';
+    input.style.borderColor = '';
+}
+
+// Poblar datalists de proveedores cuando se abren los modales
+function poblarDatalistProveedores() {
+    const nombres = (Array.isArray(configProveedores) ? configProveedores : [])
+        .map(p => p.nombre)
+        .filter(Boolean);
+    // Agregar también proveedores únicos de productos cargados
+    const deProd = [...new Set((productos || []).map(p => p.proveedor).filter(Boolean))];
+    const todos = [...new Set([...nombres, ...deProd])].sort();
+    ['ingProveedoresList', 'npProveedoresList'].forEach(function(id) {
+        const dl = document.getElementById(id);
+        if (dl) dl.innerHTML = todos.map(n => '<option value="' + n + '">').join('');
+    });
+}
+
+// Sobrescribir abrirIngreso para poblar datalist al abrir
+const _abrirIngresoOrig = abrirIngreso;
+abrirIngreso = function(productoPresel) {
+    _abrirIngresoOrig(productoPresel);
+    poblarDatalistProveedores();
+};
+
+// Idem para nuevo producto
+const _abrirNuevoProductoOrig = abrirNuevoProducto;
+abrirNuevoProducto = function() {
+    _abrirNuevoProductoOrig();
+    poblarDatalistProveedores();
+};
 </script>
 </body>
 </html>
