@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v120-c0003e</title>
+    <title>Copihue — POS v121-c0003e</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -839,6 +839,7 @@
             <!-- Botón expandir/colapsar header — solo visible cuando hay carrito -->
             <button id="btnToggleHeader" onclick="toggleHeader()" style="display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);border-radius:20px;padding:4px 12px;color:white;font-size:1rem;font-weight:700;cursor:pointer;">⚙️</button>
             <button onclick="abrirConfigTeclado()" style="display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.25);border-radius:20px;padding:4px 10px;color:white;font-size:1rem;cursor:pointer;">⌨️</button>
+            <button id="btnBuscarQwerty" onclick="toggleBarraBusqueda()" style="display:none;align-items:center;justify-content:center;background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.4);border-radius:20px;padding:4px 10px;color:white;font-size:1rem;cursor:pointer;">🔍</button>
         </div>
         <button class="btn-resumen" onclick="cambiarVendedor()" id="vendedorBadge"
                 style="background:rgba(255,255,255,0.15);border-color:rgba(255,255,255,0.4);">👤 Víctor</button>
@@ -1269,8 +1270,8 @@
   </div>
 </div>
 
-<div class="modal-bg" id="modalPeso" onclick="cerrarModalPeso(event)">
-    <div class="modal-sheet" style="padding-bottom:20px;">
+<div class="modal-bg" id="modalPeso" onclick="cerrarModalPeso(event)" style="z-index:8000;">
+    <div class="modal-sheet" style="padding-bottom:20px;max-height:96vh;">
         <div class="modal-handle"></div>
         <div class="modal-header">
             <span class="modal-titulo">⚖️ Venta por peso</span>
@@ -1660,6 +1661,14 @@ function actualizarBarraMinimizada() {
     history.pushState({ pos: true }, '');
 })();
 
+window.addEventListener('beforeunload', function(e) {
+    if (typeof ventaActual !== 'undefined' && ventaActual.length > 0) {
+        e.preventDefault(); e.returnValue = '¿Salir? Hay una venta en curso.'; return e.returnValue;
+    }
+});
+window.addEventListener('pagehide', function(e) {
+    if (typeof ventaActual !== 'undefined' && ventaActual.length > 0) e.preventDefault();
+});
 window.addEventListener('popstate', function() {
     // Reinsertar estado para seguir capturando futuros "atrás"
     history.pushState({ pos: true }, '');
@@ -1697,8 +1706,8 @@ let metodoPagoActual = 'efectivo'; // efectivo | posnet | transferencia | qr
 // ========== CARGA DE PRODUCTOS ==========
 async function forzarActualizacion() {
     const btn = document.getElementById('btnActualizar');
-    btn.textContent = '⏳'; btn.disabled = true;
-    mostrarToast('🧹 Limpiando caché...', 'verde');
+    if (btn) { btn.textContent = '⏳'; btn.disabled = true; }
+    mostrarToast('🔄 Actualizando productos...', 'verde');
     try {
         if ('serviceWorker' in navigator) {
             const regs = await navigator.serviceWorker.getRegistrations();
@@ -1708,8 +1717,34 @@ async function forzarActualizacion() {
             const keys = await caches.keys();
             await Promise.all(keys.map(k => caches.delete(k)));
         }
-        window.location.reload(true);
-    } catch(e) { window.location.reload(true); }
+        await cargarProductos();
+        renderVenta();
+        mostrarToast('✅ Productos actualizados', 'verde');
+    } catch(e) {
+        mostrarToast('❌ Error — reintentando...', 'rojo');
+        setTimeout(() => window.location.reload(true), 1500);
+    } finally {
+        if (btn) { btn.textContent = '🔄'; btn.disabled = false; }
+    }
+}
+let _ultimaCargaTs = 0;
+const _MIN_ENTRE_CARGAS = 5 * 60 * 1000;
+async function _recargaSilenciosa() {
+    const ahora = Date.now();
+    if (ahora - _ultimaCargaTs < _MIN_ENTRE_CARGAS) return;
+    if (typeof productos === 'undefined' || productos.length === 0) return;
+    _ultimaCargaTs = ahora;
+    try {
+        const r = await fetch(API_URL + '?cache=' + ahora, { signal: AbortSignal.timeout(10000) });
+        const data = await r.json();
+        const arr = data.productos || data;
+        if (!arr || arr.length === 0) return;
+        const map = {};
+        arr.forEach(p => { map[p.id] = p; });
+        productos = productos.map(p => { const f=map[p.id]; return f ? {...p,stock:parseInt(f.stock)||0,price:parseInt(f.price)||p.price} : p; });
+        const ind = document.getElementById('indicadorCarga');
+        if (ind) { ind.classList.remove('cargando'); ind.classList.add('ok'); }
+    } catch(e) { console.warn('Recarga silenciosa:', e.message); }
 }
 
 async function cargarProductos() {
@@ -3823,22 +3858,27 @@ function abrirSelectorVendedor(puedeCerrar) {
     const vendedores = getVendedores();
     const div = document.getElementById('vendedorOpciones');
     const defaultVendedores = VENDEDORES_DEFAULT;
-    div.innerHTML = vendedores.map(v => `
-        <div style="display:flex;gap:8px;align-items:center;">
+    div.innerHTML = vendedores.map(v => {
+        const teclado = localStorage.getItem('pos_teclado_' + v) || TECLADO_DEFAULTS[v] || 't9';
+        const tecLabel = teclado === 'qwerty' ? '⌨️ QWERTY' : '📟 T9';
+        const tecColor = teclado === 'qwerty' ? '#1565c0' : '#2e7d32';
+        const tecBg    = teclado === 'qwerty' ? '#e3f2fd' : '#e8f5e9';
+        return `
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:2px;">
             <button onclick="seleccionarVendedor('${v}')"
-                    style="flex:1;padding:14px;border:2px solid ${v === vendedorActual ? 'var(--verde)' : '#e0e0e0'};
-                           border-radius:12px;background:${v === vendedorActual ? '#e8f5e9' : 'white'};
-                           font-size:1rem;font-weight:700;cursor:pointer;text-align:left;color:#222;">
-                👤 ${v} ${v === vendedorActual ? '✅' : ''}
+                    style="flex:1;padding:12px 14px;border:2px solid ${v===vendedorActual?'var(--verde)':'#e0e0e0'};
+                           border-radius:12px;background:${v===vendedorActual?'#e8f5e9':'white'};
+                           font-size:1rem;font-weight:700;cursor:pointer;text-align:left;color:#222;
+                           display:flex;align-items:center;justify-content:space-between;">
+                <span>👤 ${v} ${v===vendedorActual?'✅':''}</span>
+                <span style="font-size:0.68rem;font-weight:700;color:${tecColor};background:${tecBg};padding:2px 8px;border-radius:10px;">${tecLabel}</span>
             </button>
-            ${!defaultVendedores.includes(v) ? `
-            <button onclick="borrarVendedor('${v}')"
-                    style="padding:12px 14px;border:2px solid #ffcdd2;border-radius:12px;background:#fff5f5;
-                           font-size:1rem;cursor:pointer;color:#e53935;flex-shrink:0;">
-                🗑
-            </button>` : ''}
-        </div>
-    `).join('');
+            <button onclick="event.stopPropagation();_toggleTecladoVendedor('${v}')"
+                    title="Cambiar teclado"
+                    style="padding:10px 12px;border:2px solid #e0e0e0;border-radius:12px;background:white;font-size:1rem;cursor:pointer;flex-shrink:0;">⚙️</button>
+            ${!defaultVendedores.includes(v)?`<button onclick="borrarVendedor('${v}')" style="padding:10px 12px;border:2px solid #ffcdd2;border-radius:12px;background:#fff5f5;font-size:1rem;cursor:pointer;color:#e53935;flex-shrink:0;">🗑</button>`:''}
+        </div>`;
+    }).join('');
     
     const modal = document.getElementById('modalVendedor');
     modal.classList.add('open');
@@ -3856,6 +3896,7 @@ function seleccionarVendedor(nombre) {
     localStorage.setItem(VENDEDOR_KEY, nombre);
     actualizarBadgeVendedor();
     cerrarVendedor();
+    setTimeout(() => aplicarTeclado(getTipoTeclado()), 180);
     mostrarToast('👤 Vendiendo como ' + nombre, 'verde');
 }
 
@@ -3885,6 +3926,14 @@ function agregarVendedor() {
 }
 
 function cambiarVendedor() {
+    abrirSelectorVendedor(true);
+}
+function _toggleTecladoVendedor(nombre) {
+    const actual = localStorage.getItem('pos_teclado_' + nombre) || TECLADO_DEFAULTS[nombre] || 't9';
+    const nuevo  = actual === 't9' ? 'qwerty' : 't9';
+    localStorage.setItem('pos_teclado_' + nombre, nuevo);
+    if (nombre === vendedorActual) setTimeout(() => aplicarTeclado(nuevo), 100);
+    mostrarToast(`⌨️ ${nombre}: ${nuevo==='qwerty'?'QWERTY':'T9'}`, 'verde');
     abrirSelectorVendedor(true);
 }
 
@@ -4111,7 +4160,7 @@ async function confirmarVencidosRetirados() {
 function verificarAlertasDelDia() {
     if (!productos || productos.length === 0) return;
 
-    // Solo 1 vez por día
+    // Máximo 1 vez por día — guardar en localStorage
     const hoyKey = fechaArgentina();
     const yaVisto = localStorage.getItem('alerta_reposicion_' + hoyKey);
     if (yaVisto) return;
@@ -4126,27 +4175,14 @@ function verificarAlertasDelDia() {
     });
 
     if (alertas.length === 0) return;
-
-    // Marcar como visto — no vuelve a aparecer hoy
     localStorage.setItem('alerta_reposicion_' + hoyKey, '1');
-
-    // Armar lista compacta para el panel 🔔
     const lineas = alertas.map(p => {
         const min = p.stockMin > 0 ? p.stockMin : 3;
         const tag = p.stock === 0 ? '❌ sin stock' : `⚠️ stock ${p.stock} (mín ${min})`;
         const color = p.stock === 0 ? '#e53935' : '#e65100';
-        return `<div style="padding:4px 0;border-bottom:1px solid rgba(0,0,0,0.06);font-size:0.78rem;">
-                    <span style="font-weight:600;">${p.name}</span>
-                    <span style="color:${color};margin-left:6px;">${tag}</span>
-                </div>`;
+        return `<div style="padding:4px 0;border-bottom:1px solid rgba(0,0,0,0.06);font-size:0.78rem;"><span style="font-weight:600;">${p.name}</span><span style="color:${color};margin-left:6px;">${tag}</span></div>`;
     }).join('');
-
-    const diaCapit = hoy.charAt(0).toUpperCase() + hoy.slice(1);
-    const titulo = `🚨 Reposición urgente (${alertas.length} producto${alertas.length>1?'s':''})`;
-    const detalle = `Hoy es <strong>${diaCapit}</strong><div style="margin-top:5px;">${lineas}</div>`;
-
-    // Agregar al panel de notificaciones — sin modal bloqueante
-    agregarNotifPos('🚨', titulo, detalle, '#c62828');
+    agregarNotifPos('🚨',`Reposición urgente — ${alertas.length} producto${alertas.length>1?'s':''} bajo mínimo`,`Hoy es <strong>${hoy.charAt(0).toUpperCase()+hoy.slice(1)}</strong><div style="margin-top:5px;">${lineas}</div>`,'#c62828');
 }
 
 // ========== RELÁMPAGO INTELIGENTE ==========
@@ -5021,7 +5057,7 @@ function toggleCervecero() {
 // Sincronizar badge de versión desde el <title>
 (function(){
     const el = document.getElementById('versionTag');
-    if (el) el.textContent = 'c0003e';
+    if (el) el.textContent = 'v121';
 })();
 
 // ── WakeLock: mantener pantalla encendida mientras la app está activa ──
@@ -5035,8 +5071,10 @@ async function activarWakeLock() {
 }
 activarWakeLock();
 document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') activarWakeLock();
+    if (document.visibilityState === 'visible') { activarWakeLock(); _recargaSilenciosa(); }
 });
+window.addEventListener('online', () => { mostrarToast('📶 Conexión recuperada', 'verde'); _recargaSilenciosa(); });
+window.addEventListener('offline', () => { mostrarToast('📵 Sin conexión', 'rojo'); });
 
 
 // ===== LUPA FLOTANTE =====
@@ -5533,6 +5571,8 @@ async function compartirFlyerAdminWA() {
 .t9k:active { background:#2e7d32 !important; transform:scale(0.92); }
 body.t9-on #resultados { padding-bottom: 185px; }
 body.qwerty-on #resultados { padding-bottom: 60px; }
+body.t9-on #fabStack { bottom: calc(185px + 16px); }
+body.qwerty-on #fabStack { bottom: calc(60px + 16px); }
 </style>
 
 <script>
@@ -5542,8 +5582,12 @@ function _tecladoKey() {
     const v = typeof vendedorActual !== 'undefined' ? vendedorActual : 'default';
     return 'pos_teclado_' + v;
 }
+const TECLADO_DEFAULTS = { 'Sebastián': 'qwerty' };
 function getTipoTeclado() {
-    return localStorage.getItem(_tecladoKey()) || 't9';
+    const g = localStorage.getItem(_tecladoKey());
+    if (g) return g;
+    const v = typeof vendedorActual !== 'undefined' ? vendedorActual : '';
+    return TECLADO_DEFAULTS[v] || 't9';
 }
 
 function abrirConfigTeclado() {
@@ -5582,18 +5626,25 @@ function ocultarTecladoPos() {
 }
 
 function aplicarTeclado(tipo) {
-    if (window.innerWidth >= 768) { ocultarTecladoPos(); return; }
+    const btnBuscar = document.getElementById('btnBuscarQwerty');
+    if (window.innerWidth >= 768) {
+        ocultarTecladoPos();
+        if (btnBuscar) btnBuscar.style.display = 'none';
+        return;
+    }
     ocultarTecladoPos();
+    // Ocultar barra QWERTY al cambiar de modo
+    const barraQ = document.getElementById('pos-barra-wrap');
+    if (barraQ) barraQ.style.display = 'none';
     if (tipo === 't9') {
         const t9 = document.getElementById('pos-t9');
         if (t9) t9.style.display = 'block';
         document.body.classList.add('t9-on');
+        if (btnBuscar) btnBuscar.style.display = 'none';
     } else {
-        const barra = document.getElementById('pos-barra-wrap');
-        if (barra) barra.style.display = 'block';
+        // QWERTY: la barra está oculta — aparece solo cuando toca 🔍
         document.body.classList.add('qwerty-on');
-        const inp = document.getElementById('pos-barra-input');
-        if (inp) inp.focus();
+        if (btnBuscar) btnBuscar.style.display = 'flex';
     }
 }
 
@@ -5602,6 +5653,8 @@ window.t9Limpiar = function(){};
 (function initT9() {
     const T9_MAP = {'2':'ABC','3':'DEF','4':'GHI','5':'JKL','6':'MNO','7':'PQRS','8':'TUV','9':'WXYZ'};
     let seq = '', spaceText = '';
+    let t9InactividadTimer = null;
+    function resetearInactividad() { if(t9InactividadTimer)clearTimeout(t9InactividadTimer); t9InactividadTimer=setTimeout(()=>{seq='';spaceText='';aplicarT9();},2000); }
 
     function combinar(digits) {
         if (!digits) return [''];
@@ -5663,12 +5716,14 @@ window.t9Limpiar = function(){};
             e.preventDefault();
             seq += btn.dataset.n;
             aplicarT9();
+            resetearInactividad();
         });
     });
 
     const delBtn = document.getElementById('t9-del');
     delBtn.addEventListener('click', e => {
         e.preventDefault();
+        if(t9InactividadTimer)clearTimeout(t9InactividadTimer);
         if (seq.length > 0) { seq = seq.slice(0,-1); }
         else if (spaceText.length > 0) { spaceText = spaceText.slice(0,-1); }
         aplicarT9();
@@ -5681,6 +5736,7 @@ window.t9Limpiar = function(){};
 
     document.getElementById('t9-espacio').addEventListener('click', e => {
         e.preventDefault();
+        if(t9InactividadTimer)clearTimeout(t9InactividadTimer);
         const combis = combinar(seq);
         if (seq) spaceText = (spaceText ? spaceText + ' ' : '') + (combis[0]||seq);
         seq = '';
@@ -5694,8 +5750,13 @@ window.t9Limpiar = function(){};
     const resultadosEl = document.getElementById('resultados');
     if (resultadosEl) {
         let lastY = 0, oculto = false;
+        function hayModalAbierto() {
+            const ids=['modalNotifPos','modalResumen','modalVendedor','modalAjuste','modalIngreso','modalNuevoProducto','modalConfigTeclado','modalPeso','modalConfirm'];
+            return ids.some(id=>{const el=document.getElementById(id);return el&&(el.style.display==='flex'||el.style.display==='block'||el.classList.contains('open'));});
+        }
         resultadosEl.addEventListener('scroll', function() {
             if (getTipoTeclado() !== 't9') return;
+            if (hayModalAbierto()) return;
             const y = resultadosEl.scrollTop;
             const t9 = document.getElementById('pos-t9');
             if (!t9 || t9.style.display==='none') return;
@@ -5712,6 +5773,7 @@ window.t9Limpiar = function(){};
         }, {passive:true});
         resultadosEl.addEventListener('touchend', () => {
             if (getTipoTeclado() !== 't9') return;
+            if (hayModalAbierto()) return;
             const t9 = document.getElementById('pos-t9');
             if (t9 && oculto) { t9.style.transform='translateY(0)'; document.body.classList.add('t9-on'); oculto=false; }
         }, {passive:true});
@@ -5730,7 +5792,33 @@ window.t9Limpiar = function(){};
         bus.value = inp.value;
         bus.dispatchEvent(new Event('input', {bubbles:true}));
     });
+    // Al quedar vacío y perder foco → ocultar barra
+    inp.addEventListener('blur', function() {
+        if (!inp.value) setTimeout(() => { if (document.activeElement !== inp) _ocultarBarraQwerty(); }, 250);
+    });
 })();
+
+// ── Barra QWERTY: mostrar/ocultar al tocar 🔍 ──
+function _mostrarBarraQwerty() {
+    const barra = document.getElementById('pos-barra-wrap');
+    const inp   = document.getElementById('pos-barra-input');
+    if (barra) barra.style.display = 'block';
+    document.body.classList.add('qwerty-on');
+    setTimeout(() => { if (inp) inp.focus(); }, 80);
+}
+function _ocultarBarraQwerty() {
+    const barra = document.getElementById('pos-barra-wrap');
+    const inp   = document.getElementById('pos-barra-input');
+    if (barra) barra.style.display = 'none';
+    if (inp)   { inp.value = ''; inp.blur(); }
+    const bus = document.getElementById('buscador');
+    if (bus) { bus.value = ''; bus.dispatchEvent(new Event('input',{bubbles:true})); }
+}
+function toggleBarraBusqueda() {
+    const barra = document.getElementById('pos-barra-wrap');
+    if (barra && barra.style.display !== 'none') _ocultarBarraQwerty();
+    else _mostrarBarraQwerty();
+}
 
 // ========== OCULTAR TECLADO EN MODALES ==========
 function _ocultarKbdEnModal() { ocultarTecladoPos(); }
