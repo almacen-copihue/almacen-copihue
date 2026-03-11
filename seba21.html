@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v125-c0003e</title>
+    <title>Copihue — POS v129</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -870,6 +870,10 @@
                 🔔<span id="badgeNotifPos" style="display:none;position:absolute;top:-4px;right:-4px;
                     background:#e53935;color:white;border-radius:50%;width:16px;height:16px;
                     font-size:0.6rem;font-weight:900;align-items:center;justify-content:center;line-height:1;"></span>
+            </button>
+            <button class="btn-resumen" onclick="abrirListaCompra()" title="Lista de compra" id="btnListaCompra"
+                    style="background:rgba(255,152,0,0.3);border-color:rgba(255,152,0,0.6);flex:1;text-align:center;position:relative;display:flex;align-items:center;justify-content:center;">
+                🛒<span id="badgeListaCompra" style="display:none;position:absolute;top:-4px;right:-4px;background:#e65100;color:white;border-radius:50%;min-width:16px;height:16px;font-size:0.6rem;font-weight:900;align-items:center;justify-content:center;line-height:1;padding:0 2px;"></span>
             </button>
             <button class="btn-resumen" onclick="limpiarVenta()" title="Limpiar venta" style="background:rgba(183,28,28,0.3);border-color:rgba(183,28,28,0.6);flex:1;text-align:center;color:#ffcdd2;">🗑</button>
         </div>
@@ -5091,7 +5095,7 @@ function toggleCervecero() {
 // Sincronizar badge de versión desde el <title>
 (function(){
     const el = document.getElementById('versionTag');
-    if (el) el.textContent = 'v125';
+    if (el) el.textContent = 'v129';
 })();
 
 // ── WakeLock: mantener pantalla encendida mientras la app está activa ──
@@ -5627,6 +5631,273 @@ async function compartirFlyerAdminWA() {
 </div>
 <canvas id="fotosOffscreen" width="400" height="400" style="display:none;"></canvas>
 
+
+<!-- ═══════════════════════════════════════════════════════
+     LISTA DE COMPRA — Modal, CSS y JS
+════════════════════════════════════════════════════════ -->
+<style>
+.lc-chip {
+  padding: 5px 12px;
+  border-radius: 20px;
+  border: 1.5px solid #ddd;
+  background: #f5f5f5;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  color: #555;
+  transition: all .15s;
+}
+.lc-chip.activo {
+  background: #e65100;
+  border-color: #e65100;
+  color: white;
+}
+.lc-card {
+  background: #fff;
+  border: 1.5px solid #e0e0e0;
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.lc-card.urgente {
+  border-color: #ef9a9a;
+  background: #fff8f8;
+}
+.lc-card.piso {
+  border-color: #ffcc02;
+  background: #fffde7;
+}
+.lc-badge-urg {
+  background: #c62828;
+  color: white;
+  font-size: 0.62rem;
+  font-weight: 900;
+  padding: 2px 6px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.lc-badge-ok {
+  background: #e8f5e9;
+  color: #2e7d32;
+  font-size: 0.62rem;
+  font-weight: 900;
+  padding: 2px 6px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+</style>
+
+<div id="modalListaCompra" style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,0.55);backdrop-filter:blur(3px);overflow-y:auto;">
+  <div style="background:#fff;border-radius:18px 18px 0 0;min-height:92vh;margin-top:4vh;max-width:600px;margin-left:auto;margin-right:auto;">
+
+    <!-- Header sticky -->
+    <div style="background:linear-gradient(135deg,#bf360c,#e65100);padding:14px 16px;border-radius:18px 18px 0 0;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:2;">
+      <div>
+        <div style="color:white;font-size:1.05rem;font-weight:900;">🛒 Lista de compra</div>
+        <div id="lcSubtitulo" style="color:rgba(255,255,255,0.8);font-size:0.72rem;margin-top:2px;">Cargando...</div>
+      </div>
+      <button onclick="cerrarListaCompra()" style="background:rgba(255,255,255,0.2);border:none;border-radius:50%;width:34px;height:34px;color:white;font-size:1.1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;">✕</button>
+    </div>
+
+    <!-- Resumen -->
+    <div id="lcResumen" style="display:none;background:#fff3e0;border-bottom:1px solid #ffe0b2;padding:10px 16px;flex-wrap:wrap;gap:8px;">
+      <div style="display:flex;justify-content:space-around;width:100%;">
+        <div style="text-align:center;">
+          <div id="lcTotalProd" style="font-size:1.5rem;font-weight:900;color:#e65100;">-</div>
+          <div style="font-size:0.65rem;color:#888;font-weight:600;">PRODUCTOS</div>
+        </div>
+        <div style="text-align:center;">
+          <div id="lcUrgentes" style="font-size:1.5rem;font-weight:900;color:#c62828;">-</div>
+          <div style="font-size:0.65rem;color:#888;font-weight:600;">URGENTES</div>
+        </div>
+        <div style="text-align:center;">
+          <div id="lcTotalPesos" style="font-size:1.5rem;font-weight:900;color:#2e7d32;">-</div>
+          <div style="font-size:0.65rem;color:#888;font-weight:600;">ESTIMADO</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Filtros -->
+    <div style="padding:10px 16px 6px;display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid #f0f0f0;position:sticky;top:62px;background:white;z-index:1;">
+      <button onclick="lcFiltrar('todos')"   id="lcFTodos"   class="lc-chip activo">Todos</button>
+      <button onclick="lcFiltrar('urgente')" id="lcFUrgente" class="lc-chip">🔴 Urgentes</button>
+      <button onclick="lcFiltrar('normal')"  id="lcFNormal"  class="lc-chip">🟢 Normal</button>
+    </div>
+
+    <!-- Lista de items -->
+    <div id="lcCuerpo" style="padding:10px 12px 100px;"></div>
+
+    <!-- Footer sticky -->
+    <div style="position:sticky;bottom:0;background:white;border-top:1.5px solid #eee;padding:10px 16px;display:flex;gap:8px;">
+      <button onclick="lcCompartirWA()" style="flex:1;background:#25d366;color:white;border:none;border-radius:12px;padding:12px;font-weight:700;font-size:0.88rem;cursor:pointer;">📲 Compartir WA</button>
+      <button onclick="cerrarListaCompra()" style="background:#f0f0f0;color:#555;border:none;border-radius:12px;padding:12px 18px;font-weight:600;cursor:pointer;">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── LISTA DE COMPRA ───────────────────────────────────────────
+var _lcItems = [];
+var _lcFiltroActivo = 'todos';
+
+async function abrirListaCompra() {
+  document.getElementById('modalListaCompra').style.display = 'block';
+  document.getElementById('lcSubtitulo').textContent = 'Cargando desde Sheets...';
+  document.getElementById('lcResumen').style.display = 'none';
+  document.getElementById('lcCuerpo').innerHTML = '<div style="text-align:center;padding:40px;color:#aaa;">⏳ Consultando inventario...</div>';
+
+  try {
+    const r = await fetch(API_URL + '?action=getListaCompra&t=' + Date.now(), {
+      redirect: 'follow',
+      signal: AbortSignal.timeout(15000)
+    });
+    const data = await r.json();
+
+    if (!data.ok || !data.items) {
+      document.getElementById('lcCuerpo').innerHTML = '<div style="text-align:center;padding:40px;color:#e53935;">❌ ' + (data.error || 'Error al cargar') + '</div>';
+      return;
+    }
+
+    _lcItems = data.items;
+
+    // Resumen
+    document.getElementById('lcTotalProd').textContent = data.items.length;
+    document.getElementById('lcUrgentes').textContent  = data.urgentes;
+    document.getElementById('lcTotalPesos').textContent = '$' + Math.round(data.totalPesos).toLocaleString('es-AR');
+    document.getElementById('lcResumen').style.display = 'flex';
+
+    // Subtítulo con hora
+    const hora = new Date(data.generadoEn).toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'});
+    document.getElementById('lcSubtitulo').textContent = data.items.length + ' productos · act. ' + hora;
+
+    // Badge en botón del header
+    const badge = document.getElementById('badgeListaCompra');
+    if (badge && data.urgentes > 0) {
+      badge.textContent = data.urgentes;
+      badge.style.display = 'flex';
+    }
+
+    lcRenderizar('todos');
+
+  } catch(e) {
+    document.getElementById('lcCuerpo').innerHTML = '<div style="text-align:center;padding:40px;color:#e53935;">❌ Error: ' + e.message + '</div>';
+  }
+}
+
+function cerrarListaCompra() {
+  document.getElementById('modalListaCompra').style.display = 'none';
+}
+
+function lcFiltrar(filtro) {
+  _lcFiltroActivo = filtro;
+  ['lcFTodos','lcFUrgente','lcFNormal'].forEach(function(id) {
+    document.getElementById(id).classList.remove('activo');
+  });
+  var mapa = { todos: 'lcFTodos', urgente: 'lcFUrgente', normal: 'lcFNormal' };
+  document.getElementById(mapa[filtro]).classList.add('activo');
+  lcRenderizar(filtro);
+}
+
+function lcRenderizar(filtro) {
+  var items = _lcItems;
+  if (filtro === 'urgente') items = items.filter(function(it){ return it.urgencia <= 2; });
+  if (filtro === 'normal')  items = items.filter(function(it){ return it.urgencia > 2; });
+
+  if (!items.length) {
+    document.getElementById('lcCuerpo').innerHTML = '<div style="text-align:center;padding:40px;color:#aaa;">Sin productos en esta categoría</div>';
+    return;
+  }
+
+  var html = '';
+  var urgenciaActual = -1;
+
+  items.forEach(function(it) {
+    // Separador de sección
+    if (it.urgencia !== urgenciaActual) {
+      urgenciaActual = it.urgencia;
+      var tit = '';
+      if (it.urgencia === 0) tit = '🔔 Piso manual — PEDIR YA';
+      else if (it.urgencia === 1) tit = '⚠️ Empujar ya';
+      else if (it.urgencia === 2) tit = '🟠 Riesgo vencimiento';
+      else if (it.urgencia === 3) tit = '⏰ Stock crítico (≤3 días)';
+      else if (it.urgencia === 4) tit = '🟡 Stock bajo (≤7 días)';
+      else tit = '🟢 Compra normal';
+      html += '<div style="font-size:0.7rem;font-weight:900;color:#888;text-transform:uppercase;letter-spacing:.8px;margin:14px 4px 6px;">' + tit + '</div>';
+    }
+
+    var esUrgente = it.urgencia <= 2;
+    var esPiso    = it.urgencia === 0;
+    var cardClass = esPiso ? 'lc-card piso' : (esUrgente ? 'lc-card urgente' : 'lc-card');
+
+    var diasTxt = (it.diasStock !== null) ? it.diasStock + 'd stock' : 'sin historial';
+    var provTxt = it.proveedor ? '<span style="font-size:0.65rem;color:#888;">📦 ' + it.proveedor + '</span>' : '';
+    var badgeTxt = esUrgente
+      ? '<span class="lc-badge-urg">' + (esPiso ? '🔔 PISO' : it.prioridad) + '</span>'
+      : '<span class="lc-badge-ok">OK</span>';
+
+    html += '<div class="' + cardClass + '">'
+      + '<div style="flex:1;min-width:0;">'
+      +   '<div style="font-size:0.82rem;font-weight:700;color:#222;line-height:1.3;margin-bottom:3px;">' + it.nombre + '</div>'
+      +   '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'
+      +     badgeTxt
+      +     '<span style="font-size:0.68rem;color:#888;">📦 stock: ' + it.stock + '</span>'
+      +     '<span style="font-size:0.68rem;color:#888;">⏱ ' + diasTxt + '</span>'
+      +     provTxt
+      +   '</div>'
+      + '</div>'
+      + '<div style="text-align:right;min-width:70px;">'
+      +   '<div style="font-size:1rem;font-weight:900;color:#e65100;">x' + it.cantidad + '</div>'
+      +   '<div style="font-size:0.7rem;color:#666;">$' + it.total.toLocaleString('es-AR') + '</div>'
+      + '</div>'
+      + '</div>';
+  });
+
+  document.getElementById('lcCuerpo').innerHTML = html;
+}
+
+function lcCompartirWA() {
+  if (!_lcItems.length) return;
+
+  var texto = '🛒 *Lista de compra Almacén Copihue*
+';
+  texto += new Date().toLocaleDateString('es-AR') + '
+
+';
+
+  var urgentes = _lcItems.filter(function(it){ return it.urgencia <= 2; });
+  var normales  = _lcItems.filter(function(it){ return it.urgencia > 2; });
+
+  if (urgentes.length) {
+    texto += '⚠️ *URGENTES*
+';
+    urgentes.forEach(function(it){
+      texto += '• ' + it.nombre + ' — pedir x' + it.cantidad + '
+';
+    });
+    texto += '
+';
+  }
+
+  if (normales.length) {
+    texto += '📋 *NORMAL*
+';
+    normales.forEach(function(it){
+      texto += '• ' + it.nombre + ' — pedir x' + it.cantidad + '
+';
+    });
+    texto += '
+';
+  }
+
+  var total = _lcItems.reduce(function(s,it){ return s + it.total; }, 0);
+  texto += '💰 *Total estimado: $' + Math.round(total).toLocaleString('es-AR') + '*';
+
+  window.open('https://wa.me/?text=' + encodeURIComponent(texto), '_blank');
+}
+</script>
 </body>
 </html>
 
