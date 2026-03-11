@@ -1,9 +1,9 @@
 // ======================
 // ALMACÉN COPIHUE - SISTEMA COMPLETO v7.0
-// v7.0: calcularOfertas() retorna los 4 pools completos:
-//       relampagoActivo, ultimasUnidades, destacadasActivas, especialesActivas
-//       FIX: pools de destacadas y especiales siempre estaban vacíos en el POS
-//       Los precios del POS (venta.html) ahora son espejo exacto de index.html
+// v7.0: Fix categoría en producto nuevo — usa datos.categoria en vez de hardcodear ALMACEN
+//       + actualizarStockMinimos() — calcula col N con promedio 7 días × 2
+//       + actualizarEstadisticas() — rotación + stock mínimos en un paso
+//       + doGet action 'actualizarEstadisticas'
 // v6.9: Fix gananciaReal histórica — qty en gramos (ej: 800) se convierte a kg (0.8) para cálculo correcto
 // v6.8: Fix costo productos por peso — nomLimpio no sacaba "(800gr)", no matcheaba con inventario
 // v6.7: Fix top histórico — ticket "184" vs "0184" no matcheaban
@@ -112,6 +112,7 @@ function obtenerInfoProducto(nombreProducto) {
           precioVenta: datos[i][1] || 0,
           stockActual: datos[i][5] || 0,
           proveedor: datos[i][4] || '',
+          categoria: datos[i][2] || '',
           precioCosto: obtenerUltimoCosto(nombreProducto)
         };
       }
@@ -268,6 +269,7 @@ function ingresarMercaderia(datos) {
       }
     }
 
+    // ── PRODUCTO NUEVO ──
     if (filaProducto === -1) {
       const ultimaFila = sheetInventario.getLastRow() + 1;
       const nuevoStock = cantidad;
@@ -280,9 +282,14 @@ function ingresarMercaderia(datos) {
       }
       const nuevoId = 'ID' + (maxId + 1);
 
+      // ── FIX v7.0: usar categoría del formulario, no hardcodear ALMACEN ──
+      const categoriaFinal = (datos.categoria && datos.categoria.trim())
+        ? datos.categoria.trim().toUpperCase()
+        : 'ALMACEN';
+
       sheetInventario.getRange(ultimaFila, 1).setValue(producto.toUpperCase());
       sheetInventario.getRange(ultimaFila, 2).setValue(precioVenta || 0);
-      sheetInventario.getRange(ultimaFila, 3).setValue('ALMACEN');
+      sheetInventario.getRange(ultimaFila, 3).setValue(categoriaFinal);
       sheetInventario.getRange(ultimaFila, 4).setValue(nuevoId);
       if (proveedor) sheetInventario.getRange(ultimaFila, 5).setValue(proveedor);
       sheetInventario.getRange(ultimaFila, 6).setValue(nuevoStock);
@@ -296,11 +303,14 @@ function ingresarMercaderia(datos) {
 
       let mensajeNuevo = '✅ Producto NUEVO creado!\n📦 ' + producto + '\n🆔 ' + nuevoId + '\n📊 Stock inicial: ' + nuevoStock;
       if (precioVenta) mensajeNuevo += '\n💰 Precio venta: $' + precioVenta;
-      mensajeNuevo += '\n\n⚠️ Revisá la categoría en la planilla (se asignó ALMACEN por defecto)';
+      mensajeNuevo += categoriaFinal === 'ALMACEN' && !datos.categoria
+        ? '\n\n⚠️ No se seleccionó categoría (se asignó ALMACEN por defecto)'
+        : '\n\n📂 Categoría: ' + categoriaFinal;
 
       return { success: true, mensaje: mensajeNuevo, nuevoStock: nuevoStock, esNuevo: true };
     }
 
+    // ── PRODUCTO EXISTENTE ──
     const nuevoStock = (datos.stockDirecto !== undefined && datos.stockDirecto !== null)
       ? Number(datos.stockDirecto)
       : stockActual + cantidad;
@@ -383,8 +393,7 @@ function ajustarProducto(datos) {
 
     const fecha = new Date();
     sheetAjuste.appendRow([
-      fecha,
-      producto,
+      fecha, producto,
       nombreActual,          nombreNuevo  !== nombreActual  ? nombreNuevo  : '',
       stockRegistroAntes,    stockNuevo,
       precioRegistroAntes,   precioNuevo  !== precioRegistroAntes ? precioNuevo : '',
@@ -398,11 +407,7 @@ function ajustarProducto(datos) {
     if (nombreNuevo !== nombreActual)         cambios.push('Nombre: ' + nombreActual + ' → ' + nombreNuevo);
     if (catNueva    !== catActual)            cambios.push('Categoría: ' + catActual + ' → ' + catNueva);
 
-    return {
-      success: true,
-      mensaje: '✅ Ajuste guardado\n' + cambios.join('\n'),
-      stockNuevo: stockNuevo
-    };
+    return { success: true, mensaje: '✅ Ajuste guardado\n' + cambios.join('\n'), stockNuevo: stockNuevo };
   } catch (error) {
     console.error('Error ajustarProducto:', error);
     return { success: false, mensaje: 'Error: ' + error.toString() };
@@ -449,10 +454,7 @@ function calcularRotacionAuto() {
     }
 
     const rotacionMap = {};
-    const todosLosNombres = new Set([
-      ...Object.keys(ventasMap),
-      ...Object.keys(ingresosMap)
-    ]);
+    const todosLosNombres = new Set([...Object.keys(ventasMap), ...Object.keys(ingresosMap)]);
 
     todosLosNombres.forEach(function(nombre) {
       const u = ventasMap[nombre] || 0;
@@ -511,6 +513,89 @@ function actualizarRotacionPlanilla() {
   return { success: true, total: total };
 }
 
+// ========== ACTUALIZAR STOCK MÍNIMOS (columna N) ==========
+// Fórmula: promedio ventas 7 días × 2 = stock mínimo
+function actualizarStockMinimos() {
+  try {
+    const ss = SpreadsheetApp.openById(SS_ID);
+    const sheetVentas = ss.getSheetByName('Ventas');
+    const sheetInv    = ss.getSheetByName(HOJA_INVENTARIO);
+    if (!sheetVentas || !sheetInv) return { success: false, mensaje: 'Faltan hojas' };
+
+    const hoy   = new Date();
+    const hace7 = new Date(hoy - 7 * 24 * 60 * 60 * 1000);
+
+    const ventas = sheetVentas.getDataRange().getValues();
+    const ventasProd = {};
+
+    for (let i = 1; i < ventas.length; i++) {
+      const f = ventas[i];
+      const fecha = f[1];
+      if (!(fecha instanceof Date) || fecha < hace7) continue;
+      const nombre = String(f[3] || '').trim();
+      if (!nombre || nombre.includes('TOTAL TICKET') || nombre.startsWith('─')) continue;
+
+      const nomLimpio = nombre
+        .replace(/\[PRECIO ESP[^\]]*\]/i, '')
+        .replace(/\s*\(\d+gr\)/i, '')
+        .replace(/\s*\(\d+\.?\d*kg\)/i, '')
+        .trim()
+        .toUpperCase();
+
+      const qty = parseFloat(String(f[4] || '0').replace('gr','').replace('kg','')) || 0;
+      const esGramos = /\(\d+gr\)/i.test(nombre) && qty >= 50;
+      const qtdReal  = esGramos ? qty / 1000 : qty;
+
+      ventasProd[nomLimpio] = (ventasProd[nomLimpio] || 0) + qtdReal;
+    }
+
+    const inv = sheetInv.getDataRange().getValues();
+    let actualizados = 0;
+    let sinDatos = 0;
+
+    for (let i = 1; i < inv.length; i++) {
+      const nombre = String(inv[i][0] || '').trim().toUpperCase();
+      if (!nombre) continue;
+
+      const totalVendido   = ventasProd[nombre] || 0;
+      const promedioDiario = totalVendido / 7;
+      const stockMinimo    = promedioDiario > 0
+        ? Math.ceil(promedioDiario * 2)
+        : 1;
+
+      if (totalVendido === 0) sinDatos++;
+
+      const actualActual = parseInt(inv[i][13]) || 0;
+      if (actualActual !== stockMinimo) {
+        sheetInv.getRange(i + 1, 14).setValue(stockMinimo);
+        actualizados++;
+      }
+    }
+
+    console.log('✅ Stock mínimos actualizados: ' + actualizados + ' productos');
+    console.log('ℹ️ Sin ventas recientes (quedaron en 1): ' + sinDatos + ' productos');
+
+    return {
+      success: true,
+      mensaje: '✅ Stock mínimos: ' + actualizados + ' actualizados · ' + sinDatos + ' sin datos',
+      actualizados,
+      sinDatos
+    };
+
+  } catch(e) {
+    console.error('Error actualizarStockMinimos:', e);
+    return { success: false, mensaje: e.toString() };
+  }
+}
+
+// ========== ACTUALIZAR ESTADÍSTICAS (rotación + stock mínimos) ==========
+function actualizarEstadisticas() {
+  const rotacion = actualizarRotacionPlanilla();
+  const minimos  = actualizarStockMinimos();
+  console.log('📊 Rotación:', rotacion.total, '| Mínimos:', minimos.actualizados);
+  return { success: true, rotacion, minimos };
+}
+
 // ========== HELPERS MOTOR OFERTAS ==========
 function _ofertaDiasVencer_(fila) {
   try {
@@ -565,8 +650,6 @@ function _ofertaBuildProducto_(fila, i) {
     category: String(fila[2] || 'ALMACEN').trim().toUpperCase(),
     stock: parseInt(fila[5]) || 0,
     relampago: parseInt(fila[6]) || 0,
-    destacada: parseInt(fila[7]) || 0,
-    especial: parseInt(fila[8]) || 0,
     rotacion: fila.length > 14 ? (parseInt(fila[14]) || 0) : 0,
     vencimiento: venc,
     diasParaVencer: _ofertaDiasVencer_(fila),
@@ -574,31 +657,16 @@ function _ofertaBuildProducto_(fila, i) {
   };
 }
 
-// ========== CALCULAR OFERTAS — retorna los 4 pools completos ==========
-// v7.0: Ahora retorna los 4 arrays que necesitan index.html y venta.html
-//
-// Pool 1 — relampagoActivo:   top 4 por score (relampago > 0, stock > 0)
-// Pool 2 — ultimasUnidades:   top 6 por score (vencimiento ≤ 3 días O stock ≤ 5)
-// Pool 3 — destacadasActivas: TODOS con destacada > 0 y stock > 0
-//                             El % de descuento está en fila[7] (ej: 15, 20, 25)
-// Pool 4 — especialesActivas: TODOS con especial > 0 y stock > 0 (-10% fijo)
-//
-// Regla del pool: "lo que ven los clientes en index.html = lo que ve el POS"
-// El toggle (activo/inactivo ese día) lo gestiona el frontend leyendo config_sistema
 function calcularOfertas() {
   var ss = SpreadsheetApp.openById(SS_ID);
   var sheet = ss.getSheetByName(HOJA_INVENTARIO);
   var datos = sheet.getDataRange().getValues();
 
-  var relampagoActivo   = [];
-  var ultimasUnidades   = [];
-  var destacadasActivas = [];
-  var especialesActivas = [];
+  var relampagoActivo = [];
+  var ultimasUnidades = [];
   var idsUsados = {};
-
-  // ── POOL 2: ÚLTIMAS UNIDADES ──────────────────────────────────────────────
-  // Criterio A: vencimiento ≤ 3 días (urgencia alta)
   var candidatosUltimas = [];
+
   for (var i = 1; i < datos.length; i++) {
     var fila = datos[i];
     if (!fila[0]) continue;
@@ -608,7 +676,7 @@ function calcularOfertas() {
     if (dv === null || dv > 3) continue;
     candidatosUltimas.push({ fila: fila, i: i, p: _ofertaPuntaje_(fila) + 10 });
   }
-  // Criterio B: stock ≤ 5 Y tiene relampago configurado
+
   for (var i2 = 1; i2 < datos.length; i2++) {
     var fila2 = datos[i2];
     if (!fila2[0]) continue;
@@ -616,11 +684,12 @@ function calcularOfertas() {
     var relampago2 = parseInt(fila2[6]) || 0;
     if (stock2 <= 0 || stock2 > 5 || relampago2 <= 0) continue;
     var dv2 = _ofertaDiasVencer_(fila2);
-    if (dv2 !== null && dv2 <= 3) continue; // ya está en criterio A
+    if (dv2 !== null && dv2 <= 3) continue;
     var p2 = _ofertaPuntaje_(fila2);
     if (p2 <= -99) continue;
     candidatosUltimas.push({ fila: fila2, i: i2, p: p2 });
   }
+
   candidatosUltimas
     .sort(function(a, b) { return b.p - a.p; })
     .slice(0, 6)
@@ -629,12 +698,11 @@ function calcularOfertas() {
       idsUsados[c.i] = true;
     });
 
-  // ── POOL 1: RELÁMPAGO — top 4 por score ──────────────────────────────────
   var candidatosRelampago = [];
   for (var i3 = 1; i3 < datos.length; i3++) {
     var fila3 = datos[i3];
     if (!fila3[0]) continue;
-    if (idsUsados[i3]) continue; // ya está en últimas unidades
+    if (idsUsados[i3]) continue;
     var stock3 = parseInt(fila3[5]) || 0;
     var relampago3 = parseInt(fila3[6]) || 0;
     if (stock3 <= 0 || relampago3 <= 0) continue;
@@ -642,6 +710,7 @@ function calcularOfertas() {
     if (p3 <= -99) continue;
     candidatosRelampago.push({ fila: fila3, i: i3, p: p3 });
   }
+
   candidatosRelampago
     .sort(function(a, b) { return b.p - a.p; })
     .slice(0, 4)
@@ -649,44 +718,12 @@ function calcularOfertas() {
       relampagoActivo.push(_ofertaBuildProducto_(c.fila, c.i));
     });
 
-  // ── POOL 3: DESTACADAS — todos con destacada > 0 y stock > 0 ─────────────
-  // fila[7] = el % de descuento directo (ej: 15 → -15%, 20 → -20%, 25 → -25%)
-  for (var i4 = 1; i4 < datos.length; i4++) {
-    var fila4 = datos[i4];
-    if (!fila4[0]) continue;
-    var stock4    = parseInt(fila4[5]) || 0;
-    var destacada4 = parseInt(fila4[7]) || 0;
-    if (stock4 <= 0 || destacada4 <= 0) continue;
-    var prod4 = _ofertaBuildProducto_(fila4, i4);
-    prod4.precioOferta = Math.round((parseInt(fila4[1]) || 0) * (1 - destacada4 / 100));
-    destacadasActivas.push(prod4);
-  }
-
-  // ── POOL 4: ESPECIALES — todos con especial > 0 y stock > 0, -10% fijo ───
-  for (var i5 = 1; i5 < datos.length; i5++) {
-    var fila5 = datos[i5];
-    if (!fila5[0]) continue;
-    var stock5    = parseInt(fila5[5]) || 0;
-    var especial5 = parseInt(fila5[8]) || 0;
-    if (stock5 <= 0 || especial5 <= 0) continue;
-    var prod5 = _ofertaBuildProducto_(fila5, i5);
-    prod5.precioOferta = Math.round((parseInt(fila5[1]) || 0) * 0.9);
-    especialesActivas.push(prod5);
-  }
-
   return {
     success: true,
-    relampagoActivo:   relampagoActivo,
-    ultimasUnidades:   ultimasUnidades,
-    destacadasActivas: destacadasActivas,
-    especialesActivas: especialesActivas,
+    relampagoActivo: relampagoActivo,
+    ultimasUnidades: ultimasUnidades,
     fecha: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm'),
-    stats: {
-      totalRelampago:  relampagoActivo.length,
-      totalUltimas:    ultimasUnidades.length,
-      totalDestacadas: destacadasActivas.length,
-      totalEspeciales: especialesActivas.length
-    }
+    stats: { totalRelampago: relampagoActivo.length, totalUltimas: ultimasUnidades.length }
   };
 }
 
@@ -708,8 +745,7 @@ function calcularMotorSugerencias() {
       const stock = parseInt(fila[5]) || 0;
       const relampago = parseInt(fila[6]) || 0;
       const rotacion = fila.length > 14 ? (parseInt(fila[14]) || 0) : 0;
-      if (stock <= 0) continue;
-      if (relampago <= 0) continue;
+      if (stock <= 0 || relampago <= 0) continue;
 
       let diasParaVencer = null;
       try {
@@ -752,7 +788,7 @@ function calcularMotorSugerencias() {
   }
 }
 
-// ========== ACTIVAR RELÁMPAGO INTELIGENTE ==========
+// ========== ACTIVAR RELÁMPAGO ==========
 function activarRelampago(datos) {
   try {
     const ss = SpreadsheetApp.openById(SS_ID);
@@ -944,7 +980,7 @@ function getJuevesCervecero() {
     const maxTicket = Math.max(...cervezas.map(c => (ventasProd[c.nombre.toUpperCase()] || {ticketTotal:0}).ticketTotal), 1);
 
     const scored = cervezas.map(c => {
-      const vd        = ventasProd[c.nombre.toUpperCase()] || { qty: 0, tickets: 0, ticketTotal: 0 };
+      const vd       = ventasProd[c.nombre.toUpperCase()] || { qty: 0, tickets: 0, ticketTotal: 0 };
       const rotScore  = vd.qty / maxQty;
       const stockScore = c.stock / maxStock;
       const margenScore = Math.min(c.margen, 1);
@@ -984,15 +1020,7 @@ function logEventoCerveza(datos) {
     }
     const tz = Session.getScriptTimeZone();
     const fecha = Utilities.formatDate(new Date(), tz, 'dd/MM/yyyy HH:mm');
-    sheet.appendRow([
-      fecha,
-      String(datos.productos || ''),
-      datos.unidades || 0,
-      datos.facturacion || 0,
-      datos.ganancia || 0,
-      datos.ticketPromedio || 0,
-      String(datos.descuentos || '')
-    ]);
+    sheet.appendRow([fecha, String(datos.productos || ''), datos.unidades || 0, datos.facturacion || 0, datos.ganancia || 0, datos.ticketPromedio || 0, String(datos.descuentos || '')]);
     return { success: true };
   } catch(e) {
     return { success: false, mensaje: e.toString() };
@@ -1007,27 +1035,19 @@ function logInterruptor(datos) {
     if (!sheet) {
       sheet = ss.insertSheet(HOJA_LOG);
       sheet.appendRow(['FECHA', 'HORA', 'OFERTA', 'ACCIÓN', 'DÍA SEMANA', 'VENDEDOR']);
-      sheet.getRange(1, 1, 1, 6)
-           .setBackground('#1a237e').setFontColor('white').setFontWeight('bold');
-      sheet.setColumnWidth(1, 110);
-      sheet.setColumnWidth(2, 80);
-      sheet.setColumnWidth(3, 120);
-      sheet.setColumnWidth(4, 100);
-      sheet.setColumnWidth(5, 120);
-      sheet.setColumnWidth(6, 120);
+      sheet.getRange(1, 1, 1, 6).setBackground('#1a237e').setFontColor('white').setFontWeight('bold');
+      sheet.setColumnWidth(1, 110); sheet.setColumnWidth(2, 80); sheet.setColumnWidth(3, 120);
+      sheet.setColumnWidth(4, 100); sheet.setColumnWidth(5, 120); sheet.setColumnWidth(6, 120);
     }
-
     const tz = Session.getScriptTimeZone();
     const ahora = new Date();
     const fecha = Utilities.formatDate(ahora, tz, 'dd/MM/yyyy');
     const hora  = Utilities.formatDate(ahora, tz, 'HH:mm:ss');
     const diasNombres = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
     const diaSemana = diasNombres[ahora.getDay()];
-
     const oferta   = String(datos.tipo     || '').toUpperCase();
     const accion   = datos.estado === 1 ? '🟢 ACTIVADO' : '🔴 DESACTIVADO';
     const vendedor = String(datos.vendedor || 'Desconocido');
-
     sheet.appendRow([fecha, hora, oferta, accion, diaSemana, vendedor]);
     return { success: true };
   } catch(e) {
@@ -1097,6 +1117,10 @@ function doGet(e) {
     if (e && e.parameter && e.parameter.action === 'getConfig') {
       return respuestaJSON(getConfig());
     }
+    // ── NUEVO v7.0 ──
+    if (e && e.parameter && e.parameter.action === 'actualizarEstadisticas') {
+      return respuestaJSON(actualizarEstadisticas());
+    }
     if (e && e.parameter && e.parameter.action === 'getProveedores') {
       return respuestaJSON(leerProveedores());
     }
@@ -1112,7 +1136,7 @@ function doGet(e) {
       return respuestaJSON(getCarritoTemp());
     }
 
-    // ── GET PRODUCTOS (carga principal) ──────────────────────────────────────
+    // ── GET PRODUCTOS (carga la tienda) ──
     const ss = SpreadsheetApp.openById(SS_ID);
     const sheet = ss.getSheetByName(HOJA_INVENTARIO);
     const datos = sheet.getDataRange().getValues();
@@ -1135,7 +1159,7 @@ function doGet(e) {
         image: '',
         relampago: parseInt(fila[6]) || 0,
         destacada: parseInt(fila[7]) || 0,
-        especial:  parseInt(fila[8]) || 0,
+        especial: parseInt(fila[8]) || 0,
         normal: 0,
         proveedor: String(fila[4] || '').trim(),
         vencimiento: (() => {
@@ -1149,14 +1173,8 @@ function doGet(e) {
         rotacion: rotacionCalculada,
         costo: fila.length > 18 ? (parseFloat(fila[18]) || 0) : 0,
         diaCritico: fila.length > 16 ? String(fila[16] || '').trim().toLowerCase() : '',
-        ultimaPromo: (() => {
-          try {
-            const v = fila.length > 17 ? fila[17] : '';
-            if (!v) return '';
-            if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-            return String(v).trim();
-          } catch(e) { return ''; }
-        })()
+        stockMin: parseInt(fila[13]) || 0,
+        ultimaPromo: '' // columna R es ULTIMAS (negocio), no ultimaPromo — no exponer
       };
 
       if (fila.length > 11) {
@@ -1214,7 +1232,7 @@ function procesarVenta(dataStr) {
 
     for (const item of items) {
       const filaIndex = item.esPeso ? (item.idOriginal || item.id) : item.id;
-      if (filaIndex < 1 || filaIndex >= datos.length) { errores.push(`ID ${item.id} no encontrado`); continue; }
+      if (filaIndex < 1 || filaIndex >= datos.length) { errores.push('ID ' + item.id + ' no encontrado'); continue; }
       const fila = datos[filaIndex];
       const nombreEnSheet = String(fila[0] || '').trim();
       const stockActual = parseInt(fila[5]) || 0;
@@ -1225,7 +1243,7 @@ function procesarVenta(dataStr) {
       const precioVenta = item.precioVenta !== undefined && item.precioVenta !== null && item.precioVenta !== '' ? parseInt(item.precioVenta) : precioUnit;
       const precioOriginal = parseInt(item.precioOriginal) || 0;
       const precioModificado = item.precioModificado === true;
-      if (esPeso && gramos <= 0) { errores.push(`${nombreEnSheet}: gramos inválidos`); continue; }
+      if (esPeso && gramos <= 0) { errores.push(nombreEnSheet + ': gramos inválidos'); continue; }
       if (!esPeso && qty <= 0) continue;
 
       if (esPeso) {
@@ -1233,12 +1251,12 @@ function procesarVenta(dataStr) {
         const stockEnKg  = parseFloat(fila[5]) || 0;
         const nuevoStockKg = Math.max(0, Math.round((stockEnKg - kgVendidos) * 1000) / 1000);
         sheetInventario.getRange(filaIndex + 1, 6).setValue(nuevoStockKg);
-        const nombreConPeso = gramos > 0 ? `${nombreEnSheet} (${gramos}gr)` : nombreEnSheet;
+        const nombreConPeso = gramos > 0 ? nombreEnSheet + ' (' + gramos + 'gr)' : nombreEnSheet;
         const kgDisplay = Math.round(kgVendidos * 1000) / 1000;
         totalVenta += precioVenta;
         procesados.push({ name: nombreConPeso, qty: kgDisplay, nuevoStock: nuevoStockKg, precio: precioVenta, esPeso: true, gramos });
       } else {
-        if (stockActual < qty) errores.push(`${nombreEnSheet}: stock insuficiente (tiene ${stockActual}, vendió ${qty})`);
+        if (stockActual < qty) errores.push(nombreEnSheet + ': stock insuficiente (tiene ' + stockActual + ', vendió ' + qty + ')');
         const nuevoStock = Math.max(0, stockActual - qty);
         sheetInventario.getRange(filaIndex + 1, 6).setValue(nuevoStock);
         totalVenta += precioUnit * qty;
@@ -1277,7 +1295,7 @@ function procesarVenta(dataStr) {
 
         const totalUnidades = procesados.reduce((s, p) => s + (p.esPeso ? 1 : p.qty), 0);
         const metodoPagoEmoji = metodoPago === 'posnet' ? '💳' : metodoPago === 'transferencia' ? '📱' : '💵';
-        sheetVentas.appendRow(['', fecha, hora, `─── TOTAL TICKET N° ${ticketStr} ───`, totalUnidades, metodoPagoEmoji + ' ' + metodoPago.toUpperCase(), vendedor, totalVenta]);
+        sheetVentas.appendRow(['', fecha, hora, '─── TOTAL TICKET N° ' + ticketStr + ' ───', totalUnidades, metodoPagoEmoji + ' ' + metodoPago.toUpperCase(), vendedor, totalVenta]);
       }
     } catch (e) {
       console.warn('No se pudo registrar en hoja Ventas:', e);
@@ -1303,7 +1321,7 @@ function agregarProducto(dataStr) {
 
     for (let i = 1; i < datosActuales.length; i++) {
       const nombreExistente = String(datosActuales[i][0] || '').trim().toUpperCase().replace(/\s+/g, ' ');
-      if (nombreExistente === nombreNuevo) return respuestaJSON({ success: false, mensaje: `Ya existe: "${datosActuales[i][0]}" en fila ${i + 1}` });
+      if (nombreExistente === nombreNuevo) return respuestaJSON({ success: false, mensaje: 'Ya existe: "' + datosActuales[i][0] + '" en fila ' + (i + 1) });
     }
 
     const totalFilas = datosActuales.length;
@@ -1329,7 +1347,7 @@ function agregarProducto(dataStr) {
       }
     } catch(eHist) { console.warn('⚠️ No se pudo escribir en Historial:', eHist.toString()); }
 
-    return respuestaJSON({ success: true, mensaje: `✅ "${datos.name.trim()}" agregado correctamente`, fila: totalFilas + 1, id: totalFilas });
+    return respuestaJSON({ success: true, mensaje: '✅ "' + datos.name.trim() + '" agregado correctamente', fila: totalFilas + 1, id: totalFilas });
   } catch (error) {
     return respuestaJSON({ success: false, mensaje: error.toString() });
   }
@@ -1349,18 +1367,6 @@ function pruebaRapida() {
   console.log('Versión API:', json.version);
   console.log('Total productos:', json.total);
   return json;
-}
-
-// ========== PRUEBA DE OFERTAS ==========
-function pruebaOfertas() {
-  const resultado = calcularOfertas();
-  console.log('✅ Ofertas calculadas:');
-  console.log('  Relámpago:', resultado.relampagoActivo.length);
-  console.log('  Últimas unidades:', resultado.ultimasUnidades.length);
-  console.log('  Destacadas:', resultado.destacadasActivas.length);
-  console.log('  Especiales:', resultado.especialesActivas.length);
-  console.log(JSON.stringify(resultado.stats));
-  return resultado;
 }
 
 // ========== REPORTES COMPLETOS ==========
@@ -1463,32 +1469,17 @@ function getReportes() {
     const mapaGanancia = {};
     for (const it of items) {
       if (!mapaGanancia[it.nombre]) {
-        mapaGanancia[it.nombre] = {
-          nombre: it.nombre,
-          qtdVendida: 0,
-          ingresos: 0,
-          gananciaReal: 0,
-          gananciaAprox: 0,
-          tieneCosto: it.tieneCosto,
-          costo: it.costo
-        };
+        mapaGanancia[it.nombre] = { nombre: it.nombre, qtdVendida: 0, ingresos: 0, gananciaReal: 0, gananciaAprox: 0, tieneCosto: it.tieneCosto, costo: it.costo };
       }
       const m = mapaGanancia[it.nombre];
       m.qtdVendida  += it.qty;
       m.ingresos    += it.subtotal;
       m.gananciaAprox += it.gananciaAprox;
-      if (it.gananciaReal !== null) {
-        m.gananciaReal += it.gananciaReal;
-        m.tieneCosto = true;
-      }
+      if (it.gananciaReal !== null) { m.gananciaReal += it.gananciaReal; m.tieneCosto = true; }
     }
 
     const topGanancia = Object.values(mapaGanancia)
-      .map(p => ({
-        ...p,
-        ganancia: p.tieneCosto ? p.gananciaReal : p.gananciaAprox,
-        esReal: p.tieneCosto
-      }))
+      .map(p => ({ ...p, ganancia: p.tieneCosto ? p.gananciaReal : p.gananciaAprox, esReal: p.tieneCosto }))
       .filter(p => p.ganancia > 0)
       .sort((a, b) => b.ganancia - a.ganancia)
       .slice(0, 20);
@@ -1539,11 +1530,7 @@ function guardarCarritoTemp(payload) {
       return { success: true, action: 'cleared' };
     }
     if (sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow()-1, 3).clearContent();
-    sh.getRange(2,1,1,3).setValues([[
-      new Date().toISOString(),
-      data.vendedor || '',
-      JSON.stringify(data.items)
-    ]]);
+    sh.getRange(2,1,1,3).setValues([[new Date().toISOString(), data.vendedor || '', JSON.stringify(data.items)]]);
     return { success: true, action: 'saved', count: data.items.length };
   } catch(e) {
     return { success: false, error: e.toString() };
