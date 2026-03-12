@@ -737,7 +737,6 @@ function calcularOfertas() {
   }
 
   // ── Leer límites de visualización desde config_sistema ─────
-  // (los pools completos van al POS para descuentos; los límites los usa index.html para mostrar)
   var limites = { relampago: 3, ultimas: 3, especiales: 2, destacadas: 9 };
   try {
     var ssCfg = SpreadsheetApp.openById(SS_ID);
@@ -758,19 +757,40 @@ function calcularOfertas() {
     }
   } catch(eCfg) { /* usa el default 9 */ }
 
+  // ── Rotación diaria de especiales ──────────────────────────
+  // Mismo algoritmo que ROTACION_SISTEMA en index.html (misma seed = mismo resultado para todos)
+  var especialesPool = especialesActivas; // pool completo (para stats)
+  if (especialesActivas.length > limites.especiales) {
+    var tzDate    = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+    var dateKey   = tzDate.getFullYear() + '-' +
+                    String(tzDate.getMonth() + 1).padStart(2, '0') + '-' +
+                    String(tzDate.getDate()).padStart(2, '0');
+    var argDate   = new Date(dateKey);
+    var dayOfYear = Math.floor((argDate - new Date(argDate.getFullYear(), 0, 0)) / 86400000);
+    var totalSets = Math.ceil(especialesActivas.length / limites.especiales);
+    var setNumber = dayOfYear % totalSets;
+    var startIdx  = (setNumber * limites.especiales) % especialesActivas.length;
+    var rotados   = [];
+    for (var ri = 0; ri < limites.especiales; ri++) {
+      rotados.push(especialesActivas[(startIdx + ri) % especialesActivas.length]);
+    }
+    especialesActivas = rotados;
+  }
+
   return {
     success: true,
     relampagoActivo:   relampagoActivo,
     ultimasUnidades:   ultimasUnidades,
     destacadasActivas: destacadasActivas,
-    especialesActivas: especialesActivas,
+    especialesActivas: especialesActivas,   // ya filtradas y rotadas (máx limites.especiales)
     limites: limites,
     fecha: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm'),
     stats: {
       totalRelampago:   relampagoActivo.length,
       totalUltimas:     ultimasUnidades.length,
       totalDestacadas:  destacadasActivas.length,
-      totalEspeciales:  especialesActivas.length
+      totalEspeciales:  especialesPool.length,   // total real del pool
+      especialesMostradas: especialesActivas.length
     }
   };
 }
