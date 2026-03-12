@@ -2083,7 +2083,7 @@
 // ========== VERSIÓN Y CONFIGURACIÓN ==========
 const APP_VERSION = 'V2.9-GANCHO-250305';
 // Tag versión automático con fecha
-(function(){ const el=document.getElementById('versionTag'); if(el) el.textContent='v002'; })();
+(function(){ const el=document.getElementById('versionTag'); if(el) el.textContent='v003'; })();
 
 // ========== MAPEO DE OFERTAS RELÁMPAGO ==========
 const OFERTAS_RELAMPAGO_SISTEMA = {
@@ -2535,11 +2535,12 @@ function seleccionarProductosOfertas() {
             productosEspeciales = poolFiltrado; // TODAS las especiales
             console.log(`⭐ [ADMIN] Mostrando TODAS las especiales: ${productosEspeciales.length} productos`);
         } else {
+            // LÍMITE FIJO: máximo 2 especiales visibles
             productosEspeciales = ROTACION_SISTEMA.selectRotatedProducts(
                 poolFiltrado, 
                 2, 
                 'rotacion_especiales'
-            );
+            ).slice(0, 2); // doble seguridad
             console.log(`⭐ Especiales activo: ${productosEspeciales.length} productos`);
         }
         
@@ -3040,11 +3041,22 @@ function renderizarCervecero() {
 }
 
 function agregarProductoCervecero(idProducto, precioPromo) {
-    // Agregar al carrito con precio especial (solo si index tiene carrito)
-    if (typeof openCart === 'function') {
-        const prod = products.find(p => p.id === idProducto);
-        if (prod) addToCart({ ...prod, price: precioPromo, _esCervecero: true });
+    // Buscar el producto local por id (índice inventario = p.i de GAS)
+    const prod = products.find(p => p.id === idProducto);
+    if (!prod) {
+        // Fallback: buscar por id de la sección de cervezas del pool
+        const prodAlt = products.find(p => String(p.id) === String(idProducto));
+        if (!prodAlt) { showNotification('❌ Producto no encontrado', 'error'); return; }
     }
+    // Temporalmente parchamos el precio en el array para que addToCart use el precioPromo
+    const prodLocal = products.find(p => p.id === idProducto || String(p.id) === String(idProducto));
+    if (!prodLocal) { showNotification('❌ Producto no encontrado', 'error'); return; }
+    const precioOriginal = prodLocal.price;
+    prodLocal.price = precioPromo; // precio Jueves Cervecero
+    prodLocal._precioOriginalJC = precioOriginal;
+    addToCart(prodLocal.id, 'cervecero');
+    // Restaurar precio real (no alterar el catálogo)
+    prodLocal.price = precioOriginal;
 }
 
 // ========== FLYER CERVECERO CANVAS ==========
