@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v133</title>
+    <title>Copihue — POS v134</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -98,6 +98,12 @@
             70% { box-shadow: 0 0 0 5px rgba(105,240,174,0); }
             100% { box-shadow: 0 0 0 0 rgba(105,240,174,0); }
         }
+        @keyframes pulsoCobrar {
+            0%   { box-shadow: 0 4px 16px rgba(27,94,32,0.55), 0 0 0 0 rgba(76,175,80,0.7); transform: scale(1); }
+            50%  { box-shadow: 0 4px 22px rgba(27,94,32,0.7),  0 0 0 10px rgba(76,175,80,0); transform: scale(1.07); }
+            100% { box-shadow: 0 4px 16px rgba(27,94,32,0.55), 0 0 0 0 rgba(76,175,80,0); transform: scale(1); }
+        }
+        #fabCobrar button { animation: pulsoCobrar 1.8s ease-in-out infinite; }
         @keyframes parpadeoAmbar {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.3; }
@@ -384,6 +390,11 @@
             font-weight: 900;
             flex: 1;
         }
+        @keyframes pulsoBtnConfirmar {
+            0%   { box-shadow: 0 2px 8px rgba(105,240,174,0.4), 0 0 0 0 rgba(105,240,174,0.6); }
+            60%  { box-shadow: 0 2px 14px rgba(105,240,174,0.6), 0 0 0 8px rgba(105,240,174,0); }
+            100% { box-shadow: 0 2px 8px rgba(105,240,174,0.4), 0 0 0 0 rgba(105,240,174,0); }
+        }
         .btn-confirmar {
             background: #69f0ae;
             color: var(--verde-oscuro);
@@ -393,14 +404,15 @@
             font-size: 1.15rem;
             font-weight: 800;
             cursor: pointer;
-            transition: transform 0.1s;
             white-space: nowrap;
         }
-        .btn-confirmar:active { transform: scale(0.96); }
+        .btn-confirmar:not(:disabled) { animation: pulsoBtnConfirmar 1.8s ease-in-out infinite; }
+        .btn-confirmar:active { transform: scale(0.96); animation: none; }
         .btn-confirmar:disabled {
             background: #555;
             color: #999;
             cursor: not-allowed;
+            animation: none;
         }
 
         /* ===== MODAL RESUMEN DEL DÍA ===== */
@@ -4942,6 +4954,7 @@ const _poolIdsRelampago  = new Set();
 const _poolIdsDestacadas = new Set();
 const _poolIdsEspeciales = new Set();
 const _poolIdsUltimas    = new Set();
+const _poolCervecero     = new Map(); // id → { descuento, precioPromo }
 
 async function cargarPoolsOfertas() {
     try {
@@ -4960,6 +4973,25 @@ async function cargarPoolsOfertas() {
     } catch(e) {
         console.warn('⚠️ No se pudieron cargar pools de ofertas:', e.message);
     }
+    // Cargar pool Jueves Cervecero siempre (el toggle decide si se aplica)
+    try {
+        const r2 = await fetch(API_URL + '?action=getJuevesCervecero&t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(8000) });
+        const d2 = await r2.json();
+        _poolCervecero.clear();
+        if (d2.success && d2.productos && d2.productos.length > 0) {
+            d2.productos.forEach(p => {
+                // El id de GAS es el índice de fila en inventario (coincide con p.i del servidor)
+                // Buscamos el producto local por nombre (más robusto que por id de GAS)
+                const local = productos.find(lp => lp.name.trim().toUpperCase() === p.nombre.trim().toUpperCase());
+                if (local) {
+                    _poolCervecero.set(local.id, { descuento: p.descuento, precioPromo: p.precioPromo, esGancho: p.esGancho });
+                }
+            });
+            console.log(`🍺 Pool cervecero: ${_poolCervecero.size} cervezas`);
+        }
+    } catch(e) {
+        console.warn('⚠️ No se pudo cargar pool cervecero:', e.message);
+    }
 }
 
 const OFERTAS_RELAMPAGO_SISTEMA = {
@@ -4976,10 +5008,26 @@ const OFERTAS_RELAMPAGO_SISTEMA = {
     '14': { nombre:'25off', tipo:'pct', descuento:25            },
 };
 
+// Helper: estado real del toggle cervecero
+function _esCerveceroActivo() {
+    return _cerveceroOverride !== null ? _cerveceroOverride : _esCerveceroAutoActivo();
+}
+
 // Calcula precio y etiqueta de oferta para un producto en el POS
 // Retorna { precioUnitario, etiqueta, tieneOferta, tipoOferta }
 function calcularOfertaPOS(producto, qty) {
     const r = { precioUnitario: producto.price, precioTotal: producto.price * qty, etiqueta: null, tieneOferta: false, tipoOferta: null };
+
+    // 0. JUEVES CERVECERO — prioridad sobre todo si el toggle está activo
+    if (_esCerveceroActivo() && _poolCervecero.has(producto.id)) {
+        const jc = _poolCervecero.get(producto.id);
+        r.precioUnitario = jc.precioPromo || Math.round(producto.price * (1 - jc.descuento / 100));
+        r.precioTotal    = r.precioUnitario * qty;
+        r.etiqueta       = jc.esGancho ? `🍺 -${jc.descuento}% 🔥` : `🍺 -${jc.descuento}%`;
+        r.tieneOferta    = true;
+        r.tipoOferta     = 'cervecero';
+        return r;
+    }
 
     // 1. RELÁMPAGO — toggle activo Y producto en el pool del día
     if (producto.relampago > 0 && _toggleEstado.relampago && _poolIdsRelampago.has(producto.id)) {
@@ -5024,6 +5072,10 @@ function calcularOfertaPOS(producto, qty) {
 
 // Badge de oferta para el buscador
 function badgeOfertaPOS(producto) {
+    if (_esCerveceroActivo() && _poolCervecero.has(producto.id)) {
+        const jc = _poolCervecero.get(producto.id);
+        return `<span style="background:#1565c0;color:#f9a825;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">🍺 -${jc.descuento}%</span>`;
+    }
     if (producto.relampago > 0 && _toggleEstado.relampago && _poolIdsRelampago.has(producto.id)) {
         const cfg = OFERTAS_RELAMPAGO_SISTEMA[String(producto.relampago)];
         if (cfg) return `<span style="background:#f9a825;color:#000;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">⚡ ${cfg.nombre.toUpperCase()}</span>`;
@@ -5188,12 +5240,14 @@ function toggleCervecero() {
         ? '🔄 Cervecero en modo automático'
         : (nuevoEstado ? '🟢 🍺 Cervecero activado (manual)' : '🔴 🍺 Cervecero desactivado (manual)');
     mostrarToast(msg, nuevoEstado ? 'verde' : 'rojo');
+    // Recargar pool cervecero y refrescar badges
+    cargarPoolsOfertas().then(() => _refreshResultadosBadges());
 }
 
 // Sincronizar badge de versión desde el <title>
 (function(){
     const el = document.getElementById('versionTag');
-    if (el) el.textContent = 'v133';
+    if (el) el.textContent = 'v134';
 })();
 
 // ── WakeLock: mantener pantalla encendida mientras la app está activa ──
