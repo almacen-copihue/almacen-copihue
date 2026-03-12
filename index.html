@@ -2187,6 +2187,7 @@ let esAdmin = false;
 // Pools de ofertas
 let poolRelampago = [];
 let poolUltimas = [];
+let _limiteDestacadas = 9; // configurable desde config_sistema → "máximo destacadas"
 let productosUltimas = [];
 let poolDestacadas = [];
 let poolEspeciales = [];
@@ -2315,6 +2316,17 @@ async function cargarConfigSistema() {
             console.log('🔘 ' + tipo + ': ' + (OFERTA_ACTIVA[tipo] ? '🟢 ACTIVA' : '🔴 inactiva'));
         });
 
+        // Leer límite configurable de destacadas
+        const claveMax = Object.keys(cfg).find(k => k.toLowerCase().includes('máximo destacadas') || k.toLowerCase().includes('maximo destacadas'));
+        if (claveMax) {
+            const rowMax = cfg[claveMax];
+            const valMax = rowMax ? rowMax[diaIdx] : null;
+            if (valMax !== null && !isNaN(parseInt(valMax)) && parseInt(valMax) > 0) {
+                _limiteDestacadas = parseInt(valMax);
+                console.log('🔥 Límite destacadas configurado desde planilla:', _limiteDestacadas);
+            }
+        }
+
         actualizarMensajesOfertas();
     } catch(e) {
         console.warn('⚠️ Error cargando config_sistema:', e.message);
@@ -2366,14 +2378,10 @@ function calcularPuntaje(prod) {
     }
 
     // Días desde última promo (con fix UTC)
-    // Blindado: ignorar fechas futuras o inválidas
     let diasPromo = null;
     if (prod.ultimaPromo) {
         const u = parseFechaLocal(prod.ultimaPromo);
-        if (u) {
-            const d = Math.round((hoy - u) / 86400000);
-            if (d >= 0) diasPromo = d; // ignorar fechas futuras (d < 0)
-        }
+        if (u) diasPromo = Math.round((hoy - u) / 86400000);
     }
 
     // Penalización: si estuvo en promo en últimos 15 días
@@ -2501,11 +2509,11 @@ function seleccionarProductosOfertas() {
             productosDestacadas = poolFiltrado;
             console.log(`🔥 [ADMIN] Mostrando TODAS las destacadas: ${productosDestacadas.length}`);
         }
-        // Si hay más de 9, rotar; si no, mostrar todos
-        else if (poolFiltrado.length > 9) {
+        // Si hay más de _limiteDestacadas, rotar; si no, mostrar todos
+        else if (poolFiltrado.length > _limiteDestacadas) {
             productosDestacadas = ROTACION_SISTEMA.selectRotatedProducts(
                 poolFiltrado, 
-                9, 
+                _limiteDestacadas, 
                 'rotacion_destacadas'
             );
             console.log(`🔥 Destacadas activo (rotando): ${productosDestacadas.length} de ${poolFiltrado.length}`);
@@ -2696,7 +2704,7 @@ function renderizarContenedorOfertas(tipo, productos) {
                         ✅ Stock: ${product.stockNumber}
                     </div>
                     
-                    <button class="add-to-cart" data-id="${product.id}" data-testid="add-to-cart-${product.id}">
+                    <button class="add-to-cart" data-id="${product.id}" data-tipo="${tipo}" data-testid="add-to-cart-${product.id}">
                         🛒 Agregar al Carrito
                     </button>
                 </div>
@@ -3565,7 +3573,7 @@ function calcularAhorro(producto, cantidad, esRelampago = false, ofertaRelampago
 // Variable para controlar clics rápidos
 let clickEnProgreso = false;
 
-function addToCart(productId) {
+function addToCart(productId, tipoForzado) {
     // Prevenir clics rápidos duplicados
     if (clickEnProgreso) return;
     clickEnProgreso = true;
@@ -3603,8 +3611,9 @@ function addToCart(productId) {
         esPromo = true;
     }
     
-    // 1. Verificar ESPECIALES (si está activa O si admin las fuerza)
-    if ((productosEspeciales.some(p => p.id === productId) && validarHorario('especiales')) ||
+    // 1. Verificar ESPECIALES (si está activa, si admin las fuerza, O si viene del botón de oferta)
+    if (tipoForzado === 'especiales' ||
+        (productosEspeciales.some(p => p.id === productId) && validarHorario('especiales')) ||
         (esAdmin && modoMostrarTodasEspeciales)) {
         esOfertaEspecial = true;
         ofertaConfig = {
@@ -3616,7 +3625,8 @@ function addToCart(productId) {
         console.log('✅ Producto tiene oferta ESPECIAL');
     } 
     // 2. Verificar DESTACADAS
-    else if (product.destacada > 0 && productosDestacadas.some(p => p.id === productId) && validarHorario('destacadas')) {
+    else if (tipoForzado === 'destacadas' ||
+             (product.destacada > 0 && productosDestacadas.some(p => p.id === productId) && validarHorario('destacadas'))) {
         esOfertaDestacada = true;
         ofertaConfig = {
             nombre: "Destacada",
@@ -3627,8 +3637,9 @@ function addToCart(productId) {
         console.log('✅ Producto tiene oferta DESTACADA:', product.destacada + '%');
     }
     // 3. Verificar RELÁMPAGO
-    else if (product.relampago > 0 && (productosRelampago.some(p => p.id === productId) && validarHorario('relampago') || 
-             (esAdmin && modoMostrarTodasOfertas))) {
+    else if (tipoForzado === 'relampago' ||
+             (product.relampago > 0 && (productosRelampago.some(p => p.id === productId) && validarHorario('relampago') || 
+             (esAdmin && modoMostrarTodasOfertas)))) {
         esOfertaRelampago = true;
         const configRelampago = OFERTAS_RELAMPAGO_SISTEMA[product.relampago];
         if (configRelampago) {
@@ -5106,10 +5117,11 @@ function setupEventListeners() {
         const addToCartBtn = e.target.closest('.add-to-cart');
         if (addToCartBtn) {
             const productId = parseInt(addToCartBtn.getAttribute('data-id'));
+            const tipoOferta = addToCartBtn.getAttribute('data-tipo') || null;
             if (!isNaN(productId)) {
-                addToCart(productId);
-                e.stopPropagation(); // Prevenir propagación
-                e.preventDefault(); // Prevenir comportamiento por defecto
+                addToCart(productId, tipoOferta);
+                e.stopPropagation();
+                e.preventDefault();
             }
         }
     });
