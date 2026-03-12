@@ -2083,7 +2083,7 @@
 // ========== VERSIÓN Y CONFIGURACIÓN ==========
 const APP_VERSION = 'V2.9-GANCHO-250305';
 // Tag versión automático con fecha
-(function(){ const el=document.getElementById('versionTag'); if(el) el.textContent='v003'; })();
+(function(){ const el=document.getElementById('versionTag'); if(el) el.textContent='v004'; })();
 
 // ========== MAPEO DE OFERTAS RELÁMPAGO ==========
 const OFERTAS_RELAMPAGO_SISTEMA = {
@@ -3041,22 +3041,42 @@ function renderizarCervecero() {
 }
 
 function agregarProductoCervecero(idProducto, precioPromo) {
-    // Buscar el producto local por id (índice inventario = p.i de GAS)
-    const prod = products.find(p => p.id === idProducto);
-    if (!prod) {
-        // Fallback: buscar por id de la sección de cervezas del pool
-        const prodAlt = products.find(p => String(p.id) === String(idProducto));
-        if (!prodAlt) { showNotification('❌ Producto no encontrado', 'error'); return; }
+    const prod = products.find(p => p.id === idProducto || String(p.id) === String(idProducto));
+    if (!prod) { showNotification('❌ Producto no encontrado', 'error'); return; }
+    if (clickEnProgreso) return;
+    clickEnProgreso = true;
+    setTimeout(() => { clickEnProgreso = false; }, 500);
+
+    const existingItem = cart.find(item => item.id === prod.id);
+    if (existingItem) {
+        if (existingItem.quantity >= prod.stockNumber) {
+            showNotification(`⚠️ Stock máximo: ${prod.stockNumber} unidades`, 'warning');
+            return;
+        }
+        existingItem.quantity++;
+        existingItem.esJuevesCervecero = true;
+        existingItem.precioJC = precioPromo;
+    } else {
+        cart.push({
+            id: prod.id,
+            name: prod.name,
+            price: prod.price,         // precio original (para referencia)
+            precioJC: precioPromo,     // precio con descuento JC
+            quantity: 1,
+            maxStock: prod.stockNumber,
+            oferta: null,
+            esOfertaEspecial: false,
+            esOfertaDestacada: false,
+            esOfertaRelampago: false,
+            esPromo: false,
+            esJuevesCervecero: true,
+            productRef: prod
+        });
     }
-    // Temporalmente parchamos el precio en el array para que addToCart use el precioPromo
-    const prodLocal = products.find(p => p.id === idProducto || String(p.id) === String(idProducto));
-    if (!prodLocal) { showNotification('❌ Producto no encontrado', 'error'); return; }
-    const precioOriginal = prodLocal.price;
-    prodLocal.price = precioPromo; // precio Jueves Cervecero
-    prodLocal._precioOriginalJC = precioOriginal;
-    addToCart(prodLocal.id, 'cervecero');
-    // Restaurar precio real (no alterar el catálogo)
-    prodLocal.price = precioOriginal;
+    updateCartCount();
+    renderCartItems();
+    const descuento = Math.round((1 - precioPromo / prod.price) * 100);
+    showNotification(`🍺 ${prod.name.substring(0,28)} — -${descuento}% OFF`, 'success');
 }
 
 // ========== FLYER CERVECERO CANVAS ==========
@@ -3787,8 +3807,19 @@ function renderCartItems() {
         let badgeColor = '#ddd';
         let esProductoNormal = true; // Flag para productos sin oferta
         
+        // ===== JUEVES CERVECERO =====
+        if (item.esJuevesCervecero && item.precioJC) {
+            esProductoNormal = false;
+            const precioUnitario = item.precioJC;
+            precioTotalItem = precioUnitario * item.quantity;
+            ahorroItem = precioNormalTotal - precioTotalItem;
+            const descPct = Math.round((1 - item.precioJC / product.price) * 100);
+            badgeColor = '#1565c0';
+            badge = `🍺 -${descPct}%`;
+            formula = `<div style="color:#1565c0;font-size:0.7rem;">👉 Jueves Cervecero -${descPct}%</div>`;
+        }
         // ===== OFERTAS RELÁMPAGO =====
-        if (item.esOfertaRelampago && item.oferta) {
+        else if (item.esOfertaRelampago && item.oferta) {
             esProductoNormal = false; // Tiene oferta
             // 2da50
             if (item.oferta.tipo === '2da50') {
@@ -4025,8 +4056,15 @@ function sendOrderViaWhatsApp() {
         let precioItem = precioNormalItem;
         let ofertaInfo = '';
 
+        // JUEVES CERVECERO
+        if (item.esJuevesCervecero && item.precioJC) {
+            precioItem = item.precioJC * item.quantity;
+            const ahorro = precioNormalItem - precioItem;
+            const descPct = Math.round((1 - item.precioJC / product.price) * 100);
+            ofertaInfo = `\n🍺 Jueves Cervecero -${descPct}% · Ahorrás $${ahorro}`;
+        }
         // OFERTA ESPECIAL (-10%)
-        if (item.esOfertaEspecial && item.oferta) {
+        else if (item.esOfertaEspecial && item.oferta) {
             const precioUnitario = Math.round(product.price * 0.9);
             precioItem = precioUnitario * item.quantity;
             const ahorro = precioNormalItem - precioItem;
