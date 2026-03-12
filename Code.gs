@@ -703,7 +703,37 @@ function calcularOfertas() {
       idsUsados[c.i] = true;
     });
 
-  // Candidatos relámpago
+  // ── ¿Está activo Jueves Cervecero hoy? ────────────────────
+  // Si está activo, cervezas tienen su propia oferta y no deben
+  // aparecer en relámpago / destacadas / especiales.
+  var diaIdxJC = [1,2,3,4,5,6,0].indexOf(new Date().getDay()); // 0=Lun…6=Dom
+  var cerveceroActivoHoy = false;
+  try {
+    var ssCfgJC = SpreadsheetApp.openById(SS_ID);
+    var shCfgJC = ssCfgJC.getSheetByName(HOJA_CONFIG);
+    if (shCfgJC) {
+      var cfgJC = shCfgJC.getDataRange().getValues();
+      for (var cji = 0; cji < cfgJC.length; cji++) {
+        var cjClave = String(cfgJC[cji][0] || '').trim().toLowerCase();
+        if (cjClave.includes('jueves cervecero') || cjClave.includes('cervecero')) {
+          var cjVal = cfgJC[cji][diaIdxJC + 1];
+          cerveceroActivoHoy = (cjVal === 1 || cjVal === '1' || cjVal === true);
+          break;
+        }
+      }
+    }
+  } catch(eCJ) { /* si falla, no excluir */ }
+
+  // Helper: ¿es cerveza? (misma lógica que getJuevesCervecero)
+  function _esCerveza_(fila) {
+    var nom = String(fila[0] || '').trim().toUpperCase();
+    var cat = String(fila[2] || '').trim().toUpperCase();
+    return cat.includes('CERV') || nom.includes('CERVEZA') || nom.includes(' LATA') ||
+           nom.includes('BIRRA') || nom.includes(' IPA') || nom.includes(' STOUT') || nom.includes(' PORTER');
+  }
+
+  // Candidatos relámpago — incluye TODO con relampago>0 y stock>0
+  // Sin filtro de puntaje: el puntaje es para sugerencias automáticas, no para bloquear ofertas manuales
   var candidatosRelampago = [];
   for (var i3 = 1; i3 < datos.length; i3++) {
     var fila3 = datos[i3];
@@ -712,19 +742,17 @@ function calcularOfertas() {
     var stock3 = parseInt(fila3[5]) || 0;
     var relampago3 = parseInt(fila3[6]) || 0;
     if (stock3 <= 0 || relampago3 <= 0) continue;
-    var p3 = _ofertaPuntaje_(fila3);
-    if (p3 <= -99) continue;
-    candidatosRelampago.push({ fila: fila3, i: i3, p: p3 });
+    if (cerveceroActivoHoy && _esCerveza_(fila3)) continue; // JC tiene prioridad
+    candidatosRelampago.push({ fila: fila3, i: i3, p: _ofertaPuntaje_(fila3) });
   }
 
   candidatosRelampago
     .sort(function(a, b) { return b.p - a.p; })
-    .slice(0, 20)
     .forEach(function(c) {
       relampagoActivo.push(_ofertaBuildProducto_(c.fila, c.i));
     });
 
-  // Destacadas y Especiales
+  // Destacadas y Especiales — excluir cervezas si JC activo
   var destacadasActivas = [];
   var especialesActivas = [];
   for (var idx = 1; idx < datos.length; idx++) {
@@ -732,6 +760,7 @@ function calcularOfertas() {
     if (!fd[0]) continue;
     var stockD = parseInt(fd[5]) || 0;
     if (stockD <= 0) continue;
+    if (cerveceroActivoHoy && _esCerveza_(fd)) continue; // JC tiene prioridad
     if ((parseInt(fd[7]) || 0) > 0) destacadasActivas.push(_ofertaBuildProducto_(fd, idx));
     if ((parseInt(fd[8]) || 0) > 0) especialesActivas.push(_ofertaBuildProducto_(fd, idx));
   }
