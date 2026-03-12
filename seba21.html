@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v132</title>
+    <title>Copihue — POS v133</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -917,12 +917,20 @@
 <input type="text" id="buscador" style="display:none;" autocomplete="off" autocorrect="off" spellcheck="false" readonly>
 <!-- barra de búsqueda QWERTY — visible solo en modo QWERTY -->
 <div id="pos-barra-wrap" style="display:block;background:white;padding:4px 10px;border-bottom:1.5px solid #2e7d32;flex-shrink:0;">
-    <input type="text" id="pos-barra-input" class="buscador-input"
-           placeholder="🔍 Buscar..."
-           autocomplete="off" autocorrect="off" autocapitalize="off"
-           spellcheck="false" inputmode="search" enterkeyhint="search"
-           oninput="document.getElementById('buscador').value=this.value;document.getElementById('buscador').dispatchEvent(new Event('input',{bubbles:true}))"
-           style="flex:1;height:38px;font-size:1rem;width:100%;box-sizing:border-box;">
+    <div style="position:relative;display:flex;align-items:center;">
+        <input type="text" id="pos-barra-input" class="buscador-input"
+               placeholder="🔍 Buscar producto..."
+               autocomplete="off" autocorrect="off" autocapitalize="off"
+               spellcheck="false" inputmode="search" enterkeyhint="search"
+               oninput="(function(v){document.getElementById('buscador').value=v;document.getElementById('buscador').dispatchEvent(new Event('input',{bubbles:true}));var btn=document.getElementById('btnCerrarBusq');if(btn)btn.style.display=v.length>0?'flex':'none';})(this.value)"
+               style="flex:1;height:38px;font-size:1rem;width:100%;box-sizing:border-box;padding-right:40px;">
+        <button id="btnCerrarBusq" onclick="limpiarBusqueda()"
+                title="Cerrar búsqueda"
+                style="display:none;position:absolute;right:4px;top:50%;transform:translateY(-50%);
+                       background:#c62828;color:white;border:none;border-radius:50%;
+                       width:28px;height:28px;font-size:0.75rem;cursor:pointer;font-weight:900;
+                       align-items:center;justify-content:center;flex-shrink:0;line-height:1;">✕</button>
+    </div>
 </div>
 
 <!-- BANNER VENTA PENDIENTE — desaparece solo en 3s -->
@@ -2073,23 +2081,9 @@ function renderResultados(results, term = '') {
         </div>`;
     }
 
+    // Lista plana — items en carrito van primero (con fondo verde), sin encabezados
     let html = '';
-    if (enCarrito.length > 0) {
-        html += `<div style="padding:5px 12px 3px;font-size:0.6rem;font-weight:700;
-                             color:#2e7d32;text-transform:uppercase;letter-spacing:1.5px;
-                             background:#f1f8e9;border-bottom:1px solid #c8e6c9;">
-                    🛒 En el carrito
-                 </div>`;
-        html += enCarrito.map(cardHTML).join('');
-        if (resto.length > 0) {
-            html += `<div style="padding:5px 12px 3px;font-size:0.6rem;font-weight:700;
-                                 color:#aaa;text-transform:uppercase;letter-spacing:1.5px;
-                                 background:#fafafa;border-bottom:1px solid #eee;">
-                        Productos
-                     </div>`;
-        }
-    }
-    html += resto.map(cardHTML).join('');
+    html += [...enCarrito, ...resto].map(cardHTML).join('');
     contenedor.innerHTML = html;
 
     contenedor.querySelectorAll('button[data-prod-id]').forEach(btn => {
@@ -2127,9 +2121,9 @@ function ocultarResultados() {
 // Cerrar resultados al tocar fuera// Cerrar resultados al tocar fuera (no cuando se abre el selector de cantidad)
 document.addEventListener('click', function(e) {
     if (document.getElementById('modalQty').style.display === 'flex') return; // modal qty abierto, no cerrar
-    if (!e.target.closest('.resultados') && !e.target.closest('.buscador-wrap')) {
+    if (!e.target.closest('.resultados') && !e.target.closest('.buscador-wrap') && !e.target.closest('#pos-barra-wrap')) {
         ocultarResultados();
-        document.getElementById('buscador').value = '';
+        // No se borra la búsqueda — usar el botón ✕ para limpiar
     }
 });
 
@@ -2267,15 +2261,8 @@ function agregarProducto(id) {
 
     renderVenta();
     guardarCarritoPendiente();
-    // Limpiar buscador para siguiente producto
-    const buscadorEl = document.getElementById('buscador');
-    if (buscadorEl && buscadorEl.value.trim().length > 0) {
-        buscadorEl.value = '';
-        // Re-render lista completa porque cambió el término
-        _refreshResultadosBadges();
-    } else {
-        _refreshResultadosBadges(producto.id);
-    }
+    // Mantener búsqueda activa — el botón ✕ rojo cierra la búsqueda
+    _refreshResultadosBadges();
 }
 
 // ===== SELECTOR DE CANTIDAD ANTES DE AGREGAR =====
@@ -2412,7 +2399,7 @@ function renderVenta() {
         document.getElementById('fabStack').style.display = 'none';
         } else {
             const pv = document.getElementById('panelVenta');
-            if (pv) pv.style.display = 'none';
+            if (pv) pv.style.display = 'flex'; // siempre visible en desktop
         }
         return;
     }
@@ -2546,24 +2533,105 @@ function actualizarTotalConRedondeo() {
     window._descuentoRedondeo = descuento;
 }
 
+// ===== LIMPIAR BÚSQUEDA =====
+function limpiarBusqueda() {
+    const busInput = document.getElementById('pos-barra-input');
+    const busOculto = document.getElementById('buscador');
+    const btnX = document.getElementById('btnCerrarBusq');
+    if (busInput) busInput.value = '';
+    if (busOculto) busOculto.value = '';
+    if (btnX) btnX.style.display = 'none';
+    if (busOculto) busOculto.dispatchEvent(new Event('input', {bubbles:true}));
+    if (busInput) busInput.focus();
+}
+
+// ===== MODAL CONFIRMAR: helpers para editar desde el modal =====
+function _buildDetalleModalHTML() {
+    const esDesktop = window.innerWidth >= 768;
+    const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
+    const items = ventaActual.map((item, idx) => {
+        const subtotal = (item.price * item.qty).toLocaleString('es-AR');
+        const badge = item.ofertaEtiqueta
+            ? `<span style="background:#f9a825;color:#000;font-size:.56rem;font-weight:800;padding:1px 5px;border-radius:6px;white-space:nowrap;">${item.ofertaEtiqueta}</span>`
+            : '';
+        if (esDesktop) {
+            return `<div class="confirm-item" style="display:flex;align-items:center;gap:8px;padding:7px 12px;">
+                <img src="imagenes-productos/${simplificarNombre(item.name)}.jpg"
+                     onerror="this.style.display='none'"
+                     style="width:34px;height:34px;border-radius:6px;object-fit:cover;background:#e8f5e9;flex-shrink:0;">
+                <div style="flex:1;min-width:0;">
+                    <span style="font-size:0.85rem;">${item.name.substring(0,34)}</span> ${badge}
+                </div>
+                <div style="display:flex;align-items:center;gap:3px;flex-shrink:0;">
+                    <button onclick="_modalQty(${idx},-1)"
+                            style="width:26px;height:26px;border:1.5px solid #ccc;border-radius:50%;background:white;
+                                   font-size:1.1rem;font-weight:900;cursor:pointer;
+                                   display:flex;align-items:center;justify-content:center;line-height:1;color:#333;">−</button>
+                    <span style="min-width:22px;text-align:center;font-weight:800;font-size:0.9rem;">${item.qty}</span>
+                    <button onclick="_modalQty(${idx},1)"
+                            style="width:26px;height:26px;border:1.5px solid #ccc;border-radius:50%;background:white;
+                                   font-size:1.1rem;font-weight:900;cursor:pointer;
+                                   display:flex;align-items:center;justify-content:center;line-height:1;color:#333;">+</button>
+                    <button onclick="_modalDel(${idx})"
+                            style="width:26px;height:26px;border:none;border-radius:50%;background:#e53935;color:white;
+                                   font-size:0.65rem;font-weight:900;cursor:pointer;margin-left:2px;
+                                   display:flex;align-items:center;justify-content:center;line-height:1;">✕</button>
+                </div>
+                <span style="font-weight:700;min-width:64px;text-align:right;font-size:0.9rem;">$${subtotal}</span>
+            </div>`;
+        } else {
+            return `<div class="confirm-item">
+                <span>${item.qty}× ${item.name.substring(0,35)}${item.ofertaEtiqueta ? ` <span style="background:#f9a825;color:#000;font-size:.58rem;font-weight:800;padding:1px 4px;border-radius:6px">${item.ofertaEtiqueta}</span>` : ''}</span>
+                <span style="font-weight:700;">$${subtotal}</span>
+            </div>`;
+        }
+    }).join('');
+    return items + `<div class="confirm-total-row"><span>TOTAL</span><span>$${total.toLocaleString('es-AR')}</span></div>`;
+}
+
+function _modalQty(idx, delta) {
+    if (idx < 0 || idx >= ventaActual.length) return;
+    const item = ventaActual[idx];
+    const newQty = (item.qty || 1) + delta;
+    if (newQty <= 0) { _modalDel(idx); return; }
+    item.qty = newQty;
+    // Recalcular precio con oferta para nueva cantidad
+    const p = productos.find(pr => pr.id === item.id);
+    if (p && !item.esPeso) {
+        const oferta = calcularOfertaPOS(p, newQty);
+        item.price = oferta.precioUnitario || p.price;
+        item.ofertaEtiqueta = oferta.etiqueta || null;
+    }
+    renderVenta();
+    guardarCarritoPendiente();
+    _reRenderModal();
+}
+
+function _modalDel(idx) {
+    if (idx < 0 || idx >= ventaActual.length) return;
+    ventaActual.splice(idx, 1);
+    renderVenta();
+    guardarCarritoPendiente();
+    if (ventaActual.length === 0) { cerrarConfirm(); return; }
+    _reRenderModal();
+}
+
+function _reRenderModal() {
+    const el = document.getElementById('confirmDetalle');
+    if (!el) return;
+    const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
+    window._totalConRedondeo = total;
+    window._descuentoRedondeo = 0;
+    el.innerHTML = _buildDetalleModalHTML();
+    actualizarTotalConRedondeo();
+}
+
 function abrirConfirmacion() {
     if (ventaActual.length === 0) return;
 
     const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
 
-    const detalleHTML = ventaActual.map(item => `
-        <div class="confirm-item">
-            ${window.innerWidth >= 768 ? `<img src="imagenes-productos/${simplificarNombre(item.name)}.jpg" onerror="this.style.display='none'" style="width:36px;height:36px;border-radius:6px;object-fit:cover;background:#e8f5e9;flex-shrink:0;">` : ''}
-            <span>${item.qty}× ${item.name.substring(0, 35)}${item.ofertaEtiqueta ? ` <span style="background:#f9a825;color:#000;font-size:.58rem;font-weight:800;padding:1px 4px;border-radius:6px">${item.ofertaEtiqueta}</span>` : ''}</span>
-            <span style="font-weight:700;">$${(item.price * item.qty).toLocaleString('es-AR')}</span>
-        </div>
-    `).join('') + `
-        <div class="confirm-total-row">
-            <span>TOTAL</span>
-            <span>$${total.toLocaleString('es-AR')}</span>
-        </div>`;
-
-    document.getElementById('confirmDetalle').innerHTML = detalleHTML;
+    document.getElementById('confirmDetalle').innerHTML = _buildDetalleModalHTML();
     document.getElementById('btnOkConfirm').disabled = false;
     document.getElementById('btnOkConfirm').textContent = '✅ Confirmar cobro';
 
@@ -5125,7 +5193,7 @@ function toggleCervecero() {
 // Sincronizar badge de versión desde el <title>
 (function(){
     const el = document.getElementById('versionTag');
-    if (el) el.textContent = 'v132';
+    if (el) el.textContent = 'v133';
 })();
 
 // ── WakeLock: mantener pantalla encendida mientras la app está activa ──
@@ -5256,10 +5324,10 @@ cargarProductos().then(() => {
         if (a.stock > 0 && b.stock === 0) return -1;
         return rankScore(b.id) - rankScore(a.id);
     }));
-    // En desktop: panel oculto hasta que haya items
+    // En desktop: panel siempre visible (cobrar siempre accesible)
     if (!MOBILE) {
         const pv = document.getElementById('panelVenta');
-        if (pv) pv.style.display = 'none';
+        if (pv) pv.style.display = 'flex';
     }
 
     // Primero verificar si hay venta pendiente y recuperarla silenciosamente

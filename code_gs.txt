@@ -1136,10 +1136,6 @@ function doGet(e) {
       return respuestaJSON(getCarritoTemp());
     }
 
-    if (e && e.parameter && e.parameter.action === 'getListaCompra') {
-      return respuestaJSON(getListaCompra());
-    }
-
     // ── GET PRODUCTOS (carga la tienda) ──
     const ss = SpreadsheetApp.openById(SS_ID);
     const sheet = ss.getSheetByName(HOJA_INVENTARIO);
@@ -1563,86 +1559,5 @@ function getCarritoTemp() {
     return { success: true, items, vendedor: row[1] || '', ts: ts ? new Date(ts).toISOString() : '' };
   } catch(e) {
     return { success: false, error: e.toString(), items: [] };
-  }
-}
-
-// ========== LISTA DE COMPRA ==========
-function getListaCompra() {
-  try {
-    var ss    = SpreadsheetApp.getActiveSpreadsheet();
-    var shInv = ss.getSheetByName('inventario');
-    if (!shInv) return { ok: false, error: 'Hoja inventario no encontrada' };
-
-    var datos = shInv.getDataRange().getValues();
-    // Columnas (índice base 0):
-    // A=0 PRODUCTOS, B=1 PRECIO, E=4 Proveedor, F=5 STOCK
-    // N=13 stock_min_popup, O=14 ROTACION
-    // AB=27 CompraSugerida, Y=24 DiasStock
-    // AF=31 PrioridadEmpuje, AE=30 RiesgoVencimiento
-    // AH=33 AlertaPisoManual, AG=32 StockPisoManual
-
-    var items = [];
-    for (var i = 1; i < datos.length; i++) {
-      var row         = datos[i];
-      var nombre      = row[0];
-      var precio      = parseFloat(row[1])  || 0;
-      var proveedor   = row[4]              || '';
-      var stock       = parseFloat(row[5])  || 0;
-      var stockMin    = parseFloat(row[13]) || 0;
-      var compra      = parseFloat(row[27]) || 0;
-      var diasStock   = row[24];
-      var prioridad   = row[31]             || 'NORMAL';
-      var riesgo      = row[30]             || 'OK';
-      var alertaPiso  = row[33]             || '';
-
-      if (!nombre) continue;
-      if (compra <= 0 && alertaPiso !== 'PEDIR YA') continue;
-
-      var cantidad = compra > 0 ? compra : 1;
-
-      // Urgencia numérica para ordenar (menor = más urgente)
-      var urgencia;
-      if (alertaPiso === 'PEDIR YA')           urgencia = 0;
-      else if (prioridad === 'EMPUJAR YA')     urgencia = 1;
-      else if (riesgo    === 'ALERTA')         urgencia = 2;
-      else if (typeof diasStock === 'number' && diasStock <= 3)  urgencia = 3;
-      else if (typeof diasStock === 'number' && diasStock <= 7)  urgencia = 4;
-      else                                     urgencia = 5;
-
-      items.push({
-        nombre:    nombre,
-        stock:     stock,
-        minimo:    stockMin,
-        cantidad:  cantidad,
-        precio:    precio,
-        total:     Math.round(precio * cantidad),
-        proveedor: String(proveedor),
-        urgencia:  urgencia,
-        diasStock: (typeof diasStock === 'number') ? Math.round(diasStock) : null,
-        prioridad: String(prioridad),
-        riesgo:    String(riesgo),
-        alertaPiso: String(alertaPiso)
-      });
-    }
-
-    // Ordenar por urgencia, luego diasStock asc
-    items.sort(function(a, b) {
-      if (a.urgencia !== b.urgencia) return a.urgencia - b.urgencia;
-      var da = a.diasStock !== null ? a.diasStock : 999;
-      var db = b.diasStock !== null ? b.diasStock : 999;
-      return da - db;
-    });
-
-    var totalPesos = items.reduce(function(s, it) { return s + it.total; }, 0);
-
-    return {
-      ok:          true,
-      items:       items,
-      totalPesos:  totalPesos,
-      urgentes:    items.filter(function(it){ return it.urgencia <= 2; }).length,
-      generadoEn:  new Date().toISOString()
-    };
-  } catch(e) {
-    return { ok: false, error: e.toString() };
   }
 }

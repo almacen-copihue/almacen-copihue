@@ -25,7 +25,8 @@ const HOJA_AJUSTE_RAPIDO = 'Ajuste_Rapido';
 const HOJA_PROVEEDORES = 'Proveedores';
 const MP_ACCESS_TOKEN = 'APP_USR-5614141351834158-022520-6ad6dd5ed431ca58fa841bfd74f0945b-213611899';
 
-// ========== CREAR MENÚ PERSONALIZADO ==========
+// ========== MENÚ UNIFICADO ==========
+// ⚠️ UN SOLO onOpen en todo el proyecto. motorInventario.gs NO tiene onOpen propio.
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
   ui.createMenu('🏪 COPIHUE')
@@ -33,6 +34,9 @@ function onOpen() {
     .addSeparator()
     .addItem('📊 Ver Historial', 'irAHistorial')
     .addItem('🔄 Actualizar Todo', 'actualizarTodo')
+    .addSeparator()
+    .addItem('▶ Actualizar motor inventario', 'actualizarMotorInventario')
+    .addItem('📋 Generar lista de compra', 'actualizarListaCompra')
     .addToUi();
   console.log('✅ Menú Copihue creado');
 }
@@ -58,9 +62,10 @@ function irAHistorial() {
 }
 
 // ========== ACTUALIZAR TODO ==========
+// ⚠️ Las funciones del motor muestran su propio alert — no agregar un tercero acá
 function actualizarTodo() {
-  SpreadsheetApp.flush();
-  SpreadsheetApp.getUi().alert('✅ Datos actualizados correctamente');
+  actualizarMotorInventario();
+  actualizarListaCompra();
 }
 
 // ========== OBTENER DATOS INICIALES (para formulario ingreso) ==========
@@ -282,7 +287,6 @@ function ingresarMercaderia(datos) {
       }
       const nuevoId = 'ID' + (maxId + 1);
 
-      // ── FIX v7.0: usar categoría del formulario, no hardcodear ALMACEN ──
       const categoriaFinal = (datos.categoria && datos.categoria.trim())
         ? datos.categoria.trim().toUpperCase()
         : 'ALMACEN';
@@ -391,9 +395,9 @@ function ajustarProducto(datos) {
     if (nombreNuevo !== nombreActual)   sheetInventario.getRange(filaProducto, 1).setValue(nombreNuevo);
     if (catNueva    !== catActual)      sheetInventario.getRange(filaProducto, 3).setValue(catNueva);
 
-    const fecha = new Date();
+    const fechaAj = new Date();
     sheetAjuste.appendRow([
-      fecha, producto,
+      fechaAj, producto,
       nombreActual,          nombreNuevo  !== nombreActual  ? nombreNuevo  : '',
       stockRegistroAntes,    stockNuevo,
       precioRegistroAntes,   precioNuevo  !== precioRegistroAntes ? precioNuevo : '',
@@ -514,7 +518,6 @@ function actualizarRotacionPlanilla() {
 }
 
 // ========== ACTUALIZAR STOCK MÍNIMOS (columna N) ==========
-// Fórmula: promedio ventas 7 días × 2 = stock mínimo
 function actualizarStockMinimos() {
   try {
     const ss = SpreadsheetApp.openById(SS_ID);
@@ -573,8 +576,6 @@ function actualizarStockMinimos() {
     }
 
     console.log('✅ Stock mínimos actualizados: ' + actualizados + ' productos');
-    console.log('ℹ️ Sin ventas recientes (quedaron en 1): ' + sinDatos + ' productos');
-
     return {
       success: true,
       mensaje: '✅ Stock mínimos: ' + actualizados + ' actualizados · ' + sinDatos + ' sin datos',
@@ -588,7 +589,7 @@ function actualizarStockMinimos() {
   }
 }
 
-// ========== ACTUALIZAR ESTADÍSTICAS (rotación + stock mínimos) ==========
+// ========== ACTUALIZAR ESTADÍSTICAS ==========
 function actualizarEstadisticas() {
   const rotacion = actualizarRotacionPlanilla();
   const minimos  = actualizarStockMinimos();
@@ -644,16 +645,18 @@ function _ofertaBuildProducto_(fila, i) {
     }
   } catch(e) {}
   return {
-    id: i,
-    name: String(fila[0] || '').trim(),
-    price: parseInt(fila[1]) || 0,
-    category: String(fila[2] || 'ALMACEN').trim().toUpperCase(),
-    stock: parseInt(fila[5]) || 0,
-    relampago: parseInt(fila[6]) || 0,
-    rotacion: fila.length > 14 ? (parseInt(fila[14]) || 0) : 0,
-    vencimiento: venc,
+    id:           i,
+    name:         String(fila[0] || '').trim(),
+    price:        parseInt(fila[1]) || 0,
+    category:     String(fila[2] || 'ALMACEN').trim().toUpperCase(),
+    stock:        parseInt(fila[5]) || 0,
+    relampago:    parseInt(fila[6]) || 0,
+    destacada:    parseInt(fila[7]) || 0,   // ← incluido para que el index lo use
+    especial:     parseInt(fila[8]) || 0,   // ← incluido para que el index lo use
+    rotacion:     fila.length > 14 ? (parseInt(fila[14]) || 0) : 0,
+    vencimiento:  venc,
     diasParaVencer: _ofertaDiasVencer_(fila),
-    puntaje: _ofertaPuntaje_(fila)
+    puntaje:      _ofertaPuntaje_(fila)
   };
 }
 
@@ -667,6 +670,7 @@ function calcularOfertas() {
   var idsUsados = {};
   var candidatosUltimas = [];
 
+  // Candidatos últimas unidades (por vencimiento próximo)
   for (var i = 1; i < datos.length; i++) {
     var fila = datos[i];
     if (!fila[0]) continue;
@@ -677,12 +681,13 @@ function calcularOfertas() {
     candidatosUltimas.push({ fila: fila, i: i, p: _ofertaPuntaje_(fila) + 10 });
   }
 
+  // Candidatos relámpago que también entran a últimas
   for (var i2 = 1; i2 < datos.length; i2++) {
     var fila2 = datos[i2];
     if (!fila2[0]) continue;
     var stock2 = parseInt(fila2[5]) || 0;
     var relampago2 = parseInt(fila2[6]) || 0;
-    if (stock2 <= 0 || stock2 > 5 || relampago2 <= 0) continue;
+    if (stock2 <= 0 || relampago2 <= 0) continue;
     var dv2 = _ofertaDiasVencer_(fila2);
     if (dv2 !== null && dv2 <= 3) continue;
     var p2 = _ofertaPuntaje_(fila2);
@@ -692,12 +697,13 @@ function calcularOfertas() {
 
   candidatosUltimas
     .sort(function(a, b) { return b.p - a.p; })
-    .slice(0, 6)
+    .slice(0, 20)
     .forEach(function(c) {
       ultimasUnidades.push(_ofertaBuildProducto_(c.fila, c.i));
       idsUsados[c.i] = true;
     });
 
+  // Candidatos relámpago
   var candidatosRelampago = [];
   for (var i3 = 1; i3 < datos.length; i3++) {
     var fila3 = datos[i3];
@@ -713,17 +719,59 @@ function calcularOfertas() {
 
   candidatosRelampago
     .sort(function(a, b) { return b.p - a.p; })
-    .slice(0, 4)
+    .slice(0, 20)
     .forEach(function(c) {
       relampagoActivo.push(_ofertaBuildProducto_(c.fila, c.i));
     });
 
+  // Destacadas y Especiales
+  var destacadasActivas = [];
+  var especialesActivas = [];
+  for (var idx = 1; idx < datos.length; idx++) {
+    var fd = datos[idx];
+    if (!fd[0]) continue;
+    var stockD = parseInt(fd[5]) || 0;
+    if (stockD <= 0) continue;
+    if ((parseInt(fd[7]) || 0) > 0) destacadasActivas.push(_ofertaBuildProducto_(fd, idx));
+    if ((parseInt(fd[8]) || 0) > 0) especialesActivas.push(_ofertaBuildProducto_(fd, idx));
+  }
+
+  // ── Leer límites de visualización desde config_sistema ─────
+  // (los pools completos van al POS para descuentos; los límites los usa index.html para mostrar)
+  var limites = { relampago: 3, ultimas: 3, especiales: 2, destacadas: 9 };
+  try {
+    var ssCfg = SpreadsheetApp.openById(SS_ID);
+    var shCfg = ssCfg.getSheetByName(HOJA_CONFIG);
+    if (shCfg) {
+      var cfgRows = shCfg.getDataRange().getValues();
+      for (var ci = 1; ci < cfgRows.length; ci++) {
+        var clave = String(cfgRows[ci][0] || '').trim().toLowerCase();
+        if (clave.indexOf('máximo destacadas') !== -1 || clave.indexOf('maximo destacadas') !== -1) {
+          // Toma el primer valor numérico que encuentre (cualquier día)
+          for (var cj = 1; cj <= 7; cj++) {
+            var v = parseInt(cfgRows[ci][cj]);
+            if (!isNaN(v) && v > 0) { limites.destacadas = v; break; }
+          }
+          break;
+        }
+      }
+    }
+  } catch(eCfg) { /* usa el default 9 */ }
+
   return {
     success: true,
-    relampagoActivo: relampagoActivo,
-    ultimasUnidades: ultimasUnidades,
+    relampagoActivo:   relampagoActivo,
+    ultimasUnidades:   ultimasUnidades,
+    destacadasActivas: destacadasActivas,
+    especialesActivas: especialesActivas,
+    limites: limites,
     fecha: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm'),
-    stats: { totalRelampago: relampagoActivo.length, totalUltimas: ultimasUnidades.length }
+    stats: {
+      totalRelampago:   relampagoActivo.length,
+      totalUltimas:     ultimasUnidades.length,
+      totalDestacadas:  destacadasActivas.length,
+      totalEspeciales:  especialesActivas.length
+    }
   };
 }
 
@@ -1058,7 +1106,6 @@ function logInterruptor(datos) {
 // ========== API PRINCIPAL doGet ==========
 function doGet(e) {
   try {
-
     if (e && e.parameter && e.parameter.action === 'vender') {
       return procesarVenta(e.parameter.data);
     }
@@ -1117,7 +1164,6 @@ function doGet(e) {
     if (e && e.parameter && e.parameter.action === 'getConfig') {
       return respuestaJSON(getConfig());
     }
-    // ── NUEVO v7.0 ──
     if (e && e.parameter && e.parameter.action === 'actualizarEstadisticas') {
       return respuestaJSON(actualizarEstadisticas());
     }
@@ -1174,7 +1220,7 @@ function doGet(e) {
         costo: fila.length > 18 ? (parseFloat(fila[18]) || 0) : 0,
         diaCritico: fila.length > 16 ? String(fila[16] || '').trim().toLowerCase() : '',
         stockMin: parseInt(fila[13]) || 0,
-        ultimaPromo: '' // columna R es ULTIMAS (negocio), no ultimaPromo — no exponer
+        ultimaPromo: ''
       };
 
       if (fila.length > 11) {
@@ -1353,14 +1399,13 @@ function agregarProducto(dataStr) {
   }
 }
 
-// ========== HELPER ==========
+// ========== HELPERS ==========
 function respuestaJSON(obj) {
   return ContentService
     .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-// ========== FUNCIÓN DE PRUEBA ==========
 function pruebaRapida() {
   const resultado = doGet(null);
   const json = JSON.parse(resultado.getContent());
