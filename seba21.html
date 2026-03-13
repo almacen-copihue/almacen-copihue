@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v147</title>
+    <title>Copihue — POS v148</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2050,7 +2050,7 @@ function renderResultados(results, term = '') {
         const stockBajo = p.stock > 0 && p.stock <= 3;
         const qty       = idsEnCarrito[p.id] || 0;
         const esPesoCard = ventaActual.some(i => i.esPeso && i.idOriginal === p.id);
-        const oferta    = calcularOfertaPOS(p, 1);
+        const oferta    = calcularOfertaPOS(p, qty > 0 ? qty : 1);
         const precio    = oferta.precioUnitario || p.price;
         // Para productos por peso: qty = gramos, precio = $/kg → mismo cálculo que el modal
         const totalCart = qty > 0
@@ -2274,7 +2274,6 @@ function agregarProducto(id) {
             return;
         }
         existente.qty++;
-        // Recalcular precio con oferta si aplica (NxM cambia al agregar más unidades)
         const o = calcularOfertaPOS(producto, existente.qty);
         existente.price          = o.precioUnitario;
         existente.precioOriginal = o.tieneOferta ? producto.price : 0;
@@ -2489,9 +2488,7 @@ function renderVenta() {
         // ── Calcular precios y ahorro ──────────────────────────────
         const tieneOferta  = item.precioModificado && item.precioOriginal > 0;
         const precioUnit   = item.price;
-        // Para NxM el subtotal real es price*qty (price ya es el promedio ponderado)
         const subtotal     = Math.round(precioUnit * item.qty);
-        const ahorroUnit   = tieneOferta ? (item.precioOriginal - precioUnit) : 0;
         const ahorroTotal  = tieneOferta ? Math.round(item.precioOriginal * item.qty - subtotal) : 0;
 
         // ── Texto de fórmula según tipo ────────────────────────────
@@ -5083,17 +5080,13 @@ const _poolCervecero     = new Map(); // id → { descuento, precioPromo }
 function _construirPoolsLocalFallback() {
     if (!productos || productos.length === 0) return;
     console.warn('⚠️ getOfertas vacío — usando fallback local para construir pools');
-    _poolIdsRelampago.clear();
-    _poolIdsDestacadas.clear();
-    _poolIdsEspeciales.clear();
+    _poolIdsRelampago.clear(); _poolIdsDestacadas.clear(); _poolIdsEspeciales.clear();
     productos.forEach(prod => {
         if (!prod || prod.stock <= 0) return;
         const rel = prod.relampago;
         if (rel && rel !== '0' && rel !== 0) {
             const key = String(rel);
-            if (OFERTAS_RELAMPAGO_SISTEMA[key] || key.match(/(\d+)x(\d+)/i)) {
-                _poolIdsRelampago.add(prod.id); return;
-            }
+            if (OFERTAS_RELAMPAGO_SISTEMA[key] || key.match(/(\d+)x(\d+)/i)) { _poolIdsRelampago.add(prod.id); return; }
         }
         if (prod.destacada && prod.destacada > 0) { _poolIdsDestacadas.add(prod.id); return; }
         if (prod.especial  && prod.especial  > 0) { _poolIdsEspeciales.add(prod.id); }
@@ -5106,10 +5099,7 @@ async function cargarPoolsOfertas() {
         const r = await fetch(API_URL + '?action=getOfertas&t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(8000) });
         const data = await r.json();
         if (!data.success) { _construirPoolsLocalFallback(); return; }
-        _poolIdsRelampago.clear();
-        _poolIdsDestacadas.clear();
-        _poolIdsEspeciales.clear();
-        _poolIdsUltimas.clear();
+        _poolIdsRelampago.clear(); _poolIdsDestacadas.clear(); _poolIdsEspeciales.clear(); _poolIdsUltimas.clear();
         (data.relampagoActivo   || []).forEach(p => _poolIdsRelampago.add(p.id));
         (data.destacadasActivas || []).forEach(p => _poolIdsDestacadas.add(p.id));
         (data.especialesActivas || []).forEach(p => _poolIdsEspeciales.add(p.id));
@@ -5207,13 +5197,10 @@ function calcularOfertaPOS(producto, qty) {
             r.etiqueta       = `⚡ ${cfg.nombre.toUpperCase()}`;
             r.tieneOferta = true; r.tipoOferta = 'relampago';
         } else {
-            // Fallback regex: soporta "3x2", "2x1", "relampago3x2", "relampago2x1", etc.
             const match = key.match(/(\d+)x(\d+)/i);
             if (match) {
-                const N = parseInt(match[1]);
-                const M = parseInt(match[2]);
-                const ciclos     = Math.floor(qty / N);
-                const resto      = qty % N;
+                const N = parseInt(match[1]), M = parseInt(match[2]);
+                const ciclos = Math.floor(qty / N), resto = qty % N;
                 r.precioTotal    = Math.round((ciclos * M + resto) * producto.price);
                 r.precioUnitario = qty > 0 ? Math.round(r.precioTotal / qty) : producto.price;
                 r.etiqueta       = `⚡ ${N}X${M}`;
@@ -5456,7 +5443,7 @@ function toggleCervecero() {
 // Sincronizar badge de versión desde el <title>
 (function(){
     const el = document.getElementById('versionTag');
-    if (el) el.textContent = 'v147';
+    if (el) el.textContent = 'v148';
 })();
 
 // ── WakeLock: mantener pantalla encendida mientras la app está activa ──
