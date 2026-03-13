@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v149</title>
+    <title>Copihue — POS v150</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -1982,17 +1982,8 @@ function toggleListadoCompleto() {
     }
     listadoCompletoVisible = true;
     const bl = document.getElementById('btnListado'); if (bl) bl.style.background = '#e8f5e9';
-    // Ordenar: en-carrito primero, luego por más vendido, sin stock al final
     const idsEnCarrito = new Set(ventaActual.map(i => i.id));
-    const todos = [...productos].sort((a, b) => {
-        const aCarrito = idsEnCarrito.has(a.id) ? 1 : 0;
-        const bCarrito = idsEnCarrito.has(b.id) ? 1 : 0;
-        if (bCarrito !== aCarrito) return bCarrito - aCarrito; // en carrito arriba
-        if (a.stock === 0 && b.stock > 0) return 1;  // sin stock abajo
-        if (a.stock > 0 && b.stock === 0) return -1;
-        return rankScore(b.id) - rankScore(a.id); // más vendido primero
-    });
-    renderResultados(todos);
+    renderResultados(_sortProductos(productos, idsEnCarrito));
 }
 
 let searchTimeout;
@@ -2000,15 +1991,9 @@ document.getElementById('buscador').addEventListener('input', function() {
     clearTimeout(searchTimeout);
     const term = this.value.trim();
     searchTimeout = setTimeout(() => {        if (term.length < 1) {
-            // Sin búsqueda: mostrar todos ordenados por más vendido + carrito arriba
-            const idsEnCarrito = new Set(ventaActual.map(i => i.id));
-            renderResultados([...productos].sort((a, b) => {
-                const ac = idsEnCarrito.has(a.id) ? 1 : 0, bc = idsEnCarrito.has(b.id) ? 1 : 0;
-                if (bc !== ac) return bc - ac;
-                if (a.stock === 0 && b.stock > 0) return 1;
-                if (a.stock > 0 && b.stock === 0) return -1;
-                return rankScore(b.id) - rankScore(a.id);
-            }));
+            // Sin búsqueda: mostrar todos ordenados por oferta → carrito → más vendido
+            const idsEnCarrito = new Set(ventaActual.map(i => i.esPeso ? i.idOriginal : i.id));
+            renderResultados(_sortProductos(productos, idsEnCarrito));
         } else {
             renderResultados(buscarProductos(term), term);
         }
@@ -2072,7 +2057,7 @@ function renderResultados(results, term = '') {
             : '';
 
         // Para NxM con qty < mínimo requerido: precio === p.price (sin descuento real aún)
-        // No mostrar tachado falso — solo el badge de la promo ya indica que hay oferta
+        // No mostrar tachado falso — el badge ya indica que hay promo
         const esNxMSinActivar = oferta.tieneOferta && oferta.tipoOferta === 'relampago' && precio === p.price;
         const precioUnitHTML = (oferta.tieneOferta && !esNxMSinActivar)
             ? `<span style="font-size:.6rem;color:#999;text-decoration:line-through;margin-right:3px;">$${p.price.toLocaleString('es-AR')}</span><span style="color:#f9a825;font-weight:900;font-size:.72rem;">$${precio.toLocaleString('es-AR')}</span>`
@@ -2243,15 +2228,8 @@ function _refreshResultadosBadges(idActualizado) {
     if (termActual.length >= 1) {
         renderResultados(buscarProductos(termActual), termActual);
     } else {
-        const idsEnCarrito = new Set();
-        ventaActual.forEach(i => idsEnCarrito.add(i.esPeso ? i.idOriginal : i.id));
-        renderResultados([...productos].sort((a, b) => {
-            const ac = idsEnCarrito.has(a.id) ? 1 : 0, bc = idsEnCarrito.has(b.id) ? 1 : 0;
-            if (bc !== ac) return bc - ac;
-            if (a.stock === 0 && b.stock > 0) return 1;
-            if (a.stock > 0 && b.stock === 0) return -1;
-            return rankScore(b.id) - rankScore(a.id);
-        }));
+        const idsEnCarrito = new Set(ventaActual.map(i => i.esPeso ? i.idOriginal : i.id));
+        renderResultados(_sortProductos(productos, idsEnCarrito));
     }
     if (contenedor) contenedor.scrollTop = scrollPos;
 }
@@ -2277,11 +2255,12 @@ function agregarProducto(id) {
             return;
         }
         existente.qty++;
-        // Recalcular precio con oferta NxM si aplica (cambia al agregar más unidades)
-        if (existente.ofertaTipo) {
-            const o = calcularOfertaPOS(producto, existente.qty);
-            existente.price = o.precioUnitario;
-        }
+        const o = calcularOfertaPOS(producto, existente.qty);
+        existente.price          = o.precioUnitario;
+        existente.precioOriginal = o.tieneOferta ? producto.price : 0;
+        existente.precioModificado = o.tieneOferta;
+        existente.ofertaEtiqueta = o.etiqueta || null;
+        existente.ofertaTipo     = o.tipoOferta || null;
     } else {
         const oferta = calcularOfertaPOS(producto, 1);
         ventaActual.push({
@@ -2470,16 +2449,8 @@ function renderVenta() {
 
     // Re-render lista para actualizar badges y separador
     const term = document.getElementById('buscador').value.trim();
-    const listaResultados = term.length >= 1 ? buscarProductos(term) : (() => {
-        const idsEnCarrito = new Set(ventaActual.map(i => i.id));
-        return [...productos].sort((a, b) => {
-            const ac = idsEnCarrito.has(a.id) ? 1 : 0, bc = idsEnCarrito.has(b.id) ? 1 : 0;
-            if (bc !== ac) return bc - ac;
-            if (a.stock === 0 && b.stock > 0) return 1;
-            if (a.stock > 0 && b.stock === 0) return -1;
-            return rankScore(b.id) - rankScore(a.id);
-        });
-    })();
+    const listaResultados = term.length >= 1 ? buscarProductos(term)
+        : _sortProductos(productos, new Set(ventaActual.map(i => i.esPeso ? i.idOriginal : i.id)));
     renderResultados(listaResultados, term);
 
     const esDesktopPanel = window.innerWidth >= 768;
@@ -2488,10 +2459,10 @@ function renderVenta() {
         const imgSrc = `imagenes-productos/${simplificarNombre(item.name)}.jpg`;
 
         // ── Calcular precios y ahorro ──────────────────────────────
-        const tieneOferta = item.precioModificado && item.precioOriginal > 0;
-        const precioUnit  = item.price;
-        const subtotal    = Math.round(precioUnit * item.qty);
-        const ahorro      = tieneOferta ? Math.round((item.precioOriginal - precioUnit) * item.qty) : 0;
+        const tieneOferta  = item.precioModificado && item.precioOriginal > 0;
+        const precioUnit   = item.price;
+        const subtotal     = Math.round(precioUnit * item.qty);
+        const ahorroTotal  = tieneOferta ? Math.round(item.precioOriginal * item.qty - subtotal) : 0;
 
         // ── Texto de fórmula según tipo ────────────────────────────
         let formulaHTML = '';
@@ -2525,7 +2496,7 @@ function renderVenta() {
             ? `<div style="flex-shrink:0;text-align:right;min-width:64px;">
                 <span class="item-precio-antes">$${item.precioOriginal.toLocaleString('es-AR')}</span>
                 <span class="item-precio-con-oferta" style="color:${colOferta||'var(--verde-oscuro)'}">$${precioUnit.toLocaleString('es-AR')}</span>
-                <span class="item-ahorro-badge">−$${(item.precioOriginal - precioUnit).toLocaleString('es-AR')}</span>
+                <span class="item-ahorro-badge">−$${ahorroTotal.toLocaleString('es-AR')}</span>
               </div>`
             : `<span class="item-precio-editable ${item.precioModificado ? 'modificado' : ''}"
                      onclick="editarPrecioCarrito('${item.id}')"
@@ -3011,6 +2982,38 @@ function actualizarRanking() {
 }
 function rankScore(id) {
     return _rankingVentas[String(id)] || 0;
+}
+
+// Orden estándar del scroll:
+// 1) Con oferta activa (relámpago > destacada > especial > últimas)
+// 2) En carrito (sin oferta)
+// 3) Resto por más vendido
+// 4) Sin stock al final
+function _tieneOfertaActiva(p) {
+    if (_esCerveceroActivo() && _poolCervecero && _poolCervecero.has(p.id)) return true;
+    if (p.relampago && _toggleEstado.relampago !== false && _poolIdsRelampago.has(p.id)) return true;
+    if (_toggleEstado.ultimas !== false && _poolIdsUltimas.has(p.id)) return true;
+    if (p.destacada > 0 && _toggleEstado.destacadas !== false && _poolIdsDestacadas.has(p.id)) return true;
+    if (p.especial  > 0 && _toggleEstado.especiales !== false && _poolIdsEspeciales.has(p.id)) return true;
+    return false;
+}
+
+function _sortProductos(lista, idsEnCarrito) {
+    return [...lista].sort((a, b) => {
+        // Sin stock siempre al fondo
+        if (a.stock === 0 && b.stock > 0) return 1;
+        if (a.stock > 0 && b.stock === 0) return -1;
+        // Con oferta activa primero
+        const aOf = _tieneOfertaActiva(a) ? 1 : 0;
+        const bOf = _tieneOfertaActiva(b) ? 1 : 0;
+        if (bOf !== aOf) return bOf - aOf;
+        // Luego en carrito
+        const aC = (idsEnCarrito && idsEnCarrito.has(a.id)) ? 1 : 0;
+        const bC = (idsEnCarrito && idsEnCarrito.has(b.id)) ? 1 : 0;
+        if (bC !== aC) return bC - aC;
+        // Finalmente por más vendido
+        return rankScore(b.id) - rankScore(a.id);
+    });
 }
 
 function guardarVentaDia(venta) {
@@ -5100,18 +5103,20 @@ async function cargarPoolsOfertas() {
     try {
         const r = await fetch(API_URL + '?action=getOfertas&t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(8000) });
         const data = await r.json();
-        if (!data.success) { _construirPoolsLocalFallback(); return; }
+        if (!data.success) { _construirPoolsLocalFallback(); _refreshResultadosBadges(); return; }
         _poolIdsRelampago.clear(); _poolIdsDestacadas.clear(); _poolIdsEspeciales.clear(); _poolIdsUltimas.clear();
         (data.relampagoActivo   || []).forEach(p => _poolIdsRelampago.add(p.id));
         (data.destacadasActivas || []).forEach(p => _poolIdsDestacadas.add(p.id));
         (data.especialesActivas || []).forEach(p => _poolIdsEspeciales.add(p.id));
         (data.ultimasUnidades   || []).forEach(p => _poolIdsUltimas.set(p.id, p.diasParaVencer !== undefined ? p.diasParaVencer : null));
         const poolsVacios = _poolIdsRelampago.size === 0 && _poolIdsDestacadas.size === 0 && _poolIdsEspeciales.size === 0;
-        if (poolsVacios) { _construirPoolsLocalFallback(); return; }
+        if (poolsVacios) { _construirPoolsLocalFallback(); }
         console.log(`✅ Pools POS: ${_poolIdsRelampago.size} rel · ${_poolIdsDestacadas.size} dest · ${_poolIdsEspeciales.size} esp · ${_poolIdsUltimas.size} ult`);
+        _refreshResultadosBadges(); // re-render con pools ya cargados → orden correcto
     } catch(e) {
         console.warn('⚠️ No se pudieron cargar pools de ofertas:', e.message);
         _construirPoolsLocalFallback();
+        _refreshResultadosBadges();
     }
     // Cargar pool Jueves Cervecero siempre (el toggle decide si se aplica)
     try {
@@ -5266,9 +5271,12 @@ function badgeOfertaPOS(producto) {
         const jc = _poolCervecero.get(producto.id);
         return `<span style="background:#1565c0;color:#f9a825;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">🍺 -${jc.descuento}%</span>`;
     }
-    if (producto.relampago > 0 && _toggleEstado.relampago !== false && _poolIdsRelampago.has(producto.id)) {
-        const cfg = OFERTAS_RELAMPAGO_SISTEMA[String(producto.relampago)];
+    if (producto.relampago && _toggleEstado.relampago !== false && _poolIdsRelampago.has(producto.id)) {
+        const key = String(producto.relampago);
+        const cfg = OFERTAS_RELAMPAGO_SISTEMA[key];
         if (cfg) return `<span style="background:#f9a825;color:#000;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">⚡ ${cfg.nombre.toUpperCase()}</span>`;
+        const match = key.match(/(\d+)x(\d+)/i);
+        if (match) return `<span style="background:#f9a825;color:#000;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">⚡ ${match[1]}X${match[2]}</span>`;
     }
     if (_toggleEstado.ultimas !== false && _poolIdsUltimas.has(producto.id))
         return `<span style="background:#b71c1c;color:#fff;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">🏷️ ÚLTIMAS</span>`;
@@ -5442,7 +5450,7 @@ function toggleCervecero() {
 // Sincronizar badge de versión desde el <title>
 (function(){
     const el = document.getElementById('versionTag');
-    if (el) el.textContent = 'v149';
+    if (el) el.textContent = 'v150';
 })();
 
 // ── WakeLock: mantener pantalla encendida mientras la app está activa ──
@@ -5568,11 +5576,7 @@ cargarProductos().then(() => {
     iniciarToggleOfertas();
     cargarPoolsOfertas();
     // Mostrar lista al arrancar
-    renderResultados([...productos].sort((a, b) => {
-        if (a.stock === 0 && b.stock > 0) return 1;
-        if (a.stock > 0 && b.stock === 0) return -1;
-        return rankScore(b.id) - rankScore(a.id);
-    }));
+    renderResultados(_sortProductos(productos, new Set()));
     // En desktop: panel siempre visible (cobrar siempre accesible)
     if (!MOBILE) {
         const pv = document.getElementById('panelVenta');
