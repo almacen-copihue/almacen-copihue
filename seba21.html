@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v144</title>
+    <title>Copihue — POS v145</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -5151,20 +5151,33 @@ function calcularOfertaPOS(producto, qty) {
 
     // 1. RELÁMPAGO — toggle activo Y producto en el pool del día
     if (producto.relampago && _toggleEstado.relampago !== false && _poolIdsRelampago.has(producto.id)) {
-        const cfg = OFERTAS_RELAMPAGO_SISTEMA[String(producto.relampago)];
-        if (cfg) {
-            if (cfg.tipo === 'pct') {
-                r.precioUnitario = Math.round(producto.price * (1 - cfg.descuento / 100));
-                r.precioTotal    = r.precioUnitario * qty;
-                r.etiqueta       = `⚡ -${cfg.descuento}% OFF`;
-            } else if (cfg.tipo === 'nxm') {
-                const ciclos    = Math.floor(qty / cfg.cantidad);
-                const resto     = qty % cfg.cantidad;
-                r.precioTotal   = Math.round((ciclos * cfg.pagas + resto) * producto.price);
-                r.precioUnitario = qty > 0 ? Math.round(r.precioTotal / qty) : producto.price;
-                r.etiqueta      = `⚡ ${cfg.nombre.toUpperCase()}`;
-            }
+        const key = String(producto.relampago);
+        const cfg = OFERTAS_RELAMPAGO_SISTEMA[key];
+        if (cfg && cfg.tipo === 'pct') {
+            r.precioUnitario = Math.round(producto.price * (1 - cfg.descuento / 100));
+            r.precioTotal    = r.precioUnitario * qty;
+            r.etiqueta       = `⚡ -${cfg.descuento}% OFF`;
             r.tieneOferta = true; r.tipoOferta = 'relampago';
+        } else if (cfg && cfg.tipo === 'nxm') {
+            const ciclos     = Math.floor(qty / cfg.cantidad);
+            const resto      = qty % cfg.cantidad;
+            r.precioTotal    = Math.round((ciclos * cfg.pagas + resto) * producto.price);
+            r.precioUnitario = qty > 0 ? Math.round(r.precioTotal / qty) : producto.price;
+            r.etiqueta       = `⚡ ${cfg.nombre.toUpperCase()}`;
+            r.tieneOferta = true; r.tipoOferta = 'relampago';
+        } else {
+            // Fallback: relampago llega como string directo "2x1", "3x2", etc.
+            const match = key.match(/^(\d+)x(\d+)$/i);
+            if (match) {
+                const N = parseInt(match[1]);
+                const M = parseInt(match[2]);
+                const ciclos     = Math.floor(qty / N);
+                const resto      = qty % N;
+                r.precioTotal    = Math.round((ciclos * M + resto) * producto.price);
+                r.precioUnitario = qty > 0 ? Math.round(r.precioTotal / qty) : producto.price;
+                r.etiqueta       = `⚡ ${key.toUpperCase()}`;
+                r.tieneOferta = true; r.tipoOferta = 'relampago';
+            }
         }
     }
     // 1b. ÚLTIMAS UNIDADES — toggle activo (null = default on) Y producto en el pool
@@ -5223,7 +5236,7 @@ function badgeOfertaPOS(producto) {
         const jc = _poolCervecero.get(producto.id);
         return `<span style="background:#1565c0;color:#f9a825;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">🍺 -${jc.descuento}%</span>`;
     }
-    if (producto.relampago && _toggleEstado.relampago !== false && _poolIdsRelampago.has(producto.id)) {
+    if (producto.relampago > 0 && _toggleEstado.relampago !== false && _poolIdsRelampago.has(producto.id)) {
         const cfg = OFERTAS_RELAMPAGO_SISTEMA[String(producto.relampago)];
         if (cfg) return `<span style="background:#f9a825;color:#000;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">⚡ ${cfg.nombre.toUpperCase()}</span>`;
     }
@@ -5399,7 +5412,7 @@ function toggleCervecero() {
 // Sincronizar badge de versión desde el <title>
 (function(){
     const el = document.getElementById('versionTag');
-    if (el) el.textContent = 'v144';
+    if (el) el.textContent = 'v145';
 })();
 
 // ── WakeLock: mantener pantalla encendida mientras la app está activa ──
