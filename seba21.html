@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v148</title>
+    <title>Copihue — POS v149</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2050,7 +2050,7 @@ function renderResultados(results, term = '') {
         const stockBajo = p.stock > 0 && p.stock <= 3;
         const qty       = idsEnCarrito[p.id] || 0;
         const esPesoCard = ventaActual.some(i => i.esPeso && i.idOriginal === p.id);
-        const oferta    = calcularOfertaPOS(p, qty > 0 ? qty : 1);
+        const oferta    = calcularOfertaPOS(p, Math.max(qty, 1));
         const precio    = oferta.precioUnitario || p.price;
         // Para productos por peso: qty = gramos, precio = $/kg → mismo cálculo que el modal
         const totalCart = qty > 0
@@ -2071,9 +2071,12 @@ function renderResultados(results, term = '') {
                            border:2px solid white;z-index:2;line-height:1;border-radius:10px;">${badgeQtyLabel}</div>`
             : '';
 
-        const precioUnitHTML = oferta.tieneOferta
+        // Para NxM con qty < mínimo requerido: precio === p.price (sin descuento real aún)
+        // No mostrar tachado falso — solo el badge de la promo ya indica que hay oferta
+        const esNxMSinActivar = oferta.tieneOferta && oferta.tipoOferta === 'relampago' && precio === p.price;
+        const precioUnitHTML = (oferta.tieneOferta && !esNxMSinActivar)
             ? `<span style="font-size:.6rem;color:#999;text-decoration:line-through;margin-right:3px;">$${p.price.toLocaleString('es-AR')}</span><span style="color:#f9a825;font-weight:900;font-size:.72rem;">$${precio.toLocaleString('es-AR')}</span>`
-            : `<span style="color:#666;font-size:.72rem;">$${precio.toLocaleString('es-AR')}</span>`;
+            : `<span style="color:#666;font-size:.72rem;">$${p.price.toLocaleString('es-AR')}</span>`;
 
         const stockColor = sinStock ? '#e53935' : stockBajo ? '#f57c00' : '#aaa';
         const stockLabel = sinStock ? 'sin stock' : stockBajo ? `${p.stock} u. (poco)` : `stock: ${p.stock}`;
@@ -2274,12 +2277,11 @@ function agregarProducto(id) {
             return;
         }
         existente.qty++;
-        const o = calcularOfertaPOS(producto, existente.qty);
-        existente.price          = o.precioUnitario;
-        existente.precioOriginal = o.tieneOferta ? producto.price : 0;
-        existente.precioModificado = o.tieneOferta;
-        existente.ofertaEtiqueta = o.etiqueta || null;
-        existente.ofertaTipo     = o.tipoOferta || null;
+        // Recalcular precio con oferta NxM si aplica (cambia al agregar más unidades)
+        if (existente.ofertaTipo) {
+            const o = calcularOfertaPOS(producto, existente.qty);
+            existente.price = o.precioUnitario;
+        }
     } else {
         const oferta = calcularOfertaPOS(producto, 1);
         ventaActual.push({
@@ -2486,10 +2488,10 @@ function renderVenta() {
         const imgSrc = `imagenes-productos/${simplificarNombre(item.name)}.jpg`;
 
         // ── Calcular precios y ahorro ──────────────────────────────
-        const tieneOferta  = item.precioModificado && item.precioOriginal > 0;
-        const precioUnit   = item.price;
-        const subtotal     = Math.round(precioUnit * item.qty);
-        const ahorroTotal  = tieneOferta ? Math.round(item.precioOriginal * item.qty - subtotal) : 0;
+        const tieneOferta = item.precioModificado && item.precioOriginal > 0;
+        const precioUnit  = item.price;
+        const subtotal    = Math.round(precioUnit * item.qty);
+        const ahorro      = tieneOferta ? Math.round((item.precioOriginal - precioUnit) * item.qty) : 0;
 
         // ── Texto de fórmula según tipo ────────────────────────────
         let formulaHTML = '';
@@ -2523,7 +2525,7 @@ function renderVenta() {
             ? `<div style="flex-shrink:0;text-align:right;min-width:64px;">
                 <span class="item-precio-antes">$${item.precioOriginal.toLocaleString('es-AR')}</span>
                 <span class="item-precio-con-oferta" style="color:${colOferta||'var(--verde-oscuro)'}">$${precioUnit.toLocaleString('es-AR')}</span>
-                <span class="item-ahorro-badge">−$${ahorroTotal.toLocaleString('es-AR')}</span>
+                <span class="item-ahorro-badge">−$${(item.precioOriginal - precioUnit).toLocaleString('es-AR')}</span>
               </div>`
             : `<span class="item-precio-editable ${item.precioModificado ? 'modificado' : ''}"
                      onclick="editarPrecioCarrito('${item.id}')"
@@ -5264,12 +5266,9 @@ function badgeOfertaPOS(producto) {
         const jc = _poolCervecero.get(producto.id);
         return `<span style="background:#1565c0;color:#f9a825;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">🍺 -${jc.descuento}%</span>`;
     }
-    if (producto.relampago && _toggleEstado.relampago !== false && _poolIdsRelampago.has(producto.id)) {
-        const key = String(producto.relampago);
-        const cfg = OFERTAS_RELAMPAGO_SISTEMA[key];
+    if (producto.relampago > 0 && _toggleEstado.relampago !== false && _poolIdsRelampago.has(producto.id)) {
+        const cfg = OFERTAS_RELAMPAGO_SISTEMA[String(producto.relampago)];
         if (cfg) return `<span style="background:#f9a825;color:#000;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">⚡ ${cfg.nombre.toUpperCase()}</span>`;
-        const match = key.match(/(\d+)x(\d+)/i);
-        if (match) return `<span style="background:#f9a825;color:#000;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">⚡ ${match[1]}X${match[2]}</span>`;
     }
     if (_toggleEstado.ultimas !== false && _poolIdsUltimas.has(producto.id))
         return `<span style="background:#b71c1c;color:#fff;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">🏷️ ÚLTIMAS</span>`;
@@ -5443,7 +5442,7 @@ function toggleCervecero() {
 // Sincronizar badge de versión desde el <title>
 (function(){
     const el = document.getElementById('versionTag');
-    if (el) el.textContent = 'v148';
+    if (el) el.textContent = 'v149';
 })();
 
 // ── WakeLock: mantener pantalla encendida mientras la app está activa ──
