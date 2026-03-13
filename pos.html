@@ -2216,6 +2216,68 @@ body { padding-bottom: 130px !important; }
     box-shadow: 0 4px 16px rgba(0,0,0,0.4);
 }
 
+/* ===== POS v3: FLASH Y GESTOS TÁCTILES ===== */
+
+/* Flash verde al agregar */
+.product-card.pos-flash-add {
+    animation: posFlashAdd 0.32s ease-out forwards;
+    position: relative;
+    z-index: 5;
+}
+@keyframes posFlashAdd {
+    0%   { box-shadow: 0 0 0 0 rgba(46,125,50,0); transform: scale(1); }
+    35%  { box-shadow: 0 0 0 9px rgba(46,125,50,0.6); transform: scale(1.035); }
+    100% { box-shadow: 0 0 0 0 rgba(46,125,50,0); transform: scale(1); }
+}
+
+/* Flash rojo al quitar */
+.product-card.pos-flash-remove {
+    animation: posFlashRem 0.28s ease-out forwards;
+    position: relative;
+    z-index: 5;
+}
+@keyframes posFlashRem {
+    0%   { box-shadow: 0 0 0 0 rgba(183,28,28,0); }
+    35%  { box-shadow: 0 0 0 9px rgba(183,28,28,0.55); }
+    100% { box-shadow: 0 0 0 0 rgba(183,28,28,0); }
+}
+
+/* Badge cantidad flotante sobre la imagen */
+.pos-card-qty-badge {
+    position: absolute;
+    top: 7px;
+    left: 7px;
+    background: #1b5e20;
+    color: #b9f6ca;
+    font-size: 0.78rem;
+    font-weight: 900;
+    min-width: 24px;
+    height: 24px;
+    border-radius: 12px;
+    padding: 0 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 20;
+    pointer-events: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+}
+.pos-card-qty-badge.bump {
+    animation: posBadgeBump 0.18s ease-out;
+}
+@keyframes posBadgeBump {
+    0%   { transform: scale(1); }
+    50%  { transform: scale(1.5); }
+    100% { transform: scale(1); }
+}
+
+/* Cursor pointer en toda la card */
+#productsGrid .product-card:not(.out-of-stock) {
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
 @media (min-width: 600px) {
     .cart-content { max-width: 520px !important; left: 50% !important; transform: translateX(-50%) !important; border-radius: 20px !important; }
     .pos-confirm-box { max-width: 520px; border-radius: 24px; margin: auto; }
@@ -4426,6 +4488,8 @@ function renderCartItems() {
     if (typeof _posActualizarPanel === 'function') _posActualizarPanel();
     // ── POS: inicializar swipe en items ──
     setTimeout(() => { if (typeof _posInitSwipe === 'function') _posInitSwipe(); }, 80);
+    // ── POS v3: actualizar badges en cards ──
+    setTimeout(() => { if (typeof _posRefreshAllBadges === 'function') _posRefreshAllBadges(); }, 90);
     
     // ===== BOTONES DE CANTIDAD =====
     setTimeout(() => {
@@ -6529,6 +6593,214 @@ document.addEventListener('DOMContentLoaded', () => {
         posCobrar();
     }, true);
 });
+
+// ================================================================
+// POS v3 — GESTOS TÁCTILES Y TAP EN CARD
+// Toda la lógica usa event delegation sobre #productsGrid
+// → sobrevive al re-render del innerHTML del grid
+// ================================================================
+(function() {
+
+    // ── Helpers ──
+    function _getProductCard(el) {
+        return el ? el.closest('#productsGrid .product-card:not(.out-of-stock)') : null;
+    }
+    function _getProductId(card) {
+        if (!card) return null;
+        const btn = card.querySelector('.add-to-cart[data-id]');
+        return btn ? parseInt(btn.getAttribute('data-id'), 10) : null;
+    }
+
+    // ── Feedback visual: flash en la card ──
+    function posFlashCard(card, tipo) {
+        if (!card) return;
+        card.classList.remove('pos-flash-add', 'pos-flash-remove');
+        void card.offsetWidth; // reflow para reiniciar animación
+        card.classList.add(tipo === 'add' ? 'pos-flash-add' : 'pos-flash-remove');
+        setTimeout(() => card.classList.remove('pos-flash-add', 'pos-flash-remove'), 400);
+    }
+
+    // ── Badge de cantidad sobre la imagen de la card ──
+    function posUpdateCardBadge(card, productId) {
+        if (!card) return;
+        const imgWrap = card.querySelector('.product-image');
+        if (!imgWrap) return;
+        let badge = imgWrap.querySelector('.pos-card-qty-badge');
+        const item = cart.find(i => i.id === productId);
+        const qty = item ? item.quantity : 0;
+        if (qty === 0) {
+            if (badge) badge.remove();
+            return;
+        }
+        if (!badge) {
+            badge = document.createElement('div');
+            badge.className = 'pos-card-qty-badge';
+            imgWrap.style.position = 'relative'; // asegurar
+            imgWrap.insertBefore(badge, imgWrap.firstChild);
+        }
+        badge.textContent = qty;
+        badge.classList.remove('bump');
+        void badge.offsetWidth;
+        badge.classList.add('bump');
+    }
+
+    // ── Actualizar todos los badges visibles ──
+    function posRefreshAllBadges() {
+        const grid = document.getElementById('productsGrid');
+        if (!grid) return;
+        grid.querySelectorAll('.product-card').forEach(card => {
+            const pid = _getProductId(card);
+            if (pid) posUpdateCardBadge(card, pid);
+        });
+    }
+
+    // Exponer para que renderCartItems pueda refrescar badges
+    window._posRefreshAllBadges = posRefreshAllBadges;
+
+    // ── Estado del gesto activo ──
+    let _tsX = 0, _tsY = 0;
+    let _activeCard = null;
+    let _swipeConsumed = false; // true cuando touchend disparó swipe → cancelar el click
+
+    // ── Registro de último productId agregado por click de card
+    // (evita double-fire si el botón .add-to-cart también propagó)
+    let _lastCardTapId = null;
+    let _lastCardTapTs  = 0;
+
+    function _initGridDelegation(grid) {
+        // Marcar para no doble-init si se llama de nuevo
+        if (grid._posv3Init) return;
+        grid._posv3Init = true;
+
+        // -- TOUCH START --
+        grid.addEventListener('touchstart', function(e) {
+            const t = e.touches[0];
+            _tsX = t.clientX;
+            _tsY = t.clientY;
+            _activeCard = _getProductCard(e.target);
+            _swipeConsumed = false;
+        }, { passive: true });
+
+        // -- TOUCH MOVE --
+        // Solo necesitamos saber si el gesto es horizontal o vertical
+        grid.addEventListener('touchmove', function(e) {
+            if (!_activeCard) return;
+            const dx = Math.abs(e.touches[0].clientX - _tsX);
+            const dy = Math.abs(e.touches[0].clientY - _tsY);
+            // Si vertical domina desde el principio → es scroll, cancelar gesto
+            if (dy > dx + 8) {
+                _activeCard = null;
+            }
+        }, { passive: true });
+
+        // -- TOUCH END --
+        grid.addEventListener('touchend', function(e) {
+            if (!_activeCard) return;
+            const touch = e.changedTouches[0];
+            const dx = touch.clientX - _tsX;
+            const dy = Math.abs(touch.clientY - _tsY);
+            const card = _activeCard;
+            _activeCard = null;
+
+            const THRESHOLD = 42; // px mínimo para swipe
+
+            // No es swipe si movimiento menor al umbral o vertical domina
+            if (Math.abs(dx) < THRESHOLD || dy > Math.abs(dx)) return;
+
+            // Es swipe — marcar para cancelar el click que Android dispara tras touchend
+            _swipeConsumed = true;
+            setTimeout(() => { _swipeConsumed = false; }, 600);
+
+            const pid = _getProductId(card);
+            if (!pid) return;
+
+            if (dx > 0) {
+                // ── Swipe DERECHA → agregar ──
+                addToCart(pid);
+                posFlashCard(card, 'add');
+                setTimeout(() => posUpdateCardBadge(card, pid), 60);
+            } else {
+                // ── Swipe IZQUIERDA → quitar ──
+                const item = cart.find(i => i.id === pid);
+                if (item) {
+                    updateCartQuantity(pid, -1);
+                    posFlashCard(card, 'remove');
+                    setTimeout(() => posUpdateCardBadge(card, pid), 60);
+                } else {
+                    // No está en carrito: feedback visual suave sin acción
+                    posFlashCard(card, 'remove');
+                }
+            }
+        }, { passive: true });
+
+        // -- CLICK (TAP EN CARD) --
+        // Se dispara tras touchend en taps normales.
+        // Guardamos referencia para evitar doble-ejecución con el botón .add-to-cart
+        grid.addEventListener('click', function(e) {
+            // Si fue swipe → ignorar
+            if (_swipeConsumed) return;
+
+            // Si el click viene del botón compartir → no hacer nada
+            if (e.target.closest('.share-btn')) return;
+
+            // Si el click viene del botón .add-to-cart → el listener global del documento
+            // ya lo maneja (ver event delegation de index.html).
+            // Nosotros solo actualizamos el badge y el flash.
+            if (e.target.closest('.add-to-cart')) {
+                const card = _getProductCard(e.target);
+                if (card) {
+                    const pid = _getProductId(card);
+                    if (pid) {
+                        posFlashCard(card, 'add');
+                        setTimeout(() => posUpdateCardBadge(card, pid), 60);
+                    }
+                }
+                return; // dejar que el listener existente maneje addToCart
+            }
+
+            // Si tiene onclick propio (promos, paginación, etc.) → no interferir
+            if (e.target.closest('[onclick]')) return;
+
+            // Click en zona de la card (imagen, nombre, precio, stock)
+            const card = _getProductCard(e.target);
+            if (!card) return;
+            const pid = _getProductId(card);
+            if (!pid) return;
+
+            // Anti-doble: si este mismo producto ya fue agregado por .add-to-cart
+            // en los últimos 300ms (el botón propagó y llegó primero al doc listener),
+            // no volver a agregar
+            const now = Date.now();
+            if (_lastCardTapId === pid && now - _lastCardTapTs < 300) return;
+            _lastCardTapId = pid;
+            _lastCardTapTs = now;
+
+            addToCart(pid);
+            posFlashCard(card, 'add');
+            setTimeout(() => posUpdateCardBadge(card, pid), 60);
+        });
+    }
+
+    // ── Inicializar cuando el DOM esté listo ──
+    document.addEventListener('DOMContentLoaded', function() {
+        // Esperar un tick para que el grid exista
+        setTimeout(function() {
+            const grid = document.getElementById('productsGrid');
+            if (grid) _initGridDelegation(grid);
+        }, 200);
+
+        // Actualizar badges cada vez que renderCartItems termina
+        // (ya tiene el hook _posRefreshAllBadges pero también lo llamamos aquí)
+        const origRender = window.renderCartItems;
+        if (origRender) {
+            window.renderCartItems = function() {
+                origRender.apply(this, arguments);
+                setTimeout(posRefreshAllBadges, 80);
+            };
+        }
+    });
+
+})(); // fin IIFE gestos POS v3
 </script>
 </body>
 </html>
