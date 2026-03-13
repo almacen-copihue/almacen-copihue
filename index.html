@@ -2083,7 +2083,7 @@
 // ========== VERSIÓN Y CONFIGURACIÓN ==========
 const APP_VERSION = 'V2.9-GANCHO-250305';
 // Tag versión automático con fecha
-(function(){ const el=document.getElementById('versionTag'); if(el) el.textContent='v004'; })();
+(function(){ const el=document.getElementById('versionTag'); if(el) el.textContent='v005'; })();
 
 // ========== MAPEO DE OFERTAS RELÁMPAGO ==========
 const OFERTAS_RELAMPAGO_SISTEMA = {
@@ -3633,6 +3633,7 @@ function addToCart(productId, tipoForzado) {
     let esOfertaEspecial = false;
     let esOfertaDestacada = false;
     let esOfertaRelampago = false;
+    let esOfertaUltimas = false;
     let esPromo = false;
     let ofertaConfig = null;
     
@@ -3668,6 +3669,31 @@ function addToCart(productId, tipoForzado) {
         };
         console.log('✅ Producto tiene oferta DESTACADA:', product.destacada + '%');
     }
+    // 2b. Verificar ÚLTIMAS UNIDADES
+    else if (tipoForzado === 'ultimas' || productosUltimas.some(p => p.id === productId)) {
+        // Calcular días para vencer desde el campo vencimiento del producto
+        let diasVenc = null;
+        if (product.vencimiento) {
+            const partes = String(product.vencimiento).split('-');
+            if (partes.length === 3) {
+                const vD = new Date(parseInt(partes[0]), parseInt(partes[1]) - 1, parseInt(partes[2]));
+                const hoy = new Date(); hoy.setHours(0,0,0,0);
+                diasVenc = Math.round((vD - hoy) / 86400000);
+            }
+        }
+        // También intentar desde el pool (que tiene diasParaVencer del backend)
+        const enPool = productosUltimas.find(p => p.id === productId);
+        if (diasVenc === null && enPool && enPool.diasParaVencer !== undefined) diasVenc = enPool.diasParaVencer;
+        const pct = diasVenc !== null && diasVenc <= 1 ? 25 : 15;
+        esOfertaUltimas = true;
+        ofertaConfig = {
+            nombre: "Últimas",
+            tipo: "ultimas",
+            descuento: pct,
+            eslogan: `🏷️ -${pct}% ÚLTIMAS UNIDADES`
+        };
+        console.log('✅ Producto tiene oferta ÚLTIMAS UNIDADES:', pct + '% off');
+    }
     // 3. Verificar RELÁMPAGO
     else if (tipoForzado === 'relampago' ||
              (product.relampago > 0 && (productosRelampago.some(p => p.id === productId) && validarHorario('relampago') || 
@@ -3702,6 +3728,7 @@ function addToCart(productId, tipoForzado) {
         existingItem.esOfertaEspecial = esOfertaEspecial;
         existingItem.esOfertaDestacada = esOfertaDestacada;
         existingItem.esOfertaRelampago = esOfertaRelampago;
+        existingItem.esOfertaUltimas = esOfertaUltimas;
         existingItem.esPromo = esPromo;
         existingItem.productRef = product; // Actualizar referencia
     } else {
@@ -3715,6 +3742,7 @@ function addToCart(productId, tipoForzado) {
             esOfertaEspecial: esOfertaEspecial,
             esOfertaDestacada: esOfertaDestacada,
             esOfertaRelampago: esOfertaRelampago,
+            esOfertaUltimas: esOfertaUltimas,
             esPromo: esPromo,
             productRef: product
         });
@@ -3870,7 +3898,7 @@ function renderCartItems() {
         }
         // ===== OFERTAS DESTACADAS =====
         else if (item.esOfertaDestacada && item.oferta) {
-            esProductoNormal = false; // Tiene oferta
+            esProductoNormal = false;
             badgeColor = '#ff6f00';
             const descuento = item.oferta.descuento / 100;
             const precioUnitario = Math.round(product.price * (1 - descuento));
@@ -3878,6 +3906,17 @@ function renderCartItems() {
             ahorroItem = precioNormalTotal - precioTotalItem;
             badge = `${item.oferta.descuento}%`;
             formula = `<div style="color:#ff6f00;font-size:0.7rem;">👉 -${item.oferta.descuento}% c/u</div>`;
+        }
+        // ===== ÚLTIMAS UNIDADES =====
+        else if (item.esOfertaUltimas && item.oferta) {
+            esProductoNormal = false;
+            badgeColor = '#b71c1c';
+            const descuento = item.oferta.descuento / 100;
+            const precioUnitario = Math.round(product.price * (1 - descuento));
+            precioTotalItem = precioUnitario * item.quantity;
+            ahorroItem = precioNormalTotal - precioTotalItem;
+            badge = `-${item.oferta.descuento}%`;
+            formula = `<div style="color:#b71c1c;font-size:0.7rem;">🏷️ Últimas unidades -${item.oferta.descuento}%</div>`;
         }
         // ===== OFERTAS ESPECIALES =====
         else if (item.esOfertaEspecial && item.oferta) {
@@ -4077,6 +4116,14 @@ function sendOrderViaWhatsApp() {
             precioItem = precioUnitario * item.quantity;
             const ahorro = precioNormalItem - precioItem;
             ofertaInfo = `\n🔥 Ahorrás $${ahorro}`;
+        }
+        // ÚLTIMAS UNIDADES (ej: -15% o -25%)
+        else if (item.esOfertaUltimas && item.oferta) {
+            const descuento = item.oferta.descuento / 100;
+            const precioUnitario = Math.round(product.price * (1 - descuento));
+            precioItem = precioUnitario * item.quantity;
+            const ahorro = precioNormalItem - precioItem;
+            ofertaInfo = `\n🏷️ Últimas unidades -${item.oferta.descuento}% · Ahorrás $${ahorro}`;
         }
         // OFERTA RELÁMPAGO (ej: 3x2)
         else if (item.esOfertaRelampago && item.oferta) {
