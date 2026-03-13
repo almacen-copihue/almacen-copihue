@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v141</title>
+    <title>Copihue — POS v142</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -5098,6 +5098,7 @@ async function cargarPoolsOfertas() {
         const d2 = await r2.json();
         _poolCervecero.clear();
         if (d2.success && d2.productos && d2.productos.length > 0) {
+            if (d2.horaCierre) _jcHoraCierre = d2.horaCierre; // actualizar hora límite
             d2.productos.forEach(p => {
                 // El id de GAS es el índice de fila en inventario (coincide con p.i del servidor)
                 // Buscamos el producto local por nombre (más robusto que por id de GAS)
@@ -5178,13 +5179,14 @@ function calcularOfertaPOS(producto, qty) {
                 diasVenc = Math.round((vD - hoy) / 86400000);
             }
         }
-        const esUrgente = diasVenc !== null && diasVenc <= 2;
+        const esUrgente = diasVenc !== null && diasVenc <= 3;
         if (esUrgente) {
-            r.precioUnitario = Math.round(producto.price * 0.75); // -25%
+            const pct = diasVenc <= 1 ? 25 : 15; // hoy/mañana = 25%, 2-3 días = 15%
+            r.precioUnitario = Math.round(producto.price * (1 - pct / 100));
             r.precioTotal    = r.precioUnitario * qty;
-            r.etiqueta       = `🏷️ -25% VENCE${diasVenc === 0 ? ' HOY' : diasVenc === 1 ? ' MAÑANA' : ' EN 2D'}`;
+            const labelDia = diasVenc === 0 ? 'VENCE HOY' : diasVenc === 1 ? 'VENCE MAÑANA' : `VENCE EN ${diasVenc}D`;
+            r.etiqueta       = `🏷️ -${pct}% ${labelDia}`;
         } else {
-            // En pool pero sin urgencia: mostrar badge sin descuento
             r.etiqueta = `🏷️ ÚLTIMAS UNIDADES`;
         }
         r.tieneOferta = esUrgente;
@@ -5340,10 +5342,13 @@ if (_cerveceroOverride === 'true')  _cerveceroOverride = true;
 else if (_cerveceroOverride === 'false') _cerveceroOverride = false;
 else _cerveceroOverride = null;
 
+let _jcHoraCierre = 22; // se actualiza al cargar el pool cervecero
+
 function _esCerveceroAutoActivo() {
     const now = new Date();
     const arg = new Date(now.toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
-    return arg.getDay() === 4 && arg.getHours() >= 18;
+    const hora = arg.getHours() + arg.getMinutes() / 60;
+    return arg.getDay() === 4 && hora >= 18 && hora < _jcHoraCierre;
 }
 
 function _pintarToggleCervecero() {
@@ -5392,7 +5397,7 @@ function toggleCervecero() {
 // Sincronizar badge de versión desde el <title>
 (function(){
     const el = document.getElementById('versionTag');
-    if (el) el.textContent = 'v141';
+    if (el) el.textContent = 'v142';
 })();
 
 // ── WakeLock: mantener pantalla encendida mientras la app está activa ──
