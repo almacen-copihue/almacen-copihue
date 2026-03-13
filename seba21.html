@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v140</title>
+    <title>Copihue — POS v141</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2508,6 +2508,9 @@ function renderVenta() {
             } else if (tipo === 'especiales') {
                 colOferta = '#00bcd4';
                 formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">⭐ Especial</div>`;
+            } else if (tipo === 'ultimas') {
+                colOferta = '#b71c1c';
+                formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">${item.ofertaEtiqueta || '🏷️ ÚLTIMAS UNIDADES'}</div>`;
             } else if (tipo === 'normal') {
                 colOferta = '#43a047';
                 formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">↓ Precio rebajado</div>`;
@@ -2659,7 +2662,7 @@ function _buildDetalleModalHTML() {
         // Colores por tipo
         const colores = {
             cervecero: '#1565c0', relampago: '#b06000',
-            destacadas: '#ff6f00', especiales: '#00bcd4', normal: '#43a047'
+            destacadas: '#ff6f00', especiales: '#00bcd4', ultimas: '#b71c1c', normal: '#43a047'
         };
         const col = colores[item.ofertaTipo] || '#f9a825';
 
@@ -5163,6 +5166,30 @@ function calcularOfertaPOS(producto, qty) {
             r.tieneOferta = true; r.tipoOferta = 'relampago';
         }
     }
+    // 1b. ÚLTIMAS UNIDADES — toggle activo Y producto en el pool
+    else if (_toggleEstado.ultimas && _poolIdsUltimas.has(producto.id)) {
+        // Calcular días para vencer (mismo criterio que index.html)
+        let diasVenc = null;
+        if (producto.vencimiento) {
+            const partes = String(producto.vencimiento).split('-');
+            if (partes.length === 3) {
+                const vD = new Date(parseInt(partes[0]), parseInt(partes[1]) - 1, parseInt(partes[2]));
+                const hoy = new Date(); hoy.setHours(0,0,0,0);
+                diasVenc = Math.round((vD - hoy) / 86400000);
+            }
+        }
+        const esUrgente = diasVenc !== null && diasVenc <= 2;
+        if (esUrgente) {
+            r.precioUnitario = Math.round(producto.price * 0.75); // -25%
+            r.precioTotal    = r.precioUnitario * qty;
+            r.etiqueta       = `🏷️ -25% VENCE${diasVenc === 0 ? ' HOY' : diasVenc === 1 ? ' MAÑANA' : ' EN 2D'}`;
+        } else {
+            // En pool pero sin urgencia: mostrar badge sin descuento
+            r.etiqueta = `🏷️ ÚLTIMAS UNIDADES`;
+        }
+        r.tieneOferta = esUrgente;
+        r.tipoOferta  = 'ultimas';
+    }
     // 2. DESTACADAS — toggle activo Y en pool
     else if (producto.destacada > 0 && _toggleEstado.destacadas && _poolIdsDestacadas.has(producto.id)) {
         r.precioUnitario = Math.round(producto.price * (1 - producto.destacada / 100));
@@ -5196,6 +5223,8 @@ function badgeOfertaPOS(producto) {
         const cfg = OFERTAS_RELAMPAGO_SISTEMA[String(producto.relampago)];
         if (cfg) return `<span style="background:#f9a825;color:#000;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">⚡ ${cfg.nombre.toUpperCase()}</span>`;
     }
+    if (_toggleEstado.ultimas && _poolIdsUltimas.has(producto.id))
+        return `<span style="background:#b71c1c;color:#fff;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">🏷️ ÚLTIMAS</span>`;
     if (producto.destacada > 0 && _toggleEstado.destacadas && _poolIdsDestacadas.has(producto.id))
         return `<span style="background:#ff6f00;color:#fff;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">🔥 -${producto.destacada}%</span>`;
     if (producto.especial > 0 && _toggleEstado.especiales && _poolIdsEspeciales.has(producto.id))
@@ -5363,7 +5392,7 @@ function toggleCervecero() {
 // Sincronizar badge de versión desde el <title>
 (function(){
     const el = document.getElementById('versionTag');
-    if (el) el.textContent = 'v140';
+    if (el) el.textContent = 'v141';
 })();
 
 // ── WakeLock: mantener pantalla encendida mientras la app está activa ──
