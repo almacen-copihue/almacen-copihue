@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v142</title>
+    <title>Copihue — POS v143</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -5072,7 +5072,7 @@ function cerrarInfoProd(e) {
 const _poolIdsRelampago  = new Set();
 const _poolIdsDestacadas = new Set();
 const _poolIdsEspeciales = new Set();
-const _poolIdsUltimas    = new Set();
+const _poolIdsUltimas    = new Map(); // id → diasParaVencer
 const _poolCervecero     = new Map(); // id → { descuento, precioPromo }
 
 async function cargarPoolsOfertas() {
@@ -5087,7 +5087,7 @@ async function cargarPoolsOfertas() {
         (data.relampagoActivo   || []).forEach(p => _poolIdsRelampago.add(p.id));
         (data.destacadasActivas || []).forEach(p => _poolIdsDestacadas.add(p.id));
         (data.especialesActivas || []).forEach(p => _poolIdsEspeciales.add(p.id));
-        (data.ultimasUnidades   || []).forEach(p => _poolIdsUltimas.add(p.id));
+        (data.ultimasUnidades   || []).forEach(p => _poolIdsUltimas.set(p.id, p.diasParaVencer !== undefined ? p.diasParaVencer : null));
         console.log(`✅ Pools POS: ${_poolIdsRelampago.size} rel · ${_poolIdsDestacadas.size} dest · ${_poolIdsEspeciales.size} esp · ${_poolIdsUltimas.size} ult`);
     } catch(e) {
         console.warn('⚠️ No se pudieron cargar pools de ofertas:', e.message);
@@ -5169,7 +5169,7 @@ function calcularOfertaPOS(producto, qty) {
     }
     // 1b. ÚLTIMAS UNIDADES — toggle activo Y producto en el pool
     else if (_toggleEstado.ultimas && _poolIdsUltimas.has(producto.id)) {
-        // Calcular días para vencer (mismo criterio que index.html)
+        // Prioridad: vencimiento propio del producto → fallback a diasParaVencer del pool
         let diasVenc = null;
         if (producto.vencimiento) {
             const partes = String(producto.vencimiento).split('-');
@@ -5179,9 +5179,11 @@ function calcularOfertaPOS(producto, qty) {
                 diasVenc = Math.round((vD - hoy) / 86400000);
             }
         }
+        if (diasVenc === null) diasVenc = _poolIdsUltimas.get(producto.id); // viene del backend
+
         const esUrgente = diasVenc !== null && diasVenc <= 3;
         if (esUrgente) {
-            const pct = diasVenc <= 1 ? 25 : 15; // hoy/mañana = 25%, 2-3 días = 15%
+            const pct = diasVenc <= 1 ? 25 : 15;
             r.precioUnitario = Math.round(producto.price * (1 - pct / 100));
             r.precioTotal    = r.precioUnitario * qty;
             const labelDia = diasVenc === 0 ? 'VENCE HOY' : diasVenc === 1 ? 'VENCE MAÑANA' : `VENCE EN ${diasVenc}D`;
@@ -5397,7 +5399,7 @@ function toggleCervecero() {
 // Sincronizar badge de versión desde el <title>
 (function(){
     const el = document.getElementById('versionTag');
-    if (el) el.textContent = 'v142';
+    if (el) el.textContent = 'v143';
 })();
 
 // ── WakeLock: mantener pantalla encendida mientras la app está activa ──
