@@ -665,6 +665,9 @@ function calcularOfertas() {
   var sheet = ss.getSheetByName(HOJA_INVENTARIO);
   var datos = sheet.getDataRange().getValues();
 
+  // ── Límites de visualización (hardcoded + puede sobreescribirse desde config) ──
+  var limites = { relampago: 3, ultimas: 3, especiales: 2, destacadas: 9 };
+
   var relampagoActivo = [];
   var ultimasUnidades = [];
   var idsUsados = {};
@@ -748,6 +751,7 @@ function calcularOfertas() {
 
   candidatosRelampago
     .sort(function(a, b) { return b.p - a.p; })
+    .slice(0, limites.relampago)
     .forEach(function(c) {
       relampagoActivo.push(_ofertaBuildProducto_(c.fila, c.i));
     });
@@ -765,8 +769,7 @@ function calcularOfertas() {
     if ((parseInt(fd[8]) || 0) > 0) especialesActivas.push(_ofertaBuildProducto_(fd, idx));
   }
 
-  // ── Leer límites de visualización desde config_sistema ─────
-  var limites = { relampago: 3, ultimas: 3, especiales: 2, destacadas: 9 };
+  // ── Sobreescribir límite de destacadas desde config_sistema si existe ──
   try {
     var ssCfg = SpreadsheetApp.openById(SS_ID);
     var shCfg = ssCfg.getSheetByName(HOJA_CONFIG);
@@ -775,7 +778,6 @@ function calcularOfertas() {
       for (var ci = 1; ci < cfgRows.length; ci++) {
         var clave = String(cfgRows[ci][0] || '').trim().toLowerCase();
         if (clave.indexOf('máximo destacadas') !== -1 || clave.indexOf('maximo destacadas') !== -1) {
-          // Toma el primer valor numérico que encuentre (cualquier día)
           for (var cj = 1; cj <= 7; cj++) {
             var v = parseInt(cfgRows[ci][cj]);
             if (!isNaN(v) && v > 0) { limites.destacadas = v; break; }
