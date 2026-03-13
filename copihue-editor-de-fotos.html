@@ -400,6 +400,53 @@
   #ghStatus.error { background: rgba(255,77,109,0.1); color: var(--danger); border: 1px solid rgba(255,77,109,0.3); }
   #ghStatus.loading { background: rgba(21,101,192,0.1); color: #64b5f6; border: 1px solid rgba(100,181,246,0.3); }
 
+  .publish-checks {
+    display: none;
+    margin-top: 12px;
+    padding: 12px;
+    border-radius: 12px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+  }
+  .publish-checks-title {
+    font-size: 0.72rem; font-weight: 700; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .8px; margin-bottom: 8px;
+  }
+  .publish-check-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 0; font-size: 0.84rem; color: var(--text);
+    border-top: 1px solid rgba(255,255,255,0.04);
+  }
+  .publish-check-item:first-of-type { border-top: 0; }
+  .publish-check-dot {
+    width: 18px; height: 18px; border-radius: 999px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; flex-shrink: 0;
+    border: 1px solid var(--border); background: var(--surface);
+    color: var(--muted);
+  }
+  .publish-check-item.pending .publish-check-dot { color: var(--warn); border-color: rgba(255,179,0,.35); }
+  .publish-check-item.ok .publish-check-dot { color: var(--ok); border-color: rgba(0,201,122,.35); }
+  .publish-check-item.error .publish-check-dot { color: var(--danger); border-color: rgba(255,77,109,.35); }
+  .publish-check-actions {
+    display: none;
+    gap: 8px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+  }
+  .mini-btn {
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    border-radius: 10px;
+    padding: 8px 10px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .mini-btn:hover { border-color: var(--accent); color: white; }
+
   /* ── CONFIG PANEL ───────────────────────── */
   .config-panel {
     display: none; position: fixed; inset: 0;
@@ -598,6 +645,26 @@
           </div>
         </div>
         <div id="ghStatus"></div>
+
+        <div class="publish-checks" id="publishChecks">
+          <div class="publish-checks-title">Verificación de publicación</div>
+          <div class="publish-check-item pending" id="checkGitHub">
+            <span class="publish-check-dot">1</span>
+            <span>Subida al repositorio</span>
+          </div>
+          <div class="publish-check-item pending" id="checkCDN">
+            <span class="publish-check-dot">2</span>
+            <span>Disponible en la web</span>
+          </div>
+          <div class="publish-check-item pending" id="checkPreview">
+            <span class="publish-check-dot">3</span>
+            <span>Vista previa actualizada</span>
+          </div>
+          <div class="publish-check-actions" id="publishCheckActions">
+            <button class="mini-btn" type="button" onclick="abrirImagenPublica()">🔎 Abrir foto publicada</button>
+            <button class="mini-btn" type="button" onclick="reverificarImagenPublica()">🔁 Revalidar</button>
+          </div>
+        </div>
       </div>
 
     </div><!-- /modal-body -->
@@ -664,6 +731,83 @@ function toast(msg, tipo = '') {
   el.className = 'show ' + tipo;
   clearTimeout(el._t);
   el._t = setTimeout(() => { el.className = ''; }, 2800);
+}
+
+function _imgPublicSrc(slug, bust = true) {
+  return 'imagenes-productos/' + slug + '.jpg' + (bust ? '?t=' + Date.now() : '');
+}
+
+function _imgPublicURL(slug) {
+  return new URL(_imgPublicSrc(slug, true), window.location.href).href;
+}
+
+function _setCheck(id, state, text) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.className = 'publish-check-item ' + state;
+  const dot = el.querySelector('.publish-check-dot');
+  if (dot) dot.textContent = state === 'ok' ? '✓' : state === 'error' ? '✕' : '…';
+  const span = el.querySelector('span:last-child');
+  if (span && text) span.textContent = text;
+}
+
+function _resetPublishChecks() {
+  const wrap = document.getElementById('publishChecks');
+  const actions = document.getElementById('publishCheckActions');
+  if (wrap) wrap.style.display = 'none';
+  if (actions) actions.style.display = 'none';
+  _setCheck('checkGitHub', 'pending', 'Subida al repositorio');
+  _setCheck('checkCDN', 'pending', 'Disponible en la web');
+  _setCheck('checkPreview', 'pending', 'Vista previa actualizada');
+}
+
+function _showPublishChecks() {
+  const wrap = document.getElementById('publishChecks');
+  if (wrap) wrap.style.display = 'block';
+}
+
+async function _esperarImagenPublica(slug, maxIntentos = 12, pausaMs = 2500) {
+  const base = _imgPublicSrc(slug, false);
+  for (let i = 1; i <= maxIntentos; i++) {
+    const url = base + '?v=' + Date.now() + '-' + i;
+    const ok = await new Promise(resolve => {
+      const img = new Image();
+      let done = false;
+      const finish = val => { if (!done) { done = true; resolve(val); } };
+      const timeout = setTimeout(() => finish(false), 4000);
+      img.onload = () => { clearTimeout(timeout); finish(true); };
+      img.onerror = () => { clearTimeout(timeout); finish(false); };
+      img.src = url;
+    });
+    if (ok) return { ok: true, url };
+    if (i < maxIntentos) await new Promise(r => setTimeout(r, pausaMs));
+  }
+  return { ok: false, url: _imgPublicURL(slug) };
+}
+
+function abrirImagenPublica() {
+  if (!productoActual) return;
+  window.open(_imgPublicURL(productoActual.slug), '_blank', 'noopener');
+}
+
+async function reverificarImagenPublica() {
+  if (!productoActual) return;
+  _showPublishChecks();
+  _setCheck('checkCDN', 'pending', 'Revalidando disponibilidad web...');
+  _setCheck('checkPreview', 'pending', 'Esperando resultado de revalidación');
+  const res = await _esperarImagenPublica(productoActual.slug, 6, 2000);
+  if (!res.ok) {
+    _setCheck('checkCDN', 'error', 'Aún no responde la URL pública');
+    _setCheck('checkPreview', 'error', 'No se pudo refrescar la vista previa');
+    toast('⚠️ Sigue sin aparecer en la web', 'error');
+    return;
+  }
+  const modalImg = document.getElementById('modalProdImg');
+  if (modalImg) modalImg.src = res.url;
+  _setCheck('checkCDN', 'ok', 'La URL pública ya entrega la foto');
+  _setCheck('checkPreview', 'ok', 'Vista previa recargada correctamente');
+  document.getElementById('publishCheckActions').style.display = 'flex';
+  toast('✅ Foto confirmada en la web', 'ok');
 }
 
 // ═══════════════════════════════════════════
@@ -789,7 +933,7 @@ function renderGrid() {
       imgWrap.innerHTML = '<div class="no-foto-badge">📷<span>SIN FOTO</span></div>';
     } else {
       const img = document.createElement('img');
-      img.src = 'imagenes-productos/' + p.slug + '.jpg';
+      img.src = _imgPublicSrc(p.slug, true);
       img.className = 'loading';
       img.loading = 'lazy';
       img.alt = p.name;
@@ -856,12 +1000,13 @@ function abrirEditor(id) {
     el.style.display = 'none';
     if (id === 'ghStatus') el.className = '';
   });
+  _resetPublishChecks();
   document.getElementById('btnBuscarNet').disabled = false;
 
   // Poblar info
   document.getElementById('modalProdName').textContent = p.name;
   document.getElementById('modalProdSlug').textContent = p.slug + '.jpg';
-  document.getElementById('modalProdImg').src = 'imagenes-productos/' + p.slug + '.jpg';
+  document.getElementById('modalProdImg').src = _imgPublicSrc(p.slug, true);
   document.getElementById('btnCopyName').textContent = '📋 Copiar';
   document.getElementById('btnCopyName').classList.remove('copied');
 
@@ -998,6 +1143,12 @@ function _dibujarEnCanvas(img, canvas) {
   const scale = Math.max(S/iw, S/ih), sw = S/scale, sh = S/scale;
   ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,S,S);
   ctx.drawImage(img, (iw-sw)/2, (ih-sh)/2, sw, sh, 0, 0, S, S);
+  ctx.save();
+  ctx.translate(S/2, S/2); ctx.rotate(-30 * Math.PI/180);
+  ctx.font = 'bold 28px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(30,30,30,0.18)';
+  ctx.fillText('ALMACÉN COPIHUE', 0, 0);
+  ctx.restore();
 }
 
 function _previsualizar(url, cardEl) {
@@ -1071,49 +1222,103 @@ async function publicarEnGitHub() {
   if (!productoActual) return;
   const cfg = _ghCfg();
   if (!cfg || !cfg.token) { abrirConfig(); return; }
-  const slug = productoActual.slug, fname = slug + '.jpg', path = 'imagenes-productos/' + fname;
-  const b64 = (document.getElementById('fotosOffscreen').toDataURL('image/jpeg', 0.93)
-             || document.getElementById('fotosCanvas').toDataURL('image/jpeg', 0.93)).split(',')[1];
-  const btn = document.getElementById('btnPublicarGH'); btn.disabled = true;
+
+  const slug = productoActual.slug;
+  const fname = slug + '.jpg';
+  const path = 'imagenes-productos/' + fname;
+  const canvasData = (document.getElementById('fotosOffscreen').toDataURL('image/jpeg', 0.93)
+             || document.getElementById('fotosCanvas').toDataURL('image/jpeg', 0.93));
+  const b64 = canvasData.split(',')[1];
+  const btn = document.getElementById('btnPublicarGH');
+  btn.disabled = true;
+
+  _showPublishChecks();
+  _setCheck('checkGitHub', 'pending', 'Subiendo archivo al repositorio...');
+  _setCheck('checkCDN', 'pending', 'Esperando propagación pública...');
+  _setCheck('checkPreview', 'pending', 'Pendiente de confirmación final');
+  document.getElementById('publishCheckActions').style.display = 'none';
   _setGHStatus('<div style="display:flex;align-items:center;gap:8px;"><div class="spin"></div> Verificando repo...</div>', 'loading');
+
   const apiBase = `https://api.github.com/repos/${cfg.owner}/${cfg.repo}/contents/${path}`;
-  const hdrs = { 'Authorization': 'token ' + cfg.token, 'Content-Type': 'application/json', 'Accept': 'application/vnd.github+json' };
+  const hdrs = {
+    'Authorization': 'token ' + cfg.token,
+    'Content-Type': 'application/json',
+    'Accept': 'application/vnd.github+json'
+  };
+
   try {
     let sha = null;
     try {
       const chk = await fetch(apiBase + '?ref=' + (cfg.branch||'main'), { headers: hdrs });
-      if (chk.ok) { sha = (await chk.json()).sha; }
+      if (chk.ok) {
+        const chkData = await chk.json();
+        sha = chkData.sha || null;
+      }
     } catch(e) {}
+
     const body = { message: 'Foto: ' + fname + ' · Copihue POS', content: b64, branch: cfg.branch || 'main' };
     if (sha) body.sha = sha;
-    _setGHStatus('<div style="display:flex;align-items:center;gap:8px;"><div class="spin"></div> Subiendo imagen...</div>', 'loading');
+
+    _setGHStatus('<div style="display:flex;align-items:center;gap:8px;"><div class="spin"></div> Subiendo imagen a GitHub...</div>', 'loading');
     const put = await fetch(apiBase, { method: 'PUT', headers: hdrs, body: JSON.stringify(body) });
-    if (put.ok) {
-      const res = await put.json();
-      const commitUrl = res.commit?.html_url || '#';
-      _setGHStatus(`✅ <strong>${fname}</strong> publicado.<br><small>Vercel redeploya en ~1 min. <a href="${commitUrl}" target="_blank" style="color:var(--ok);">Ver commit ↗</a></small>`, 'ok');
-      toast('✅ Publicado: ' + fname, 'ok');
-      // Actualizar imagen en el grid
-      const card = [...document.querySelectorAll('.prod-card')].find(c => {
-        const slug_div = c.querySelector('.card-slug');
-        return slug_div && slug_div.textContent === fname;
-      });
-      if (card) {
-        card.classList.remove('sin-foto');
-        const imgWrap = card.querySelector('.card-img');
-        if (imgWrap) {
-          imgWrap.innerHTML = `<img src="imagenes-productos/${slug}.jpg?t=${Date.now()}" class="loaded" style="width:100%;height:100%;object-fit:cover;display:block;">`;
-        }
-      }
-      sinFotoSet.delete(productoActual.id);
-    } else {
-      const err = await put.json();
+
+    if (!put.ok) {
+      const err = await put.json().catch(() => ({}));
+      _setCheck('checkGitHub', 'error', 'GitHub rechazó la subida');
+      _setCheck('checkCDN', 'error', 'No se puede validar porque la subida falló');
+      _setCheck('checkPreview', 'error', 'Vista previa no confirmada');
       if (put.status === 401) _setGHStatus('❌ Token inválido. <button onclick="abrirConfig()" style="background:none;border:none;color:var(--danger);font-weight:700;cursor:pointer;text-decoration:underline;">Actualizar ↗</button>', 'error');
       else if (put.status === 404) _setGHStatus('❌ Repo no encontrado. <button onclick="abrirConfig()" style="background:none;border:none;color:var(--danger);font-weight:700;cursor:pointer;text-decoration:underline;">Cambiar config ↗</button>', 'error');
       else _setGHStatus('❌ Error: ' + (err.message || put.statusText), 'error');
+      return;
     }
-  } catch(e) { _setGHStatus('❌ Error de red: ' + e.message, 'error'); }
-  btn.disabled = false;
+
+    const res = await put.json();
+    const commitUrl = res.commit?.html_url || '#';
+    _setCheck('checkGitHub', 'ok', 'Archivo confirmado en GitHub');
+    _setCheck('checkCDN', 'pending', 'Esperando que la web entregue la foto...');
+    _setGHStatus('<div style="display:flex;align-items:center;gap:8px;"><div class="spin"></div> GitHub OK. Ahora validando que la foto exista públicamente...</div>', 'loading');
+
+    const publicado = await _esperarImagenPublica(slug, 12, 2500);
+    if (!publicado.ok) {
+      _setCheck('checkCDN', 'error', 'GitHub OK, pero la web aún no responde');
+      _setCheck('checkPreview', 'error', 'Se necesita revalidar manualmente');
+      _setGHStatus(`⚠️ <strong>${fname}</strong> subido a GitHub, pero la URL pública todavía no responde.<br><small><a href="${commitUrl}" target="_blank" style="color:var(--warn);">Ver commit ↗</a></small>`, 'error');
+      document.getElementById('publishCheckActions').style.display = 'flex';
+      toast('⚠️ Subida OK, pero la web aún no la entrega', 'error');
+      return;
+    }
+
+    const modalImg = document.getElementById('modalProdImg');
+    if (modalImg) modalImg.src = publicado.url;
+
+    const card = [...document.querySelectorAll('.prod-card')].find(c => {
+      const slug_div = c.querySelector('.card-slug');
+      return slug_div && slug_div.textContent === fname;
+    });
+    if (card) {
+      card.classList.remove('sin-foto');
+      const imgWrap = card.querySelector('.card-img');
+      if (imgWrap) {
+        imgWrap.innerHTML = `<img src="${publicado.url}" class="loaded" style="width:100%;height:100%;object-fit:cover;display:block;">`;
+      }
+    }
+
+    sinFotoSet.delete(productoActual.id);
+    updateCounter();
+    _setCheck('checkCDN', 'ok', 'La URL pública respondió correctamente');
+    _setCheck('checkPreview', 'ok', 'Vista previa y grilla actualizadas');
+    document.getElementById('publishCheckActions').style.display = 'flex';
+    _setGHStatus(`✅ <strong>${fname}</strong> publicado y verificado.<br><small><a href="${commitUrl}" target="_blank" style="color:var(--ok);">Ver commit ↗</a> · <a href="${publicado.url}" target="_blank" style="color:var(--ok);">Abrir imagen ↗</a></small>`, 'ok');
+    toast('✅ Foto subida y validada', 'ok');
+  } catch(e) {
+    _setCheck('checkGitHub', 'error', 'Error de red durante la publicación');
+    _setCheck('checkCDN', 'error', 'No se pudo validar la publicación');
+    _setCheck('checkPreview', 'error', 'No se pudo confirmar la vista previa');
+    _setGHStatus('❌ Error de red: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // ═══════════════════════════════════════════
