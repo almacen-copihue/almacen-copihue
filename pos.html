@@ -2423,20 +2423,23 @@ body { padding-bottom: 130px !important; }
         <div class="ofertas-products-grid" id="cervecero-grid"></div>
     </div>
 
-    <div class="search-container" id="desktopSearch">
-        <div class="search-wrapper">
-            <input type="text" id="productSearch" class="search-input" 
-                   placeholder="🔍 Buscar productos por nombre... (Presiona Enter para buscar)">
-            <button class="clear-search" id="clearSearchBtn">✖️</button>
+    <!-- POS v4: Barra de búsqueda y categorías -->
+    <div id="pos-search-bar">
+        <div id="pos-search-wrap">
+            <span id="pos-search-icon">🔍</span>
+            <input type="text" id="pos-search-input"
+                   placeholder="Buscar producto..."
+                   autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+            <button id="pos-search-clear" onclick="clearSearch()">✕</button>
         </div>
     </div>
-
-    <section class="categories" id="categories">
-        <!-- Categorías dinámicas -->
-    </section>
+    <div id="pos-cat-strip">
+        <section class="categories" id="categories"></section>
+    </div>
+    <div id="pos-count-bar"><span id="pos-count-label"></span></div>
 
     <section class="products-grid" id="productsGrid">
-        <div class="loading">🔄 Cargando productos desde tu API...</div>
+        <div class="loading">🔄 Cargando...</div>
     </section>
 </div>
 
@@ -2545,7 +2548,7 @@ body { padding-bottom: 130px !important; }
 // ========== VERSIÓN Y CONFIGURACIÓN ==========
 const APP_VERSION = 'V2.9-GANCHO-250305';
 // Tag versión automático con fecha
-(function(){ const el=document.getElementById('versionTag'); if(el) el.textContent='pos-v002'; })();
+(function(){ const el=document.getElementById('versionTag'); if(el) el.textContent='pos-v004'; })();
 
 // ========== MAPEO DE OFERTAS RELÁMPAGO ==========
 const OFERTAS_RELAMPAGO_SISTEMA = {
@@ -3185,183 +3188,30 @@ function iniciarCountdown(tipo) {
 }
         
 function renderizarProductosNormales() {
-    const productsGrid = document.getElementById('productsGrid');
-    if (!productsGrid) return;
-    
-    // Filtrar productos que NO están en ofertas
-    const productosNormales = products.filter(p => 
-        !idsEnOfertas.has(p.id) && 
-        p.stockNumber > 0
-    );
-    
-    // Filtrar por categoría si no estamos en búsqueda
-    let productosFiltrados = productosNormales;
+    const grid = document.getElementById('productsGrid');
+    if (!grid) return;
+
+    const normales = products.filter(p => !idsEnOfertas.has(p.id) && p.stockNumber > 0);
+    let filtrados = normales;
     if (!isSearching && currentCategory !== 'ALL') {
-        productosFiltrados = productosNormales.filter(p => 
-            p.category === currentCategory
-        );
+        filtrados = normales.filter(p => p.category === currentCategory);
     }
-    
-    // ========== PAGINACIÓN ==========
-    const totalProductos = productosFiltrados.length;
-    const totalPaginas = Math.ceil(totalProductos / PRODUCTOS_POR_PAGINA);
-    const indiceInicio = (paginaActual - 1) * PRODUCTOS_POR_PAGINA;
-    const indiceFin = indiceInicio + PRODUCTOS_POR_PAGINA;
-    const productosPagina = productosFiltrados.slice(indiceInicio, indiceFin);
-    
-    if (totalProductos === 0) {
-        productsGrid.innerHTML = `
-            <div class="loading">
-                <div style="font-size: 3rem; margin-bottom: 1rem;">😕</div>
-                <h3>No hay productos disponibles</h3>
-            </div>
-        `;
+    filtrados = [...filtrados].sort((a,b) => (typeof rankScore === 'function' ? rankScore(b.id)-rankScore(a.id) : 0));
+
+    const POR_PAG = 80;
+    const total   = filtrados.length;
+    const totalPag = Math.ceil(total / POR_PAG) || 1;
+    const idx0    = (paginaActual - 1) * POR_PAG;
+    const pagina  = filtrados.slice(idx0, idx0 + POR_PAG);
+
+    if (total === 0) {
+        grid.innerHTML = _posRowEmpty('Sin productos en esta categoría');
+        _posUpdateCount(0, 0);
         return;
     }
-    
-    // Si es categoría PROMOS, hacer grid de 1 columna
-    if (currentCategory === 'PROMOS') {
-        productsGrid.style.gridTemplateColumns = '1fr';
-    } else {
-        // Restaurar grid normal
-        productsGrid.style.gridTemplateColumns = '';
-    }
-    
-    let htmlProductos = productosPagina.map((product, index) => {
-    const esPromo = product.category === 'PROMOS';
-    const clasePromo = esPromo ? 'promo-card' : '';
-    
-    const stock = product.stockNumber || 0;
-    const estaActiva = esPromo && stock > 0;
-    const claseActiva = estaActiva ? 'active' : '';
-    const estaAgotada = esPromo && stock === 0;
-    const claseAgotada = estaAgotada ? 'out-of-stock' : '';
-    
-    // Badge ANTES/AHORA solo para PROMOS con precio normal
-    const tienePrecioNormal = esPromo && product.normal && product.normal > product.price;
-    
-    // Para PROMOS: SIEMPRE mostrar badge (aunque sea solo precio)
-    const badgePrecioHTML = esPromo ? `
-        <div class="price-badge-promo">
-            ${tienePrecioNormal ? `
-                <span class="antes">ANTES $${product.normal}</span>
-                <span class="ahora">AHORA<br>$${product.price}</span>
-                <span class="ahorro">-${Math.round(((product.normal - product.price) / product.normal) * 100)}%</span>
-            ` : `
-                <span class="ahora" style="font-size:1.8rem;font-weight:900;">$${product.price}</span>
-            `}
-        </div>
-    ` : '';
-    
-    if (esPromo && stock === 0) {
-        return `
-            <div class="product-card promo-card out-of-stock" style="opacity:0.6;filter:grayscale(0.7);">
-                <div class="product-image">
-                    <button class="share-btn" onclick="compartirProducto('${product.id}', event)" title="Compartir">📤</button>
-                    <img src="${product.image}" 
-                         alt="${product.name}"
-                         onerror="handleImageError(this, '${product.name.replace(/'/g, "\\'")}')">
-                    <div style="position:absolute;top:10px;right:10px;background:rgba(0,0,0,0.7);color:white;padding:5px 10px;border-radius:5px;font-size:0.9rem;font-weight:bold;z-index:11;">
-                        🔴 AGOTADA
-                    </div>
-                </div>
-                ${badgePrecioHTML}
-                <div class="product-info">
-                    <div class="product-name">${product.name}</div>
-                    <div class="product-stock out-of-stock" style="background:#ffebee;color:#d32f2f;padding:0.5rem;border-radius:8px;">
-                        ⚠️ Volverá pronto
-                    </div>
-                    <button class="add-to-cart" disabled style="background:#ccc;color:#666;cursor:not-allowed;">
-                        🛒 Temporalmente no disponible
-                    </button>
-                </div>
-            </div>
-        `;
-    }
-    
-    return `
-        <div class="product-card ${clasePromo} ${claseActiva} ${claseAgotada}">
-            <div class="product-image">
-                <button class="share-btn" onclick="compartirProducto('${product.id}', event)" title="Compartir">📤</button>
-                <img src="${product.image}" 
-                     alt="${product.name}"
-                     onerror="handleImageError(this, '${product.name.replace(/'/g, "\\'")}')">
-                ${estaActiva ? `
-                    <div style="position:absolute;top:10px;right:10px;background:#4CAF50;color:white;padding:8px 12px;border-radius:8px;font-size:0.9rem;font-weight:bold;z-index:10;box-shadow:0 3px 10px rgba(0,0,0,0.3);">
-                        🔥 COMBO ${index + 1}
-                    </div>
-                ` : ''}
-            </div>
-            ${badgePrecioHTML}
-            <div class="product-info">
-                <div class="product-name">${product.name}</div>
-                ${!esPromo ? `
-                    <div class="product-price-container">
-                        <span class="product-price">$${product.price}</span>
-                    </div>
-                ` : ''}
-                <div class="product-stock ${stock > 5 ? 'in-stock' : stock > 0 ? 'low-stock' : 'out-of-stock'}">
-                    ${stock > 5 ? '✅' : stock > 0 ? '⚠️' : '❌'} Stock: ${stock}
-                </div>
-                <button class="add-to-cart" data-id="${product.id}" data-testid="add-to-cart-${product.id}"
-                        ${stock === 0 ? 'disabled style="background:#ccc;color:#666;cursor:not-allowed;"' : ''}>
-                    ${stock === 0 ? '🛒 Agotado' : '🛒 Agregar al Carrito'}
-                </button>
-            </div>
-        </div>
-    `;
-}).join('');
-    
-    // Si estamos en PROMOS y hay activas, agregar header especial
-    if (currentCategory === 'PROMOS') {
-        const promosActivas = productosFiltrados.filter(p => p.stockNumber > 0).length;
-        const totalPromos = productosFiltrados.length;
-        
-        const headerHTML = `
-            <div style="background:linear-gradient(135deg, #FF9800, #FF5722);color:white;padding:20px;border-radius:12px;margin-bottom:25px;text-align:center;box-shadow:0 8px 25px rgba(255,87,34,0.3);grid-column:1/-1;">
-                <h2 style="margin:0 0 10px 0;font-size:1.8rem;display:flex;align-items:center;justify-content:center;gap:10px;">
-                    🎯 COMBOS DISPONIBLES
-                </h2>
-                <p style="margin:0;font-size:1.1rem;opacity:0.95;background:rgba(255,255,255,0.2);padding:8px 15px;border-radius:20px;display:inline-block;">
-                    ${promosActivas} de ${totalPromos} combos disponibles
-                </p>
-                ${promosActivas > 0 ? `
-                    <div style="margin-top:15px;font-size:0.9rem;color:#FFECB3;">
-                        ⭐ Gracias por preferirnos¡¡¡
-                    </div>
-                ` : ''}
-            </div>
-        `;
-        
-        htmlProductos = headerHTML + htmlProductos;
-    }
-    
-    productsGrid.innerHTML = htmlProductos;
-    
-    // ========== CONTROLES DE PAGINACIÓN ==========
-    if (totalPaginas > 1) {
-        const paginacionHTML = `
-            <div style="grid-column:1/-1;display:flex;justify-content:center;align-items:center;gap:15px;margin-top:30px;padding:20px;">
-                <button onclick="cambiarPagina(${paginaActual - 1})" 
-                        ${paginaActual === 1 ? 'disabled' : ''}
-                        style="padding:10px 20px;background:${paginaActual === 1 ? '#ccc' : '#2e7d32'};color:white;border:none;border-radius:8px;cursor:${paginaActual === 1 ? 'not-allowed' : 'pointer'};font-weight:bold;">
-                    ← Anterior
-                </button>
-                <span style="font-weight:bold;color:#2e7d32;font-size:1.1rem;">
-                    Página ${paginaActual} de ${totalPaginas}
-                </span>
-                <button onclick="cambiarPagina(${paginaActual + 1})" 
-                        ${paginaActual === totalPaginas ? 'disabled' : ''}
-                        style="padding:10px 20px;background:${paginaActual === totalPaginas ? '#ccc' : '#2e7d32'};color:white;border:none;border-radius:8px;cursor:${paginaActual === totalPaginas ? 'not-allowed' : 'pointer'};font-weight:bold;">
-                    Siguiente →
-                </button>
-            </div>
-            <div style="grid-column:1/-1;text-align:center;color:#666;font-size:0.9rem;margin-top:10px;">
-                Mostrando ${indiceInicio + 1}-${Math.min(indiceFin, totalProductos)} de ${totalProductos} productos
-            </div>
-        `;
-        productsGrid.innerHTML += paginacionHTML;
-    }
+    grid.innerHTML = pagina.map(_posRowHTML).join('') + (totalPag > 1 ? _posPagHTML(paginaActual, totalPag) : '');
+    _posUpdateCount(pagina.length, total);
+    _posInitSwipeOnGrid(grid);
 }
 
 // ========== CAMBIAR PÁGINA ==========
@@ -4959,10 +4809,12 @@ function obtenerInfoUltimoPedido() {
 
 
 function setupSearch() {
+    // POS v4: búsqueda manejada por #pos-search-input — setupSearch es no-op
     const productSearch = document.getElementById('productSearch');
     const mobileSearch = document.getElementById('mobileSearch');
     const clearSearchBtn = document.getElementById('clearSearchBtn');
     const clearMobileSearchBtn = document.getElementById('clearMobileSearchBtn');
+    if (!productSearch || !mobileSearch) return; // DOM nuevo: salir
     
     // Función para realizar búsqueda
     function performSearch(searchInput, isMobile = false) {
@@ -4973,7 +4825,7 @@ function setupSearch() {
                 isSearching = false;
                 renderizarProductosNormales();
             } else {
-                document.getElementById('mobileSearchResults').innerHTML = '';
+                const _msr = document.getElementById('mobileSearchResults'); if (_msr) _msr.innerHTML = '';
             }
             return;
         }
@@ -5010,7 +4862,7 @@ function setupSearch() {
         clearMobileSearchBtn.style.display = searchTerm.length > 0 ? 'block' : 'none';
         
         if (searchTerm === '') {
-            document.getElementById('mobileSearchResults').innerHTML = '';
+            const _msr = document.getElementById('mobileSearchResults'); if (_msr) _msr.innerHTML = '';
             return;
         }
         
@@ -5040,127 +4892,38 @@ function setupSearch() {
 
 // ========== HELPER: TARJETA DE BÚSQUEDA CON OFERTAS Y COMPARTIR ==========
 function generarTarjetaBusqueda(product) {
-    const esAdminTodas = esAdmin && modoMostrarTodasOfertas;
-    const esAdminTodasEsp = esAdmin && modoMostrarTodasEspeciales;
-    const esPromo = product.category === 'PROMOS';
-
-    let precioHTML = '';
-    let badgeOferta = '';
-
-    // Solo mostrar badge relámpago si el producto está SELECCIONADO (no solo en el pool)
-    const estaSeleccionadoRelampago = productosRelampago.some(p => p.id === product.id);
-    if (product.relampago > 0 && estaSeleccionadoRelampago && (validarHorario('relampago') || esAdminTodas)) {
-        const oferta = OFERTAS_RELAMPAGO_SISTEMA[product.relampago];
-        if (oferta) {
-            badgeOferta = `<div style="position:absolute;top:8px;left:8px;background:linear-gradient(135deg,#ff3d00,#d50000);color:white;padding:4px 8px;border-radius:8px;font-size:0.75rem;font-weight:bold;z-index:10;">⚡ ${oferta.nombre}</div>`;
-            precioHTML = `<div style="font-size:0.9rem;color:#555;">$${product.price} c/u</div>
-                <div style="background:#fff3e0;color:#ff6f00;padding:5px 8px;border-radius:8px;font-size:0.8rem;font-weight:bold;margin-top:4px;">${oferta.eslogan}</div>`;
-        }
-    } else if (product.destacada > 0 && productosDestacadas.some(p => p.id === product.id) && validarHorario('destacadas')) {
-        const po = Math.round(product.price * (1 - product.destacada / 100));
-        badgeOferta = `<div style="position:absolute;top:8px;left:8px;background:linear-gradient(135deg,#ff6f00,#f57c00);color:white;padding:4px 8px;border-radius:8px;font-size:0.75rem;font-weight:bold;z-index:10;">🔥 -${product.destacada}%</div>`;
-        precioHTML = `<div style="text-decoration:line-through;color:#999;font-size:0.85rem;">$${product.price}</div>
-            <div style="font-size:1.2rem;font-weight:900;color:#ff6f00;">$${po}</div>
-            <div style="font-size:0.75rem;color:#4caf50;">Ahorrás $${product.price - po}</div>`;
-    } else if (product.especial === 1 && productosEspeciales.some(p => p.id === product.id) && (validarHorario('especiales') || esAdminTodasEsp)) {
-        const po = Math.round(product.price * 0.9);
-        badgeOferta = `<div style="position:absolute;top:8px;left:8px;background:linear-gradient(135deg,#2196f3,#1976d2);color:white;padding:4px 8px;border-radius:8px;font-size:0.75rem;font-weight:bold;z-index:10;">⭐ -10%</div>`;
-        precioHTML = `<div style="text-decoration:line-through;color:#999;font-size:0.85rem;">$${product.price}</div>
-            <div style="font-size:1.2rem;font-weight:900;color:#2196f3;">$${po}</div>
-            <div style="font-size:0.75rem;color:#4caf50;">Ahorrás $${product.price - po}</div>`;
-    } else if (esPromo && product.normal && product.normal > product.price) {
-        const pct = Math.round(((product.normal - product.price) / product.normal) * 100);
-        badgeOferta = `<div style="position:absolute;top:8px;left:8px;background:linear-gradient(135deg,#ff9800,#ff5722);color:white;padding:4px 8px;border-radius:8px;font-size:0.75rem;font-weight:bold;z-index:10;">🎯 COMBO -${pct}%</div>`;
-        precioHTML = `<div style="text-decoration:line-through;color:#999;font-size:0.85rem;">ANTES $${product.normal}</div>
-            <div style="font-size:1.2rem;font-weight:900;color:#ff5722;">AHORA $${product.price}</div>
-            <div style="font-size:0.75rem;color:#4caf50;">Ahorrás $${product.normal - product.price}</div>`;
-    } else {
-        precioHTML = `<span class="product-price">$${product.price}</span>`;
-    }
-
-    const stockClass = product.stockNumber > 5 ? 'in-stock' : 'low-stock';
-    const stockIcon = product.stockNumber > 5 ? '✅' : '⚠️';
-    const badgePrecioPromo = (esPromo && product.normal && product.normal > product.price) ? `
-        <div class="price-badge-promo">
-            <span class="antes">ANTES $${product.normal}</span>
-            <span class="ahora">AHORA<br>$${product.price}</span>
-            <span class="ahorro">-${Math.round(((product.normal - product.price) / product.normal) * 100)}%</span>
-        </div>` : '';
-
-    return `
-        <div class="product-card${esPromo ? ' promo-card' : ''}">
-            <div class="product-image">
-                <button class="share-btn" onclick="compartirProducto('${product.id}', event)" title="Compartir">📤</button>
-                ${badgeOferta}
-                <img src="${product.image}"
-                     alt="${product.name}"
-                     onerror="handleImageError(this, '${product.name.replace(/'/g, "\'")}')">
-            </div>
-            ${badgePrecioPromo}
-            <div class="product-info">
-                <div class="product-name">${product.name}</div>
-                <div class="product-price-container">${precioHTML}</div>
-                <div class="product-stock ${stockClass}">${stockIcon} Stock: ${product.stockNumber}</div>
-                <button class="add-to-cart" data-id="${product.id}" data-testid="add-to-cart-${product.id}">
-                    🛒 Agregar al Carrito
-                </button>
-            </div>
-        </div>`;
+    return _posRowHTML(product);
 }
 
 function filterProducts(searchTerm) {
-    const productsGrid = document.getElementById('productsGrid');
+    const grid = document.getElementById('productsGrid');
+    if (!grid) return;
     const results = products.filter(p => p.name.toLowerCase().includes(searchTerm) && p.stockNumber > 0);
-
     if (results.length === 0) {
-        productsGrid.innerHTML = `
-            <div class="loading">
-                <div style="font-size: 3rem; margin-bottom: 1rem;">🔍</div>
-                <h3>No se encontraron productos para "${searchTerm}"</h3>
-                <button onclick="clearSearch()" class="retry-btn">✨ Ver todos los productos</button>
-            </div>`;
+        grid.innerHTML = _posRowEmpty('Sin resultados para "' + searchTerm + '"');
+        _posUpdateCount(0, 0);
         return;
     }
-
-    productsGrid.innerHTML = `
-        <div class="search-results" style="grid-column:1/-1;">
-            <strong>🔍 Búsqueda: "${searchTerm}"</strong><br>
-            <small>Encontraste ${results.length} producto(s)</small>
-            <button onclick="clearSearch()" style="margin-left:10px;padding:6px 12px;background:#ff6f00;color:white;border:none;border-radius:15px;cursor:pointer;font-size:0.8rem;">
-                ✖️ Limpiar búsqueda
-            </button>
-        </div>
-    ` + results.map(p => generarTarjetaBusqueda(p)).join('');
+    grid.innerHTML = results.map(_posRowHTML).join('');
+    _posUpdateCount(results.length, results.length);
+    _posInitSwipeOnGrid(grid);
 }
 
 function filterMobileProducts(searchTerm) {
-    const resultsContainer = document.getElementById('mobileSearchResults');
-    const results = products.filter(p => p.name.toLowerCase().includes(searchTerm) && p.stockNumber > 0);
-
-    if (results.length === 0) {
-        resultsContainer.innerHTML = `
-            <div style="text-align:center;padding:2rem;color:#666;">
-                🔍 No se encontraron productos para "<strong>${searchTerm}</strong>"
-            </div>`;
-        return;
-    }
-
-    resultsContainer.innerHTML = '<div style="display:grid;gap:1rem;">' +
-        results.map(p => generarTarjetaBusqueda(p)).join('') + '</div>';
+    filterProducts(searchTerm);
 }
 
 
 function clearSearch() {
-    document.getElementById('productSearch').value = '';
-    document.getElementById('clearSearchBtn').style.display = 'none';
+    const inp = document.getElementById('pos-search-input');
+    if (inp) { inp.value = ''; inp.blur(); }
     isSearching = false;
+    paginaActual = 1;
     renderizarProductosNormales();
 }
 
 function clearMobileSearch() {
-    document.getElementById('mobileSearch').value = '';
-    document.getElementById('clearMobileSearchBtn').style.display = 'none';
-    document.getElementById('mobileSearchResults').innerHTML = '';
+    clearSearch();
 }
 
 // ========== MODALES ==========
@@ -5174,14 +4937,12 @@ function closeCartModal() {
 }
 
 function openSearchModal() {
-    document.getElementById('searchModal').style.display = "flex";
-    document.getElementById('mobileSearch').focus();
-    history.pushState({ modalSearch: true }, '');
+    const inp = document.getElementById('pos-search-input');
+    if (inp) { inp.focus(); inp.select(); }
 }
 
 function closeSearchModal() {
-    document.getElementById('searchModal').style.display = "none";
-    clearMobileSearch();
+    clearSearch();
 }
 
 // ========== BOTÓN HOME ==========
@@ -5190,14 +4951,17 @@ function goToHome() {
     currentCategory = "ALMACEN";
     
     // Limpiar búsqueda
-    document.getElementById('productSearch').value = '';
-    document.getElementById('clearSearchBtn').style.display = 'none';
+    const _psi = document.getElementById('pos-search-input');
+    if (_psi) { _psi.value = ''; _psi.blur(); }
+    // legacy refs (no-op si no existen)
+    const _ps = document.getElementById('productSearch'); if (_ps) _ps.value = '';
+    const _csb = document.getElementById('clearSearchBtn'); if (_csb) _csb.style.display = 'none';
     isSearching = false;
     
     // Limpiar búsqueda móvil si está activa
-    document.getElementById('mobileSearch').value = '';
-    document.getElementById('clearMobileSearchBtn').style.display = 'none';
-    document.getElementById('mobileSearchResults').innerHTML = '';
+    const _ms2 = document.getElementById('mobileSearch'); if (_ms2) _ms2.value = '';
+    const _cmsb2 = document.getElementById('clearMobileSearchBtn'); if (_cmsb2) _cmsb2.style.display = 'none';
+    const _msr = document.getElementById('mobileSearchResults'); if (_msr) _msr.innerHTML = '';
     
     // Actualizar botones de categoría
     document.querySelectorAll('.category-btn').forEach(btn => {
@@ -5659,7 +5423,7 @@ function setupEventListeners() {
     document.getElementById('closeCart').addEventListener('click', closeCartModal);
     
     // Búsqueda
-    document.getElementById('floatingSearch').addEventListener('click', openSearchModal);
+    const _fsBnt = document.getElementById('floatingSearch'); if (_fsBnt) _fsBnt.addEventListener('click', openSearchModal);
     document.getElementById('closeSearch').addEventListener('click', closeSearchModal);
     
     // Home
@@ -6246,1210 +6010,752 @@ setInterval(actualizarRelojHeader, 10000);
 <!-- Toast POS -->
 <div id="pos-toast"></div>
 
-<!-- ================================================================
-     POS UX v3 — VISTA LISTADO + BÚSQUEDA INTEGRADA
-     Todo lo que sigue modifica la PRESENTACIÓN sin tocar la lógica
-================================================================ -->
+<!-- ════════════════════════════════════════════════════════════
+     POS v4 — CSS LISTA COMPACTA
+════════════════════════════════════════════════════════════ -->
 <style>
-/* === OCULTAR ELEMENTOS DE CATÁLOGO ========================== */
+/* ── Ocultar elementos de catálogo ── */
+.hero,.info-bar,footer,
 .search-container#desktopSearch,
-.floating-search,
-#searchModal,
-.search-modal,
-.hero, .info-bar, footer,
-.floating-home { display: none !important; }
+.floating-search,.floating-home,
+#searchModal,.search-modal,
+#sendOrder,.share-btn,
+.send-order{ display:none !important; }
 
-/* === HEADER MÁS COMPACTO PARA MOSTRADOR ==================== */
-header { padding: 0.55rem 1rem !important; }
-.logo { font-size: 1.1rem !important; }
-.logo-icon { width: 28px !important; height: 28px !important; }
-#versionTag { font-size: 0.62rem !important; }
+/* ── Header compacto ── */
+header{ padding:.5rem 1rem !important; }
+.logo{ font-size:1.05rem !important; }
+.logo-icon{ width:26px !important; height:26px !important; }
+#versionTag{ font-size:.6rem !important; }
 
-/* === CATEGORÍAS COMO BARRA HORIZONTAL COMPACTA ============= */
-section.categories, #categories {
-    display: flex !important;
-    flex-wrap: nowrap !important;
-    overflow-x: auto !important;
-    gap: 5px !important;
-    padding: 8px 10px !important;
-    background: #f0f0f0 !important;
-    -webkit-overflow-scrolling: touch !important;
-    scrollbar-width: none !important;
-    border-bottom: 1px solid #ddd !important;
-    position: sticky !important;
-    top: 50px !important;
-    z-index: 88 !important;
+/* ── Barra de búsqueda POS ── */
+#pos-search-bar{
+    display:flex; align-items:center;
+    gap:0; padding:6px 10px;
+    background:#fff;
+    border-bottom:1px solid #e0e0e0;
+    position:sticky; top:48px; z-index:90;
 }
-section.categories::-webkit-scrollbar { display: none !important; }
-.category-btn {
-    flex-shrink: 0 !important;
-    padding: 5px 13px !important;
-    font-size: 0.73rem !important;
-    border-radius: 20px !important;
-    white-space: nowrap !important;
-    min-height: 30px !important;
+#pos-search-wrap{
+    display:flex; align-items:center;
+    flex:1; background:#f4f4f4;
+    border-radius:10px; border:1.5px solid #e0e0e0;
+    overflow:hidden; height:42px;
+    transition:border-color .15s;
 }
+#pos-search-bar:focus-within #pos-search-wrap{
+    border-color:#2e7d32; background:#fff;
+}
+#pos-search-icon{
+    padding:0 8px 0 12px;
+    font-size:.95rem; line-height:1;
+    color:#aaa; pointer-events:none;
+    flex-shrink:0;
+}
+#pos-search-input{
+    flex:1; border:none; background:transparent;
+    font-size:.95rem; font-family:inherit;
+    color:#1a1a1a; padding:0 4px;
+    height:100%; outline:none;
+    -webkit-appearance:none;
+}
+#pos-search-input::placeholder{ color:#bbb; }
+#pos-search-clear{
+    padding:0 12px; border:none; background:transparent;
+    font-size:.85rem; color:#999; cursor:pointer;
+    font-family:inherit; height:100%; flex-shrink:0;
+}
+#pos-search-clear:active{ color:#e53935; }
 
-/* === BARRA DE BÚSQUEDA POS ================================= */
-#pos-search-bar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 10px;
-    background: white;
-    border-bottom: 2px solid #e8f5e9;
-    position: sticky;
-    top: 84px;
-    z-index: 87;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+/* ── Strip de categorías ── */
+#pos-cat-strip{
+    position:sticky; top:94px; z-index:89;
+    background:#f7f7f7;
+    border-bottom:1px solid #e0e0e0;
+    overflow:hidden;
 }
-#pos-search-input {
-    flex: 1;
-    padding: 10px 14px;
-    border: 2px solid #ddd;
-    border-radius: 10px;
-    font-size: 1rem;
-    font-family: inherit;
-    background: #fafafa;
-    color: #1a1a1a;
-    transition: border-color 0.15s;
-    -webkit-appearance: none;
-    min-height: 44px;
+#pos-cat-strip .categories,
+#categories{
+    display:flex !important; flex-wrap:nowrap !important;
+    overflow-x:auto !important; gap:5px !important;
+    padding:6px 10px !important; margin:0 !important;
+    background:transparent !important;
+    -webkit-overflow-scrolling:touch !important;
+    scrollbar-width:none !important;
 }
-#pos-search-input:focus { outline: none; border-color: #2e7d32; background: white; }
-#pos-search-input::placeholder { color: #aaa; }
-#pos-search-clear {
-    padding: 0 14px;
-    height: 44px;
-    border: none;
-    background: #f0f0f0;
-    border-radius: 10px;
-    font-size: 0.95rem;
-    cursor: pointer;
-    color: #555;
-    font-family: inherit;
-    font-weight: 600;
-    flex-shrink: 0;
-    transition: background 0.1s;
-}
-#pos-search-clear:active { background: #ddd; }
-
-/* === CONTADOR DE RESULTADOS ================================= */
-#pos-product-count {
-    font-size: 0.68rem;
-    color: #aaa;
-    text-align: right;
-    padding: 3px 12px 2px;
-    background: #fafafa;
-    border-bottom: 1px solid #f0f0f0;
+#pos-cat-strip .categories::-webkit-scrollbar{ display:none; }
+.category-btn{
+    flex-shrink:0 !important;
+    padding:5px 12px !important;
+    font-size:.72rem !important; font-weight:600 !important;
+    border-radius:16px !important;
+    white-space:nowrap !important; min-height:28px !important;
+    border-width:1.5px !important;
 }
 
-/* === PRODUCTS GRID → LISTA VERTICAL ========================= */
-#productsGrid,
-section.products-grid#productsGrid {
-    display: flex !important;
-    flex-direction: column !important;
-    gap: 0 !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    grid-template-columns: unset !important;
-    background: white !important;
+/* ── Barra contador ── */
+#pos-count-bar{
+    padding:3px 12px;
+    font-size:.62rem; color:#bbb; text-align:right;
+    background:#fafafa;
+    border-bottom:1px solid #f0f0f0;
+    letter-spacing:.3px;
 }
 
-/* === POS ROW — Fila compacta de producto ==================== */
-.pos-row {
-    display: flex;
-    align-items: center;
-    gap: 0;
-    border-bottom: 1px solid #f0f0f0;
-    background: white;
-    position: relative;
-    overflow: hidden;
-    min-height: 62px;
-    touch-action: pan-y;
-    user-select: none;
-    -webkit-user-select: none;
-}
-.pos-row-agotada { opacity: 0.38; }
-.pos-row-agotada .pos-row-add { background: #ccc !important; color: #999 !important; }
-
-.pos-row-inner {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex: 1;
-    padding: 9px 10px;
-    background: white;
-    min-width: 0;
-    transition: transform 0.2s ease;
-    will-change: transform;
+/* ── Transformar grid en lista ── */
+#productsGrid, section.products-grid#productsGrid{
+    display:flex !important;
+    flex-direction:column !important;
+    gap:0 !important; padding:0 !important;
+    margin:0 !important;
+    grid-template-columns:unset !important;
+    background:#fff !important;
+    border-top:none !important;
 }
 
-.pos-row-img {
-    width: 48px;
-    height: 48px;
-    border-radius: 8px;
-    object-fit: cover;
-    flex-shrink: 0;
-    background: #f5f5f5;
-    display: block;
+/* ── Fila de producto ── */
+.pos-row{
+    display:flex; align-items:center;
+    border-bottom:1px solid #f0f0f0;
+    background:#fff;
+    position:relative; overflow:hidden;
+    min-height:60px;
+    touch-action:pan-y;
+    user-select:none; -webkit-user-select:none;
+}
+.pos-row-agotada{ opacity:.35; pointer-events:none; }
+
+.pos-row-inner{
+    display:flex; align-items:center;
+    flex:1; gap:9px;
+    padding:8px 10px;
+    background:#fff;
+    min-width:0;
+    will-change:transform;
+    transition:transform .2s ease;
 }
 
-.pos-row-info { flex: 1; min-width: 0; overflow: hidden; }
-.pos-row-name {
-    font-size: 0.88rem;
-    font-weight: 700;
-    color: #1a1a1a;
-    line-height: 1.25;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    margin-bottom: 2px;
-}
-.pos-row-prices {
-    display: flex;
-    align-items: baseline;
-    gap: 5px;
-    flex-wrap: wrap;
-}
-.pos-row-price { font-size: 0.95rem; font-weight: 900; color: #2e7d32; }
-.pos-row-price-old { font-size: 0.75rem; font-weight: 400; color: #bbb; text-decoration: line-through; }
-.pos-row-badge {
-    font-size: 0.6rem; font-weight: 800;
-    padding: 2px 5px; border-radius: 5px;
-    vertical-align: middle; white-space: nowrap;
-    display: inline-block; margin-left: 3px;
-}
-.pos-row-badge.relampago { background: #ff3d00; color: #fff; }
-.pos-row-badge.destacada { background: #ff6f00; color: #fff; }
-.pos-row-badge.especial  { background: #1565c0; color: #fff; }
-.pos-row-badge.ultimas   { background: #b71c1c; color: #fff; }
-.pos-row-badge.cervecero { background: #f9a825; color: #1a1a1a; }
-.pos-row-stock { font-size: 0.65rem; color: #ccc; margin-top: 1px; }
-.pos-row-stock.low { color: #e65100; font-weight: 700; }
-
-.pos-row-qty-badge {
-    flex-shrink: 0;
-    background: #1b5e20; color: #b9f6ca;
-    font-size: 0.78rem; font-weight: 900;
-    min-width: 24px; height: 24px;
-    border-radius: 12px; padding: 0 7px;
-    display: flex; align-items: center; justify-content: center;
-    margin-right: 5px;
+/* Imagen mini */
+.pos-row-img{
+    width:44px; height:44px;
+    border-radius:7px; object-fit:cover;
+    flex-shrink:0; background:#f0f0f0;
+    display:block;
 }
 
-.pos-row-add {
-    flex-shrink: 0;
-    width: 46px; height: 46px;
-    border-radius: 12px; border: none;
-    background: #2e7d32; color: white;
-    font-size: 1.6rem; font-weight: 900; line-height: 1;
-    cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-    font-family: inherit;
-    margin-right: 10px;
-    transition: background 0.1s, transform 0.08s;
+/* Info */
+.pos-row-info{ flex:1; min-width:0; overflow:hidden; }
+.pos-row-name{
+    font-size:.875rem; font-weight:700;
+    color:#111; line-height:1.22;
+    white-space:nowrap; overflow:hidden;
+    text-overflow:ellipsis;
 }
-.pos-row-add:active { background: #1b5e20; transform: scale(0.91); }
-.pos-row-add:disabled { background: #ddd !important; color: #aaa !important; cursor: not-allowed; transform: none !important; }
-
-.pos-row-del-reveal {
-    position: absolute;
-    right: 0; top: 0; bottom: 0;
-    width: 72px;
-    background: #c62828; color: white;
-    display: flex; flex-direction: column;
-    align-items: center; justify-content: center;
-    font-size: 1.15rem; font-weight: 900;
-    transform: translateX(100%);
-    transition: transform 0.2s ease;
-    cursor: pointer; gap: 1px;
+.pos-row-meta{
+    display:flex; align-items:center;
+    gap:6px; margin-top:2px;
+    flex-wrap:nowrap;
 }
-.pos-row-del-reveal span { font-size: 0.58rem; font-weight: 400; opacity: 0.8; }
+.pos-row-price{
+    font-size:.92rem; font-weight:900;
+    color:#2e7d32; white-space:nowrap;
+}
+.pos-row-price-old{
+    font-size:.72rem; color:#ccc;
+    text-decoration:line-through;
+    white-space:nowrap;
+}
+.pos-row-stock{
+    font-size:.62rem; color:#ccc;
+    white-space:nowrap;
+}
+.pos-row-stock.low{ color:#e65100; font-weight:700; }
+.pos-row-badge{
+    font-size:.58rem; font-weight:800;
+    padding:2px 5px; border-radius:4px;
+    white-space:nowrap; flex-shrink:0;
+}
+.pos-row-badge.rl{ background:#d50000; color:#fff; }
+.pos-row-badge.de{ background:#e65100; color:#fff; }
+.pos-row-badge.es{ background:#1565c0; color:#fff; }
+.pos-row-badge.ul{ background:#b71c1c; color:#fff; }
+.pos-row-badge.jc{ background:#f9a825; color:#111; }
 
-/* Flashes */
-.pos-row.pos-flash-add .pos-row-inner { animation: posRowFlAdd 0.28s ease-out; }
-@keyframes posRowFlAdd { 0%{background:white} 35%{background:#c8e6c9} 100%{background:white} }
-.pos-row.pos-flash-rem .pos-row-inner { animation: posRowFlRem 0.25s ease-out; }
-@keyframes posRowFlRem { 0%{background:white} 35%{background:#ffcdd2} 100%{background:white} }
-
-/* Sección header */
-.pos-list-header {
-    padding: 5px 12px;
-    font-size: 0.63rem; font-weight: 800;
-    color: #aaa; text-transform: uppercase; letter-spacing: 0.7px;
-    background: #f7f7f7;
-    border-bottom: 1px solid #eee;
-    border-top: 2px solid #e8e8e8;
+/* Badge qty en carrito */
+.pos-qty{
+    flex-shrink:0;
+    background:#1b5e20; color:#b9f6ca;
+    font-size:.76rem; font-weight:900;
+    min-width:22px; height:22px;
+    border-radius:11px; padding:0 6px;
+    display:flex; align-items:center;
+    justify-content:center;
+    margin-right:4px;
 }
 
-/* Empty state */
-.pos-list-empty { text-align: center; padding: 3rem 1rem; color: #bbb; }
-.pos-list-empty .pos-empty-icon { font-size: 2.5rem; margin-bottom: 0.4rem; }
-.pos-list-empty p { font-size: 0.88rem; margin: 0; }
-
-/* Paginación */
-.pos-paginacion {
-    display: flex; justify-content: center; align-items: center;
-    gap: 12px; padding: 14px;
-    background: #f9f9f9; border-top: 1px solid #eee;
+/* Botón + */
+.pos-add{
+    flex-shrink:0;
+    width:46px; height:46px;
+    border-radius:11px; border:none;
+    background:#2e7d32; color:#fff;
+    font-size:1.55rem; font-weight:900; line-height:1;
+    cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    font-family:inherit;
+    margin-right:8px;
+    transition:background .1s, transform .08s;
+    -webkit-tap-highlight-color:transparent;
 }
-.pos-pag-btn {
-    padding: 8px 18px; border: none; border-radius: 8px;
-    background: #2e7d32; color: white;
-    font-weight: 700; font-size: 0.85rem;
-    cursor: pointer; font-family: inherit;
-}
-.pos-pag-btn:disabled { background: #ccc; cursor: not-allowed; }
-.pos-pag-label { font-size: 0.82rem; color: #888; }
+.pos-add:active{ background:#1b5e20; transform:scale(.9); }
+.pos-add:disabled{ background:#e0e0e0 !important; color:#bbb !important;
+    transform:none !important; cursor:not-allowed; }
 
-/* Floating cart para tablet */
-.floating-cart { width: 54px !important; height: 54px !important; font-size: 1.45rem !important; }
+/* Panel swipe-left "quitar" */
+.pos-del{
+    position:absolute; right:0; top:0; bottom:0;
+    width:68px;
+    background:#c62828; color:#fff;
+    display:flex; flex-direction:column;
+    align-items:center; justify-content:center;
+    font-size:1.05rem; font-weight:900;
+    transform:translateX(100%);
+    transition:transform .2s ease;
+    cursor:pointer; gap:1px;
+}
+.pos-del small{ font-size:.55rem; font-weight:400; opacity:.85; }
+
+/* Flash al agregar */
+.pos-row.pf-add .pos-row-inner{
+    animation:pfAdd .28s ease-out;
+}
+@keyframes pfAdd{
+    0%{ background:#fff } 40%{ background:#c8e6c9 } 100%{ background:#fff }
+}
+/* Flash al quitar */
+.pos-row.pf-rem .pos-row-inner{
+    animation:pfRem .24s ease-out;
+}
+@keyframes pfRem{
+    0%{ background:#fff } 40%{ background:#ffcdd2 } 100%{ background:#fff }
+}
+
+/* Header de sección (categorías dentro del listado) */
+.pos-list-hdr{
+    padding:5px 10px;
+    font-size:.6rem; font-weight:800; color:#bbb;
+    text-transform:uppercase; letter-spacing:.7px;
+    background:#f9f9f9;
+    border-bottom:1px solid #eee;
+}
+
+/* Empty / error */
+.pos-empty{
+    text-align:center; padding:3rem 1rem; color:#ccc;
+}
+.pos-empty em{ font-size:2rem; display:block; margin-bottom:.5rem; }
+.pos-empty p{ font-size:.88rem; margin:0; font-style:normal; }
+
+/* Paginación compacta */
+.pos-pag{
+    display:flex; justify-content:center;
+    align-items:center; gap:10px;
+    padding:12px; background:#f9f9f9;
+    border-top:1px solid #eee;
+}
+.pos-pag-btn{
+    padding:7px 16px; border:none;
+    border-radius:8px; background:#2e7d32; color:#fff;
+    font-weight:700; font-size:.82rem;
+    cursor:pointer; font-family:inherit;
+}
+.pos-pag-btn:disabled{ background:#ccc; cursor:not-allowed; }
+.pos-pag-lbl{ font-size:.8rem; color:#999; }
+
+/* Cart flotante más grande para tablet */
+.floating-cart{
+    width:52px !important; height:52px !important;
+    font-size:1.4rem !important;
+    bottom:136px !important;
+}
+
+/* body padding-bottom para el panel fijo */
+body{ padding-bottom:128px !important; }
 </style>
 
+<!-- ════════════════════════════════════════════════════════════
+     POS v4 — SCRIPTS
+════════════════════════════════════════════════════════════ -->
 <script>
-// ===================================================
-// POS LOGIC — pos.html
-// Lógica de cobro extraída de seba21.html
-// ===================================================
-
+// ════════════════════════════════════════════════════
+// MOTOR DE COBRO (extraído de seba21, idéntico al v2)
+// ════════════════════════════════════════════════════
 const POS_API_URL = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
 let _posMetodoActual = 'efectivo';
 
-// ── Helpers de zona horaria Argentina (igual que seba21) ──
-function _posFechaArgentina(offsetDias = 0) {
-    const now = new Date();
-    if (offsetDias !== 0) now.setDate(now.getDate() + offsetDias);
-    return new Date(now.toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }))
-        .toISOString().slice(0, 10);
+function _posFechaArg(d=0){
+    const n=new Date(); if(d) n.setDate(n.getDate()+d);
+    return new Date(n.toLocaleString('en-US',{timeZone:'America/Argentina/Buenos_Aires'})).toISOString().slice(0,10);
 }
-function _posGetHoyKey() { return 'copihue_ventas_' + _posFechaArgentina(); }
-function _posGetVentasHoy() {
-    const keyArg = _posGetHoyKey();
-    const keyUtc = 'copihue_ventas_' + new Date().toISOString().slice(0, 10);
-    const ventasArg = JSON.parse(localStorage.getItem(keyArg) || '[]');
-    if (keyUtc !== keyArg) {
-        const ventasUtc = JSON.parse(localStorage.getItem(keyUtc) || '[]');
-        if (ventasUtc.length > 0) {
-            const todas = [...ventasArg, ...ventasUtc];
-            localStorage.setItem(keyArg, JSON.stringify(todas));
-            localStorage.removeItem(keyUtc);
-            return todas;
-        }
+function _posHoyKey(){ return 'copihue_ventas_'+_posFechaArg(); }
+function _posVentasHoy(){
+    const ka=_posHoyKey(), ku='copihue_ventas_'+new Date().toISOString().slice(0,10);
+    const va=JSON.parse(localStorage.getItem(ka)||'[]');
+    if(ku!==ka){
+        const vu=JSON.parse(localStorage.getItem(ku)||'[]');
+        if(vu.length){const t=[...va,...vu];localStorage.setItem(ka,JSON.stringify(t));localStorage.removeItem(ku);return t;}
     }
-    return ventasArg;
+    return va;
 }
-function _posGuardarVentaDia(venta) {
-    const ventas = _posGetVentasHoy();
-    ventas.push(venta);
-    localStorage.setItem(_posGetHoyKey(), JSON.stringify(ventas));
-}
+function _posGuardarVenta(v){ const vs=_posVentasHoy(); vs.push(v); localStorage.setItem(_posHoyKey(),JSON.stringify(vs)); }
 
-// ── Actualizar total en panel ──
-function _posActualizarPanel() {
-    const total = cart.reduce((s, i) => {
-        // Calcular precio real con oferta igual que renderCartItems
-        const product = i.productRef || products.find(p => p.id === i.id);
-        if (!product) return s;
-        let precioItem = product.price * i.quantity;
-        if (i.esJuevesCervecero && i.precioJC) {
-            precioItem = i.precioJC * i.quantity;
-        } else if (i.esOfertaDestacada && i.oferta) {
-            precioItem = Math.round(product.price * (1 - i.oferta.descuento / 100)) * i.quantity;
-        } else if (i.esOfertaEspecial && i.oferta) {
-            precioItem = Math.round(product.price * 0.9) * i.quantity;
-        } else if (i.esOfertaUltimas && i.oferta) {
-            precioItem = Math.round(product.price * (1 - i.oferta.descuento / 100)) * i.quantity;
-        } else if (i.esOfertaRelampago && i.oferta) {
-            precioItem = calcularPrecioConOferta(product, i.quantity, true, i.oferta);
-        }
-        return s + precioItem;
-    }, 0);
-
-    document.getElementById('pos-total-monto').textContent = '$' + total.toLocaleString('es-AR');
-    const btn = document.getElementById('pos-cobrar-btn');
-    btn.disabled = cart.length === 0;
-}
-
-// ── Seleccionar método de pago ──
-function posMetodo(metodo) {
-    _posMetodoActual = metodo;
-    ['efectivo','posnet','transfer'].forEach(m => {
-        const btn = document.getElementById('pos-btn-' + m);
-        if (btn) btn.classList.remove('activo');
+function _posActualizarPanel(){
+    let total=0;
+    cart.forEach(i=>{
+        const p=i.productRef||products.find(x=>x.id===i.id); if(!p) return;
+        let pr=p.price*i.quantity;
+        if(i.esJuevesCervecero&&i.precioJC) pr=i.precioJC*i.quantity;
+        else if(i.esOfertaDestacada&&i.oferta) pr=Math.round(p.price*(1-i.oferta.descuento/100))*i.quantity;
+        else if(i.esOfertaEspecial&&i.oferta) pr=Math.round(p.price*.9)*i.quantity;
+        else if(i.esOfertaUltimas&&i.oferta) pr=Math.round(p.price*(1-i.oferta.descuento/100))*i.quantity;
+        else if(i.esOfertaRelampago&&i.oferta) pr=calcularPrecioConOferta(p,i.quantity,true,i.oferta);
+        total+=pr;
     });
-    const map = { efectivo: 'efectivo', posnet: 'posnet', transferencia: 'transfer' };
-    const btnId = 'pos-btn-' + (map[metodo] || metodo);
-    const btn = document.getElementById(btnId);
-    if (btn) btn.classList.add('activo');
+    document.getElementById('pos-total-monto').textContent='$'+total.toLocaleString('es-AR');
+    document.getElementById('pos-cobrar-btn').disabled=cart.length===0;
 }
 
-// ── Abrir modal confirmar ──
-function posCobrar() {
-    if (cart.length === 0) return;
-
-    // Calcular items con precios reales
-    let itemsHTML = '';
-    let totalFinal = 0;
-
-    cart.forEach(i => {
-        const product = i.productRef || products.find(p => p.id === i.id);
-        if (!product) return;
-        let precioUnit = product.price;
-        let descInfo = '';
-
-        if (i.esJuevesCervecero && i.precioJC) {
-            precioUnit = i.precioJC;
-            descInfo = ' 🍺';
-        } else if (i.esOfertaDestacada && i.oferta) {
-            precioUnit = Math.round(product.price * (1 - i.oferta.descuento / 100));
-            descInfo = ` -${i.oferta.descuento}%`;
-        } else if (i.esOfertaEspecial && i.oferta) {
-            precioUnit = Math.round(product.price * 0.9);
-            descInfo = ' -10%';
-        } else if (i.esOfertaUltimas && i.oferta) {
-            precioUnit = Math.round(product.price * (1 - i.oferta.descuento / 100));
-            descInfo = ` -${i.oferta.descuento}%`;
-        } else if (i.esOfertaRelampago && i.oferta) {
-            const totalRelamp = calcularPrecioConOferta(product, i.quantity, true, i.oferta);
-            precioUnit = Math.round(totalRelamp / i.quantity);
-            descInfo = ` ⚡`;
-        }
-
-        const subtotal = precioUnit * i.quantity;
-        totalFinal += subtotal;
-        itemsHTML += `<div class="pos-confirm-item">
-            <span class="pos-confirm-item-name">${i.name}${descInfo}</span>
-            <span class="pos-confirm-item-qty">×${i.quantity}</span>
-            <span class="pos-confirm-item-precio">$${subtotal.toLocaleString('es-AR')}</span>
-        </div>`;
+function posMetodo(m){
+    _posMetodoActual=m;
+    ['efectivo','posnet','transfer'].forEach(k=>{
+        const b=document.getElementById('pos-btn-'+k); if(b) b.classList.remove('activo');
     });
+    const map={efectivo:'efectivo',posnet:'posnet',transferencia:'transfer'};
+    const b=document.getElementById('pos-btn-'+(map[m]||m)); if(b) b.classList.add('activo');
+}
 
-    // Redondeo efectivo
-    let descRedondeo = 0;
-    if (_posMetodoActual === 'efectivo' && totalFinal % 100 !== 0) {
-        const redondeado = Math.floor(totalFinal / 100) * 100;
-        descRedondeo = totalFinal - redondeado;
-        totalFinal = redondeado;
-        itemsHTML += `<div class="pos-confirm-item" style="color:#888;font-size:0.8rem;">
-            <span class="pos-confirm-item-name">↓ Redondeo efectivo</span>
-            <span class="pos-confirm-item-qty"></span>
-            <span class="pos-confirm-item-precio">−$${descRedondeo}</span>
-        </div>`;
+function posCobrar(){
+    if(!cart.length) return;
+    let html='', total=0;
+    cart.forEach(i=>{
+        const p=i.productRef||products.find(x=>x.id===i.id); if(!p) return;
+        let pu=p.price, di='';
+        if(i.esJuevesCervecero&&i.precioJC){pu=i.precioJC;di=' 🍺';}
+        else if(i.esOfertaDestacada&&i.oferta){pu=Math.round(p.price*(1-i.oferta.descuento/100));di=` -${i.oferta.descuento}%`;}
+        else if(i.esOfertaEspecial&&i.oferta){pu=Math.round(p.price*.9);di=' -10%';}
+        else if(i.esOfertaUltimas&&i.oferta){pu=Math.round(p.price*(1-i.oferta.descuento/100));di=` -${i.oferta.descuento}%`;}
+        else if(i.esOfertaRelampago&&i.oferta){pu=Math.round(calcularPrecioConOferta(p,i.quantity,true,i.oferta)/i.quantity);di=' ⚡';}
+        const sub=pu*i.quantity; total+=sub;
+        html+=`<div class="pos-confirm-item"><span class="pos-confirm-item-name">${i.name}${di}</span><span class="pos-confirm-item-qty">×${i.quantity}</span><span class="pos-confirm-item-precio">$${sub.toLocaleString('es-AR')}</span></div>`;
+    });
+    let desc=0;
+    if(_posMetodoActual==='efectivo'&&total%100!==0){
+        const r=Math.floor(total/100)*100; desc=total-r; total=r;
+        html+=`<div class="pos-confirm-item" style="color:#aaa;font-size:.8rem;"><span class="pos-confirm-item-name">↓ Redondeo efectivo</span><span class="pos-confirm-item-qty"></span><span class="pos-confirm-item-precio">−$${desc}</span></div>`;
     }
-
-    document.getElementById('pos-confirm-items').innerHTML = itemsHTML;
-    document.getElementById('pos-confirm-total').textContent = 'TOTAL: $' + totalFinal.toLocaleString('es-AR');
-
-    const metodoLabel = { efectivo:'💵 Efectivo', posnet:'💳 Posnet', transferencia:'📱 Transferencia' };
-    document.getElementById('pos-confirm-metodo').textContent = metodoLabel[_posMetodoActual] || _posMetodoActual;
-
-    // Guardar total calculado para confirmarVenta
-    window._posTotalFinal = totalFinal;
-    window._posDescRedondeo = descRedondeo;
-
-    const btn = document.getElementById('pos-btn-confirmar');
-    btn.disabled = false;
-    btn.textContent = '✅ Confirmar cobro';
-
+    document.getElementById('pos-confirm-items').innerHTML=html;
+    document.getElementById('pos-confirm-total').textContent='TOTAL: $'+total.toLocaleString('es-AR');
+    const lbl={efectivo:'💵 Efectivo',posnet:'💳 Posnet',transferencia:'📱 Transferencia'};
+    document.getElementById('pos-confirm-metodo').textContent=lbl[_posMetodoActual]||_posMetodoActual;
+    window._posTotalFinal=total; window._posDescRedondeo=desc;
+    const btn=document.getElementById('pos-btn-confirmar');
+    btn.disabled=false; btn.textContent='✅ Confirmar cobro';
     document.getElementById('pos-confirm-modal').classList.add('open');
 }
+function posCancelarConfirm(){ document.getElementById('pos-confirm-modal').classList.remove('open'); }
 
-function posCancelarConfirm() {
-    document.getElementById('pos-confirm-modal').classList.remove('open');
-}
-
-// ── Confirmar y procesar venta ──
-async function posConfirmarVenta() {
-    const btn = document.getElementById('pos-btn-confirmar');
-    btn.disabled = true;
-    btn.textContent = '⏳ Procesando...';
-
-    const total = window._posTotalFinal || 0;
-    const descuentoRedondeo = window._posDescRedondeo || 0;
-    const _t = new Date();
-    const hora = _t.getHours().toString().padStart(2,'0') + ':' + _t.getMinutes().toString().padStart(2,'0');
-    const metodoPagoFinal = _posMetodoActual.toUpperCase();
-
-    // Armar items para el payload
-    const ventaData = cart.map(i => {
-        const product = i.productRef || products.find(p => p.id === i.id);
-        let precioVenta = product ? product.price : 0;
-
-        if (i.esJuevesCervecero && i.precioJC) {
-            precioVenta = i.precioJC;
-        } else if (i.esOfertaDestacada && i.oferta && product) {
-            precioVenta = Math.round(product.price * (1 - i.oferta.descuento / 100));
-        } else if (i.esOfertaEspecial && product) {
-            precioVenta = Math.round(product.price * 0.9);
-        } else if (i.esOfertaUltimas && i.oferta && product) {
-            precioVenta = Math.round(product.price * (1 - i.oferta.descuento / 100));
-        } else if (i.esOfertaRelampago && i.oferta && product) {
-            precioVenta = Math.round(calcularPrecioConOferta(product, i.quantity, true, i.oferta) / i.quantity);
-        }
-
-        return {
-            id: i.id,
-            name: i.name,
-            qty: i.quantity,
-            esPeso: false,
-            gramos: 0,
-            precioVenta,
-            precioModificado: !!(i.esOfertaDestacada || i.esOfertaEspecial || i.esOfertaRelampago || i.esOfertaUltimas || i.esJuevesCervecero),
-            precioOriginal: product ? product.price : 0,
-            precioCosto: product ? (product.costo || 0) : 0
-        };
+async function posConfirmarVenta(){
+    const btn=document.getElementById('pos-btn-confirmar');
+    btn.disabled=true; btn.textContent='⏳ Procesando...';
+    const total=window._posTotalFinal||0;
+    const _t=new Date();
+    const hora=_t.getHours().toString().padStart(2,'0')+':'+_t.getMinutes().toString().padStart(2,'0');
+    const metodo=_posMetodoActual.toUpperCase();
+    const data=cart.map(i=>{
+        const p=i.productRef||products.find(x=>x.id===i.id);
+        let pv=p?p.price:0;
+        if(i.esJuevesCervecero&&i.precioJC) pv=i.precioJC;
+        else if(i.esOfertaDestacada&&i.oferta&&p) pv=Math.round(p.price*(1-i.oferta.descuento/100));
+        else if(i.esOfertaEspecial&&p) pv=Math.round(p.price*.9);
+        else if(i.esOfertaUltimas&&i.oferta&&p) pv=Math.round(p.price*(1-i.oferta.descuento/100));
+        else if(i.esOfertaRelampago&&i.oferta&&p) pv=Math.round(calcularPrecioConOferta(p,i.quantity,true,i.oferta)/i.quantity);
+        return{id:i.id,name:i.name,qty:i.quantity,esPeso:false,gramos:0,precioVenta:pv,
+               precioModificado:!!(i.esOfertaDestacada||i.esOfertaEspecial||i.esOfertaRelampago||i.esOfertaUltimas||i.esJuevesCervecero),
+               precioOriginal:p?p.price:0,precioCosto:p?(p.costo||0):0};
     });
-
-    // Enviar a Google Sheets
-    let stockOk = false;
-    try {
-        const ventaPayload = { items: ventaData, metodoPago: metodoPagoFinal, vendedor: 'POS' };
-        const dataEncoded = encodeURIComponent(JSON.stringify(ventaPayload));
-        const url = POS_API_URL + '?action=vender&data=' + dataEncoded;
-        const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
-        const resp = await r.json();
-        stockOk = resp.success === true;
-        if (resp.errores && resp.errores.length > 0) console.warn('⚠️ Errores stock:', resp.errores);
-    } catch(e) {
-        console.warn('⚠️ No se pudo conectar con planilla:', e);
-    }
-
-    // Guardar en localStorage (mismo formato que seba21)
-    _posGuardarVentaDia({ items: ventaData, total, hora, stockRebajado: stockOk, metodoPago: metodoPagoFinal });
-
-    // Rebajar stock local
-    cart.forEach(i => {
-        const p = products.find(pr => pr.id === i.id);
-        if (p) p.stockNumber = Math.max(0, (p.stockNumber || 0) - i.quantity);
-    });
-
-    // Reset carrito
-    cart.length = 0;
+    let ok=false;
+    try{
+        const enc=encodeURIComponent(JSON.stringify({items:data,metodoPago:metodo,vendedor:'POS'}));
+        const r=await fetch(POS_API_URL+'?action=vender&data='+enc,{redirect:'follow',signal:AbortSignal.timeout(15000)});
+        const j=await r.json(); ok=j.success===true;
+        if(j.errores?.length) console.warn('⚠️ errores stock',j.errores);
+    }catch(e){console.warn('⚠️ sin conexión planilla',e);}
+    _posGuardarVenta({items:data,total,hora,stockRebajado:ok,metodoPago:metodo});
+    cart.forEach(i=>{const p=products.find(x=>x.id===i.id);if(p) p.stockNumber=Math.max(0,(p.stockNumber||0)-i.quantity);});
+    cart.length=0;
     document.getElementById('pos-confirm-modal').classList.remove('open');
-    updateCartUI();
+    renderCartItems();
     _posActualizarPanel();
-
-    // Toast
-    _posToast(stockOk ? '✅ Venta confirmada y registrada' : '✅ Venta registrada (stock manual)');
+    _posToast(ok?'✅ Venta confirmada':'✅ Registrada (sin conexión)');
+    renderizarProductosNormales(); // refrescar stocks en la lista
 }
 
-function _posToast(msg) {
-    const t = document.getElementById('pos-toast');
-    t.textContent = msg;
-    t.style.display = 'block';
-    setTimeout(() => { t.style.display = 'none'; }, 2800);
+function _posToast(msg,ms=2800){
+    const t=document.getElementById('pos-toast');
+    t.textContent=msg; t.style.display='block';
+    clearTimeout(t._t); t._t=setTimeout(()=>{t.style.display='none';},ms);
 }
 
-// ── Qty desde botones POS ──
-function posQtyMinus(productId) {
-    updateCartQuantity(productId, -1);
-}
-function posQtyPlus(productId, btn) {
-    addToCart(productId);
-    btn.classList.add('flash');
-    setTimeout(() => btn.classList.remove('flash'), 200);
-}
-// Doble tap + → +5 de golpe
-function posQtyDblPlus(productId, btn) {
-    for (let i = 0; i < 4; i++) addToCart(productId); // ya viene 1 del onclick = 5 total
-    btn.classList.add('flash');
-    setTimeout(() => btn.classList.remove('flash'), 300);
-    _posToast('+5 ⚡');
-}
-
-// Eliminar item desde botón borrar
-function posEliminarItem(productId) {
-    const idx = cart.findIndex(i => i.id === productId);
-    if (idx !== -1) {
-        cart.splice(idx, 1);
-        renderCartItems();
-    }
-}
-
-// ── Swipe left en items del carrito ──
-function _posInitSwipe() {
-    const wraps = document.querySelectorAll('.pos-cart-item-wrap');
-    wraps.forEach(wrap => {
-        const inner = wrap.querySelector('.pos-cart-item-inner');
-        const del   = wrap.querySelector('.pos-cart-item-del');
-        if (!inner || !del) return;
-
-        let startX = 0, startY = 0, dx = 0, swiped = false;
-        const THRESHOLD = 50;
-
-        inner.addEventListener('touchstart', e => {
-            startX = e.touches[0].clientX;
-            startY = e.touches[0].clientY;
-            dx = 0;
-            inner.style.transition = 'none';
-        }, { passive: true });
-
-        inner.addEventListener('touchmove', e => {
-            const cx = e.touches[0].clientX;
-            const cy = e.touches[0].clientY;
-            dx = cx - startX;
-            const dy = Math.abs(cy - startY);
-            if (Math.abs(dx) < dy) return; // scroll vertical
-            if (dx < 0) {
-                const clamped = Math.max(dx, -80);
-                inner.style.transform = `translateX(${clamped}px)`;
-                del.style.transform = `translateX(${100 + clamped}%)`;
-            } else if (swiped && dx > 0) {
-                const offset = Math.min(-80 + dx, 0);
-                inner.style.transform = `translateX(${offset}px)`;
-            }
-        }, { passive: true });
-
-        inner.addEventListener('touchend', () => {
-            inner.style.transition = 'transform 0.2s';
-            del.style.transition = 'transform 0.2s';
-            if (!swiped && dx < -THRESHOLD) {
-                inner.style.transform = 'translateX(-80px)';
-                del.style.transform = 'translateX(0)';
-                swiped = true;
-            } else if (swiped && dx > THRESHOLD) {
-                inner.style.transform = 'translateX(0)';
-                del.style.transform = 'translateX(100%)';
-                swiped = false;
-            } else if (!swiped) {
-                inner.style.transform = 'translateX(0)';
-                del.style.transform = 'translateX(100%)';
-            } else {
-                inner.style.transform = 'translateX(-80px)';
-                del.style.transform = 'translateX(0)';
-            }
+// Swipe en items del carrito (sin cambios)
+function _posInitSwipe(){
+    const wraps=document.querySelectorAll('.pos-cart-item-wrap');
+    wraps.forEach(wrap=>{
+        const inner=wrap.querySelector('.pos-cart-item-inner');
+        const del=wrap.querySelector('.pos-cart-item-del');
+        if(!inner||!del) return;
+        let sx=0,sy=0,dx=0,sw=false;
+        const TH=50;
+        inner.addEventListener('touchstart',e=>{sx=e.touches[0].clientX;sy=e.touches[0].clientY;dx=0;inner.style.transition='none';},{passive:true});
+        inner.addEventListener('touchmove',e=>{
+            const cx=e.touches[0].clientX,cy=e.touches[0].clientY;
+            dx=cx-sx; const dy=Math.abs(cy-sy);
+            if(Math.abs(dx)<dy) return;
+            if(dx<0){const c=Math.max(dx,-80);inner.style.transform=`translateX(${c}px)`;del.style.transform=`translateX(${100+c}%)`;}
+            else if(sw&&dx>0){const o=Math.min(-80+dx,0);inner.style.transform=`translateX(${o}px)`;}
+        },{passive:true});
+        inner.addEventListener('touchend',()=>{
+            inner.style.transition='transform .2s'; del.style.transition='transform .2s';
+            if(!sw&&dx<-TH){inner.style.transform='translateX(-80px)';del.style.transform='translateX(0)';sw=true;}
+            else if(sw&&dx>TH){inner.style.transform='translateX(0)';del.style.transform='translateX(100%)';sw=false;}
+            else if(!sw){inner.style.transform='translateX(0)';del.style.transform='translateX(100%)';}
+            else{inner.style.transform='translateX(-80px)';del.style.transform='translateX(0)';}
         });
     });
-
-    // Tap fuera cierra cualquier swipe abierto
-    document.getElementById('cartItems').addEventListener('touchstart', e => {
-        if (!e.target.closest('.pos-cart-item-wrap')) {
-            wraps.forEach(w => {
-                const inn = w.querySelector('.pos-cart-item-inner');
-                const dl  = w.querySelector('.pos-cart-item-del');
-                if (inn) { inn.style.transition = 'transform 0.2s'; inn.style.transform = 'translateX(0)'; }
-                if (dl)  { dl.style.transition = 'transform 0.2s'; dl.style.transform = 'translateX(100%)'; }
-            });
-        }
-    }, { passive: true });
+    const ci=document.getElementById('cartItems');
+    if(ci) ci.addEventListener('touchstart',e=>{
+        if(!e.target.closest('.pos-cart-item-wrap')) wraps.forEach(w=>{
+            const inn=w.querySelector('.pos-cart-item-inner'),dl=w.querySelector('.pos-cart-item-del');
+            if(inn){inn.style.transition='transform .2s';inn.style.transform='translateX(0)';}
+            if(dl){dl.style.transition='transform .2s';dl.style.transform='translateX(100%)';}
+        });
+    },{passive:true});
 }
 
-// ── Hook: cada vez que cambia el carrito, actualizar panel ──
-// Sobreescribir updateCartUI para también actualizar el panel POS
-const _origUpdateCartUI = typeof updateCartUI !== 'undefined' ? updateCartUI : null;
-document.addEventListener('DOMContentLoaded', () => {
-    // Patch updateCartUI después de que esté definida
-    const origFn = window.updateCartUI;
-    if (origFn) {
-        window.updateCartUI = function() {
-            origFn.call(this, ...arguments);
-            _posActualizarPanel();
-        };
-    }
+// Hook DOMContentLoaded: parchea updateCartUI
+document.addEventListener('DOMContentLoaded',()=>{
+    const orig=window.updateCartUI;
+    if(orig) window.updateCartUI=function(){orig.apply(this,arguments);_posActualizarPanel();};
     _posActualizarPanel();
-    // Abrir carrito al tocar el panel cobrar para ver items
-    document.getElementById('pos-cobrar-btn').addEventListener('click', () => {
-        if (cart.length === 0) return;
-        posCobrar();
-    }, true);
+    const cobrarBtn=document.getElementById('pos-cobrar-btn');
+    if(cobrarBtn) cobrarBtn.addEventListener('click',()=>{if(cart.length) posCobrar();},true);
 });
 
-// ================================================================
-// POS v3 — GESTOS TÁCTILES Y TAP EN CARD
-// Toda la lógica usa event delegation sobre #productsGrid
-// → sobrevive al re-render del innerHTML del grid
-// ================================================================
-(function() {
-
-    // ── Helpers ──
-    function _getProductCard(el) {
-        return el ? el.closest('#productsGrid .product-card:not(.out-of-stock)') : null;
-    }
-    function _getProductId(card) {
-        if (!card) return null;
-        const btn = card.querySelector('.add-to-cart[data-id]');
-        return btn ? parseInt(btn.getAttribute('data-id'), 10) : null;
-    }
-
-    // ── Feedback visual: flash en la card ──
-    function posFlashCard(card, tipo) {
-        if (!card) return;
-        card.classList.remove('pos-flash-add', 'pos-flash-remove');
-        void card.offsetWidth; // reflow para reiniciar animación
-        card.classList.add(tipo === 'add' ? 'pos-flash-add' : 'pos-flash-remove');
-        setTimeout(() => card.classList.remove('pos-flash-add', 'pos-flash-remove'), 400);
-    }
-
-    // ── Badge de cantidad sobre la imagen de la card ──
-    function posUpdateCardBadge(card, productId) {
-        if (!card) return;
-        const imgWrap = card.querySelector('.product-image');
-        if (!imgWrap) return;
-        let badge = imgWrap.querySelector('.pos-card-qty-badge');
-        const item = cart.find(i => i.id === productId);
-        const qty = item ? item.quantity : 0;
-        if (qty === 0) {
-            if (badge) badge.remove();
-            return;
-        }
-        if (!badge) {
-            badge = document.createElement('div');
-            badge.className = 'pos-card-qty-badge';
-            imgWrap.style.position = 'relative'; // asegurar
-            imgWrap.insertBefore(badge, imgWrap.firstChild);
-        }
-        badge.textContent = qty;
-        badge.classList.remove('bump');
-        void badge.offsetWidth;
-        badge.classList.add('bump');
-    }
-
-    // ── Actualizar todos los badges visibles ──
-    function posRefreshAllBadges() {
-        const grid = document.getElementById('productsGrid');
-        if (!grid) return;
-        grid.querySelectorAll('.product-card').forEach(card => {
-            const pid = _getProductId(card);
-            if (pid) posUpdateCardBadge(card, pid);
-        });
-    }
-
-    // Exponer para que renderCartItems pueda refrescar badges
-    window._posRefreshAllBadges = posRefreshAllBadges;
-
-    // ── Estado del gesto activo ──
-    let _tsX = 0, _tsY = 0;
-    let _activeCard = null;
-    let _swipeConsumed = false; // true cuando touchend disparó swipe → cancelar el click
-
-    // ── Registro de último productId agregado por click de card
-    // (evita double-fire si el botón .add-to-cart también propagó)
-    let _lastCardTapId = null;
-    let _lastCardTapTs  = 0;
-
-    function _initGridDelegation(grid) {
-        // Marcar para no doble-init si se llama de nuevo
-        if (grid._posv3Init) return;
-        grid._posv3Init = true;
-
-        // -- TOUCH START --
-        grid.addEventListener('touchstart', function(e) {
-            const t = e.touches[0];
-            _tsX = t.clientX;
-            _tsY = t.clientY;
-            _activeCard = _getProductCard(e.target);
-            _swipeConsumed = false;
-        }, { passive: true });
-
-        // -- TOUCH MOVE --
-        // Solo necesitamos saber si el gesto es horizontal o vertical
-        grid.addEventListener('touchmove', function(e) {
-            if (!_activeCard) return;
-            const dx = Math.abs(e.touches[0].clientX - _tsX);
-            const dy = Math.abs(e.touches[0].clientY - _tsY);
-            // Si vertical domina desde el principio → es scroll, cancelar gesto
-            if (dy > dx + 8) {
-                _activeCard = null;
-            }
-        }, { passive: true });
-
-        // -- TOUCH END --
-        grid.addEventListener('touchend', function(e) {
-            if (!_activeCard) return;
-            const touch = e.changedTouches[0];
-            const dx = touch.clientX - _tsX;
-            const dy = Math.abs(touch.clientY - _tsY);
-            const card = _activeCard;
-            _activeCard = null;
-
-            const THRESHOLD = 42; // px mínimo para swipe
-
-            // No es swipe si movimiento menor al umbral o vertical domina
-            if (Math.abs(dx) < THRESHOLD || dy > Math.abs(dx)) return;
-
-            // Es swipe — marcar para cancelar el click que Android dispara tras touchend
-            _swipeConsumed = true;
-            setTimeout(() => { _swipeConsumed = false; }, 600);
-
-            const pid = _getProductId(card);
-            if (!pid) return;
-
-            if (dx > 0) {
-                // ── Swipe DERECHA → agregar ──
-                addToCart(pid);
-                posFlashCard(card, 'add');
-                setTimeout(() => posUpdateCardBadge(card, pid), 60);
-            } else {
-                // ── Swipe IZQUIERDA → quitar ──
-                const item = cart.find(i => i.id === pid);
-                if (item) {
-                    updateCartQuantity(pid, -1);
-                    posFlashCard(card, 'remove');
-                    setTimeout(() => posUpdateCardBadge(card, pid), 60);
-                } else {
-                    // No está en carrito: feedback visual suave sin acción
-                    posFlashCard(card, 'remove');
-                }
-            }
-        }, { passive: true });
-
-        // -- CLICK (TAP EN CARD) --
-        // Se dispara tras touchend en taps normales.
-        // Guardamos referencia para evitar doble-ejecución con el botón .add-to-cart
-        grid.addEventListener('click', function(e) {
-            // Si fue swipe → ignorar
-            if (_swipeConsumed) return;
-
-            // Si el click viene del botón compartir → no hacer nada
-            if (e.target.closest('.share-btn')) return;
-
-            // Si el click viene del botón .add-to-cart → el listener global del documento
-            // ya lo maneja (ver event delegation de index.html).
-            // Nosotros solo actualizamos el badge y el flash.
-            if (e.target.closest('.add-to-cart')) {
-                const card = _getProductCard(e.target);
-                if (card) {
-                    const pid = _getProductId(card);
-                    if (pid) {
-                        posFlashCard(card, 'add');
-                        setTimeout(() => posUpdateCardBadge(card, pid), 60);
-                    }
-                }
-                return; // dejar que el listener existente maneje addToCart
-            }
-
-            // Si tiene onclick propio (promos, paginación, etc.) → no interferir
-            if (e.target.closest('[onclick]')) return;
-
-            // Click en zona de la card (imagen, nombre, precio, stock)
-            const card = _getProductCard(e.target);
-            if (!card) return;
-            const pid = _getProductId(card);
-            if (!pid) return;
-
-            // Anti-doble: si este mismo producto ya fue agregado por .add-to-cart
-            // en los últimos 300ms (el botón propagó y llegó primero al doc listener),
-            // no volver a agregar
-            const now = Date.now();
-            if (_lastCardTapId === pid && now - _lastCardTapTs < 300) return;
-            _lastCardTapId = pid;
-            _lastCardTapTs = now;
-
-            addToCart(pid);
-            posFlashCard(card, 'add');
-            setTimeout(() => posUpdateCardBadge(card, pid), 60);
-        });
-    }
-
-    // ── Inicializar cuando el DOM esté listo ──
-    document.addEventListener('DOMContentLoaded', function() {
-        // Esperar un tick para que el grid exista
-        setTimeout(function() {
-            const grid = document.getElementById('productsGrid');
-            if (grid) _initGridDelegation(grid);
-        }, 200);
-
-        // Actualizar badges cada vez que renderCartItems termina
-        // (ya tiene el hook _posRefreshAllBadges pero también lo llamamos aquí)
-        const origRender = window.renderCartItems;
-        if (origRender) {
-            window.renderCartItems = function() {
-                origRender.apply(this, arguments);
-                setTimeout(posRefreshAllBadges, 80);
-            };
-        }
-    });
-
-
-</script>
-
-<!-- ================================================================
-     POS UX v3 — MOTOR DE LISTADO, BÚSQUEDA Y GESTOS EN FILAS
-================================================================ -->
-<script>
-(function posUX() {
+// ════════════════════════════════════════════════════
+// MOTOR DE FILAS POS v4 (lista + búsqueda + gestos)
+// ════════════════════════════════════════════════════
+(function posV4(){
 'use strict';
 
-// ── Info de oferta para un producto en el listado ──
-function _ofertaRow(product) {
-    var esAdminTodas  = esAdmin && modoMostrarTodasOfertas;
-    var esAdminTodasD = esAdmin && modoMostrarTodasDestacadas;
-    var esAdminTodasE = esAdmin && modoMostrarTodasEspeciales;
-    var precioFinal=product.price, precioAntes=null, badgeText=null, badgeClass='', tipoOferta=null;
-
-    if (product.relampago > 0 && productosRelampago.some(function(p){return p.id===product.id;}) &&
-        (validarHorario('relampago') || esAdminTodas)) {
-        var of = OFERTAS_RELAMPAGO_SISTEMA[product.relampago];
-        if (of) { badgeText='⚡ '+of.nombre; badgeClass='relampago'; tipoOferta='relampago'; }
-    } else if (productosUltimas.some(function(p){return p.id===product.id;}) &&
-               (validarHorario('ultimas') || esAdminTodas)) {
-        var enPool = productosUltimas.find(function(p){return p.id===product.id;});
-        var dv = (enPool && enPool.diasParaVencer != null) ? enPool.diasParaVencer : 2;
-        var pct = dv <= 1 ? 25 : 15;
-        precioAntes=product.price; precioFinal=Math.round(product.price*(1-pct/100));
-        badgeText='🏷️ -'+pct+'%'; badgeClass='ultimas'; tipoOferta='ultimas';
-    } else if (product.destacada > 0 && productosDestacadas.some(function(p){return p.id===product.id;}) &&
-               (validarHorario('destacadas') || esAdminTodasD)) {
-        precioAntes=product.price; precioFinal=Math.round(product.price*(1-product.destacada/100));
-        badgeText='🔥 -'+product.destacada+'%'; badgeClass='destacada'; tipoOferta='destacadas';
-    } else if (product.especial===1 && productosEspeciales.some(function(p){return p.id===product.id;}) &&
-               (validarHorario('especiales') || esAdminTodasE)) {
-        precioAntes=product.price; precioFinal=Math.round(product.price*0.9);
-        badgeText='⭐ -10%'; badgeClass='especial'; tipoOferta='especiales';
+// ── Oferta activa de un producto → datos para la fila ──
+function _oferta(p){
+    const ad=esAdmin&&modoMostrarTodasOfertas, adD=esAdmin&&modoMostrarTodasDestacadas, adE=esAdmin&&modoMostrarTodasEspeciales;
+    let pf=p.price,pa=null,bt=null,bc='';
+    if(p.relampago>0 && productosRelampago.some(x=>x.id===p.id) && (validarHorario('relampago')||ad)){
+        const o=OFERTAS_RELAMPAGO_SISTEMA[p.relampago]; if(o){bt='⚡ '+o.nombre;bc='rl';}
+    } else if(productosUltimas.some(x=>x.id===p.id) && (validarHorario('ultimas')||ad)){
+        const e=productosUltimas.find(x=>x.id===p.id);
+        const dv=(e&&e.diasParaVencer!=null)?e.diasParaVencer:2;
+        const pct=dv<=1?25:15; pa=p.price; pf=Math.round(p.price*(1-pct/100));
+        bt='🏷️ -'+pct+'%'; bc='ul';
+    } else if(p.destacada>0 && productosDestacadas.some(x=>x.id===p.id) && (validarHorario('destacadas')||adD)){
+        pa=p.price; pf=Math.round(p.price*(1-p.destacada/100));
+        bt='🔥 -'+p.destacada+'%'; bc='de';
+    } else if(p.especial===1 && productosEspeciales.some(x=>x.id===p.id) && (validarHorario('especiales')||adE)){
+        pa=p.price; pf=Math.round(p.price*.9); bt='⭐ -10%'; bc='es';
     }
-    return {precioFinal:precioFinal,precioAntes:precioAntes,badgeText:badgeText,badgeClass:badgeClass,tipoOferta:tipoOferta};
+    return{pf,pa,bt,bc};
 }
 
-// ── HTML de una fila ──
-function _buildRow(product) {
-    var stock=product.stockNumber||0, agotada=stock===0;
-    var of=_ofertaRow(product);
-    var item=cart.find(function(i){return i.id===product.id;});
-    var qty=item?item.quantity:0;
+// ── Construir HTML de una fila ──
+function _row(p){
+    const st=p.stockNumber||0, ag=st===0;
+    const o=_oferta(p);
+    const it=cart.find(i=>i.id===p.id);
+    const qty=it?it.quantity:0;
+    const ne=p.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;');
 
-    var precioHTML = of.precioAntes
-        ? '<span class="pos-row-price-old">$'+of.precioAntes+'</span><span class="pos-row-price"> $'+of.precioFinal+'</span>'
-        : '<span class="pos-row-price">$'+product.price+'</span>';
-    var badgeHTML  = of.badgeText ? '<span class="pos-row-badge '+of.badgeClass+'">'+of.badgeText+'</span>' : '';
-    var stockTxt   = stock>5?'Stock: '+stock : stock>0?'⚠️ Solo '+stock : '❌ Agotado';
-    var stockCls   = stock>5?'':'low';
-    var qtyBadge   = qty>0?'<div class="pos-row-qty-badge">'+qty+'</div>':'';
-    var nameEsc    = product.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    const precio = o.pa
+        ? `<span class="pos-row-price-old">$${o.pa}</span><span class="pos-row-price"> $${o.pf}</span>`
+        : `<span class="pos-row-price">$${p.price}</span>`;
+    const badge  = o.bt ? `<span class="pos-row-badge ${o.bc}">${o.bt}</span>` : '';
+    const stk    = st>5 ? `<span class="pos-row-stock">·${st}</span>`
+                 : st>0 ? `<span class="pos-row-stock low">⚠${st}</span>` : '';
+    const qb     = qty>0 ? `<span class="pos-qty">${qty}</span>` : '';
+    const addBtn = `<button class="pos-add add-to-cart" data-id="${p.id}" data-tipo=""${ag?' disabled':''}
+        onclick="event.stopPropagation();_posAdd(${p.id})">+</button>`;
 
-    return '<div class="pos-row'+(agotada?' pos-row-agotada':'')+'" data-pid="'+product.id+'">'+
-      '<div class="pos-row-inner">'+
-        '<img class="pos-row-img" src="'+(product.image||'')+'" alt="'+product.name+'" '+
-             'onerror="handleImageError(this,\\''+nameEsc+'\\')">'+
-        '<div class="pos-row-info">'+
-          '<div class="pos-row-name">'+product.name+badgeHTML+'</div>'+
-          '<div class="pos-row-prices">'+precioHTML+'</div>'+
-          '<div class="pos-row-stock '+stockCls+'">'+stockTxt+'</div>'+
-        '</div>'+
-        qtyBadge+
-        '<button class="pos-row-add add-to-cart" data-id="'+product.id+'" '+
-                'data-tipo="'+(of.tipoOferta||'')+'"'+(agotada?' disabled':'')+'>+</button>'+
-      '</div>'+
-      '<div class="pos-row-del-reveal" onclick="posRowQuitar('+product.id+')">−1<span>quitar</span></div>'+
-    '</div>';
+    return `<div class="pos-row${ag?' pos-row-agotada':''}" data-pid="${p.id}">`+
+        `<div class="pos-row-inner">`+
+            `<img class="pos-row-img" src="${p.image||''}" alt="${p.name}" `+
+                 `onerror="handleImageError(this,'${ne}')" loading="lazy">`+
+            `<div class="pos-row-info">`+
+                `<div class="pos-row-name">${p.name}</div>`+
+                `<div class="pos-row-meta">${precio}${badge}${stk}</div>`+
+            `</div>`+
+            qb+
+            addBtn+
+        `</div>`+
+        `<div class="pos-del" onclick="_posQuit(${p.id})">−1<small>quitar</small></div>`+
+    `</div>`;
 }
 
-// ── Contador de items ──
-function _updateCount(shown, total, isSearch) {
-    var el=document.getElementById('pos-product-count'); if(!el) return;
-    if(total===0){el.textContent='Sin resultados';return;}
-    if(isSearch){el.textContent=total+' resultado'+(total===1?'':'s');return;}
-    el.textContent = total>shown ? 'Mostrando '+shown+' de '+total : total+' producto'+(total===1?'':'s');
-}
-
-// ── Paginación ──
-function _paginacionHTML(cur, total) {
-    return '<div class="pos-paginacion">'+
-      '<button class="pos-pag-btn" onclick="cambiarPagina('+(cur-1)+')"'+(cur===1?' disabled':'')+'>← Ant</button>'+
-      '<span class="pos-pag-label">'+cur+' / '+total+'</span>'+
-      '<button class="pos-pag-btn" onclick="cambiarPagina('+(cur+1)+')"'+(cur===total?' disabled':'')+'>Sig →</button>'+
-    '</div>';
-}
-
-// ── Override: renderizarProductosNormales ──
-window.renderizarProductosNormales = function() {
-    var grid=document.getElementById('productsGrid'); if(!grid) return;
-    grid.style.gridTemplateColumns='';
-
-    var normales=products.filter(function(p){return !idsEnOfertas.has(p.id)&&p.stockNumber>0;});
-    var filtrados=normales;
-    if(!isSearching && currentCategory!=='ALL')
-        filtrados=normales.filter(function(p){return p.category===currentCategory;});
-
-    filtrados.sort(function(a,b){return typeof rankScore==='function'?rankScore(b.id)-rankScore(a.id):0;});
-
-    var POR_PAG=60, total=filtrados.length;
-    var totalPag=Math.ceil(total/POR_PAG)||1;
-    var idx0=(paginaActual-1)*POR_PAG;
-    var pagina=filtrados.slice(idx0, idx0+POR_PAG);
-
-    if(total===0){
-        grid.innerHTML='<div class="pos-list-empty"><div class="pos-empty-icon">🔍</div><p>Sin productos en esta categoría</p></div>';
-        _updateCount(0,0,false); return;
-    }
-
-    grid.innerHTML=pagina.map(_buildRow).join('')+(totalPag>1?_paginacionHTML(paginaActual,totalPag):'');
-    _updateCount(pagina.length,total,false);
-    _initRowGestures(grid);
+// ── Helpers públicos ──
+window._posAdd=function(pid){
+    if(window.addToCart) addToCart(pid);
+    _flashRow(pid,'add'); _tickClear();
 };
-
-// ── Override: generarTarjetaBusqueda ──
-window.generarTarjetaBusqueda = function(product){ return _buildRow(product); };
-
-// ── Override: filterProducts ──
-window.filterProducts = function(searchTerm) {
-    var grid=document.getElementById('productsGrid'); if(!grid) return;
-    grid.style.gridTemplateColumns='';
-    var results=products.filter(function(p){return p.name.toLowerCase().includes(searchTerm)&&p.stockNumber>0;});
-    if(results.length===0){
-        grid.innerHTML='<div class="pos-list-empty"><div class="pos-empty-icon">🔍</div><p>Sin resultados para "<strong>'+searchTerm+'"</strong></p></div>';
-        _updateCount(0,0,true); return;
-    }
-    grid.innerHTML=results.map(_buildRow).join('');
-    _updateCount(results.length,results.length,true);
-    _initRowGestures(grid);
-};
-
-window.filterMobileProducts = function(t){ window.filterProducts(t); };
-window.openSearchModal = function(){ var i=document.getElementById('pos-search-input'); if(i) i.focus(); };
-window.closeSearchModal = function(){ _clearSearch(); };
-
-// ─────────────────────────
-// BÚSQUEDA POS
-// ─────────────────────────
-var _clearTimer=null;
-
-function _clearSearch() {
-    clearTimeout(_clearTimer);
-    var inp=document.getElementById('pos-search-input');
-    if(inp){inp.value='';inp.blur();}
-    isSearching=false; paginaActual=1;
-    window.renderizarProductosNormales();
-}
-window._posClearSearch=_clearSearch;
-
-function _startClearTimer() {
-    clearTimeout(_clearTimer);
-    var inp=document.getElementById('pos-search-input');
-    if(!inp||inp.value.trim()==='') return;
-    _clearTimer=setTimeout(function(){ if(inp.value.trim()!=='') _clearSearch(); }, 2000);
-}
-
-function _injectSearchBar() {
-    if(document.getElementById('pos-search-bar')) return;
-    var grid=document.getElementById('productsGrid'); if(!grid) return;
-    var bar=document.createElement('div');
-    bar.id='pos-search-bar';
-    bar.innerHTML='<input type="text" id="pos-search-input" placeholder="🔍 Buscar..." '+
-        'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">'+
-        '<button id="pos-search-clear" onclick="_posClearSearch()">✕</button>';
-    grid.parentNode.insertBefore(bar,grid);
-    var cnt=document.createElement('div');
-    cnt.id='pos-product-count';
-    grid.parentNode.insertBefore(cnt,grid);
-
-    var inp=document.getElementById('pos-search-input');
-    var _deb=null;
-    inp.addEventListener('input',function(){
-        clearTimeout(_deb); clearTimeout(_clearTimer);
-        var term=inp.value.trim().toLowerCase();
-        if(term.length===0){isSearching=false;paginaActual=1;window.renderizarProductosNormales();return;}
-        isSearching=true;
-        _deb=setTimeout(function(){window.filterProducts(term);},150);
-    });
-    inp.addEventListener('keydown',function(e){if(e.key==='Enter') inp.blur();});
-}
-
-// ─────────────────────────
-// BADGES EN FILAS
-// ─────────────────────────
-function _refreshRowBadges() {
-    document.querySelectorAll('#productsGrid .pos-row[data-pid]').forEach(function(row){
-        var pid=parseInt(row.getAttribute('data-pid'),10);
-        var item=cart.find(function(i){return i.id===pid;});
-        var qty=item?item.quantity:0;
-        var inner=row.querySelector('.pos-row-inner'); if(!inner) return;
-        var badge=inner.querySelector('.pos-row-qty-badge');
-        var addBtn=inner.querySelector('.pos-row-add');
-        if(qty===0){if(badge) badge.remove();}
-        else{
-            if(!badge){badge=document.createElement('div');badge.className='pos-row-qty-badge';
-                if(addBtn) inner.insertBefore(badge,addBtn); else inner.appendChild(badge);}
-            badge.textContent=qty;
-        }
-    });
-}
-window._posRefreshRowBadges=_refreshRowBadges;
-
-// ─────────────────────────
-// FLASH EN FILA
-// ─────────────────────────
-function _flashRow(row,tipo){
-    if(!row) return;
-    row.classList.remove('pos-flash-add','pos-flash-rem'); void row.offsetWidth;
-    row.classList.add(tipo==='add'?'pos-flash-add':'pos-flash-rem');
-    setTimeout(function(){row.classList.remove('pos-flash-add','pos-flash-rem');},380);
-}
-
-// ─────────────────────────
-// QUITAR VÍA REVEAL
-// ─────────────────────────
-window.posRowQuitar=function(productId){
-    var item=cart.find(function(i){return i.id===productId;}); if(!item) return;
-    var row=document.querySelector('.pos-row[data-pid="'+productId+'"]');
-    updateCartQuantity(productId,-1); _flashRow(row,'rem');
+window._posQuit=function(pid){
+    if(!cart.find(i=>i.id===pid)) return;
+    if(window.updateCartQuantity) updateCartQuantity(pid,-1);
+    _flashRow(pid,'rem');
+    const row=document.querySelector('.pos-row[data-pid="'+pid+'"]');
     if(row){
-        var inn=row.querySelector('.pos-row-inner'), dl=row.querySelector('.pos-row-del-reveal');
-        if(inn){inn.style.transition='transform 0.2s';inn.style.transform='';}
-        if(dl) {dl.style.transition='transform 0.2s'; dl.style.transform='';}
-        row._posSwiped=false;
+        row._sw=false;
+        const inn=row.querySelector('.pos-row-inner'),del=row.querySelector('.pos-del');
+        if(inn){inn.style.transition='transform .2s';inn.style.transform='';}
+        if(del){del.style.transition='transform .2s';del.style.transform='';}
     }
 };
 
-// ─────────────────────────
-// GESTOS EN FILAS
-// ─────────────────────────
-var _rtStartX=0,_rtStartY=0,_rtRow=null,_rtInner=null,_rtDel=null;
-var _rtDx=0,_rtSwiped=false,_rtSwipeFired=false;
-var _tapLastPid=null,_tapLastTs=0;
+// ── Flash de fila ──
+function _flashRow(pid,tipo){
+    const row=document.querySelector('#productsGrid .pos-row[data-pid="'+pid+'"]');
+    if(!row) return;
+    row.classList.remove('pf-add','pf-rem'); void row.offsetWidth;
+    row.classList.add(tipo==='add'?'pf-add':'pf-rem');
+    setTimeout(()=>row.classList.remove('pf-add','pf-rem'),360);
+}
 
-function _initRowGestures(grid) {
-    if(!grid||grid._posRowGestInit) return;
-    grid._posRowGestInit=true;
+// ── Refrescar badges de qty en todas las filas visibles ──
+function _refreshBadges(){
+    document.querySelectorAll('#productsGrid .pos-row[data-pid]').forEach(row=>{
+        const pid=+row.getAttribute('data-pid');
+        const it=cart.find(i=>i.id===pid);
+        const qty=it?it.quantity:0;
+        const inner=row.querySelector('.pos-row-inner'); if(!inner) return;
+        const addBtn=inner.querySelector('.pos-add');
+        let qb=inner.querySelector('.pos-qty');
+        if(qty===0){if(qb) qb.remove();}
+        else{
+            if(!qb){qb=document.createElement('span');qb.className='pos-qty';
+                if(addBtn) inner.insertBefore(qb,addBtn); else inner.appendChild(qb);}
+            qb.textContent=qty;
+        }
+    });
+}
+window._posRefreshBadges=_refreshBadges;
+// alias para renderizarProductosNormales (definida antes del IIFE)
+window._posRowHTML=_row;
 
-    grid.addEventListener('touchstart',function(e){
-        var t=e.touches[0];
-        _rtStartX=t.clientX;_rtStartY=t.clientY;_rtDx=0;_rtSwipeFired=false;
-        _rtRow=e.target.closest('.pos-row');
-        if(_rtRow){
-            _rtInner=_rtRow.querySelector('.pos-row-inner');
-            _rtDel=_rtRow.querySelector('.pos-row-del-reveal');
-            _rtSwiped=_rtRow._posSwiped||false;
-            if(_rtInner) _rtInner.style.transition='none';
-            if(_rtDel)   _rtDel.style.transition='none';
+// ── Helpers para empty/paginación ──
+window._posRowEmpty=function(msg){return`<div class="pos-empty"><em>🔍</em><p>${msg}</p></div>`;};
+window._posUpdateCount=function(sh,tot){
+    const el=document.getElementById('pos-count-label'); if(!el) return;
+    if(!tot){el.textContent='Sin resultados';return;}
+    el.textContent=tot>sh?`${sh} de ${tot} productos`:`${tot} producto${tot!==1?'s':''}`;
+};
+window._posPagHTML=function(cur,tot){
+    return`<div class="pos-pag">`+
+        `<button class="pos-pag-btn" onclick="cambiarPagina(${cur-1})"${cur===1?' disabled':''}>← Ant</button>`+
+        `<span class="pos-pag-lbl">${cur} / ${tot}</span>`+
+        `<button class="pos-pag-btn" onclick="cambiarPagina(${cur+1})"${cur===tot?' disabled':''}>Sig →</button>`+
+    `</div>`;
+};
+
+// ── Inyectar barra de búsqueda ──
+function _injectSearch(){
+    if(document.getElementById('pos-search-input')) return; // ya existe en el HTML
+    // El HTML ya fue modificado para incluir #pos-search-bar
+}
+
+// ── Init búsqueda ──
+function _initSearch(){
+    const inp=document.getElementById('pos-search-input'); if(!inp) return;
+    if(inp._posInited) return; inp._posInited=true;
+    let deb=null;
+    inp.addEventListener('input',function(){
+        clearTimeout(deb); clearTimeout(_ct);
+        const t=inp.value.trim().toLowerCase();
+        if(!t){isSearching=false;paginaActual=1;renderizarProductosNormales();return;}
+        isSearching=true; deb=setTimeout(()=>filterProducts(t),160);
+    });
+    inp.addEventListener('keydown',e=>{if(e.key==='Enter') inp.blur();});
+}
+
+// ── Auto-clear búsqueda 2s tras último addToCart ──
+let _ct=null;
+function _tickClear(){
+    const inp=document.getElementById('pos-search-input'); if(!inp||!inp.value.trim()) return;
+    clearTimeout(_ct); _ct=setTimeout(()=>{
+        const i=document.getElementById('pos-search-input'); if(!i) return;
+        i.value=''; i.blur(); isSearching=false; paginaActual=1; renderizarProductosNormales();
+    },2000);
+}
+
+// ── Gestos táctiles en filas ──
+var _sx=0,_sy=0,_row=null,_inn=null,_del=null,_dx=0,_fired=false;
+var _tapPid=null,_tapTs=0;
+
+function _initRowGestures(grid){
+    if(grid._pg4) return; grid._pg4=true;
+
+    grid.addEventListener('touchstart',e=>{
+        const t=e.touches[0]; _sx=t.clientX; _sy=t.clientY; _dx=0; _fired=false;
+        _row=e.target.closest('.pos-row:not(.pos-row-agotada)');
+        if(_row){
+            _inn=_row.querySelector('.pos-row-inner');
+            _del=_row.querySelector('.pos-del');
+            if(_inn) _inn.style.transition='none';
+            if(_del) _del.style.transition='none';
         }
     },{passive:true});
 
-    grid.addEventListener('touchmove',function(e){
-        if(!_rtRow) return;
-        var cx=e.touches[0].clientX,cy=e.touches[0].clientY;
-        _rtDx=cx-_rtStartX;
-        var dy=Math.abs(cy-_rtStartY);
-        if(dy>Math.abs(_rtDx)+10){_rtRow=null;return;}
-        if(_rtDx<0){
-            var cl=Math.max(_rtDx,-72);
-            if(_rtInner) _rtInner.style.transform='translateX('+cl+'px)';
-            if(_rtDel)   _rtDel.style.transform='translateX('+(100+cl/0.72)+'%)';
-        } else if(_rtSwiped&&_rtDx>0){
-            var off=Math.min(-72+_rtDx,0);
-            if(_rtInner) _rtInner.style.transform='translateX('+off+'px)';
-            if(_rtDel)   _rtDel.style.transform='translateX('+(100+off/0.72)+'%)';
-        } else if(!_rtSwiped&&_rtDx>0){
-            if(_rtInner) _rtInner.style.transform='translateX('+Math.min(_rtDx,10)+'px)';
+    grid.addEventListener('touchmove',e=>{
+        if(!_row) return;
+        const cx=e.touches[0].clientX,cy=e.touches[0].clientY;
+        _dx=cx-_sx; const dy=Math.abs(cy-_sy);
+        if(dy>Math.abs(_dx)+8){_row=null;return;} // scroll vertical → cancelar
+        if(_dx<0){
+            const c=Math.max(_dx,-68);
+            if(_inn) _inn.style.transform=`translateX(${c}px)`;
+            if(_del) _del.style.transform=`translateX(${100+c/0.68}%)`;
+        } else if(_row._sw&&_dx>0){
+            const o=Math.min(-68+_dx,0);
+            if(_inn) _inn.style.transform=`translateX(${o}px)`;
+            if(_del) _del.style.transform=`translateX(${100+o/0.68}%)`;
+        } else if(!_row._sw&&_dx>0){
+            if(_inn) _inn.style.transform=`translateX(${Math.min(_dx,8)}px)`;
         }
     },{passive:true});
 
-    grid.addEventListener('touchend',function(){
-        if(!_rtRow) return;
-        var row=_rtRow,dx=_rtDx,inner=_rtInner,del=_rtDel;
-        _rtRow=null;
-        if(inner) inner.style.transition='transform 0.2s';
-        if(del)   del.style.transition='transform 0.2s';
-        var THRESH=45;
+    grid.addEventListener('touchend',()=>{
+        if(!_row) return;
+        const row=_row,dx=_dx,inn=_inn,del=_del; _row=null;
+        if(inn) inn.style.transition='transform .18s';
+        if(del) del.style.transition='transform .18s';
+        const TH=42;
 
-        if(Math.abs(dx)<10){
-            if(!_rtSwiped){if(inner)inner.style.transform='';if(del)del.style.transform='';}
-            else{if(inner)inner.style.transform='translateX(-72px)';if(del)del.style.transform='translateX(0)';}
+        if(Math.abs(dx)<8){
+            if(row._sw){if(inn) inn.style.transform='translateX(-68px)'; if(del) del.style.transform='translateX(0)';}
+            else{if(inn) inn.style.transform=''; if(del) del.style.transform='';}
             return;
         }
-        if(dx<-THRESH&&!_rtSwiped){
-            if(inner)inner.style.transform='translateX(-72px)';
-            if(del)del.style.transform='translateX(0)';
-            row._posSwiped=true;_rtSwipeFired=true;return;
+        if(dx<-TH&&!row._sw){ // open reveal
+            if(inn) inn.style.transform='translateX(-68px)'; if(del) del.style.transform='translateX(0)';
+            row._sw=true; _fired=true; return;
         }
-        if(dx>THRESH&&_rtSwiped){
-            if(inner)inner.style.transform='';if(del)del.style.transform='';
-            row._posSwiped=false;_rtSwipeFired=true;return;
+        if(dx>TH&&row._sw){ // close reveal
+            if(inn) inn.style.transform=''; if(del) del.style.transform='';
+            row._sw=false; _fired=true; return;
         }
-        if(dx>THRESH&&!_rtSwiped){
-            if(inner)inner.style.transform='';
-            var pid=parseInt(row.getAttribute('data-pid'),10);
-            if(pid&&!row.classList.contains('pos-row-agotada')){
-                addToCart(pid);_flashRow(row,'add');
+        if(dx>TH&&!row._sw){ // swipe right → agregar
+            if(inn) inn.style.transform='';
+            const pid=+row.getAttribute('data-pid');
+            if(pid){addToCart(pid); _flashRow(pid,'add'); _tickClear();}
+            _fired=true; return;
+        }
+        // snap
+        if(row._sw){if(inn) inn.style.transform='translateX(-68px)'; if(del) del.style.transform='translateX(0)';}
+        else{if(inn) inn.style.transform=''; if(del) del.style.transform='';}
+    },{passive:true});
+
+    // TAP en la fila → agregar
+    grid.addEventListener('click',e=>{
+        if(_fired){_fired=false;return;}
+        if(e.target.closest('.pos-del')) return;
+
+        // Botón + → el onclick _posAdd ya lo maneja; solo flash + badge
+        if(e.target.closest('.pos-add')){
+            const row=e.target.closest('.pos-row:not(.pos-row-agotada)');
+            if(row){
+                const pid=+row.getAttribute('data-pid');
+                if(pid){_flashRow(pid,'add'); setTimeout(_refreshBadges,60);}
             }
-            _rtSwipeFired=true;return;
-        }
-        if(_rtSwiped){if(inner)inner.style.transform='translateX(-72px)';if(del)del.style.transform='translateX(0)';}
-        else{if(inner)inner.style.transform='';if(del)del.style.transform='';}
-    },{passive:true});
-
-    // Click / tap
-    grid.addEventListener('click',function(e){
-        if(_rtSwipeFired){_rtSwipeFired=false;return;}
-        if(e.target.closest('.pos-row-del-reveal')) return;
-
-        // Toca el botón +: el listener global del doc ya llama addToCart; solo flash+badge
-        if(e.target.closest('.pos-row-add')){
-            var row=e.target.closest('.pos-row:not(.pos-row-agotada)');
-            if(row){var pid=parseInt(row.getAttribute('data-pid'),10);
-                if(pid){_flashRow(row,'add');setTimeout(_refreshRowBadges,60);_startClearTimer();}}
             return;
         }
 
-        var row=e.target.closest('.pos-row:not(.pos-row-agotada)');
+        const row=e.target.closest('.pos-row:not(.pos-row-agotada)');
         if(!row) return;
-        var pid=parseInt(row.getAttribute('data-pid'),10); if(!pid) return;
-        var now=Date.now();
-        if(_tapLastPid===pid&&now-_tapLastTs<300) return;
-        _tapLastPid=pid;_tapLastTs=now;
-        addToCart(pid);_flashRow(row,'add');
-        setTimeout(_refreshRowBadges,60);_startClearTimer();
+        const pid=+row.getAttribute('data-pid'); if(!pid) return;
+        const now=Date.now();
+        if(_tapPid===pid&&now-_tapTs<300) return; // anti-doble
+        _tapPid=pid; _tapTs=now;
+        addToCart(pid); _flashRow(pid,'add');
+        setTimeout(_refreshBadges,60); _tickClear();
     });
 
-    document.addEventListener('touchstart',function(e){
+    // Cerrar reveal al tocar fuera del grid
+    document.addEventListener('touchstart',e=>{
         if(!e.target.closest('#productsGrid')){
-            document.querySelectorAll('#productsGrid .pos-row').forEach(function(r){
-                if(r._posSwiped){
-                    var inn=r.querySelector('.pos-row-inner'),dl=r.querySelector('.pos-row-del-reveal');
-                    if(inn){inn.style.transition='transform 0.2s';inn.style.transform='';}
-                    if(dl) {dl.style.transition='transform 0.2s'; dl.style.transform='';}
-                    r._posSwiped=false;
+            document.querySelectorAll('#productsGrid .pos-row').forEach(r=>{
+                if(r._sw){
+                    r._sw=false;
+                    const i=r.querySelector('.pos-row-inner'),d=r.querySelector('.pos-del');
+                    if(i){i.style.transition='transform .2s';i.style.transform='';}
+                    if(d){d.style.transition='transform .2s';d.style.transform='';}
                 }
             });
         }
     },{passive:true});
 }
 
-// ─────────────────────────
-// PATCHES
-// ─────────────────────────
-var _origATC=window.addToCart;
-window.addToCart=function(productId,tipoForzado){
-    var r=_origATC.apply(this,arguments);
-    setTimeout(_refreshRowBadges,60);_startClearTimer();return r;
+window._posInitSwipeOnGrid=function(grid){ _initRowGestures(grid||document.getElementById('productsGrid')); };
+
+// ── Patch addToCart para badges + timer ──
+const _oATC=window.addToCart;
+window.addToCart=function(pid,tf){
+    const r=_oATC?_oATC.apply(this,arguments):undefined;
+    setTimeout(_refreshBadges,55); _tickClear(); return r;
 };
 
-var _origUCQ=window.updateCartQuantity;
+// ── Patch updateCartQuantity para badges ──
+const _oUCQ=window.updateCartQuantity;
 window.updateCartQuantity=function(){
-    var r=_origUCQ.apply(this,arguments);setTimeout(_refreshRowBadges,60);return r;
+    const r=_oUCQ?_oUCQ.apply(this,arguments):undefined;
+    setTimeout(_refreshBadges,55); return r;
 };
 
-var _origRCI2=window.renderCartItems;
-if(_origRCI2){
-    window.renderCartItems=function(){
-        _origRCI2.apply(this,arguments);setTimeout(_refreshRowBadges,90);
-    };
-}
+// ── Patch renderCartItems para badges + swipe carrito ──
+const _oRCI=window.renderCartItems;
+if(_oRCI) window.renderCartItems=function(){
+    _oRCI.apply(this,arguments);
+    setTimeout(_refreshBadges,80);
+    setTimeout(_posInitSwipe,90);
+    setTimeout(_posActualizarPanel,50);
+};
 
-// ─────────────────────────
-// INIT
-// ─────────────────────────
+// ── INIT ──
 document.addEventListener('DOMContentLoaded',function(){
     setTimeout(function(){
-        _injectSearchBar();
-        var grid=document.getElementById('productsGrid');
-        if(grid) _initRowGestures(grid);
-    },400);
+        _initSearch();
+        const g=document.getElementById('productsGrid');
+        if(g) _initRowGestures(g);
+        _posActualizarPanel();
+    },500);
 });
 
-var _origPAD=window.processAPIData;
-if(_origPAD){
-    window.processAPIData=function(){
-        _origPAD.apply(this,arguments);
-        setTimeout(function(){
-            _injectSearchBar();
-            var grid=document.getElementById('productsGrid');
-            if(grid){grid._posRowGestInit=false;_initRowGestures(grid);}
-        },300);
-    };
-}
+// Re-init después de processAPIData (carga de productos)
+const _oPAD=window.processAPIData;
+if(_oPAD) window.processAPIData=function(){
+    _oPAD.apply(this,arguments);
+    setTimeout(function(){
+        _initSearch();
+        const g=document.getElementById('productsGrid');
+        if(g){g._pg4=false;_initRowGestures(g);}
+    },300);
+};
 
-})(); // fin IIFE posUX
+})(); // fin posV4
 </script>
 </body>
 </html>

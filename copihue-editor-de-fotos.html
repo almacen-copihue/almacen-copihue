@@ -1,0 +1,1161 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Copihue · Editor de Fotos</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #232636;
+    --border: #2e3247;
+    --accent: #7c4dff;
+    --accent2: #00e5a0;
+    --danger: #ff4d6d;
+    --text: #e8eaf0;
+    --muted: #7a7f96;
+    --ok: #00c97a;
+    --warn: #ffb300;
+    --gh: #6e40c9;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── HEADER ─────────────────────────────── */
+  header {
+    position: sticky; top: 0; z-index: 100;
+    background: rgba(15,17,23,0.92);
+    backdrop-filter: blur(14px);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 20px;
+    display: flex; align-items: center; gap: 14px;
+  }
+  .logo {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.95rem; font-weight: 700;
+    color: var(--accent2);
+    letter-spacing: -0.5px;
+    white-space: nowrap;
+  }
+  .logo span { color: var(--muted); font-weight: 400; }
+  .search-wrap {
+    flex: 1; position: relative; max-width: 460px;
+  }
+  .search-wrap input {
+    width: 100%;
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    padding: 9px 14px 9px 40px;
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.92rem;
+    outline: none;
+    transition: border-color .2s;
+  }
+  .search-wrap input:focus { border-color: var(--accent); }
+  .search-wrap input::placeholder { color: var(--muted); }
+  .search-icon {
+    position: absolute; left: 12px; top: 50%;
+    transform: translateY(-50%);
+    color: var(--muted); font-size: 1rem; pointer-events: none;
+  }
+  .header-actions { display: flex; gap: 8px; margin-left: auto; }
+  .btn-config {
+    background: var(--surface); border: 1.5px solid var(--border);
+    color: var(--muted); border-radius: 10px;
+    padding: 8px 14px; font-size: 0.82rem; font-weight: 600;
+    cursor: pointer; transition: all .2s; white-space: nowrap;
+  }
+  .btn-config:hover { border-color: var(--accent); color: var(--text); }
+  .counter {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.75rem; color: var(--muted);
+    padding: 8px 14px;
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    white-space: nowrap;
+  }
+  .counter span { color: var(--accent2); }
+
+  /* ── FILTROS ─────────────────────────────── */
+  .filters {
+    display: flex; gap: 8px; padding: 14px 20px;
+    overflow-x: auto; border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    scrollbar-width: none;
+  }
+  .filters::-webkit-scrollbar { display: none; }
+  .filter-btn {
+    background: var(--surface); border: 1.5px solid var(--border);
+    color: var(--muted); border-radius: 8px;
+    padding: 6px 14px; font-size: 0.8rem; font-weight: 600;
+    cursor: pointer; transition: all .2s; white-space: nowrap;
+  }
+  .filter-btn.active {
+    background: var(--accent); border-color: var(--accent);
+    color: white;
+  }
+  .filter-btn.sin-foto {
+    border-color: var(--danger);
+  }
+  .filter-btn.sin-foto.active {
+    background: var(--danger); border-color: var(--danger);
+  }
+
+  /* ── GRID ─────────────────────────────────── */
+  .grid-wrap { padding: 20px; }
+  .products-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 12px;
+  }
+  .prod-card {
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: all .2s;
+    overflow: hidden;
+    position: relative;
+  }
+  .prod-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(124,77,255,0.18);
+  }
+  .prod-card.sin-foto {
+    border-color: rgba(255,77,109,0.4);
+  }
+  .prod-card.sin-foto:hover { border-color: var(--danger); }
+  .card-img {
+    width: 100%; aspect-ratio: 1;
+    background: var(--surface2);
+    overflow: hidden; position: relative;
+  }
+  .card-img img {
+    width: 100%; height: 100%; object-fit: cover;
+    display: block; transition: opacity .3s;
+  }
+  .card-img img.loading { opacity: 0; }
+  .card-img img.loaded { opacity: 1; }
+  .no-foto-badge {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 4px;
+    background: rgba(255,77,109,0.08);
+    color: var(--danger);
+    font-size: 1.6rem;
+  }
+  .no-foto-badge span {
+    font-size: 0.6rem; font-weight: 700;
+    letter-spacing: 0.5px; color: var(--danger);
+    opacity: 0.7;
+  }
+  .card-info {
+    padding: 8px 10px 10px;
+  }
+  .card-name {
+    font-size: 0.72rem; font-weight: 600; line-height: 1.3;
+    color: var(--text);
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .card-slug {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.6rem; color: var(--muted);
+    margin-top: 3px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .copy-btn {
+    position: absolute; top: 6px; right: 6px;
+    background: rgba(15,17,23,0.75);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px; color: var(--muted);
+    width: 28px; height: 28px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; font-size: 0.75rem;
+    transition: all .15s; opacity: 0;
+    backdrop-filter: blur(4px);
+  }
+  .prod-card:hover .copy-btn { opacity: 1; }
+  .copy-btn:hover { background: var(--accent); color: white; border-color: var(--accent); }
+  .empty-state {
+    text-align: center; padding: 60px 20px; color: var(--muted);
+  }
+  .empty-state .icon { font-size: 3rem; margin-bottom: 12px; }
+  .empty-state p { font-size: 0.9rem; }
+
+  /* ── LOADING SKELETON ───────────────────── */
+  .skeleton {
+    background: linear-gradient(90deg, var(--surface) 25%, var(--surface2) 50%, var(--surface) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: var(--radius);
+    aspect-ratio: 1.1;
+  }
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* ── MODAL EDITOR ───────────────────────── */
+  .overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 500;
+  }
+  .overlay.open { display: flex; align-items: flex-end; justify-content: center; animation: fadeIn .2s; }
+  @media (min-width: 600px) {
+    .overlay.open { align-items: center; }
+  }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+  .modal {
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    border-radius: 24px 24px 0 0;
+    width: 100%; max-width: 480px;
+    max-height: 92vh; overflow-y: auto;
+    padding: 0 0 24px;
+    animation: slideUp .25s cubic-bezier(.25,.46,.45,.94);
+  }
+  @media (min-width: 600px) {
+    .modal { border-radius: 24px; max-height: 88vh; }
+  }
+  @keyframes slideUp { from { transform: translateY(30px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+  .modal-handle {
+    width: 40px; height: 4px;
+    background: var(--border); border-radius: 2px;
+    margin: 12px auto 0;
+  }
+  @media (min-width: 600px) { .modal-handle { display: none; } }
+
+  .modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid var(--border);
+    position: sticky; top: 0;
+    background: var(--surface);
+    z-index: 10;
+  }
+  .modal-title {
+    font-weight: 700; font-size: 1rem; color: var(--text);
+  }
+  .modal-close {
+    background: var(--surface2); border: none;
+    color: var(--muted); width: 32px; height: 32px;
+    border-radius: 8px; cursor: pointer; font-size: 1rem;
+    transition: all .15s; display: flex; align-items: center; justify-content: center;
+  }
+  .modal-close:hover { background: var(--danger); color: white; }
+  .modal-body { padding: 16px 20px 0; }
+
+  .prod-header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px; background: var(--surface2);
+    border-radius: 12px; margin-bottom: 14px;
+  }
+  .prod-header img {
+    width: 52px; height: 52px; border-radius: 10px;
+    object-fit: cover; background: var(--bg);
+    border: 1.5px solid var(--border);
+    flex-shrink: 0;
+  }
+  .prod-header-info .name {
+    font-weight: 700; font-size: 0.9rem; color: var(--text);
+    line-height: 1.3;
+  }
+  .prod-header-info .slug {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.67rem; color: var(--muted); margin-top: 3px;
+  }
+  .copy-name-btn {
+    margin-left: auto; flex-shrink: 0;
+    background: var(--accent); border: none;
+    color: white; border-radius: 8px;
+    padding: 7px 12px; font-size: 0.78rem; font-weight: 700;
+    cursor: pointer; transition: all .15s;
+    display: flex; align-items: center; gap: 5px;
+  }
+  .copy-name-btn:hover { filter: brightness(1.15); }
+  .copy-name-btn.copied { background: var(--ok); }
+
+  .action-btns {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 8px; margin-bottom: 14px;
+  }
+  .action-btn {
+    padding: 12px 8px; border: none; border-radius: 12px;
+    font-size: 0.83rem; font-weight: 700; cursor: pointer;
+    transition: all .2s; display: flex;
+    align-items: center; justify-content: center; gap: 6px;
+  }
+  .action-btn.net { background: #1565c0; color: white; }
+  .action-btn.net:hover { background: #1976d2; }
+  .action-btn.file {
+    background: var(--surface2); color: var(--text);
+    border: 2px dashed var(--border);
+  }
+  .action-btn.file:hover { border-color: var(--accent); }
+  .action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  #fotosStatus {
+    display: none; text-align: center; padding: 18px;
+    color: var(--muted); font-size: 0.88rem;
+    background: var(--surface2); border-radius: 10px;
+    margin-bottom: 10px;
+  }
+
+  .foto-grid-label {
+    font-size: 0.68rem; font-weight: 700; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.8px;
+    margin-bottom: 8px;
+  }
+  #fotosGrid { display: none; margin-bottom: 14px; }
+  #fotosGridItems {
+    display: grid; grid-template-columns: repeat(3,1fr); gap: 8px;
+  }
+  #fotosGridItems > div {
+    aspect-ratio: 1; background: var(--surface2);
+    border-radius: 10px; overflow: hidden;
+    border: 2px solid var(--border); cursor: pointer;
+    transition: border-color .15s;
+  }
+  #fotosGridItems > div:hover { border-color: var(--accent); }
+  #fotosGridItems > div.selected { border-color: var(--ok); }
+  #fotosGridItems img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+  #fotosPreviewWrap { display: none; margin-bottom: 14px; }
+  .preview-label {
+    font-size: 0.68rem; font-weight: 700; color: var(--ok);
+    text-transform: uppercase; letter-spacing: 0.8px;
+    margin-bottom: 10px;
+  }
+  .preview-row {
+    display: flex; gap: 14px; align-items: flex-start;
+  }
+  .canvas-wrap {
+    position: relative; flex-shrink: 0;
+  }
+  #fotosCanvas {
+    width: 110px; height: 110px;
+    border-radius: 12px; border: 2.5px solid var(--ok);
+    display: block;
+  }
+  .canvas-badge {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    background: rgba(0,0,0,0.65);
+    font-size: 8px; color: var(--ok);
+    text-align: center; padding: 2px;
+    border-radius: 0 0 10px 10px;
+    font-family: 'Space Mono', monospace;
+  }
+  .preview-actions { flex: 1; }
+  .filename-badge {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.7rem; background: var(--surface2);
+    border-radius: 8px; padding: 6px 10px;
+    margin-bottom: 8px; color: var(--ok);
+    word-break: break-all; border: 1px solid rgba(0,201,122,0.3);
+  }
+  .btn-gh {
+    width: 100%; padding: 13px;
+    border: none; border-radius: 12px;
+    background: #24292e; color: white;
+    font-size: 0.9rem; font-weight: 700;
+    cursor: pointer; margin-bottom: 7px;
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+    transition: all .2s;
+  }
+  .btn-gh:hover { background: #3c4450; }
+  .btn-gh:disabled { opacity: 0.6; cursor: not-allowed; }
+  .btn-dl {
+    width: 100%; padding: 10px;
+    border: 1.5px solid rgba(0,201,122,0.35);
+    border-radius: 12px; background: transparent;
+    color: var(--ok); font-size: 0.85rem; font-weight: 600;
+    cursor: pointer; transition: all .2s;
+  }
+  .btn-dl:hover { background: rgba(0,201,122,0.08); }
+
+  #ghStatus {
+    display: none; margin-top: 10px; padding: 10px 12px;
+    border-radius: 10px; font-size: 0.83rem; font-weight: 600;
+  }
+  #ghStatus.ok { background: rgba(0,201,122,0.1); color: var(--ok); border: 1px solid rgba(0,201,122,0.3); }
+  #ghStatus.error { background: rgba(255,77,109,0.1); color: var(--danger); border: 1px solid rgba(255,77,109,0.3); }
+  #ghStatus.loading { background: rgba(21,101,192,0.1); color: #64b5f6; border: 1px solid rgba(100,181,246,0.3); }
+
+  /* ── CONFIG PANEL ───────────────────────── */
+  .config-panel {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.8);
+    z-index: 600;
+    backdrop-filter: blur(8px);
+  }
+  .config-panel.open { display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .config-box {
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    border-radius: 20px;
+    width: 100%; max-width: 400px;
+    max-height: 90vh; overflow-y: auto;
+    padding: 24px;
+  }
+  .config-title {
+    font-weight: 700; font-size: 1.05rem;
+    margin-bottom: 18px; color: var(--text);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .config-section {
+    font-size: 0.72rem; font-weight: 700;
+    color: var(--muted); text-transform: uppercase;
+    letter-spacing: 0.8px; margin: 14px 0 8px;
+  }
+  .cfg-input {
+    width: 100%;
+    background: var(--surface2);
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 12px;
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.88rem;
+    outline: none;
+    margin-bottom: 8px;
+    transition: border-color .2s;
+  }
+  .cfg-input:focus { border-color: var(--accent); }
+  .cfg-input::placeholder { color: var(--muted); }
+  .cfg-input[type="password"] { font-family: 'Space Mono', monospace; }
+  .cfg-hint {
+    font-size: 0.7rem; color: var(--muted);
+    line-height: 1.5; margin-bottom: 10px;
+    padding: 8px 10px; background: var(--surface2);
+    border-radius: 8px; border-left: 3px solid var(--accent);
+  }
+  .cfg-hint strong { color: var(--text); }
+  .btn-save-cfg {
+    width: 100%; padding: 12px;
+    background: var(--accent); border: none;
+    border-radius: 12px; color: white;
+    font-size: 0.9rem; font-weight: 700;
+    cursor: pointer; margin-top: 6px;
+    transition: filter .2s;
+  }
+  .btn-save-cfg:hover { filter: brightness(1.1); }
+  .btn-cancel-cfg {
+    width: 100%; padding: 10px;
+    background: transparent; border: 1.5px solid var(--border);
+    border-radius: 12px; color: var(--muted);
+    font-size: 0.85rem; cursor: pointer;
+    margin-top: 8px; transition: all .2s;
+  }
+  .btn-cancel-cfg:hover { border-color: var(--danger); color: var(--danger); }
+
+  /* ── TOAST ─────────────────────────────── */
+  #toast {
+    position: fixed; bottom: 24px; left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: var(--surface2); border: 1.5px solid var(--border);
+    color: var(--text); border-radius: 12px;
+    padding: 10px 18px; font-size: 0.88rem; font-weight: 600;
+    z-index: 9999; pointer-events: none;
+    transition: transform .3s cubic-bezier(.25,.46,.45,.94), opacity .3s;
+    opacity: 0; white-space: nowrap;
+  }
+  #toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+  #toast.ok { border-color: var(--ok); color: var(--ok); }
+  #toast.error { border-color: var(--danger); color: var(--danger); }
+
+  /* ── SPINNER ───────────────────────────── */
+  .spin {
+    display: inline-block; width: 16px; height: 16px;
+    border: 2px solid rgba(255,255,255,0.2);
+    border-top-color: currentColor;
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── RESPONSIVE ─────────────────────────── */
+  @media (max-width: 480px) {
+    .products-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+    .grid-wrap { padding: 14px; }
+    .logo span { display: none; }
+    .counter { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ── HEADER ───────────────────────────────── -->
+<header>
+  <div class="logo">📷 COPIHUE <span>· fotos</span></div>
+  <div class="search-wrap">
+    <span class="search-icon">🔍</span>
+    <input type="text" id="searchInput" placeholder="Buscar producto..." autocomplete="off" oninput="filtrarGrid()">
+  </div>
+  <div class="header-actions">
+    <div class="counter" id="counter"><span id="countVis">–</span> / <span id="countTotal">–</span></div>
+    <button class="btn-config" onclick="abrirConfig()">⚙️ GitHub</button>
+  </div>
+</header>
+
+<!-- ── FILTROS ─────────────────────────────── -->
+<div class="filters" id="filters">
+  <button class="filter-btn active" data-cat="TODOS" onclick="setCategoria('TODOS', this)">Todos</button>
+  <button class="filter-btn sin-foto" data-cat="SIN_FOTO" onclick="setCategoria('SIN_FOTO', this)">❌ Sin foto</button>
+</div>
+
+<!-- ── GRID ─────────────────────────────────── -->
+<div class="grid-wrap">
+  <div class="products-grid" id="productsGrid">
+    <!-- skeletons mientras carga -->
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+  </div>
+</div>
+
+<!-- ── MODAL EDITOR ───────────────────────── -->
+<div class="overlay" id="overlayEditor" onclick="cerrarEditor(event)">
+  <div class="modal" id="modalEditor">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <span class="modal-title">✏️ Editar foto</span>
+      <button class="modal-close" onclick="cerrarEditorBtn()">✕</button>
+    </div>
+    <div class="modal-body">
+
+      <!-- Info producto -->
+      <div class="prod-header" id="modalProdHeader">
+        <img id="modalProdImg" src="" onerror="this.src=''" style="flex-shrink:0;">
+        <div class="prod-header-info">
+          <div class="name" id="modalProdName">–</div>
+          <div class="slug" id="modalProdSlug">–</div>
+        </div>
+        <button class="copy-name-btn" id="btnCopyName" onclick="copiarNombre()">
+          📋 Copiar
+        </button>
+      </div>
+
+      <!-- Acciones -->
+      <div class="action-btns">
+        <button class="action-btn net" id="btnBuscarNet" onclick="buscarEnInternet()">
+          🌐 Buscar en internet
+        </button>
+        <label class="action-btn file">
+          📁 Subir archivo
+          <input type="file" accept="image/*" style="display:none;" onchange="cargarDesdeArchivo(event)">
+        </label>
+      </div>
+
+      <!-- Status búsqueda -->
+      <div id="fotosStatus"></div>
+
+      <!-- Grid resultados -->
+      <div id="fotosGrid">
+        <div class="foto-grid-label">Elegí una foto → tocá para previsualizar</div>
+        <div id="fotosGridItems"></div>
+      </div>
+
+      <!-- Preview + publicar -->
+      <div id="fotosPreviewWrap">
+        <div class="preview-label">✅ Vista previa 400×400 · lista para publicar</div>
+        <div class="preview-row">
+          <div class="canvas-wrap">
+            <canvas id="fotosCanvas" width="400" height="400"></canvas>
+            <div class="canvas-badge">400 × 400 px</div>
+          </div>
+          <div class="preview-actions">
+            <div class="filename-badge" id="fotosFilenameLabel">–</div>
+            <button class="btn-gh" id="btnPublicarGH" onclick="publicarEnGitHub()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+              Publicar en GitHub
+            </button>
+            <button class="btn-dl" onclick="descargarFoto()">⬇ Solo descargar</button>
+          </div>
+        </div>
+        <div id="ghStatus"></div>
+      </div>
+
+    </div><!-- /modal-body -->
+  </div>
+</div>
+
+<!-- ── CONFIG PANEL ───────────────────────── -->
+<div class="config-panel" id="configPanel" onclick="cerrarConfigOut(event)">
+  <div class="config-box">
+    <div class="config-title">⚙️ Configuración</div>
+
+    <div class="config-section">GitHub · subir fotos automáticamente</div>
+    <input class="cfg-input" id="ghOwner" placeholder="Usuario GitHub" autocomplete="off">
+    <input class="cfg-input" id="ghRepo" placeholder="Nombre del repositorio">
+    <input class="cfg-input" id="ghBranch" placeholder="Branch" value="main">
+    <input class="cfg-input" type="password" id="ghToken" placeholder="Token GitHub (ghp_...)" autocomplete="off">
+    <div class="cfg-hint">
+      <strong>github.com → Settings → Developer settings → Personal access tokens → Fine-grained</strong><br>
+      Permiso necesario: <strong>Contents: Read &amp; Write</strong>
+    </div>
+
+
+    <button class="btn-save-cfg" onclick="guardarConfig()">💾 Guardar configuración</button>
+    <button class="btn-cancel-cfg" onclick="cerrarConfig()">Cancelar</button>
+  </div>
+</div>
+
+<!-- ── CANVAS OFFSCREEN ────────────────────── -->
+<canvas id="fotosOffscreen" width="400" height="400" style="display:none;"></canvas>
+
+<!-- ── TOAST ─────────────────────────────── -->
+<div id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════════
+// CONFIG
+// ═══════════════════════════════════════════
+const API_URL = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
+
+// ═══════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════
+let productos = [];
+let categorias = [];
+let categoriaActual = 'TODOS';
+let sinFotoSet = new Set();
+let productoActual = null;
+
+// ═══════════════════════════════════════════
+// UTILIDADES
+// ═══════════════════════════════════════════
+function simplificarNombre(nombre) {
+  return nombre.toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9 ]/g, "")
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .trim();
+}
+
+function toast(msg, tipo = '') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show ' + tipo;
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.className = ''; }, 2800);
+}
+
+// ═══════════════════════════════════════════
+// CARGA DE PRODUCTOS
+// ═══════════════════════════════════════════
+async function cargarProductos() {
+  try {
+    const r = await fetch(API_URL + '?cache=' + Date.now());
+    const data = await r.json();
+    const arr = data.productos || data;
+    productos = arr
+      .filter(p => p.name && p.price > 0)
+      .map(p => ({
+        id: p.id,
+        name: String(p.name).trim(),
+        price: parseInt(p.price) || 0,
+        category: String(p.category || 'ALMACEN').trim().toUpperCase(),
+        slug: simplificarNombre(String(p.name).trim())
+      }));
+
+    // Extraer categorías únicas
+    const cats = [...new Set(productos.map(p => p.category))].sort();
+    categorias = cats;
+    renderFiltros();
+
+    // Verificar qué productos tienen foto
+    await verificarFotos();
+    renderGrid();
+  } catch(e) {
+    document.getElementById('productsGrid').innerHTML =
+      '<div class="empty-state"><div class="icon">⚠️</div><p>Error al cargar productos.<br>Verificá la conexión.</p></div>';
+    console.error(e);
+  }
+}
+
+// Verificar fotos: intentar cargar todas las imágenes en paralelo
+// Usamos un batch de Image() para detectar las que fallan
+async function verificarFotos() {
+  sinFotoSet = new Set();
+  const baseURL = 'imagenes-productos/';
+  // Verificamos en lotes para no saturar
+  const batch = 20;
+  for (let i = 0; i < productos.length; i += batch) {
+    const lote = productos.slice(i, i + batch);
+    await Promise.all(lote.map(p => new Promise(res => {
+      const img = new Image();
+      img.onload = res;
+      img.onerror = () => { sinFotoSet.add(p.id); res(); };
+      img.src = baseURL + p.slug + '.jpg?t=' + Date.now();
+    })));
+  }
+  updateCounter();
+}
+
+// ═══════════════════════════════════════════
+// FILTROS / CATEGORÍAS
+// ═══════════════════════════════════════════
+function renderFiltros() {
+  const wrap = document.getElementById('filters');
+  // Mantener los primeros dos botones (Todos, Sin foto) y agregar categorías
+  const extras = categorias.map(cat =>
+    `<button class="filter-btn" data-cat="${cat}" onclick="setCategoria('${cat}', this)">${cat}</button>`
+  ).join('');
+  // Reinsertar después de los fijos
+  const fijos = wrap.querySelectorAll('[data-cat="TODOS"], [data-cat="SIN_FOTO"]');
+  // Limpiar extras anteriores
+  wrap.querySelectorAll('.filter-btn:not([data-cat="TODOS"]):not([data-cat="SIN_FOTO"])').forEach(e => e.remove());
+  wrap.insertAdjacentHTML('beforeend', extras);
+}
+
+function setCategoria(cat, btn) {
+  categoriaActual = cat;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderGrid();
+}
+
+// ═══════════════════════════════════════════
+// GRID
+// ═══════════════════════════════════════════
+function filtrarGrid() {
+  renderGrid();
+}
+
+function renderGrid() {
+  const q = document.getElementById('searchInput').value.toUpperCase().trim();
+  const grid = document.getElementById('productsGrid');
+
+  let lista = productos;
+
+  // Filtrar por categoría
+  if (categoriaActual === 'SIN_FOTO') {
+    lista = lista.filter(p => sinFotoSet.has(p.id));
+  } else if (categoriaActual !== 'TODOS') {
+    lista = lista.filter(p => p.category === categoriaActual);
+  }
+
+  // Filtrar por búsqueda
+  if (q.length >= 1) {
+    lista = lista.filter(p => p.name.toUpperCase().includes(q));
+  }
+
+  document.getElementById('countVis').textContent = lista.length;
+
+  if (!lista.length) {
+    grid.innerHTML = '<div class="empty-state"><div class="icon">🔍</div><p>Sin resultados para esta búsqueda.</p></div>';
+    return;
+  }
+
+  // Construir cards con DOM API para evitar problemas de escape de comillas
+  grid.innerHTML = '';
+  lista.forEach(p => {
+    const sinFoto = sinFotoSet.has(p.id);
+
+    const card = document.createElement('div');
+    card.className = 'prod-card' + (sinFoto ? ' sin-foto' : '');
+    card.onclick = () => abrirEditor(p.id);
+
+    const imgWrap = document.createElement('div');
+    imgWrap.className = 'card-img';
+
+    if (sinFoto) {
+      imgWrap.innerHTML = '<div class="no-foto-badge">📷<span>SIN FOTO</span></div>';
+    } else {
+      const img = document.createElement('img');
+      img.src = 'imagenes-productos/' + p.slug + '.jpg';
+      img.className = 'loading';
+      img.loading = 'lazy';
+      img.alt = p.name;
+      img.onload = function() { this.classList.remove('loading'); this.classList.add('loaded'); };
+      img.onerror = function() {
+        imgWrap.innerHTML = '<div class="no-foto-badge">📷<span>SIN FOTO</span></div>';
+        card.classList.add('sin-foto');
+      };
+      imgWrap.appendChild(img);
+    }
+
+    const info = document.createElement('div');
+    info.className = 'card-info';
+    info.innerHTML = '<div class="card-name">' + p.name + '</div><div class="card-slug">' + p.slug + '.jpg</div>';
+
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'copy-btn';
+    copyBtn.textContent = '📋';
+    copyBtn.onclick = e => { e.stopPropagation(); copiarNombreCard(p.name); };
+
+    card.appendChild(imgWrap);
+    card.appendChild(info);
+    card.appendChild(copyBtn);
+    grid.appendChild(card);
+  });
+}
+
+function updateCounter() {
+  document.getElementById('countTotal').textContent = productos.length;
+  document.getElementById('countVis').textContent = productos.length;
+}
+
+// ═══════════════════════════════════════════
+// COPY NOMBRE
+// ═══════════════════════════════════════════
+function copiarNombreCard(nombre) {
+  navigator.clipboard.writeText(nombre).then(() => {
+    toast('📋 Copiado: ' + nombre, 'ok');
+  });
+}
+
+function copiarNombre() {
+  if (!productoActual) return;
+  navigator.clipboard.writeText(productoActual.name).then(() => {
+    const btn = document.getElementById('btnCopyName');
+    btn.textContent = '✅ Copiado';
+    btn.classList.add('copied');
+    toast('📋 Copiado al portapapeles', 'ok');
+    setTimeout(() => { btn.textContent = '📋 Copiar'; btn.classList.remove('copied'); }, 2000);
+  });
+}
+
+// ═══════════════════════════════════════════
+// EDITOR MODAL
+// ═══════════════════════════════════════════
+function abrirEditor(id) {
+  const p = productos.find(x => x.id === id);
+  if (!p) return;
+  productoActual = p;
+
+  // Reset estado
+  ['fotosGrid','fotosPreviewWrap','ghStatus','fotosStatus'].forEach(id => {
+    const el = document.getElementById(id);
+    el.style.display = 'none';
+    if (id === 'ghStatus') el.className = '';
+  });
+  document.getElementById('btnBuscarNet').disabled = false;
+
+  // Poblar info
+  document.getElementById('modalProdName').textContent = p.name;
+  document.getElementById('modalProdSlug').textContent = p.slug + '.jpg';
+  document.getElementById('modalProdImg').src = 'imagenes-productos/' + p.slug + '.jpg';
+  document.getElementById('btnCopyName').textContent = '📋 Copiar';
+  document.getElementById('btnCopyName').classList.remove('copied');
+
+  document.getElementById('overlayEditor').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function cerrarEditor(e) {
+  if (e && !e.target.classList.contains('overlay')) return;
+  _cerrarEditor();
+}
+function cerrarEditorBtn() { _cerrarEditor(); }
+function _cerrarEditor() {
+  document.getElementById('overlayEditor').classList.remove('open');
+  document.body.style.overflow = '';
+  productoActual = null;
+}
+
+// ═══════════════════════════════════════════
+// BUSCAR EN INTERNET (via Apps Script → Google Custom Search)
+// ═══════════════════════════════════════════
+function _limpiarNombreBusqueda(nombre) {
+  return nombre
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\bx\s*(kg|un|lt|lts|gr|g|ml|cc|l)\b/gi, ' ')
+    .replace(/\b\d+([.,]\d+)?\s*(kg|un|lt|lts|gr|g|ml|cc|l)\b/gi, ' ')
+    .replace(/\bx\s*\d+\b/gi, ' ')
+    .replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ ]/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+async function buscarEnInternet() {
+  if (!productoActual) return;
+  const nombre = _limpiarNombreBusqueda(productoActual.name);
+  ['fotosGrid','fotosPreviewWrap','ghStatus'].forEach(id => {
+    document.getElementById(id).style.display = 'none';
+  });
+  const stEl = document.getElementById('fotosStatus');
+  stEl.style.display = 'block';
+  stEl.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;gap:10px;"><div class="spin"></div> Buscando <strong>${nombre}</strong>...</div>`;
+  document.getElementById('btnBuscarNet').disabled = true;
+
+  try {
+    const q = nombre + ' producto supermercado argentina';
+    const url = API_URL + '?action=buscarFotos&q=' + encodeURIComponent(q) + '&t=' + Date.now();
+    const resp = await fetch(url);
+    const data = await resp.json();
+
+    // data.fotos = [{b64, mime, url_original}] — imágenes ya descargadas por el backend
+    if (Array.isArray(data.fotos) && data.fotos.length) {
+      stEl.style.display = 'none';
+      _mostrarGridFotosB64(data.fotos);
+      document.getElementById('btnBuscarNet').disabled = false;
+      return;
+    }
+
+    // fallback: si el backend devuelve solo URLs (modo básico sin proxy)
+    const urls = Array.isArray(data.urls)
+      ? [...new Set(data.urls)].filter(u =>
+          typeof u === 'string' && u.startsWith('http') &&
+          !u.includes('favicon') && !u.includes('logo') && !u.includes('icon')
+        )
+      : [];
+
+    if (!urls.length) {
+      stEl.innerHTML = '⚠️ No encontré imágenes. Probá con otro nombre o subí una foto manualmente.';
+      document.getElementById('btnBuscarNet').disabled = false;
+      return;
+    }
+    stEl.style.display = 'none';
+    _mostrarGridFotos(urls);
+
+  } catch(e) {
+    stEl.innerHTML = '❌ Error al buscar: ' + e.message;
+  }
+  document.getElementById('btnBuscarNet').disabled = false;
+}
+
+// Grid para imágenes en base64 (sin CORS, viene del backend)
+function _mostrarGridFotosB64(fotos) {
+  const grid = document.getElementById('fotosGridItems');
+  grid.innerHTML = '';
+  fotos.forEach(foto => {
+    const src = 'data:' + foto.mime + ';base64,' + foto.b64;
+    const item = document.createElement('div');
+    const img = document.createElement('img');
+    img.src = src;
+    img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;';
+    item.appendChild(img);
+    item.onclick = () => _previsualizarB64(src, item);
+    grid.appendChild(item);
+  });
+  document.getElementById('fotosGrid').style.display = 'block';
+}
+
+// Previsualizar imagen base64 directamente en canvas (sin CORS)
+function _previsualizarB64(src, cardEl) {
+  document.querySelectorAll('#fotosGridItems > div').forEach(c => c.classList.remove('selected'));
+  if (cardEl) cardEl.classList.add('selected');
+  const img = new Image();
+  img.onload = () => {
+    _dibujarEnCanvas(img, document.getElementById('fotosCanvas'));
+    _dibujarEnCanvas(img, document.getElementById('fotosOffscreen'));
+    document.getElementById('fotosFilenameLabel').textContent = productoActual.slug + '.jpg';
+    document.getElementById('fotosPreviewWrap').style.display = 'block';
+    document.getElementById('ghStatus').style.display = 'none';
+    document.getElementById('ghStatus').className = '';
+    document.getElementById('fotosPreviewWrap').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  };
+  img.src = src;
+}
+
+// _extraerUrlsFotos eliminada — la búsqueda ahora usa Apps Script
+
+function _mostrarGridFotos(urls) {
+  const grid = document.getElementById('fotosGridItems');
+  grid.innerHTML = '';
+  urls.forEach(url => {
+    const item = document.createElement('div');
+    item.innerHTML = `<img src="${url}" crossorigin="anonymous" style="width:100%;height:100%;object-fit:cover;display:block;" onerror="this.parentElement.innerHTML='<div style=\\'display:flex;align-items:center;justify-content:center;height:100%;color:#555;font-size:1.5rem;\\'>❌</div>'">`;
+    item.onclick = (u => () => _previsualizar(u, item))(url);
+    grid.appendChild(item);
+  });
+  document.getElementById('fotosGrid').style.display = 'block';
+}
+
+// ═══════════════════════════════════════════
+// CANVAS / PREVIEW
+// ═══════════════════════════════════════════
+function _dibujarEnCanvas(img, canvas) {
+  const ctx = canvas.getContext('2d'), S = 400;
+  const iw = img.naturalWidth, ih = img.naturalHeight;
+  const scale = Math.max(S/iw, S/ih), sw = S/scale, sh = S/scale;
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,S,S);
+  ctx.drawImage(img, (iw-sw)/2, (ih-sh)/2, sw, sh, 0, 0, S, S);
+  ctx.save();
+  ctx.translate(S/2, S/2); ctx.rotate(-30 * Math.PI/180);
+  ctx.font = 'bold 28px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(30,30,30,0.18)';
+  ctx.fillText('ALMACÉN COPIHUE', 0, 0);
+  ctx.restore();
+}
+
+function _previsualizar(url, cardEl) {
+  document.querySelectorAll('#fotosGridItems > div').forEach(c => c.classList.remove('selected'));
+  if (cardEl) cardEl.classList.add('selected');
+  const img = new Image(); img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    _dibujarEnCanvas(img, document.getElementById('fotosCanvas'));
+    _dibujarEnCanvas(img, document.getElementById('fotosOffscreen'));
+    document.getElementById('fotosFilenameLabel').textContent = productoActual.slug + '.jpg';
+    document.getElementById('fotosPreviewWrap').style.display = 'block';
+    document.getElementById('ghStatus').style.display = 'none';
+    document.getElementById('ghStatus').className = '';
+    document.getElementById('fotosPreviewWrap').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  };
+  img.onerror = () => toast('❌ No se pudo cargar (CORS). Probá otra.', 'error');
+  img.src = url;
+}
+
+function cargarDesdeArchivo(event) {
+  const file = event.target.files[0]; if (!file || !productoActual) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      _dibujarEnCanvas(img, document.getElementById('fotosCanvas'));
+      _dibujarEnCanvas(img, document.getElementById('fotosOffscreen'));
+      document.getElementById('fotosFilenameLabel').textContent = productoActual.slug + '.jpg';
+      document.getElementById('fotosGrid').style.display = 'none';
+      document.getElementById('fotosPreviewWrap').style.display = 'block';
+      document.getElementById('ghStatus').style.display = 'none';
+      document.getElementById('ghStatus').className = '';
+      document.getElementById('fotosPreviewWrap').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file); event.target.value = '';
+}
+
+function descargarFoto() {
+  if (!productoActual) return;
+  document.getElementById('fotosOffscreen').toBlob(blob => {
+    if (!blob) { document.getElementById('fotosCanvas').toBlob(b => _triggerDl(b), 'image/jpeg', 0.93); }
+    else { _triggerDl(blob); }
+  }, 'image/jpeg', 0.93);
+}
+function _triggerDl(blob) {
+  if (!blob) { toast('❌ No se pudo generar', 'error'); return; }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = productoActual.slug + '.jpg';
+  a.click();
+  toast('✅ Descargado: ' + productoActual.slug + '.jpg', 'ok');
+}
+
+// ═══════════════════════════════════════════
+// GITHUB
+// ═══════════════════════════════════════════
+function _ghCfg() {
+  try { return JSON.parse(localStorage.getItem('copihue_gh_config')); } catch(e) { return null; }
+}
+
+function _setGHStatus(msg, tipo) {
+  const el = document.getElementById('ghStatus');
+  el.style.display = 'block';
+  el.className = tipo;
+  el.innerHTML = msg;
+}
+
+async function publicarEnGitHub() {
+  if (!productoActual) return;
+  const cfg = _ghCfg();
+  if (!cfg || !cfg.token) { abrirConfig(); return; }
+  const slug = productoActual.slug, fname = slug + '.jpg', path = 'imagenes-productos/' + fname;
+  const b64 = (document.getElementById('fotosOffscreen').toDataURL('image/jpeg', 0.93)
+             || document.getElementById('fotosCanvas').toDataURL('image/jpeg', 0.93)).split(',')[1];
+  const btn = document.getElementById('btnPublicarGH'); btn.disabled = true;
+  _setGHStatus('<div style="display:flex;align-items:center;gap:8px;"><div class="spin"></div> Verificando repo...</div>', 'loading');
+  const apiBase = `https://api.github.com/repos/${cfg.owner}/${cfg.repo}/contents/${path}`;
+  const hdrs = { 'Authorization': 'token ' + cfg.token, 'Content-Type': 'application/json', 'Accept': 'application/vnd.github+json' };
+  try {
+    let sha = null;
+    try {
+      const chk = await fetch(apiBase + '?ref=' + (cfg.branch||'main'), { headers: hdrs });
+      if (chk.ok) { sha = (await chk.json()).sha; }
+    } catch(e) {}
+    const body = { message: 'Foto: ' + fname + ' · Copihue POS', content: b64, branch: cfg.branch || 'main' };
+    if (sha) body.sha = sha;
+    _setGHStatus('<div style="display:flex;align-items:center;gap:8px;"><div class="spin"></div> Subiendo imagen...</div>', 'loading');
+    const put = await fetch(apiBase, { method: 'PUT', headers: hdrs, body: JSON.stringify(body) });
+    if (put.ok) {
+      const res = await put.json();
+      const commitUrl = res.commit?.html_url || '#';
+      _setGHStatus(`✅ <strong>${fname}</strong> publicado.<br><small>Vercel redeploya en ~1 min. <a href="${commitUrl}" target="_blank" style="color:var(--ok);">Ver commit ↗</a></small>`, 'ok');
+      toast('✅ Publicado: ' + fname, 'ok');
+      // Actualizar imagen en el grid
+      const card = [...document.querySelectorAll('.prod-card')].find(c => {
+        const slug_div = c.querySelector('.card-slug');
+        return slug_div && slug_div.textContent === fname;
+      });
+      if (card) {
+        card.classList.remove('sin-foto');
+        const imgWrap = card.querySelector('.card-img');
+        if (imgWrap) {
+          imgWrap.innerHTML = `<img src="imagenes-productos/${slug}.jpg?t=${Date.now()}" class="loaded" style="width:100%;height:100%;object-fit:cover;display:block;">`;
+        }
+      }
+      sinFotoSet.delete(productoActual.id);
+    } else {
+      const err = await put.json();
+      if (put.status === 401) _setGHStatus('❌ Token inválido. <button onclick="abrirConfig()" style="background:none;border:none;color:var(--danger);font-weight:700;cursor:pointer;text-decoration:underline;">Actualizar ↗</button>', 'error');
+      else if (put.status === 404) _setGHStatus('❌ Repo no encontrado. <button onclick="abrirConfig()" style="background:none;border:none;color:var(--danger);font-weight:700;cursor:pointer;text-decoration:underline;">Cambiar config ↗</button>', 'error');
+      else _setGHStatus('❌ Error: ' + (err.message || put.statusText), 'error');
+    }
+  } catch(e) { _setGHStatus('❌ Error de red: ' + e.message, 'error'); }
+  btn.disabled = false;
+}
+
+// ═══════════════════════════════════════════
+// CONFIG PANEL
+// ═══════════════════════════════════════════
+function abrirConfig() {
+  try {
+    const cp = document.getElementById('configPanel');
+    cp.style.cssText = 'display:flex !important; align-items:center; justify-content:center; padding:20px;';
+    const cfg = _ghCfg();
+    if (cfg) {
+      document.getElementById('ghOwner').value = cfg.owner || '';
+      document.getElementById('ghRepo').value = cfg.repo || '';
+      document.getElementById('ghBranch').value = cfg.branch || 'main';
+      document.getElementById('ghToken').value = cfg.token || '';
+    }
+  } catch(e) { alert('Error al abrir config: ' + e.message); }
+}
+function cerrarConfig() { document.getElementById('configPanel').style.display = 'none'; }
+function cerrarConfigOut(e) { if (e.target === document.getElementById('configPanel')) cerrarConfig(); }
+function guardarConfig() {
+  const owner = document.getElementById('ghOwner').value.trim();
+  const repo = document.getElementById('ghRepo').value.trim();
+  const branch = document.getElementById('ghBranch').value.trim() || 'main';
+  const token = document.getElementById('ghToken').value.trim();
+  if (!owner || !repo || !token) { toast('⚠️ Completá usuario, repo y token', 'error'); return; }
+  localStorage.setItem('copihue_gh_config', JSON.stringify({ owner, repo, branch, token }));
+
+  cerrarConfig();
+  toast('✅ Configuración guardada', 'ok');
+}
+
+// ═══════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════
+cargarProductos();
+</script>
+</body>
+</html>
