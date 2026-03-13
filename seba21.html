@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v146</title>
+    <title>Copihue — POS v147</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2274,11 +2274,13 @@ function agregarProducto(id) {
             return;
         }
         existente.qty++;
-        // Recalcular precio con oferta NxM si aplica (cambia al agregar más unidades)
-        if (existente.ofertaTipo) {
-            const o = calcularOfertaPOS(producto, existente.qty);
-            existente.price = o.precioUnitario;
-        }
+        // Recalcular precio con oferta si aplica (NxM cambia al agregar más unidades)
+        const o = calcularOfertaPOS(producto, existente.qty);
+        existente.price          = o.precioUnitario;
+        existente.precioOriginal = o.tieneOferta ? producto.price : 0;
+        existente.precioModificado = o.tieneOferta;
+        existente.ofertaEtiqueta = o.etiqueta || null;
+        existente.ofertaTipo     = o.tipoOferta || null;
     } else {
         const oferta = calcularOfertaPOS(producto, 1);
         ventaActual.push({
@@ -2485,10 +2487,12 @@ function renderVenta() {
         const imgSrc = `imagenes-productos/${simplificarNombre(item.name)}.jpg`;
 
         // ── Calcular precios y ahorro ──────────────────────────────
-        const tieneOferta = item.precioModificado && item.precioOriginal > 0;
-        const precioUnit  = item.price;
-        const subtotal    = Math.round(precioUnit * item.qty);
-        const ahorro      = tieneOferta ? Math.round((item.precioOriginal - precioUnit) * item.qty) : 0;
+        const tieneOferta  = item.precioModificado && item.precioOriginal > 0;
+        const precioUnit   = item.price;
+        // Para NxM el subtotal real es price*qty (price ya es el promedio ponderado)
+        const subtotal     = Math.round(precioUnit * item.qty);
+        const ahorroUnit   = tieneOferta ? (item.precioOriginal - precioUnit) : 0;
+        const ahorroTotal  = tieneOferta ? Math.round(item.precioOriginal * item.qty - subtotal) : 0;
 
         // ── Texto de fórmula según tipo ────────────────────────────
         let formulaHTML = '';
@@ -2522,7 +2526,7 @@ function renderVenta() {
             ? `<div style="flex-shrink:0;text-align:right;min-width:64px;">
                 <span class="item-precio-antes">$${item.precioOriginal.toLocaleString('es-AR')}</span>
                 <span class="item-precio-con-oferta" style="color:${colOferta||'var(--verde-oscuro)'}">$${precioUnit.toLocaleString('es-AR')}</span>
-                <span class="item-ahorro-badge">−$${(item.precioOriginal - precioUnit).toLocaleString('es-AR')}</span>
+                <span class="item-ahorro-badge">−$${ahorroTotal.toLocaleString('es-AR')}</span>
               </div>`
             : `<span class="item-precio-editable ${item.precioModificado ? 'modificado' : ''}"
                      onclick="editarPrecioCarrito('${item.id}')"
@@ -5076,40 +5080,24 @@ const _poolIdsUltimas    = new Map(); // id → diasParaVencer
 const _poolCervecero     = new Map(); // id → { descuento, precioPromo }
 
 // ========== FALLBACK LOCAL DE POOLS (cuando getOfertas falla o devuelve vacío) ==========
-// Cubre relámpago, destacadas y especiales. Últimas unidades queda excluido por ahora.
 function _construirPoolsLocalFallback() {
     if (!productos || productos.length === 0) return;
     console.warn('⚠️ getOfertas vacío — usando fallback local para construir pools');
-
     _poolIdsRelampago.clear();
     _poolIdsDestacadas.clear();
     _poolIdsEspeciales.clear();
-    // _poolIdsUltimas: NO se toca en fallback local
-
     productos.forEach(prod => {
         if (!prod || prod.stock <= 0) return;
-
-        // RELÁMPAGO: tiene valor de relampago (número > 0 o string reconocido)
         const rel = prod.relampago;
         if (rel && rel !== '0' && rel !== 0) {
             const key = String(rel);
-            const enSistema = !!OFERTAS_RELAMPAGO_SISTEMA[key];
-            const matchNxM  = key.match(/(\d+)x(\d+)/i);
-            if (enSistema || matchNxM) { _poolIdsRelampago.add(prod.id); return; }
+            if (OFERTAS_RELAMPAGO_SISTEMA[key] || key.match(/(\d+)x(\d+)/i)) {
+                _poolIdsRelampago.add(prod.id); return;
+            }
         }
-
-        // DESTACADAS: tiene descuento destacada > 0
-        if (prod.destacada && prod.destacada > 0) {
-            _poolIdsDestacadas.add(prod.id);
-            return;
-        }
-
-        // ESPECIALES: tiene campo especial = 1
-        if (prod.especial && prod.especial > 0) {
-            _poolIdsEspeciales.add(prod.id);
-        }
+        if (prod.destacada && prod.destacada > 0) { _poolIdsDestacadas.add(prod.id); return; }
+        if (prod.especial  && prod.especial  > 0) { _poolIdsEspeciales.add(prod.id); }
     });
-
     console.log(`🔧 Fallback local: ${_poolIdsRelampago.size} rel · ${_poolIdsDestacadas.size} dest · ${_poolIdsEspeciales.size} esp`);
 }
 
@@ -5126,7 +5114,6 @@ async function cargarPoolsOfertas() {
         (data.destacadasActivas || []).forEach(p => _poolIdsDestacadas.add(p.id));
         (data.especialesActivas || []).forEach(p => _poolIdsEspeciales.add(p.id));
         (data.ultimasUnidades   || []).forEach(p => _poolIdsUltimas.set(p.id, p.diasParaVencer !== undefined ? p.diasParaVencer : null));
-        // Fallback si el backend devolvió relámpago+destacadas+especiales todos vacíos
         const poolsVacios = _poolIdsRelampago.size === 0 && _poolIdsDestacadas.size === 0 && _poolIdsEspeciales.size === 0;
         if (poolsVacios) { _construirPoolsLocalFallback(); return; }
         console.log(`✅ Pools POS: ${_poolIdsRelampago.size} rel · ${_poolIdsDestacadas.size} dest · ${_poolIdsEspeciales.size} esp · ${_poolIdsUltimas.size} ult`);
@@ -5469,7 +5456,7 @@ function toggleCervecero() {
 // Sincronizar badge de versión desde el <title>
 (function(){
     const el = document.getElementById('versionTag');
-    if (el) el.textContent = 'v146';
+    if (el) el.textContent = 'v147';
 })();
 
 // ── WakeLock: mantener pantalla encendida mientras la app está activa ──
