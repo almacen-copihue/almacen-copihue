@@ -5075,11 +5075,46 @@ const _poolIdsEspeciales = new Set();
 const _poolIdsUltimas    = new Map(); // id → diasParaVencer
 const _poolCervecero     = new Map(); // id → { descuento, precioPromo }
 
+// ========== FALLBACK LOCAL DE POOLS (cuando getOfertas falla o devuelve vacío) ==========
+// Cubre relámpago, destacadas y especiales. Últimas unidades queda excluido por ahora.
+function _construirPoolsLocalFallback() {
+    if (!productos || productos.length === 0) return;
+    console.warn('⚠️ getOfertas vacío — usando fallback local para construir pools');
+
+    _poolIdsRelampago.clear();
+    _poolIdsDestacadas.clear();
+    _poolIdsEspeciales.clear();
+    // _poolIdsUltimas: NO se toca en fallback local
+
+    productos.forEach(prod => {
+        if (!prod || prod.stock <= 0) return;
+
+        // RELÁMPAGO: tiene código relampago > 0
+        if (prod.relampago && prod.relampago > 0) {
+            _poolIdsRelampago.add(prod.id);
+            return;
+        }
+
+        // DESTACADAS: tiene descuento destacada > 0
+        if (prod.destacada && prod.destacada > 0) {
+            _poolIdsDestacadas.add(prod.id);
+            return;
+        }
+
+        // ESPECIALES: tiene campo especial = 1
+        if (prod.especial && prod.especial > 0) {
+            _poolIdsEspeciales.add(prod.id);
+        }
+    });
+
+    console.log(`🔧 Fallback local: ${_poolIdsRelampago.size} rel · ${_poolIdsDestacadas.size} dest · ${_poolIdsEspeciales.size} esp`);
+}
+
 async function cargarPoolsOfertas() {
     try {
         const r = await fetch(API_URL + '?action=getOfertas&t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(8000) });
         const data = await r.json();
-        if (!data.success) return;
+        if (!data.success) { _construirPoolsLocalFallback(); return; }
         _poolIdsRelampago.clear();
         _poolIdsDestacadas.clear();
         _poolIdsEspeciales.clear();
@@ -5088,9 +5123,13 @@ async function cargarPoolsOfertas() {
         (data.destacadasActivas || []).forEach(p => _poolIdsDestacadas.add(p.id));
         (data.especialesActivas || []).forEach(p => _poolIdsEspeciales.add(p.id));
         (data.ultimasUnidades   || []).forEach(p => _poolIdsUltimas.set(p.id, p.diasParaVencer !== undefined ? p.diasParaVencer : null));
+        // Fallback si el backend devolvió relámpago+destacadas+especiales todos vacíos
+        const poolsVacios = _poolIdsRelampago.size === 0 && _poolIdsDestacadas.size === 0 && _poolIdsEspeciales.size === 0;
+        if (poolsVacios) { _construirPoolsLocalFallback(); return; }
         console.log(`✅ Pools POS: ${_poolIdsRelampago.size} rel · ${_poolIdsDestacadas.size} dest · ${_poolIdsEspeciales.size} esp · ${_poolIdsUltimas.size} ult`);
     } catch(e) {
         console.warn('⚠️ No se pudieron cargar pools de ofertas:', e.message);
+        _construirPoolsLocalFallback();
     }
     // Cargar pool Jueves Cervecero siempre (el toggle decide si se aplica)
     try {
