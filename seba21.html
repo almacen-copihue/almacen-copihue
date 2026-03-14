@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v153</title>
+    <title>Copihue — POS v154</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2976,11 +2976,18 @@ function rankScore(id) {
     return _rankingVentas[String(id)] || 0;
 }
 
+function aplicarLimiteDestacadas() {
+    const arr = Array.from(_poolIdsDestacadas);
+    _destacadasFiltradas = new Set(
+        arr.length <= _limiteDestacadas ? arr : arr.slice(0, _limiteDestacadas)
+    );
+}
+
 function _tieneOfertaActiva(p) {
     if (_esCerveceroActivo() && _poolCervecero && _poolCervecero.has(p.id)) return true;
     if (p.relampago && _toggleEstado.relampago !== false && _poolIdsRelampago.has(p.id)) return true;
     if (_toggleEstado.ultimas !== false && _poolIdsUltimas.has(p.id)) return true;
-    if (p.destacada > 0 && _toggleEstado.destacadas !== false && _poolIdsDestacadas.has(p.id)) return true;
+    if (p.destacada > 0 && _toggleEstado.destacadas !== false && _destacadasFiltradas.has(p.id)) return true;
     if (p.especial  > 0 && _toggleEstado.especiales !== false && _poolIdsEspeciales.has(p.id)) return true;
     return false;
 }
@@ -3010,6 +3017,7 @@ function reporteOfertasPOS(origen = 'manual') {
     console.log('📦 Pools:', {
         relampago:  _poolIdsRelampago?.size  || 0,
         destacadas: _poolIdsDestacadas?.size || 0,
+        destacadasFiltradas: _destacadasFiltradas?.size || 0,
         especiales: _poolIdsEspeciales?.size || 0,
         ultimas:    _poolIdsUltimas?.size    || 0
     });
@@ -3023,7 +3031,7 @@ function reporteOfertasPOS(origen = 'manual') {
     };
     console.log('🔍 Preview pools:');
     console.log('  ⚡ REL:',  previewPool(_poolIdsRelampago));
-    console.log('  🔥 DEST:', previewPool(_poolIdsDestacadas));
+    console.log('  🔥 DEST:', previewPool(_destacadasFiltradas));
     console.log('  ⭐ ESP:',  previewPool(_poolIdsEspeciales));
     console.log('  🏷️ ULT:',  previewPool(_poolIdsUltimas));
     if (!productos || productos.length === 0) {
@@ -3038,7 +3046,7 @@ function reporteOfertasPOS(origen = 'manual') {
             activos.relampago.push({ id: p.id, nombre: p.name, precio: p.price, rel: p.relampago });
         } else if (_toggleEstado?.ultimas !== false && _poolIdsUltimas?.has(p.id)) {
             activos.ultimas.push({ id: p.id, nombre: p.name, precio: p.price });
-        } else if (p.destacada > 0 && _toggleEstado?.destacadas !== false && _poolIdsDestacadas?.has(p.id)) {
+        } else if (p.destacada > 0 && _toggleEstado?.destacadas !== false && _destacadasFiltradas?.has(p.id)) {
             activos.destacadas.push({ id: p.id, nombre: p.name, precio: p.price, pct: p.destacada });
         } else if (p.especial > 0 && _toggleEstado?.especiales !== false && _poolIdsEspeciales?.has(p.id)) {
             activos.especiales.push({ id: p.id, nombre: p.name, precio: p.price });
@@ -5118,6 +5126,8 @@ const _poolIdsDestacadas = new Set();
 const _poolIdsEspeciales = new Set();
 const _poolIdsUltimas    = new Map(); // id → diasParaVencer
 const _poolCervecero     = new Map(); // id → { descuento, precioPromo }
+let _limiteDestacadas    = 9;
+let _destacadasFiltradas = new Set();
 
 // ========== FALLBACK LOCAL DE POOLS ==========
 function _construirPoolsLocalFallback() {
@@ -5134,7 +5144,8 @@ function _construirPoolsLocalFallback() {
         if (prod.destacada && prod.destacada > 0) { _poolIdsDestacadas.add(prod.id); return; }
         if (prod.especial  && prod.especial  > 0) { _poolIdsEspeciales.add(prod.id); }
     });
-    console.log(`🔧 Fallback local: ${_poolIdsRelampago.size} rel · ${_poolIdsDestacadas.size} dest · ${_poolIdsEspeciales.size} esp`);
+    aplicarLimiteDestacadas();
+    console.log(`🔧 Fallback local: ${_poolIdsRelampago.size} rel · ${_destacadasFiltradas.size} dest · ${_poolIdsEspeciales.size} esp`);
 }
 
 async function cargarPoolsOfertas() {
@@ -5149,12 +5160,13 @@ async function cargarPoolsOfertas() {
         (data.ultimasUnidades   || []).forEach(p => _poolIdsUltimas.set(Number(p.id), p.diasParaVencer !== undefined ? p.diasParaVencer : null));
         const poolsVacios = _poolIdsRelampago.size === 0 && _poolIdsDestacadas.size === 0 && _poolIdsEspeciales.size === 0;
         if (poolsVacios) _construirPoolsLocalFallback();
-        console.log(`✅ Pools POS: ${_poolIdsRelampago.size} rel · ${_poolIdsDestacadas.size} dest · ${_poolIdsEspeciales.size} esp · ${_poolIdsUltimas.size} ult`);
-        reporteOfertasPOS('post-pools');  // ← inmediatamente después de llenar pools
+        aplicarLimiteDestacadas();
+        console.log(`✅ Pools POS: ${_poolIdsRelampago.size} rel · ${_destacadasFiltradas.size} dest · ${_poolIdsEspeciales.size} esp · ${_poolIdsUltimas.size} ult`);
+        reporteOfertasPOS('post-pools');
     } catch(e) {
         console.warn('⚠️ No se pudieron cargar pools de ofertas:', e.message);
         _construirPoolsLocalFallback();
-        reporteOfertasPOS('post-pools');  // ← también en catch
+        reporteOfertasPOS('post-pools');
     }
     // Cargar pool Jueves Cervecero siempre (el toggle decide si se aplica)
     try {
@@ -5279,7 +5291,7 @@ function calcularOfertaPOS(producto, qty) {
         r.tipoOferta  = 'ultimas';
     }
     // 2. DESTACADAS — toggle activo Y en pool
-    else if (producto.destacada > 0 && _toggleEstado.destacadas !== false && _poolIdsDestacadas.has(producto.id)) {
+    else if (producto.destacada > 0 && _toggleEstado.destacadas !== false && _destacadasFiltradas.has(producto.id)) {
         r.precioUnitario = Math.round(producto.price * (1 - producto.destacada / 100));
         r.precioTotal    = r.precioUnitario * qty;
         r.etiqueta       = `🔥 -${producto.destacada}% OFF`;
@@ -5316,7 +5328,7 @@ function badgeOfertaPOS(producto) {
     }
     if (_toggleEstado.ultimas !== false && _poolIdsUltimas.has(producto.id))
         return `<span style="background:#b71c1c;color:#fff;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">🏷️ ÚLTIMAS</span>`;
-    if (producto.destacada > 0 && _toggleEstado.destacadas !== false && _poolIdsDestacadas.has(producto.id))
+    if (producto.destacada > 0 && _toggleEstado.destacadas !== false && _destacadasFiltradas.has(producto.id))
         return `<span style="background:#ff6f00;color:#fff;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">🔥 -${producto.destacada}%</span>`;
     if (producto.especial > 0 && _toggleEstado.especiales !== false && _poolIdsEspeciales.has(producto.id))
         return `<span style="background:#00bcd4;color:#fff;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">⭐ -10%</span>`;
@@ -5487,7 +5499,7 @@ function toggleCervecero() {
 // Sincronizar badge de versión desde el <title>
 (function(){
     const el = document.getElementById('versionTag');
-    if (el) el.textContent = 'v153';
+    if (el) el.textContent = 'v154';
 })();
 
 // ── WakeLock: mantener pantalla encendida mientras la app está activa ──
