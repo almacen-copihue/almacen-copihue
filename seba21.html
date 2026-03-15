@@ -2227,6 +2227,13 @@ function _refreshResultadosBadges(idActualizado) {
     if (contenedor) contenedor.scrollTop = scrollPos;
 }
 
+// ── Debounce global para guardar carrito — evita JSON.stringify sincrónico en cada tap ──
+let _saveCartTimer = null;
+function _guardarCarritoDiferido() {
+    clearTimeout(_saveCartTimer);
+    _saveCartTimer = setTimeout(guardarCarritoPendiente, 300);
+}
+
 function agregarProducto(id) {
     const producto = productos.find(p => p.id === id);
     if (!producto || producto.stock === 0) return;
@@ -2274,10 +2281,9 @@ function agregarProducto(id) {
         if (oferta.tieneOferta) mostrarToast(`${oferta.etiqueta} — ${producto.name.substring(0,25)}`, 'naranja');
     }
 
-    renderVenta();
-    guardarCarritoPendiente();
-    // Mantener búsqueda activa — el botón ✕ rojo cierra la búsqueda
-    _refreshResultadosBadges();
+    renderVenta(true);              // true = ligero: omite renderResultados interno
+    _guardarCarritoDiferido();      // diferido 300ms, no bloquea el tap
+    _refreshResultadosBadges(id);  // quirúrgico: solo el card tocado
 }
 
 // ===== SELECTOR DE CANTIDAD ANTES DE AGREGAR =====
@@ -2397,7 +2403,7 @@ function limpiarVenta() {
 }
 
 // ========== RENDER VENTA ==========
-function renderVenta() {
+function renderVenta(ligero = false) {
     const contenedor = document.getElementById('itemsVenta');
     const btnConfirmar = document.getElementById('btnConfirmar');
     const totalEl = document.getElementById('totalMonto');
@@ -2440,10 +2446,12 @@ function renderVenta() {
         actualizarBarraMinimizada();
     }
 
-    const term = document.getElementById('buscador').value.trim();
-    const listaResultados = term.length >= 1 ? buscarProductos(term)
-        : _sortProductos(productos, new Set(ventaActual.map(i => i.esPeso ? i.idOriginal : i.id)));
-    renderResultados(listaResultados, term);
+    if (!ligero) {
+        const term = document.getElementById('buscador').value.trim();
+        const listaResultados = term.length >= 1 ? buscarProductos(term)
+            : _sortProductos(productos, new Set(ventaActual.map(i => i.esPeso ? i.idOriginal : i.id)));
+        renderResultados(listaResultados, term);
+    }
 
     const esDesktopPanel = window.innerWidth >= 768;
 
@@ -5572,18 +5580,10 @@ function cerrarBuscadorFlotante() {
 // ===== SWIPE EN CARDS DE PRODUCTO =====
 // Swipe derecha → +1  |  Swipe izquierda → quitar del carrito
 (function initSwipeProductos() {
-    if (!MOBILE) return;
-    let sx = 0, sy = 0, startEl = null, didSwipe = false, dirLocked = false;
-    const UMBRAL      = 35;  // px mínimo para activar acción
-    const LOCK_UMBRAL = 10;  // px para decidir dirección
-    const RATIO       = 1.2; // horizontal debe superar 1.2× vertical
-
-    // Debounce para guardar carrito — no bloquea el hilo durante el gesto
-    let _saveTimer = null;
-    function _guardarDiferido() {
-        clearTimeout(_saveTimer);
-        _saveTimer = setTimeout(guardarCarritoPendiente, 300);
-    }
+    if (!MOBILE) return; // swipe solo en mobile
+    let sx = 0, sy = 0, startEl = null, didSwipe = false;
+    const UMBRAL = 35; // px mínimo para activar
+    const RATIO  = 1.2; // horizontal debe superar 1.2× vertical
 
     document.addEventListener('touchstart', function(e) {
         const btn = e.target.closest('[data-prod-id]');
@@ -5592,26 +5592,15 @@ function cerrarBuscadorFlotante() {
         sy = e.touches[0].clientY;
         startEl = btn;
         didSwipe = false;
-        dirLocked = false;
-        btn.style.willChange = 'transform'; // hint al browser
     }, { passive: true });
 
     document.addEventListener('touchmove', function(e) {
-        if (!startEl || dirLocked) return;
-        const dx = Math.abs(e.touches[0].clientX - sx);
-        const dy = Math.abs(e.touches[0].clientY - sy);
-
-        // Esperar mínimo de movimiento antes de decidir dirección
-        if (dx < LOCK_UMBRAL && dy < LOCK_UMBRAL) return;
-
-        if (dx > dy * RATIO) {
-            // Gesto horizontal confirmado → bloquear dirección y marcar swipe
+        if (!startEl) return;
+        const dx = e.touches[0].clientX - sx;
+        const dy = e.touches[0].clientY - sy;
+        // Si va más horizontal que vertical → marcar como swipe (bloquea scroll)
+        if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * RATIO) {
             didSwipe = true;
-            dirLocked = true;
-        } else if (dy > dx) {
-            // Gesto vertical confirmado → cancelar swipe, dejar scroll libre
-            startEl = null;
-            dirLocked = true;
         }
     }, { passive: true });
 
@@ -5621,36 +5610,34 @@ function cerrarBuscadorFlotante() {
         const dx = e.changedTouches[0].clientX - sx;
         const dy = e.changedTouches[0].clientY - sy;
         startEl = null;
-        btn.style.willChange = '';
 
         if (!didSwipe || Math.abs(dx) < UMBRAL) return;
         if (Math.abs(dx) < Math.abs(dy) * RATIO) return;
-        if (dx > 0) return; // solo swipe izquierda
 
-        // Feedback visual liviano con rAF
-        requestAnimationFrame(() => {
-            btn.style.transition = 'transform 0.15s';
-            btn.style.transform = 'translateX(-12px)';
-            setTimeout(() => { btn.style.transform = ''; btn.style.transition = ''; }, 180);
-        });
+        // Solo swipe izquierda — derecha reservado
+        if (dx > 0) return;
+
+        // Feedback visual
+        btn.style.transition = 'transform 0.15s';
+        btn.style.transform = 'translateX(-12px)';
+        setTimeout(() => { btn.style.transform = ''; btn.style.transition = ''; }, 200);
 
         const id = parseInt(btn.dataset.prodId);
-
-        // Producto por peso: quitar última entrada
-        const idxPeso = ventaActual.findLastIndex
-            ? ventaActual.findLastIndex(i => i.esPeso && i.idOriginal === id)
-            : ventaActual.length - 1 - [...ventaActual].reverse().findIndex(i => i.esPeso && i.idOriginal === id);
-
+        // Para productos por peso: quitar la última entrada de ese producto
+        const idxPeso = ventaActual.findLastIndex ? ventaActual.findLastIndex(i => i.esPeso && i.idOriginal === id)
+                      : [...ventaActual].reverse().findIndex(i => i.esPeso && i.idOriginal === id);
         if (idxPeso !== -1 && idxPeso >= 0) {
-            const item = ventaActual[idxPeso];
+            const realIdx = ventaActual.findLastIndex
+                ? ventaActual.findLastIndex(i => i.esPeso && i.idOriginal === id)
+                : ventaActual.length - 1 - [...ventaActual].reverse().findIndex(i => i.esPeso && i.idOriginal === id);
+            const item = ventaActual[realIdx];
             mostrarToast(`🗑 Quitado ${item.gramos}gr — ${item.name.substring(0,20)}`, 'rojo');
-            ventaActual.splice(idxPeso, 1);
+            ventaActual.splice(realIdx, 1);
             renderVenta();
-            _guardarDiferido();            // ← diferido 300ms, no bloquea
-            _refreshResultadosBadges(id); // ← quirúrgico: solo el card tocado
+            guardarCarritoPendiente();
+            _refreshResultadosBadges();
             return;
         }
-
         const idx = ventaActual.findIndex(i => i.id === id);
         if (idx !== -1) {
             if (ventaActual[idx].qty > 1) {
@@ -5661,8 +5648,8 @@ function cerrarBuscadorFlotante() {
                 mostrarToast('🗑 Quitado', 'rojo');
             }
             renderVenta();
-            _guardarDiferido();            // ← diferido 300ms, no bloquea
-            _refreshResultadosBadges(id); // ← quirúrgico: solo el card tocado
+            guardarCarritoPendiente();
+            _refreshResultadosBadges();
         } else {
             mostrarToast('No está en el carrito', '');
         }
