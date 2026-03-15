@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v162</title>
+    <title>Copihue — POS v163</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2166,64 +2166,58 @@ function esPorPeso(producto) {
            (cat.includes('FRUTA') || cat.includes('VERDURA')) && nombre.includes('KG');
 }
 
-// ── syncProductoUI(id): sincroniza el card del scroll con ventaActual ──
-const _syncLock = new Set();
-function syncProductoUI(id) {
-    if (id == null) { _refreshResultadosBadges(); return; }
-    if (_syncLock.has(id)) return;
-    _syncLock.add(id);
-    requestAnimationFrame(() => {
-        _syncLock.delete(id);
-        const item   = ventaActual.find(i => (i.esPeso ? i.idOriginal : i.id) === id);
-        const qty    = item ? item.qty : 0;
-        const gramos = item && item.esPeso ? item.gramos : 0;
-        const enCart = qty > 0;
-        const card   = document.querySelector(`.resultado-item[data-prod-id="${id}"]`);
-        if (!card) return;
-        const imgWrap = card.querySelector('div[style*="position:relative"]');
-        if (imgWrap) {
-            let badge = imgWrap.querySelector('[data-badge]');
-            if (enCart) {
-                const label = gramos ? `${gramos}g` : qty;
-                if (!badge) {
-                    badge = document.createElement('div');
-                    badge.dataset.badge = '1';
-                    badge.style.cssText = `position:absolute;top:-5px;left:-5px;background:#e53935;color:white;border-radius:10px;width:${gramos?'28px':'20px'};height:20px;font-size:0.6rem;font-weight:900;display:flex;align-items:center;justify-content:center;border:2px solid white;z-index:2;line-height:1;`;
-                    imgWrap.insertBefore(badge, imgWrap.firstChild);
-                }
-                badge.textContent = label;
-                badge.style.width = gramos ? '28px' : '20px';
-            } else if (badge) {
-                badge.remove();
-            }
-        }
-        card.style.background = enCart ? '#f1f8e9' : 'white';
-        card.style.borderLeft  = enCart ? '3px solid #43a047' : '3px solid transparent';
-        const existingTotal = card.querySelector('[data-total]');
-        if (enCart) {
-            const totalVal = item.price * qty;
-            if (existingTotal) {
-                existingTotal.querySelector('div:last-child').textContent = '$' + totalVal.toLocaleString('es-AR');
-            } else {
-                const totalDiv = document.createElement('div');
-                totalDiv.dataset.total = '1';
-                totalDiv.style.cssText = 'flex-shrink:0;text-align:right;pointer-events:none;';
-                totalDiv.innerHTML = `<div style="font-size:.62rem;color:#888;line-height:1;">total</div><div style="font-weight:900;font-size:.92rem;color:#2e7d32;line-height:1.1;">$${totalVal.toLocaleString('es-AR')}</div>`;
-                const btnAjuste = card.querySelector('button[title="Ajuste rápido"]');
-                if (btnAjuste) card.insertBefore(totalDiv, btnAjuste);
-                else card.appendChild(totalDiv);
-            }
-        } else if (existingTotal) {
-            existingTotal.remove();
-        }
-    });
-}
-
 function _refreshResultadosBadges(idActualizado) {
-    if (idActualizado != null) { syncProductoUI(idActualizado); return; }
+    // Actualización quirúrgica: solo repinta el badge del item tocado
+    // sin redibujar toda la lista
+    if (idActualizado != null) {
+        const item = ventaActual.find(i => (i.esPeso ? i.idOriginal : i.id) === idActualizado);
+        const qty = item ? item.qty : 0;
+        const gramos = item && item.esPeso ? item.gramos : 0;
+
+        // Actualizar el card del producto en la lista
+        const card = document.querySelector(`.resultado-item[data-prod-id="${idActualizado}"], [data-prod-id="${idActualizado}"]`);
+        if (card) {
+            // Badge de cantidad sobre la foto
+            const badgeEl = card.querySelector('[data-badge]');
+            const imgWrap = card.querySelector('div[style*="position:relative"]');
+            if (imgWrap) {
+                let badge = imgWrap.querySelector('[data-badge]');
+                if (qty > 0) {
+                    const label = gramos ? `${gramos}g` : qty;
+                    if (!badge) {
+                        badge = document.createElement('div');
+                        badge.dataset.badge = '1';
+                        badge.style.cssText = `position:absolute;top:-5px;left:-5px;background:#e53935;color:white;border-radius:10px;width:${gramos?'28px':'20px'};height:20px;font-size:0.6rem;font-weight:900;display:flex;align-items:center;justify-content:center;border:2px solid white;z-index:2;line-height:1;`;
+                        imgWrap.insertBefore(badge, imgWrap.firstChild);
+                    }
+                    badge.textContent = label;
+                    badge.style.width = gramos ? '28px' : '20px';
+                } else if (badge) {
+                    badge.remove();
+                }
+            }
+            // Fondo y borde verde si está en carrito
+            card.style.background = qty > 0 ? '#f1f8e9' : 'white';
+            card.style.borderLeft = qty > 0 ? '3px solid #43a047' : '3px solid transparent';
+            // Total en carrito
+            const p = productos.find(pr => pr.id === idActualizado);
+            const totalDiv = card.querySelector('[data-total]');
+            if (p && qty > 0) {
+                const precio = item ? item.price : p.price;
+                const totalVal = precio * qty;
+                if (totalDiv) {
+                    totalDiv.querySelector('div:last-child').textContent = '$' + totalVal.toLocaleString('es-AR');
+                }
+            } else if (totalDiv) {
+                totalDiv.remove();
+            }
+        }
+        return; // listo, sin re-render completo
+    }
+
     const termActual = document.getElementById('buscador').value.trim();
     const contenedor = document.getElementById('resultados');
-    const scrollPos  = contenedor ? contenedor.scrollTop : 0;
+    const scrollPos = contenedor ? contenedor.scrollTop : 0;
     if (termActual.length >= 1) {
         renderResultados(buscarProductos(termActual), termActual);
     } else {
@@ -2231,13 +2225,6 @@ function _refreshResultadosBadges(idActualizado) {
         renderResultados(_sortProductos(productos, idsEnCarrito));
     }
     if (contenedor) contenedor.scrollTop = scrollPos;
-}
-
-// ── Debounce global para guardar carrito ──
-let _saveCartTimer = null;
-function _guardarCarritoDiferido() {
-    clearTimeout(_saveCartTimer);
-    _saveCartTimer = setTimeout(guardarCarritoPendiente, 300);
 }
 
 function agregarProducto(id) {
@@ -2287,9 +2274,10 @@ function agregarProducto(id) {
         if (oferta.tieneOferta) mostrarToast(`${oferta.etiqueta} — ${producto.name.substring(0,25)}`, 'naranja');
     }
 
-    renderVenta(true);
-    _guardarCarritoDiferido();
-    syncProductoUI(id);
+    renderVenta();
+    guardarCarritoPendiente();
+    // Mantener búsqueda activa — el botón ✕ rojo cierra la búsqueda
+    _refreshResultadosBadges();
 }
 
 // ===== SELECTOR DE CANTIDAD ANTES DE AGREGAR =====
@@ -2396,9 +2384,9 @@ function cambiarCantidad(id, delta) {
     } else {
         item.qty = nuevaCant;
     }
-    renderVenta(true);
-    _guardarCarritoDiferido();
-    syncProductoUI(typeof id === 'string' && id.startsWith('peso_') ? null : Number(id));
+    renderVenta();
+    guardarCarritoPendiente();
+    _refreshResultadosBadges(typeof id === 'string' && id.startsWith('peso_') ? null : Number(id));
 }
 
 function limpiarVenta() {
@@ -2409,152 +2397,137 @@ function limpiarVenta() {
 }
 
 // ========== RENDER VENTA ==========
-// ── Genera el HTML de una fila del carrito ──
-function _buildItemVentaHTML(item, esDesktopPanel) {
-    const imgSrc = `imagenes-productos/${simplificarNombre(item.name)}.jpg`;
-    const tieneOferta  = item.precioModificado && item.precioOriginal > 0;
-    const precioUnit   = item.price;
-    const subtotal     = Math.round(precioUnit * item.qty);
-    const ahorroTotal  = tieneOferta ? Math.round(item.precioOriginal * item.qty - subtotal) : 0;
-    let formulaHTML = '', colOferta = '';
-    if (tieneOferta && item.ofertaEtiqueta) {
-        const tipo = item.ofertaTipo || '';
-        if      (tipo === 'cervecero')  { colOferta = '#1565c0'; formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">🍺 Jueves Cervecero</div>`; }
-        else if (tipo === 'relampago')  { colOferta = '#f9a825'; formulaHTML = `<div class="item-oferta-formula" style="color:#b06000">${item.ofertaEtiqueta || '⚡ Relámpago'}</div>`; }
-        else if (tipo === 'destacadas') { colOferta = '#ff6f00'; formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">🔥 Destacada</div>`; }
-        else if (tipo === 'especiales') { colOferta = '#00bcd4'; formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">⭐ Especial</div>`; }
-        else if (tipo === 'ultimas')    { colOferta = '#b71c1c'; formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">${item.ofertaEtiqueta || '🏷️ ÚLTIMAS UNIDADES'}</div>`; }
-        else if (tipo === 'normal')     { colOferta = '#43a047'; formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">↓ Precio rebajado</div>`; }
-    }
-    const precioColHTML = tieneOferta
-        ? `<div style="flex-shrink:0;text-align:right;min-width:64px;">
-            <span class="item-precio-antes">$${item.precioOriginal.toLocaleString('es-AR')}</span>
-            <span class="item-precio-con-oferta" style="color:${colOferta||'var(--verde-oscuro)'}">$${precioUnit.toLocaleString('es-AR')}</span>
-            <span class="item-ahorro-badge">−$${ahorroTotal.toLocaleString('es-AR')}</span>
-           </div>`
-        : `<span class="item-precio-editable ${item.precioModificado ? 'modificado' : ''}"
-                 onclick="editarPrecioCarrito('${item.id}')"
-                 title="Tocar para cambiar precio">
-             $${precioUnit.toLocaleString('es-AR')}
-           </span>`;
-    return `
-    <div class="item-venta" data-item-id="${item.esPeso ? 'peso_' + item.idOriginal : item.id}">
-        ${esDesktopPanel ? `<img class="item-venta-img" src="${imgSrc}"
-             onerror="this.style.display='none'"
-             onclick="abrirInfoProd(${item.esPeso ? item.idOriginal : item.id})"
-             title="Ver historial">` : ''}
-        <div class="item-venta-nombre" style="flex:1;min-width:0;">
-            <div style="font-size:0.88rem;font-weight:600;line-height:1.3;white-space:normal;word-break:break-word;">
-                ${item.name}${item.vencimiento ? badgeVencimiento(item) : ''}
-            </div>
-            ${formulaHTML}
-        </div>
-        <div class="item-venta-controles">
-            ${item.esPeso ? `
-                <button class="btn-cant" onclick="cambiarCantidad('${item.id}', -99)" style="background:#ffebee;color:#e53935;font-size:0.8rem;">🗑</button>
-                <span class="item-cant" style="font-size:0.75rem;">${item.qty}g</span>
-            ` : `
-                <button class="btn-cant" onclick="cambiarCantidad('${item.id}', -1)">−</button>
-                <span class="item-cant">${item.qty}</span>
-                <button class="btn-cant" onclick="cambiarCantidad('${item.id}', +1)">+</button>
-            `}
-        </div>
-        ${precioColHTML}
-        <div class="item-subtotal">$${subtotal.toLocaleString('es-AR')}</div>
-    </div>`;
-}
-
-// ── Actualiza totales y FABs sin tocar filas del carrito ──
-function _actualizarTotalesVenta() {
-    const total   = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
-    const totalEl = document.getElementById('totalMonto');
-    const btnConf = document.getElementById('btnConfirmar');
-    if (totalEl) totalEl.textContent = '$' + total.toLocaleString('es-AR');
-    if (btnConf) btnConf.disabled = ventaActual.length === 0;
-    if (MOBILE) {
-        document.getElementById('btnCobrarTotal').textContent = '$' + Math.round(total).toLocaleString('es-AR');
-        const hayMultiple = ventaActual.some(i => i.qty > 1);
-        document.getElementById('fabSubir').style.display = hayMultiple ? 'block' : 'none';
-    }
-}
-
-function renderVenta(ligero = false) {
-    const contenedor   = document.getElementById('itemsVenta');
+function renderVenta() {
+    const contenedor = document.getElementById('itemsVenta');
     const btnConfirmar = document.getElementById('btnConfirmar');
-    const totalEl      = document.getElementById('totalMonto');
+    const totalEl = document.getElementById('totalMonto');
 
     if (ventaActual.length === 0) {
-        // ── Cambios visuales principales: INMEDIATOS ──
         if (contenedor) contenedor.innerHTML = '<div class="venta-vacia">Sin productos aún</div>';
-        if (totalEl)      totalEl.textContent = '$0';
+        if (totalEl) totalEl.textContent = '$0';
         if (btnConfirmar) btnConfirmar.disabled = true;
         desactivarGuardiaAtras();
         _setHeaderModoVenta(false);
+        _refreshResultadosBadges();
         if (MOBILE) {
-            document.getElementById('fabStack').style.display = 'none';
+            // En QWERTY el FAB stack se mantiene visible por el botón 🔍
+        document.getElementById('fabStack').style.display = 'none';
         } else {
             const pv = document.getElementById('panelVenta');
-            if (pv) pv.style.display = 'flex';
+            if (pv) pv.style.display = 'flex'; // siempre visible en desktop
         }
-        // ── Limpieza de badges: diferida DESPUÉS del paint ──
-        // rAF espera el fin del layout; setTimeout(0) empuja a la siguiente
-        // task del event loop, ya después del paint real del frame anterior.
-        requestAnimationFrame(() => setTimeout(() => _refreshResultadosBadges(), 0));
         return;
     }
 
     _setHeaderModoVenta(true);
+
+    const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
+    const totalItems = ventaActual.reduce((s, i) => s + i.qty, 0);
+    if (totalEl) totalEl.textContent = '$' + total.toLocaleString('es-AR');
+    if (btnConfirmar) btnConfirmar.disabled = false;
     activarGuardiaAtras();
+
     if (MOBILE) {
         document.getElementById('fabStack').style.display = 'flex';
+        document.getElementById('btnCobrarTotal').textContent = '$' + Math.round(ventaActual.reduce((s,i)=>s+i.price*i.qty,0)).toLocaleString('es-AR');
+        const hayMultiple = ventaActual.some(i => i.qty > 1);
+        document.getElementById('fabSubir').style.display = hayMultiple ? 'block' : 'none';
+        document.getElementById('btnCobrarTotal').textContent = '$' + Math.round(total).toLocaleString('es-AR');
+
     } else {
         const pv = document.getElementById('panelVenta');
         if (pv) pv.style.display = 'flex';
         actualizarBarraMinimizada();
     }
 
-    if (ligero) {
-        _actualizarTotalesVenta();
-        const esDesktopPanel = window.innerWidth >= 768;
-        const idsEnVenta = new Set(ventaActual.map(i => i.esPeso ? 'peso_' + i.idOriginal : String(i.id)));
-        contenedor.querySelectorAll('.item-venta[data-item-id]').forEach(fila => {
-            if (!idsEnVenta.has(fila.dataset.itemId)) fila.remove();
-        });
-        ventaActual.forEach(item => {
-            const itemId = item.esPeso ? 'peso_' + item.idOriginal : String(item.id);
-            if (!contenedor.querySelector(`.item-venta[data-item-id="${itemId}"]`)) {
-                contenedor.insertAdjacentHTML('beforeend', _buildItemVentaHTML(item, esDesktopPanel));
-            }
-        });
-        ventaActual.forEach(item => {
-            const itemId = item.esPeso ? 'peso_' + item.idOriginal : String(item.id);
-            const fila = contenedor.querySelector(`.item-venta[data-item-id="${itemId}"]`);
-            if (!fila) return;
-            const cantEl = fila.querySelector('.item-cant');
-            const subEl  = fila.querySelector('.item-subtotal');
-            if (cantEl) cantEl.textContent = item.esPeso ? `${item.qty}g` : item.qty;
-            if (subEl)  subEl.textContent  = '$' + Math.round(item.price * item.qty).toLocaleString('es-AR');
-        });
-        return;
-    }
-
-    // ── Ruta completa ──
-    const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
-    if (totalEl) totalEl.textContent = '$' + total.toLocaleString('es-AR');
-    if (btnConfirmar) btnConfirmar.disabled = false;
-    if (MOBILE) {
-        document.getElementById('btnCobrarTotal').textContent = '$' + Math.round(total).toLocaleString('es-AR');
-        const hayMultiple = ventaActual.some(i => i.qty > 1);
-        document.getElementById('fabSubir').style.display = hayMultiple ? 'block' : 'none';
-    }
     const term = document.getElementById('buscador').value.trim();
     const listaResultados = term.length >= 1 ? buscarProductos(term)
         : _sortProductos(productos, new Set(ventaActual.map(i => i.esPeso ? i.idOriginal : i.id)));
     renderResultados(listaResultados, term);
+
     const esDesktopPanel = window.innerWidth >= 768;
-    contenedor.innerHTML = ventaActual.map(item => _buildItemVentaHTML(item, esDesktopPanel)).join('');
+
+    contenedor.innerHTML = ventaActual.map(item => {
+        const imgSrc = `imagenes-productos/${simplificarNombre(item.name)}.jpg`;
+
+        // ── Calcular precios y ahorro ──────────────────────────────
+        const tieneOferta  = item.precioModificado && item.precioOriginal > 0;
+        const precioUnit   = item.price;
+        const subtotal     = Math.round(precioUnit * item.qty);
+        const ahorroTotal  = tieneOferta ? Math.round(item.precioOriginal * item.qty - subtotal) : 0;
+
+        // ── Texto de fórmula según tipo ────────────────────────────
+        let formulaHTML = '';
+        let colOferta   = '';   // color del badge
+        if (tieneOferta && item.ofertaEtiqueta) {
+            const tipo = item.ofertaTipo || '';
+            if (tipo === 'cervecero') {
+                colOferta = '#1565c0';
+                formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">🍺 Jueves Cervecero</div>`;
+            } else if (tipo === 'relampago') {
+                colOferta = '#f9a825';
+                const etiq = item.ofertaEtiqueta || '⚡ Relámpago';
+                formulaHTML = `<div class="item-oferta-formula" style="color:#b06000">${etiq}</div>`;
+            } else if (tipo === 'destacadas') {
+                colOferta = '#ff6f00';
+                formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">🔥 Destacada</div>`;
+            } else if (tipo === 'especiales') {
+                colOferta = '#00bcd4';
+                formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">⭐ Especial</div>`;
+            } else if (tipo === 'ultimas') {
+                colOferta = '#b71c1c';
+                formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">${item.ofertaEtiqueta || '🏷️ ÚLTIMAS UNIDADES'}</div>`;
+            } else if (tipo === 'normal') {
+                colOferta = '#43a047';
+                formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">↓ Precio rebajado</div>`;
+            }
+        }
+
+        // ── Columna de precio ──────────────────────────────────────
+        const precioColHTML = tieneOferta
+            ? `<div style="flex-shrink:0;text-align:right;min-width:64px;">
+                <span class="item-precio-antes">$${item.precioOriginal.toLocaleString('es-AR')}</span>
+                <span class="item-precio-con-oferta" style="color:${colOferta||'var(--verde-oscuro)'}">$${precioUnit.toLocaleString('es-AR')}</span>
+                <span class="item-ahorro-badge">−$${ahorroTotal.toLocaleString('es-AR')}</span>
+              </div>`
+            : `<span class="item-precio-editable ${item.precioModificado ? 'modificado' : ''}"
+                     onclick="editarPrecioCarrito('${item.id}')"
+                     title="Tocar para cambiar precio">
+                 $${precioUnit.toLocaleString('es-AR')}
+               </span>`;
+
+        return `
+        <div class="item-venta">
+            ${esDesktopPanel ? `<img class="item-venta-img" src="${imgSrc}"
+                 onerror="this.style.display='none'"
+                 onclick="abrirInfoProd(${item.esPeso ? item.idOriginal : item.id})"
+                 title="Ver historial">` : ''}
+            <div class="item-venta-nombre" style="flex:1;min-width:0;">
+                <div style="font-size:0.88rem;font-weight:600;line-height:1.3;white-space:normal;word-break:break-word;">
+                    ${item.name}${item.vencimiento ? badgeVencimiento(item) : ''}
+                </div>
+                ${formulaHTML}
+            </div>
+            <div class="item-venta-controles">
+                ${item.esPeso ? `
+                    <button class="btn-cant" onclick="cambiarCantidad('${item.id}', -99)" style="background:#ffebee;color:#e53935;font-size:0.8rem;">🗑</button>
+                    <span class="item-cant" style="font-size:0.75rem;">${item.qty}g</span>
+                ` : `
+                    <button class="btn-cant" onclick="cambiarCantidad('${item.id}', -1)">−</button>
+                    <span class="item-cant">${item.qty}</span>
+                    <button class="btn-cant" onclick="cambiarCantidad('${item.id}', +1)">+</button>
+                `}
+            </div>
+            ${precioColHTML}
+            <div class="item-subtotal">$${subtotal.toLocaleString('es-AR')}</div>
+        </div>`;
+    }).join('');
+
+    // Mostrar imagen solo en desktop
     if (esDesktopPanel) {
-        contenedor.querySelectorAll('.item-venta-img').forEach(img => { img.style.display = 'block'; });
+        contenedor.querySelectorAll('.item-venta-img').forEach(img => {
+            img.style.display = 'block';
+        });
     }
 }
 
@@ -4440,10 +4413,7 @@ function alertarVencidosHoy() {
 
     const vencidosHoy = productos.filter(p => {
         if (!p.vencimiento || p.stock <= 0) return false;
-        const partes = p.vencimiento.split('-');
-        const vence = new Date(parseInt(partes[0]), parseInt(partes[1])-1, parseInt(partes[2]));
-        vence.setHours(0,0,0,0);
-        return vence < hoy;
+        return diasHasta(p.vencimiento) < 0; // < 0 = ayer o antes → VENCIDO; 0 = hoy → no incluir
     });
 
     if (vencidosHoy.length === 0) return;
@@ -4495,10 +4465,7 @@ async function confirmarVencidosRetirados() {
 
     const vencidos = productos.filter(p => {
         if (!p.vencimiento || p.stock <= 0) return false;
-        const partes = p.vencimiento.split('-');
-        const vence = new Date(parseInt(partes[0]), parseInt(partes[1])-1, parseInt(partes[2]));
-        vence.setHours(0,0,0,0);
-        return vence < hoy;
+        return diasHasta(p.vencimiento) < 0; // < 0 = ayer o antes → VENCIDO
     });
 
     const modal = document.getElementById('modalVencidosHoy');
@@ -5559,7 +5526,7 @@ function toggleCervecero() {
 // Sincronizar badge de versión desde el <title>
 (function(){
     const el = document.getElementById('versionTag');
-    if (el) el.textContent = 'v162';
+    if (el) el.textContent = 'v163';
 })();
 
 // ── WakeLock: mantener pantalla encendida mientras la app está activa ──
@@ -5597,48 +5564,64 @@ function cerrarBuscadorFlotante() {
 }
 
 // ===== SWIPE EN CARDS DE PRODUCTO =====
+// Swipe derecha → +1  |  Swipe izquierda → quitar del carrito
 (function initSwipeProductos() {
-    if (!MOBILE) return;
-    let sx = 0, sy = 0, startEl = null, didSwipe = false, dirLocked = false;
-    const UMBRAL = 35, LOCK_UMBRAL = 10, RATIO = 1.2;
+    if (!MOBILE) return; // swipe solo en mobile
+    let sx = 0, sy = 0, startEl = null, didSwipe = false;
+    const UMBRAL = 35; // px mínimo para activar
+    const RATIO  = 1.2; // horizontal debe superar 1.2× vertical
+
     document.addEventListener('touchstart', function(e) {
         const btn = e.target.closest('[data-prod-id]');
         if (!btn) { startEl = null; return; }
-        sx = e.touches[0].clientX; sy = e.touches[0].clientY;
-        startEl = btn; didSwipe = false; dirLocked = false;
-        btn.style.willChange = 'transform';
+        sx = e.touches[0].clientX;
+        sy = e.touches[0].clientY;
+        startEl = btn;
+        didSwipe = false;
     }, { passive: true });
+
     document.addEventListener('touchmove', function(e) {
-        if (!startEl || dirLocked) return;
-        const dx = Math.abs(e.touches[0].clientX - sx);
-        const dy = Math.abs(e.touches[0].clientY - sy);
-        if (dx < LOCK_UMBRAL && dy < LOCK_UMBRAL) return;
-        if (dx > dy * RATIO) { didSwipe = true; dirLocked = true; }
-        else if (dy > dx)    { startEl = null;  dirLocked = true; }
+        if (!startEl) return;
+        const dx = e.touches[0].clientX - sx;
+        const dy = e.touches[0].clientY - sy;
+        // Si va más horizontal que vertical → marcar como swipe (bloquea scroll)
+        if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * RATIO) {
+            didSwipe = true;
+        }
     }, { passive: true });
+
     document.addEventListener('touchend', function(e) {
         if (!startEl) return;
         const btn = startEl;
         const dx = e.changedTouches[0].clientX - sx;
         const dy = e.changedTouches[0].clientY - sy;
-        startEl = null; btn.style.willChange = '';
+        startEl = null;
+
         if (!didSwipe || Math.abs(dx) < UMBRAL) return;
         if (Math.abs(dx) < Math.abs(dy) * RATIO) return;
+
+        // Solo swipe izquierda — derecha reservado
         if (dx > 0) return;
-        requestAnimationFrame(() => {
-            btn.style.transition = 'transform 0.15s';
-            btn.style.transform = 'translateX(-12px)';
-            setTimeout(() => { btn.style.transform = ''; btn.style.transition = ''; }, 180);
-        });
+
+        // Feedback visual
+        btn.style.transition = 'transform 0.15s';
+        btn.style.transform = 'translateX(-12px)';
+        setTimeout(() => { btn.style.transform = ''; btn.style.transition = ''; }, 200);
+
         const id = parseInt(btn.dataset.prodId);
-        const idxPeso = ventaActual.findLastIndex
-            ? ventaActual.findLastIndex(i => i.esPeso && i.idOriginal === id)
-            : ventaActual.length - 1 - [...ventaActual].reverse().findIndex(i => i.esPeso && i.idOriginal === id);
+        // Para productos por peso: quitar la última entrada de ese producto
+        const idxPeso = ventaActual.findLastIndex ? ventaActual.findLastIndex(i => i.esPeso && i.idOriginal === id)
+                      : [...ventaActual].reverse().findIndex(i => i.esPeso && i.idOriginal === id);
         if (idxPeso !== -1 && idxPeso >= 0) {
-            const item = ventaActual[idxPeso];
+            const realIdx = ventaActual.findLastIndex
+                ? ventaActual.findLastIndex(i => i.esPeso && i.idOriginal === id)
+                : ventaActual.length - 1 - [...ventaActual].reverse().findIndex(i => i.esPeso && i.idOriginal === id);
+            const item = ventaActual[realIdx];
             mostrarToast(`🗑 Quitado ${item.gramos}gr — ${item.name.substring(0,20)}`, 'rojo');
-            ventaActual.splice(idxPeso, 1);
-            renderVenta(true); _guardarCarritoDiferido(); syncProductoUI(id);
+            ventaActual.splice(realIdx, 1);
+            renderVenta();
+            guardarCarritoPendiente();
+            _refreshResultadosBadges();
             return;
         }
         const idx = ventaActual.findIndex(i => i.id === id);
@@ -5650,11 +5633,15 @@ function cerrarBuscadorFlotante() {
                 ventaActual.splice(idx, 1);
                 mostrarToast('🗑 Quitado', 'rojo');
             }
-            renderVenta(true); _guardarCarritoDiferido(); syncProductoUI(id);
+            renderVenta();
+            guardarCarritoPendiente();
+            _refreshResultadosBadges();
         } else {
             mostrarToast('No está en el carrito', '');
         }
     }, { passive: true });
+
+    // Cancelar click si fue swipe
     document.addEventListener('click', function(e) {
         if (didSwipe) { e.stopPropagation(); didSwipe = false; }
     }, true);
