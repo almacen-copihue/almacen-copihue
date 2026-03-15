@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v165</title>
+    <title>Copihue — POS v164</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2274,9 +2274,10 @@ function agregarProducto(id) {
         if (oferta.tieneOferta) mostrarToast(`${oferta.etiqueta} — ${producto.name.substring(0,25)}`, 'naranja');
     }
 
-    renderVenta(true);
-    _guardarCarritoDiferido();
-    _refreshResultadosBadges(id); // quirúrgico: solo el card tocado
+    renderVenta();
+    guardarCarritoPendiente();
+    // Mantener búsqueda activa — el botón ✕ rojo cierra la búsqueda
+    _refreshResultadosBadges();
 }
 
 // ===== SELECTOR DE CANTIDAD ANTES DE AGREGAR =====
@@ -2383,8 +2384,8 @@ function cambiarCantidad(id, delta) {
     } else {
         item.qty = nuevaCant;
     }
-    renderVenta(true);        // ligero: solo totales/header, NO toca el scroll
-    _guardarCarritoDiferido(); // debounce 300ms
+    renderVenta();
+    guardarCarritoPendiente();
     _refreshResultadosBadges(typeof id === 'string' && id.startsWith('peso_') ? null : Number(id));
 }
 
@@ -2690,13 +2691,9 @@ function _buildDetalleModalHTML() {
     return items + `<div class="confirm-total-row"><span>TOTAL</span><span>$${total.toLocaleString('es-AR')}</span></div>`;
 }
 
-// ids tocados durante la sesión del modal — se usa para sync quirúrgico al cerrar
-const _idsTocadosEnModal = new Set();
-
 function _modalQty(idx, delta) {
     if (idx < 0 || idx >= ventaActual.length) return;
     const item = ventaActual[idx];
-    _idsTocadosEnModal.add(item.esPeso ? item.idOriginal : item.id);
     const newQty = (item.qty || 1) + delta;
     if (newQty <= 0) { _modalDel(idx); return; }
     item.qty = newQty;
@@ -2706,15 +2703,13 @@ function _modalQty(idx, delta) {
         item.price = oferta.precioUnitario || p.price;
         item.ofertaEtiqueta = oferta.etiqueta || null;
     }
-    renderVenta(true);
-    _guardarCarritoDiferido();
+    renderVenta(true);             // ligero: actualiza totales sin tocar el scroll
+    _guardarCarritoDiferido();     // diferido: no bloquea la interacción
     _reRenderModal();
 }
 
 function _modalDel(idx) {
     if (idx < 0 || idx >= ventaActual.length) return;
-    const item = ventaActual[idx];
-    _idsTocadosEnModal.add(item.esPeso ? item.idOriginal : item.id);
     ventaActual.splice(idx, 1);
     renderVenta(true);
     _guardarCarritoDiferido();
@@ -2783,10 +2778,9 @@ function abrirConfirmacion() {
     window._totalConRedondeo = total;
     window._descuentoRedondeo = 0;
 
-    _idsTocadosEnModal.clear(); // limpiar sesión anterior
     seleccionarMetodo('efectivo');
     document.getElementById('modalConfirm').classList.add('open');
-    _bindSwipeConfirmacion();
+    _bindSwipeConfirmacion(); // swipe izquierda = −1 en cada fila
 }
 
 async function confirmarVenta() {
@@ -2940,6 +2934,7 @@ function cerrarConfirm() {
     if (btnOk) { btnOk.textContent = '✅ Confirmar cobro'; btnOk.disabled = false; btnOk.onclick = confirmarVenta; }
     const btnCancelar = document.querySelector('.btn-cancelar-confirm');
     if (btnCancelar) { btnCancelar.textContent = 'Cancelar'; btnCancelar.onclick = cerrarConfirm; }
+    // Resetear cliente
     _clienteActual = null;
     const buscador = document.getElementById('clienteBuscador');
     if (buscador) buscador.value = '';
@@ -2947,9 +2942,6 @@ function cerrarConfirm() {
     if (sel) sel.style.display = 'none';
     const nuevoPanel = document.getElementById('nuevoClientePanel');
     if (nuevoPanel) nuevoPanel.style.display = 'none';
-    // Sync solo los ids tocados durante el modal — sin renderResultados, sin reordenar
-    _idsTocadosEnModal.forEach(id => _refreshResultadosBadges(id));
-    _idsTocadosEnModal.clear();
 }
 
 // ========== RESUMEN DEL DÍA ==========
@@ -5582,7 +5574,7 @@ function toggleCervecero() {
 // Sincronizar badge de versión desde el <title>
 (function(){
     const el = document.getElementById('versionTag');
-    if (el) el.textContent = 'v165';
+    if (el) el.textContent = 'v164';
 })();
 
 // ── WakeLock: mantener pantalla encendida mientras la app está activa ──
