@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v155</title>
+    <title>Copihue — POS v156</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2976,11 +2976,41 @@ function rankScore(id) {
     return _rankingVentas[String(id)] || 0;
 }
 
+// ── Replicación exacta de ROTACION_SISTEMA de index.html ──────────────────
+function _getDateKeyAR() {
+    const now = new Date();
+    const ar = new Date(now.toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+    return `${ar.getFullYear()}-${(ar.getMonth()+1).toString().padStart(2,'0')}-${ar.getDate().toString().padStart(2,'0')}`;
+}
+
+function _selectRotatedProducts(pool, visibleCount, storageKey) {
+    if (pool.length === 0) return [];
+    if (pool.length <= visibleCount) return pool;
+    const dateKey = _getDateKeyAR();
+    const argDate = new Date(dateKey);
+    const dayOfYear = Math.floor((argDate - new Date(argDate.getFullYear(), 0, 0)) / 86400000);
+    const totalSets = Math.ceil(pool.length / visibleCount);
+    const setNumber = dayOfYear % totalSets;
+    const startIndex = (setNumber * visibleCount) % pool.length;
+    const selected = [];
+    for (let i = 0; i < visibleCount; i++) {
+        selected.push(pool[(startIndex + i) % pool.length]);
+    }
+    console.log(`🔄 Rotación ${storageKey}: fecha=${dateKey} set=${setNumber} inicio=${startIndex} → ${selected.length} productos`);
+    return selected;
+}
+
 function aplicarLimiteDestacadas() {
-    const arr = Array.from(_poolIdsDestacadas);
-    _destacadasFiltradas = new Set(
-        arr.length <= _limiteDestacadas ? arr : arr.slice(0, _limiteDestacadas)
-    );
+    // 1. Pool ordenado: productos del pool destacadas con stock, ordenados por mayor descuento (igual que index)
+    const poolOrdenado = [...productos]
+        .filter(p => p.destacada > 0 && p.stock > 0 && _poolIdsDestacadas.has(p.id))
+        .sort((a, b) => b.destacada - a.destacada);
+    // 2. Excluir los ya en relámpago (igual que index excluye idsEnOfertas)
+    const poolFiltrado = poolOrdenado.filter(p => !_poolIdsRelampago.has(p.id));
+    // 3. Rotación exacta igual que index
+    const seleccionados = _selectRotatedProducts(poolFiltrado, _limiteDestacadas, 'rotacion_destacadas');
+    _destacadasFiltradas = new Set(seleccionados.map(p => p.id));
+    console.log(`🔥 Destacadas POS: ${_destacadasFiltradas.size} de ${poolFiltrado.length}`);
 }
 
 function _tieneOfertaActiva(p) {
@@ -5173,7 +5203,7 @@ async function cargarPoolsOfertas() {
         _construirPoolsLocalFallback();
         reporteOfertasPOS('post-pools');
     }
-    // Cargar pool Jueves Cervecero siempre (el toggle decide si se aplica)
+    // Cargar pool Jueves Cervecero
     try {
         const r2 = await fetch(API_URL + '?action=getJuevesCervecero&t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(8000) });
         const d2 = await r2.json();
@@ -5182,9 +5212,7 @@ async function cargarPoolsOfertas() {
             if (d2.horaCierre) _jcHoraCierre = d2.horaCierre;
             d2.productos.forEach(p => {
                 const local = productos.find(lp => lp.name.trim().toUpperCase() === p.nombre.trim().toUpperCase());
-                if (local) {
-                    _poolCervecero.set(local.id, { descuento: p.descuento, precioPromo: p.precioPromo, esGancho: p.esGancho });
-                }
+                if (local) _poolCervecero.set(local.id, { descuento: p.descuento, precioPromo: p.precioPromo, esGancho: p.esGancho });
             });
             console.log(`🍺 Pool cervecero: ${_poolCervecero.size} cervezas`);
         }
@@ -5504,7 +5532,7 @@ function toggleCervecero() {
 // Sincronizar badge de versión desde el <title>
 (function(){
     const el = document.getElementById('versionTag');
-    if (el) el.textContent = 'v155';
+    if (el) el.textContent = 'v156';
 })();
 
 // ── WakeLock: mantener pantalla encendida mientras la app está activa ──
