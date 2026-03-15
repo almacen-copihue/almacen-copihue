@@ -2274,10 +2274,9 @@ function agregarProducto(id) {
         if (oferta.tieneOferta) mostrarToast(`${oferta.etiqueta} — ${producto.name.substring(0,25)}`, 'naranja');
     }
 
-    renderVenta();
-    guardarCarritoPendiente();
-    // Mantener búsqueda activa — el botón ✕ rojo cierra la búsqueda
-    _refreshResultadosBadges();
+    renderVenta(true);
+    _guardarCarritoDiferido();
+    _refreshResultadosBadges(id); // quirúrgico: solo el card tocado
 }
 
 // ===== SELECTOR DE CANTIDAD ANTES DE AGREGAR =====
@@ -2384,8 +2383,8 @@ function cambiarCantidad(id, delta) {
     } else {
         item.qty = nuevaCant;
     }
-    renderVenta();
-    guardarCarritoPendiente();
+    renderVenta(true);
+    _guardarCarritoDiferido();
     _refreshResultadosBadges(typeof id === 'string' && id.startsWith('peso_') ? null : Number(id));
 }
 
@@ -2691,9 +2690,13 @@ function _buildDetalleModalHTML() {
     return items + `<div class="confirm-total-row"><span>TOTAL</span><span>$${total.toLocaleString('es-AR')}</span></div>`;
 }
 
+// Set de ids tocados durante la sesión del modal — se limpia al abrir, se usa al cerrar
+const _idsTocadosEnModal = new Set();
+
 function _modalQty(idx, delta) {
     if (idx < 0 || idx >= ventaActual.length) return;
     const item = ventaActual[idx];
+    _idsTocadosEnModal.add(item.esPeso ? item.idOriginal : item.id); // registrar id tocado
     const newQty = (item.qty || 1) + delta;
     if (newQty <= 0) { _modalDel(idx); return; }
     item.qty = newQty;
@@ -2703,13 +2706,15 @@ function _modalQty(idx, delta) {
         item.price = oferta.precioUnitario || p.price;
         item.ofertaEtiqueta = oferta.etiqueta || null;
     }
-    renderVenta(true);             // ligero: actualiza totales sin tocar el scroll
-    _guardarCarritoDiferido();     // diferido: no bloquea la interacción
+    renderVenta(true);
+    _guardarCarritoDiferido();
     _reRenderModal();
 }
 
 function _modalDel(idx) {
     if (idx < 0 || idx >= ventaActual.length) return;
+    const item = ventaActual[idx];
+    _idsTocadosEnModal.add(item.esPeso ? item.idOriginal : item.id); // registrar id tocado
     ventaActual.splice(idx, 1);
     renderVenta(true);
     _guardarCarritoDiferido();
@@ -2778,9 +2783,10 @@ function abrirConfirmacion() {
     window._totalConRedondeo = total;
     window._descuentoRedondeo = 0;
 
+    _idsTocadosEnModal.clear(); // limpiar ids tocados de sesión anterior
     seleccionarMetodo('efectivo');
     document.getElementById('modalConfirm').classList.add('open');
-    _bindSwipeConfirmacion(); // swipe izquierda = −1 en cada fila
+    _bindSwipeConfirmacion();
 }
 
 async function confirmarVenta() {
@@ -2926,65 +2932,6 @@ function enviarTicketWA() {
     }
 }
 
-// ── Sincroniza los cards VISIBLES del scroll con ventaActual ──────────────
-// Recorre solo los nodos ya renderizados en el DOM (los visible en pantalla),
-// nunca re-renderiza el listado completo. Ideal para usar al cerrar el modal.
-function syncListadoDesdeVentaActual() {
-    const cards = document.querySelectorAll('.resultado-item[data-prod-id]');
-    if (!cards.length) return;
-
-    // Índice rápido de ventaActual por id
-    const mapaCarrito = new Map();
-    ventaActual.forEach(i => {
-        const key = i.esPeso ? i.idOriginal : i.id;
-        mapaCarrito.set(key, i);
-    });
-
-    cards.forEach(card => {
-        const id  = parseInt(card.dataset.prodId);
-        const item = mapaCarrito.get(id);
-        const qty  = item ? item.qty : 0;
-        const gramos = item && item.esPeso ? item.gramos : 0;
-        const enCart = qty > 0;
-
-        // Badge de cantidad
-        const imgWrap = card.querySelector('div[style*="position:relative"]');
-        if (imgWrap) {
-            let badge = imgWrap.querySelector('[data-badge]');
-            if (enCart) {
-                const label = gramos ? `${gramos}g` : qty;
-                if (!badge) {
-                    badge = document.createElement('div');
-                    badge.dataset.badge = '1';
-                    badge.style.cssText = `position:absolute;top:-5px;left:-5px;background:#e53935;color:white;border-radius:10px;width:${gramos?'28px':'20px'};height:20px;font-size:0.6rem;font-weight:900;display:flex;align-items:center;justify-content:center;border:2px solid white;z-index:2;line-height:1;`;
-                    imgWrap.insertBefore(badge, imgWrap.firstChild);
-                }
-                badge.textContent = label;
-                badge.style.width = gramos ? '28px' : '20px';
-            } else if (badge) {
-                badge.remove();
-            }
-        }
-
-        // Fondo y borde
-        card.style.background = enCart ? '#f1f8e9' : 'white';
-        card.style.borderLeft  = enCart ? '3px solid #43a047' : '3px solid transparent';
-
-        // Total
-        const totalDiv = card.querySelector('[data-total]');
-        if (enCart && item) {
-            const totalVal = item.price * qty;
-            if (totalDiv) {
-                totalDiv.querySelector('div:last-child').textContent = '$' + totalVal.toLocaleString('es-AR');
-            }
-            // Si no tiene totalDiv pero debería, no lo creamos aquí para no complicar el layout
-            // — se creará cuando renderResultados lo pinte en el próximo ciclo normal
-        } else if (totalDiv) {
-            totalDiv.remove();
-        }
-    });
-}
-
 function cerrarConfirm() {
     document.getElementById('modalConfirm').classList.remove('open');
     const btnTicket = document.getElementById('btnTicketWA');
@@ -2993,7 +2940,6 @@ function cerrarConfirm() {
     if (btnOk) { btnOk.textContent = '✅ Confirmar cobro'; btnOk.disabled = false; btnOk.onclick = confirmarVenta; }
     const btnCancelar = document.querySelector('.btn-cancelar-confirm');
     if (btnCancelar) { btnCancelar.textContent = 'Cancelar'; btnCancelar.onclick = cerrarConfirm; }
-    // Resetear cliente
     _clienteActual = null;
     const buscador = document.getElementById('clienteBuscador');
     if (buscador) buscador.value = '';
@@ -3001,8 +2947,11 @@ function cerrarConfirm() {
     if (sel) sel.style.display = 'none';
     const nuevoPanel = document.getElementById('nuevoClientePanel');
     if (nuevoPanel) nuevoPanel.style.display = 'none';
-    // Sincronizar badges del scroll con ventaActual real (sin re-render global)
-    syncListadoDesdeVentaActual();
+
+    // Sync quirúrgico: SOLO los ids tocados durante la sesión del modal
+    // No recorre todo el scroll, no llama renderResultados, no reordena nada
+    _idsTocadosEnModal.forEach(id => _refreshResultadosBadges(id));
+    _idsTocadosEnModal.clear();
 }
 
 // ========== RESUMEN DEL DÍA ==========
