@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v163</title>
+    <title>Copihue — POS v164</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2397,7 +2397,21 @@ function limpiarVenta() {
 }
 
 // ========== RENDER VENTA ==========
-function renderVenta() {
+// ── Debounce global para guardar carrito ──
+let _saveCartTimer = null;
+function _guardarCarritoDiferido() {
+    clearTimeout(_saveCartTimer);
+    _saveCartTimer = setTimeout(guardarCarritoPendiente, 300);
+}
+
+function renderVenta(ligero) {
+    // ligero=true: solo actualiza totales/header sin renderResultados del scroll
+    // (usado por _modalQty/_modalDel para no tocar el listado principal)
+    if (!ligero) { _renderVentaCompleta(); return; }
+    _renderVentaCompleta(true);
+}
+
+function _renderVentaCompleta(ligero) {
     const contenedor = document.getElementById('itemsVenta');
     const btnConfirmar = document.getElementById('btnConfirmar');
     const totalEl = document.getElementById('totalMonto');
@@ -2408,13 +2422,12 @@ function renderVenta() {
         if (btnConfirmar) btnConfirmar.disabled = true;
         desactivarGuardiaAtras();
         _setHeaderModoVenta(false);
-        _refreshResultadosBadges();
+        if (!ligero) _refreshResultadosBadges();
         if (MOBILE) {
-            // En QWERTY el FAB stack se mantiene visible por el botón 🔍
-        document.getElementById('fabStack').style.display = 'none';
+            document.getElementById('fabStack').style.display = 'none';
         } else {
             const pv = document.getElementById('panelVenta');
-            if (pv) pv.style.display = 'flex'; // siempre visible en desktop
+            if (pv) pv.style.display = 'flex';
         }
         return;
     }
@@ -2433,12 +2446,13 @@ function renderVenta() {
         const hayMultiple = ventaActual.some(i => i.qty > 1);
         document.getElementById('fabSubir').style.display = hayMultiple ? 'block' : 'none';
         document.getElementById('btnCobrarTotal').textContent = '$' + Math.round(total).toLocaleString('es-AR');
-
     } else {
         const pv = document.getElementById('panelVenta');
         if (pv) pv.style.display = 'flex';
         actualizarBarraMinimizada();
     }
+
+    if (ligero) return; // modo ligero: solo totales/header, sin tocar el scroll
 
     const term = document.getElementById('buscador').value.trim();
     const listaResultados = term.length >= 1 ? buscarProductos(term)
@@ -2625,7 +2639,6 @@ function _buildDetalleModalHTML() {
         const subtotal    = Math.round(item.price * item.qty);
         const tieneOferta = item.precioModificado && item.precioOriginal > item.price;
 
-        // Colores por tipo
         const colores = {
             cervecero: '#1565c0', relampago: '#b06000',
             destacadas: '#ff6f00', especiales: '#00bcd4', ultimas: '#b71c1c', normal: '#43a047'
@@ -2636,9 +2649,8 @@ function _buildDetalleModalHTML() {
             ? `<span style="background:${col};color:#fff;font-size:.55rem;font-weight:800;padding:1px 5px;border-radius:6px;white-space:nowrap;margin-left:3px;">${item.ofertaEtiqueta}</span>`
             : '';
 
-        // Columna precio con antes/después
         const precioColModal = tieneOferta
-            ? `<div style="text-align:right;min-width:72px;">
+            ? `<div style="text-align:right;min-width:72px;flex-shrink:0;">
                 <span style="font-size:0.62rem;color:#bbb;text-decoration:line-through;display:block;">
                     $${(item.precioOriginal * item.qty).toLocaleString('es-AR')}
                 </span>
@@ -2649,39 +2661,32 @@ function _buildDetalleModalHTML() {
                     −$${((item.precioOriginal - item.price) * item.qty).toLocaleString('es-AR')}
                 </span>
                </div>`
-            : `<span style="font-weight:700;min-width:64px;text-align:right;font-size:0.9rem;">$${subtotal.toLocaleString('es-AR')}</span>`;
+            : `<span style="font-weight:700;min-width:64px;text-align:right;font-size:0.9rem;flex-shrink:0;">$${subtotal.toLocaleString('es-AR')}</span>`;
 
-        if (esDesktop) {
-            return `<div class="confirm-item" style="display:flex;align-items:center;gap:8px;padding:7px 12px;">
-                <img src="imagenes-productos/${simplificarNombre(item.name)}.jpg"
-                     onerror="this.style.display='none'"
-                     style="width:34px;height:34px;border-radius:6px;object-fit:cover;background:#e8f5e9;flex-shrink:0;">
-                <div style="flex:1;min-width:0;">
-                    <div style="font-size:0.82rem;line-height:1.3;">${item.name.substring(0,34)}${badgeHTML}</div>
-                </div>
-                <div style="display:flex;align-items:center;gap:3px;flex-shrink:0;">
-                    <button onclick="_modalQty(${idx},-1)"
-                            style="width:26px;height:26px;border:1.5px solid #ccc;border-radius:50%;background:white;
-                                   font-size:1.1rem;font-weight:900;cursor:pointer;
-                                   display:flex;align-items:center;justify-content:center;line-height:1;color:#333;">−</button>
-                    <span style="min-width:22px;text-align:center;font-weight:800;font-size:0.9rem;">${item.qty}</span>
-                    <button onclick="_modalQty(${idx},1)"
-                            style="width:26px;height:26px;border:1.5px solid #ccc;border-radius:50%;background:white;
-                                   font-size:1.1rem;font-weight:900;cursor:pointer;
-                                   display:flex;align-items:center;justify-content:center;line-height:1;color:#333;">+</button>
-                    <button onclick="_modalDel(${idx})"
-                            style="width:26px;height:26px;border:none;border-radius:50%;background:#e53935;color:white;
-                                   font-size:0.65rem;font-weight:900;cursor:pointer;margin-left:2px;
-                                   display:flex;align-items:center;justify-content:center;line-height:1;">✕</button>
-                </div>
-                ${precioColModal}
-            </div>`;
-        } else {
-            return `<div class="confirm-item">
-                <span style="flex:1;">${item.qty}× ${item.name.substring(0,30)}${badgeHTML}</span>
-                ${precioColModal}
-            </div>`;
-        }
+        // Fila unificada mobile+desktop — tap=+1, botones − y +, swipe izquierda=-1
+        return `<div class="confirm-item confirm-fila-editable"
+                     data-idx="${idx}"
+                     onclick="_modalQty(${idx},1)"
+                     style="display:flex;align-items:center;gap:8px;padding:9px 12px;cursor:pointer;user-select:none;">
+            ${esDesktop ? `<img src="imagenes-productos/${simplificarNombre(item.name)}.jpg"
+                 onerror="this.style.display='none'"
+                 style="width:34px;height:34px;border-radius:6px;object-fit:cover;background:#e8f5e9;flex-shrink:0;">` : ''}
+            <div style="flex:1;min-width:0;">
+                <div style="font-size:0.82rem;line-height:1.3;word-break:break-word;">${item.name.substring(0,34)}${badgeHTML}</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:3px;flex-shrink:0;" onclick="event.stopPropagation()">
+                <button onclick="_modalQty(${idx},-1)"
+                        style="width:28px;height:28px;border:1.5px solid #ccc;border-radius:50%;background:white;
+                               font-size:1.1rem;font-weight:900;cursor:pointer;touch-action:manipulation;
+                               display:flex;align-items:center;justify-content:center;line-height:1;color:#333;">−</button>
+                <span style="min-width:24px;text-align:center;font-weight:800;font-size:0.95rem;">${item.qty}</span>
+                <button onclick="_modalQty(${idx},1)"
+                        style="width:28px;height:28px;border:1.5px solid #ccc;border-radius:50%;background:white;
+                               font-size:1.1rem;font-weight:900;cursor:pointer;touch-action:manipulation;
+                               display:flex;align-items:center;justify-content:center;line-height:1;color:#333;">+</button>
+            </div>
+            ${precioColModal}
+        </div>`;
     }).join('');
     return items + `<div class="confirm-total-row"><span>TOTAL</span><span>$${total.toLocaleString('es-AR')}</span></div>`;
 }
@@ -2692,23 +2697,22 @@ function _modalQty(idx, delta) {
     const newQty = (item.qty || 1) + delta;
     if (newQty <= 0) { _modalDel(idx); return; }
     item.qty = newQty;
-    // Recalcular precio con oferta para nueva cantidad
     const p = productos.find(pr => pr.id === item.id);
     if (p && !item.esPeso) {
         const oferta = calcularOfertaPOS(p, newQty);
         item.price = oferta.precioUnitario || p.price;
         item.ofertaEtiqueta = oferta.etiqueta || null;
     }
-    renderVenta();
-    guardarCarritoPendiente();
+    renderVenta(true);             // ligero: actualiza totales sin tocar el scroll
+    _guardarCarritoDiferido();     // diferido: no bloquea la interacción
     _reRenderModal();
 }
 
 function _modalDel(idx) {
     if (idx < 0 || idx >= ventaActual.length) return;
     ventaActual.splice(idx, 1);
-    renderVenta();
-    guardarCarritoPendiente();
+    renderVenta(true);
+    _guardarCarritoDiferido();
     if (ventaActual.length === 0) { cerrarConfirm(); return; }
     _reRenderModal();
 }
@@ -2721,6 +2725,43 @@ function _reRenderModal() {
     window._descuentoRedondeo = 0;
     el.innerHTML = _buildDetalleModalHTML();
     actualizarTotalConRedondeo();
+    _bindSwipeConfirmacion(); // re-attachar swipe a las nuevas filas
+}
+
+// ── Swipe izquierda en filas del modal: resta 1 (no borra directamente) ──
+function _bindSwipeConfirmacion() {
+    const filas = document.querySelectorAll('.confirm-fila-editable');
+    filas.forEach(fila => {
+        let sx = 0, sy = 0, activo = false, dirLocked = false;
+        const UMBRAL = 40, LOCK = 10, RATIO = 1.3;
+
+        fila.addEventListener('touchstart', function(e) {
+            sx = e.touches[0].clientX;
+            sy = e.touches[0].clientY;
+            activo = true; dirLocked = false;
+        }, { passive: true });
+
+        fila.addEventListener('touchmove', function(e) {
+            if (!activo || dirLocked) return;
+            const dx = Math.abs(e.touches[0].clientX - sx);
+            const dy = Math.abs(e.touches[0].clientY - sy);
+            if (dx < LOCK && dy < LOCK) return;
+            if (dx > dy * RATIO) { dirLocked = true; }        // horizontal → swipe
+            else                  { activo = false; dirLocked = true; } // vertical → scroll
+        }, { passive: true });
+
+        fila.addEventListener('touchend', function(e) {
+            if (!activo) return;
+            activo = false;
+            const dx = e.changedTouches[0].clientX - sx;
+            const dy = e.changedTouches[0].clientY - sy;
+            if (Math.abs(dx) < UMBRAL) return;
+            if (Math.abs(dx) < Math.abs(dy) * RATIO) return;
+            if (dx > 0) return; // solo izquierda
+            const idx = parseInt(fila.dataset.idx);
+            if (!isNaN(idx)) _modalQty(idx, -1); // resta 1, nunca borra directo
+        }, { passive: true });
+    });
 }
 
 function abrirConfirmacion() {
@@ -2739,6 +2780,7 @@ function abrirConfirmacion() {
 
     seleccionarMetodo('efectivo');
     document.getElementById('modalConfirm').classList.add('open');
+    _bindSwipeConfirmacion(); // swipe izquierda = −1 en cada fila
 }
 
 async function confirmarVenta() {
@@ -4413,7 +4455,10 @@ function alertarVencidosHoy() {
 
     const vencidosHoy = productos.filter(p => {
         if (!p.vencimiento || p.stock <= 0) return false;
-        return diasHasta(p.vencimiento) < 0; // < 0 = ayer o antes → VENCIDO; 0 = hoy → no incluir
+        const partes = p.vencimiento.split('-');
+        const vence = new Date(parseInt(partes[0]), parseInt(partes[1])-1, parseInt(partes[2]));
+        vence.setHours(0,0,0,0);
+        return vence < hoy;
     });
 
     if (vencidosHoy.length === 0) return;
@@ -4465,7 +4510,10 @@ async function confirmarVencidosRetirados() {
 
     const vencidos = productos.filter(p => {
         if (!p.vencimiento || p.stock <= 0) return false;
-        return diasHasta(p.vencimiento) < 0; // < 0 = ayer o antes → VENCIDO
+        const partes = p.vencimiento.split('-');
+        const vence = new Date(parseInt(partes[0]), parseInt(partes[1])-1, parseInt(partes[2]));
+        vence.setHours(0,0,0,0);
+        return vence < hoy;
     });
 
     const modal = document.getElementById('modalVencidosHoy');
@@ -5526,7 +5574,7 @@ function toggleCervecero() {
 // Sincronizar badge de versión desde el <title>
 (function(){
     const el = document.getElementById('versionTag');
-    if (el) el.textContent = 'v163';
+    if (el) el.textContent = 'v164';
 })();
 
 // ── WakeLock: mantener pantalla encendida mientras la app está activa ──
