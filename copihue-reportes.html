@@ -289,6 +289,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
 .csi-tabla td.csi-col-prod{position:sticky;left:0;background:#fff;font-weight:600;font-size:.71rem;max-width:130px;overflow:hidden;text-overflow:ellipsis}
 .csi-tabla tr:hover td{background:#f5fbf5!important}
 .csi-qty{display:inline-block;background:var(--vd);color:#fff;font-weight:900;font-size:.78rem;padding:2px 8px;border-radius:8px;min-width:28px;text-align:center}
+.csi-badge-dia{background:#f3e5f5;color:#4a148c}
 .csi-badge-sem{background:var(--al);color:var(--azul)}
 .csi-badge-men{background:var(--vl);color:var(--vd)}
 .csi-badge-esp{background:var(--ml);color:var(--morado)}
@@ -1218,7 +1219,10 @@ document.addEventListener('click', function(e) {
 
 // ====== COMPRA SUGERIDA INTELIGENTE ======
 // Categorías con reposición semanal (sensibles/perecederas)
-var _CSI_SEMANALES = ['LACTEOS','FRESCOS','PANIFICADOS','CARNICERIA','VERDULERIA','FIAMBRERIA','CARNICOS','PANADERIA'];
+// Categorías con reposición DIARIA (pedido para mañana — PAN, panificados)
+var _CSI_DIARIOS   = ['PANADERIA','PANIFICADOS'];
+// Categorías con reposición SEMANAL (PANADERIA/PANIFICADOS ya están en DIARIOS — no duplicar)
+var _CSI_SEMANALES = ['LACTEOS','FRESCOS','CARNICERIA','VERDULERIA','FIAMBRERIA','CARNICOS'];
 // Categorías con regla especial (electrónica/computación)
 var _CSI_ESPECIALES = ['COMPUTACION','ELECTRONICA','TECNOLOGIA','ELECTRO'];
 
@@ -1236,7 +1240,8 @@ function _csiCat(nombre, catField) {
 // Devuelve el tipo de período según categoría
 function _csiPer(cat) {
   if (_CSI_ESPECIALES.some(function(c){return cat.indexOf(c)>=0;})) return 'especial';
-  if (_CSI_SEMANALES.some(function(c){return cat.indexOf(c)>=0;})) return 'semanal';
+  if (_CSI_DIARIOS.some(function(c){return cat.indexOf(c)>=0;}))    return 'diario';   // antes de semanal
+  if (_CSI_SEMANALES.some(function(c){return cat.indexOf(c)>=0;}))  return 'semanal';
   return 'mensual';
 }
 
@@ -1265,15 +1270,23 @@ function calcularMotorCSI() {
     if (f >= c7)  vm[it.nombre].v7  += q;
   });
 
-  // Stock y vencimientos de raw.vencProximos
+  // Stock real desde raw.stockInfo (cubre TODO el inventario, incluye productos sin vencimiento).
+  // raw.vencProximos se usa SOLO para diasVenc — no como fuente de stock.
   var stockMap={}, diasVencMap={}, catMap={};
+  // 1. Poblar stockMap desde raw.stockInfo — fuente confiable de stock real para todos los productos
+  if (raw.stockInfo) {
+    Object.keys(raw.stockInfo).forEach(function(nom) {
+      stockMap[nom] = raw.stockInfo[nom]; // clave ya viene en MAYÚSCULAS desde el backend
+    });
+  }
+  // 2. Completar diasVencMap desde raw.vencProximos — NO sobreescribe stockMap
   (raw.vencProximos||[]).forEach(function(v) {
     if (!v.nombre) return;
-    if (stockMap[v.nombre]===undefined || v.stock < stockMap[v.nombre]) {
-      stockMap[v.nombre] = v.stock;
-      diasVencMap[v.nombre] = v.dias;
+    var nom = v.nombre.toUpperCase(); // normalizar por si el backend devuelve mixedCase
+    if (diasVencMap[nom] === undefined || v.dias < diasVencMap[nom]) {
+      diasVencMap[nom] = v.dias;
     }
-    if (v.categoria) catMap[v.nombre] = v.categoria;
+    if (v.categoria) catMap[nom] = v.categoria;
   });
 
   var nMuertos=0, nVencOmit=0, filas=[];
@@ -1300,6 +1313,18 @@ function calcularMotorCSI() {
       // Sin stock confiable: incluir en tabla como referencia pero sin CompraSugerida calculada
       motivo = 'sin dato de stock';
       // compraSugerida queda null → se muestra S/D en la tabla
+    }
+    // Regla 0: Diario — panadería / panificados → pedido para mañana
+    // VentaProyectada = MAX(promDia, v7/7, 1) — garantiza al menos 1 unidad sugerida
+    // Con stock=0 nunca puede terminar en 0
+    else if (periodoBase === 'diario') {
+      ventaProyectada = Math.max(promDia, v.v7 / 7, 1);
+      var brutoDiario  = ventaProyectada - stock;
+      compraSugerida   = stock === 0
+        ? Math.max(Math.ceil(brutoDiario), 1)   // piso garantizado en stock vacío
+        : Math.ceil(brutoDiario);               // ceil normal si hay algo de stock
+      motivo = 'reposicion diaria';
+      periodo = 'diario';
     }
     // Regla 3: Electrónica / Computación — lógica especial por demanda 60d
     // Requiere stock=0 confirmado; si no hay dato, no se puede afirmar que está sin stock
@@ -1331,7 +1356,8 @@ function calcularMotorCSI() {
       }
     }
 
-    // Descartar si la sugerencia calculada es menor a 1 (solo cuando hay dato de stock)
+    // Descartar si la sugerencia calculada es ≤0 (ceil ya aplicado en cada rama).
+    // Para diario con stock=0 el piso de 1 está garantizado arriba — nunca llega aquí con 0.
     if (compraSugerida !== null && compraSugerida < 1) return;
 
     filas.push({
@@ -1346,13 +1372,13 @@ function calcularMotorCSI() {
       diasVenc: diasVenc !== undefined ? diasVenc : null,
       periodo: periodo,
       ventaProyectada: Math.round(ventaProyectada*10)/10,
-      compraSugerida: Math.round(compraSugerida),
+      compraSugerida: compraSugerida !== null ? Math.ceil(compraSugerida) : null,
       motivo: motivo
     });
   });
 
-  // Orden: calculados primero (especial>semanal>reactivacion>mensual), sin dato al final
-  var ORD = {especial:0, semanal:1, reactivacion:2, mensual:3};
+  // Orden: diario > especial > semanal > reactivacion > mensual > sin dato al final
+  var ORD = {diario:0, especial:1, semanal:2, reactivacion:3, mensual:4};
   filas.sort(function(a,b) {
     var aSD = a.compraSugerida === null, bSD = b.compraSugerida === null;
     if (aSD !== bSD) return aSD ? 1 : -1; // sin dato siempre al final
@@ -1373,6 +1399,7 @@ function renderCompraSugerida() {
   var res = calcularMotorCSI();
   var todos = res.filas, nMuertos = res.nMuertos, nVencOmit = res.nVencOmit, nSinStock = res.nSinStock;
 
+  var nDia = todos.filter(function(p){return p.periodo==='diario';}).length;
   var nSem = todos.filter(function(p){return p.periodo==='semanal';}).length;
   var nMen = todos.filter(function(p){return p.periodo==='mensual';}).length;
   var nEsp = todos.filter(function(p){return p.periodo==='especial';}).length;
@@ -1382,6 +1409,7 @@ function renderCompraSugerida() {
   var resumen =
     '<div class="csi-resumen">'+
       '<div class="csi-stat"><div class="csi-stat-v">'+todos.length+'</div><div class="csi-stat-l">Total sugeridos</div></div>'+
+      (nDia?'<div class="csi-stat" style="border-top:3px solid #4a148c"><div class="csi-stat-v" style="color:#4a148c">'+nDia+'</div><div class="csi-stat-l">🍞 Diario</div></div>':'')+
       '<div class="csi-stat csi-sem"><div class="csi-stat-v">'+nSem+'</div><div class="csi-stat-l">🥛 Semanal</div></div>'+
       '<div class="csi-stat csi-men"><div class="csi-stat-v">'+nMen+'</div><div class="csi-stat-l">📦 Mensual</div></div>'+
       '<div class="csi-stat csi-esp"><div class="csi-stat-v">'+nEsp+'</div><div class="csi-stat-l">💻 Especial</div></div>'+
@@ -1396,9 +1424,9 @@ function renderCompraSugerida() {
   // Filtros de período
   var filtros =
     '<div class="chips-wrap" style="margin-bottom:10px">'+
-    ['todos','semanal','mensual','especial','reactivacion'].map(function(f){
-      var lbl={todos:'📋 Todos',semanal:'🥛 Semanal',mensual:'📦 Mensual',especial:'💻 Especial',reactivacion:'⚡ Reactiv.'}[f];
-      var cnt={todos:todos.length,semanal:nSem,mensual:nMen,especial:nEsp,reactivacion:nRea}[f];
+    ['todos','diario','semanal','mensual','especial','reactivacion'].map(function(f){
+      var lbl={todos:'📋 Todos',diario:'🍞 Diario',semanal:'🥛 Semanal',mensual:'📦 Mensual',especial:'💻 Especial',reactivacion:'⚡ Reactiv.'}[f];
+      var cnt={todos:todos.length,diario:nDia,semanal:nSem,mensual:nMen,especial:nEsp,reactivacion:nRea}[f];
       if (cnt===0 && f!=='todos') return '';
       return '<button class="chip'+(csiFiltroPeriodo===f?' activo':'')+'" onclick="csiFiltroPeriodo=\''+f+'\';renderApp()">'+lbl+' ('+cnt+')</button>';
     }).join('')+
@@ -1417,8 +1445,8 @@ function renderCompraSugerida() {
     var vd = p.diasVenc!==null
       ? (p.diasVenc<=14 ? '<span style="color:var(--naranja);font-weight:700">'+p.diasVenc+'d</span>' : p.diasVenc+'d')
       : '<span style="color:#ddd">—</span>';
-    var pcls = {semanal:'csi-badge-sem',mensual:'csi-badge-men',especial:'csi-badge-esp',reactivacion:'csi-badge-rea'}[p.periodo]||'csi-badge-men';
-    var plbl = {semanal:'Semanal',mensual:'Mensual',especial:'Especial',reactivacion:'Reactiv.'}[p.periodo]||'Mensual';
+    var pcls = {diario:'csi-badge-dia',semanal:'csi-badge-sem',mensual:'csi-badge-men',especial:'csi-badge-esp',reactivacion:'csi-badge-rea'}[p.periodo]||'csi-badge-men';
+    var plbl = {diario:'Diario',semanal:'Semanal',mensual:'Mensual',especial:'Especial',reactivacion:'Reactiv.'}[p.periodo]||'Mensual';
     return '<tr>'+
       '<td class="csi-col-prod" title="'+p.nombre+'">'+p.nombre.substring(0,26)+'</td>'+
       '<td style="font-size:.6rem;color:var(--gris);text-align:center">'+p.cat.substring(0,11)+'</td>'+
@@ -1454,7 +1482,7 @@ function renderCompraSugerida() {
       '</table>'+
     '</div>'+
     '<div style="font-size:.6rem;color:var(--gris);padding:6px 2px;line-height:1.6;margin-top:4px">'+
-      '📌 <strong>S/D</strong>: stock sin datos (sin vencimiento en rango próximo); se asume stock=0 para el cálculo. '+
+      '📌 <strong>S/D</strong>: stock no disponible en inventario (producto sin registro de stock real); CompraSugerida no calculada para estos ítems. '+
       'Categorías detectadas por heurística sobre el nombre del producto cuando el campo no está disponible en la API.'+
     '</div>';
 
