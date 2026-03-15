@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v157</title>
+    <title>Copihue — POS v158</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2281,9 +2281,9 @@ function agregarProducto(id) {
         if (oferta.tieneOferta) mostrarToast(`${oferta.etiqueta} — ${producto.name.substring(0,25)}`, 'naranja');
     }
 
-    renderVenta(true);              // true = ligero: omite renderResultados interno
-    _guardarCarritoDiferido();      // diferido 300ms, no bloquea el tap
-    _refreshResultadosBadges(id);  // quirúrgico: solo el card tocado
+    renderVenta(true);             // true = ligero: omite renderResultados interno
+    _guardarCarritoDiferido();     // diferido 300ms, no bloquea el tap
+    _refreshResultadosBadges(id); // quirúrgico: solo el card tocado
 }
 
 // ===== SELECTOR DE CANTIDAD ANTES DE AGREGAR =====
@@ -2390,8 +2390,8 @@ function cambiarCantidad(id, delta) {
     } else {
         item.qty = nuevaCant;
     }
-    renderVenta();
-    guardarCarritoPendiente();
+    renderVenta(true);             // ligero: omite renderResultados
+    _guardarCarritoDiferido();     // diferido 300ms
     _refreshResultadosBadges(typeof id === 'string' && id.startsWith('peso_') ? null : Number(id));
 }
 
@@ -5540,7 +5540,7 @@ function toggleCervecero() {
 // Sincronizar badge de versión desde el <title>
 (function(){
     const el = document.getElementById('versionTag');
-    if (el) el.textContent = 'v157';
+    if (el) el.textContent = 'v158';
 })();
 
 // ── WakeLock: mantener pantalla encendida mientras la app está activa ──
@@ -5578,12 +5578,13 @@ function cerrarBuscadorFlotante() {
 }
 
 // ===== SWIPE EN CARDS DE PRODUCTO =====
-// Swipe derecha → +1  |  Swipe izquierda → quitar del carrito
+// Swipe izquierda → quitar del carrito
 (function initSwipeProductos() {
-    if (!MOBILE) return; // swipe solo en mobile
-    let sx = 0, sy = 0, startEl = null, didSwipe = false;
-    const UMBRAL = 35; // px mínimo para activar
-    const RATIO  = 1.2; // horizontal debe superar 1.2× vertical
+    if (!MOBILE) return;
+    let sx = 0, sy = 0, startEl = null, didSwipe = false, dirLocked = false;
+    const UMBRAL      = 35;
+    const LOCK_UMBRAL = 10;
+    const RATIO       = 1.2;
 
     document.addEventListener('touchstart', function(e) {
         const btn = e.target.closest('[data-prod-id]');
@@ -5592,15 +5593,21 @@ function cerrarBuscadorFlotante() {
         sy = e.touches[0].clientY;
         startEl = btn;
         didSwipe = false;
+        dirLocked = false;
+        btn.style.willChange = 'transform';
     }, { passive: true });
 
     document.addEventListener('touchmove', function(e) {
-        if (!startEl) return;
-        const dx = e.touches[0].clientX - sx;
-        const dy = e.touches[0].clientY - sy;
-        // Si va más horizontal que vertical → marcar como swipe (bloquea scroll)
-        if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * RATIO) {
+        if (!startEl || dirLocked) return;
+        const dx = Math.abs(e.touches[0].clientX - sx);
+        const dy = Math.abs(e.touches[0].clientY - sy);
+        if (dx < LOCK_UMBRAL && dy < LOCK_UMBRAL) return;
+        if (dx > dy * RATIO) {
             didSwipe = true;
+            dirLocked = true;
+        } else if (dy > dx) {
+            startEl = null;
+            dirLocked = true;
         }
     }, { passive: true });
 
@@ -5610,34 +5617,34 @@ function cerrarBuscadorFlotante() {
         const dx = e.changedTouches[0].clientX - sx;
         const dy = e.changedTouches[0].clientY - sy;
         startEl = null;
+        btn.style.willChange = '';
 
         if (!didSwipe || Math.abs(dx) < UMBRAL) return;
         if (Math.abs(dx) < Math.abs(dy) * RATIO) return;
-
-        // Solo swipe izquierda — derecha reservado
         if (dx > 0) return;
 
-        // Feedback visual
-        btn.style.transition = 'transform 0.15s';
-        btn.style.transform = 'translateX(-12px)';
-        setTimeout(() => { btn.style.transform = ''; btn.style.transition = ''; }, 200);
+        requestAnimationFrame(() => {
+            btn.style.transition = 'transform 0.15s';
+            btn.style.transform = 'translateX(-12px)';
+            setTimeout(() => { btn.style.transform = ''; btn.style.transition = ''; }, 180);
+        });
 
         const id = parseInt(btn.dataset.prodId);
-        // Para productos por peso: quitar la última entrada de ese producto
-        const idxPeso = ventaActual.findLastIndex ? ventaActual.findLastIndex(i => i.esPeso && i.idOriginal === id)
-                      : [...ventaActual].reverse().findIndex(i => i.esPeso && i.idOriginal === id);
+
+        const idxPeso = ventaActual.findLastIndex
+            ? ventaActual.findLastIndex(i => i.esPeso && i.idOriginal === id)
+            : ventaActual.length - 1 - [...ventaActual].reverse().findIndex(i => i.esPeso && i.idOriginal === id);
+
         if (idxPeso !== -1 && idxPeso >= 0) {
-            const realIdx = ventaActual.findLastIndex
-                ? ventaActual.findLastIndex(i => i.esPeso && i.idOriginal === id)
-                : ventaActual.length - 1 - [...ventaActual].reverse().findIndex(i => i.esPeso && i.idOriginal === id);
-            const item = ventaActual[realIdx];
+            const item = ventaActual[idxPeso];
             mostrarToast(`🗑 Quitado ${item.gramos}gr — ${item.name.substring(0,20)}`, 'rojo');
-            ventaActual.splice(realIdx, 1);
-            renderVenta();
-            guardarCarritoPendiente();
-            _refreshResultadosBadges();
+            ventaActual.splice(idxPeso, 1);
+            renderVenta(true);             // ligero: omite renderResultados
+            _guardarCarritoDiferido();     // diferido 300ms
+            _refreshResultadosBadges(id); // quirúrgico
             return;
         }
+
         const idx = ventaActual.findIndex(i => i.id === id);
         if (idx !== -1) {
             if (ventaActual[idx].qty > 1) {
@@ -5647,15 +5654,14 @@ function cerrarBuscadorFlotante() {
                 ventaActual.splice(idx, 1);
                 mostrarToast('🗑 Quitado', 'rojo');
             }
-            renderVenta();
-            guardarCarritoPendiente();
-            _refreshResultadosBadges();
+            renderVenta(true);             // ligero
+            _guardarCarritoDiferido();     // diferido
+            _refreshResultadosBadges(id); // quirúrgico
         } else {
             mostrarToast('No está en el carrito', '');
         }
     }, { passive: true });
 
-    // Cancelar click si fue swipe
     document.addEventListener('click', function(e) {
         if (didSwipe) { e.stopPropagation(); didSwipe = false; }
     }, true);
