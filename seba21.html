@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v158</title>
+    <title>Copihue — POS v159</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2227,7 +2227,7 @@ function _refreshResultadosBadges(idActualizado) {
     if (contenedor) contenedor.scrollTop = scrollPos;
 }
 
-// ── Debounce global para guardar carrito — evita JSON.stringify sincrónico en cada tap ──
+// ── Debounce global para guardar carrito ──
 let _saveCartTimer = null;
 function _guardarCarritoDiferido() {
     clearTimeout(_saveCartTimer);
@@ -2281,9 +2281,9 @@ function agregarProducto(id) {
         if (oferta.tieneOferta) mostrarToast(`${oferta.etiqueta} — ${producto.name.substring(0,25)}`, 'naranja');
     }
 
-    renderVenta(true);             // true = ligero: omite renderResultados interno
-    _guardarCarritoDiferido();     // diferido 300ms, no bloquea el tap
-    _refreshResultadosBadges(id); // quirúrgico: solo el card tocado
+    renderVenta(true);
+    _guardarCarritoDiferido();
+    _refreshResultadosBadges(id);
 }
 
 // ===== SELECTOR DE CANTIDAD ANTES DE AGREGAR =====
@@ -2390,8 +2390,8 @@ function cambiarCantidad(id, delta) {
     } else {
         item.qty = nuevaCant;
     }
-    renderVenta(true);             // ligero: omite renderResultados
-    _guardarCarritoDiferido();     // diferido 300ms
+    renderVenta(true);
+    _guardarCarritoDiferido();
     _refreshResultadosBadges(typeof id === 'string' && id.startsWith('peso_') ? null : Number(id));
 }
 
@@ -2403,139 +2403,160 @@ function limpiarVenta() {
 }
 
 // ========== RENDER VENTA ==========
+// ── Genera el HTML de una fila del carrito (usado por renderVenta y por inserción quirúrgica) ──
+function _buildItemVentaHTML(item, esDesktopPanel) {
+    const imgSrc = `imagenes-productos/${simplificarNombre(item.name)}.jpg`;
+    const tieneOferta  = item.precioModificado && item.precioOriginal > 0;
+    const precioUnit   = item.price;
+    const subtotal     = Math.round(precioUnit * item.qty);
+    const ahorroTotal  = tieneOferta ? Math.round(item.precioOriginal * item.qty - subtotal) : 0;
+    let formulaHTML = '', colOferta = '';
+    if (tieneOferta && item.ofertaEtiqueta) {
+        const tipo = item.ofertaTipo || '';
+        if (tipo === 'cervecero')  { colOferta = '#1565c0'; formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">🍺 Jueves Cervecero</div>`; }
+        else if (tipo === 'relampago')  { colOferta = '#f9a825'; formulaHTML = `<div class="item-oferta-formula" style="color:#b06000">${item.ofertaEtiqueta || '⚡ Relámpago'}</div>`; }
+        else if (tipo === 'destacadas') { colOferta = '#ff6f00'; formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">🔥 Destacada</div>`; }
+        else if (tipo === 'especiales') { colOferta = '#00bcd4'; formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">⭐ Especial</div>`; }
+        else if (tipo === 'ultimas')    { colOferta = '#b71c1c'; formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">${item.ofertaEtiqueta || '🏷️ ÚLTIMAS UNIDADES'}</div>`; }
+        else if (tipo === 'normal')     { colOferta = '#43a047'; formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">↓ Precio rebajado</div>`; }
+    }
+    const precioColHTML = tieneOferta
+        ? `<div style="flex-shrink:0;text-align:right;min-width:64px;">
+            <span class="item-precio-antes">$${item.precioOriginal.toLocaleString('es-AR')}</span>
+            <span class="item-precio-con-oferta" style="color:${colOferta||'var(--verde-oscuro)'}">$${precioUnit.toLocaleString('es-AR')}</span>
+            <span class="item-ahorro-badge">−$${ahorroTotal.toLocaleString('es-AR')}</span>
+           </div>`
+        : `<span class="item-precio-editable ${item.precioModificado ? 'modificado' : ''}"
+                 onclick="editarPrecioCarrito('${item.id}')"
+                 title="Tocar para cambiar precio">
+             $${precioUnit.toLocaleString('es-AR')}
+           </span>`;
+    return `
+    <div class="item-venta" data-item-id="${item.esPeso ? 'peso_' + item.idOriginal : item.id}">
+        ${esDesktopPanel ? `<img class="item-venta-img" src="${imgSrc}"
+             onerror="this.style.display='none'"
+             onclick="abrirInfoProd(${item.esPeso ? item.idOriginal : item.id})"
+             title="Ver historial">` : ''}
+        <div class="item-venta-nombre" style="flex:1;min-width:0;">
+            <div style="font-size:0.88rem;font-weight:600;line-height:1.3;white-space:normal;word-break:break-word;">
+                ${item.name}${item.vencimiento ? badgeVencimiento(item) : ''}
+            </div>
+            ${formulaHTML}
+        </div>
+        <div class="item-venta-controles">
+            ${item.esPeso ? `
+                <button class="btn-cant" onclick="cambiarCantidad('${item.id}', -99)" style="background:#ffebee;color:#e53935;font-size:0.8rem;">🗑</button>
+                <span class="item-cant" style="font-size:0.75rem;">${item.qty}g</span>
+            ` : `
+                <button class="btn-cant" onclick="cambiarCantidad('${item.id}', -1)">−</button>
+                <span class="item-cant">${item.qty}</span>
+                <button class="btn-cant" onclick="cambiarCantidad('${item.id}', +1)">+</button>
+            `}
+        </div>
+        ${precioColHTML}
+        <div class="item-subtotal">$${subtotal.toLocaleString('es-AR')}</div>
+    </div>`;
+}
+
+// ── Actualiza totales, FABs y header sin tocar las filas del carrito ──
+function _actualizarTotalesVenta() {
+    const total      = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
+    const totalEl    = document.getElementById('totalMonto');
+    const btnConf    = document.getElementById('btnConfirmar');
+    if (totalEl)  totalEl.textContent = '$' + total.toLocaleString('es-AR');
+    if (btnConf)  btnConf.disabled = ventaActual.length === 0;
+    if (MOBILE) {
+        document.getElementById('btnCobrarTotal').textContent = '$' + Math.round(total).toLocaleString('es-AR');
+        const hayMultiple = ventaActual.some(i => i.qty > 1);
+        document.getElementById('fabSubir').style.display = hayMultiple ? 'block' : 'none';
+    }
+}
+
 function renderVenta(ligero = false) {
-    const contenedor = document.getElementById('itemsVenta');
+    const contenedor   = document.getElementById('itemsVenta');
     const btnConfirmar = document.getElementById('btnConfirmar');
-    const totalEl = document.getElementById('totalMonto');
+    const totalEl      = document.getElementById('totalMonto');
 
     if (ventaActual.length === 0) {
         if (contenedor) contenedor.innerHTML = '<div class="venta-vacia">Sin productos aún</div>';
-        if (totalEl) totalEl.textContent = '$0';
+        if (totalEl)      totalEl.textContent = '$0';
         if (btnConfirmar) btnConfirmar.disabled = true;
         desactivarGuardiaAtras();
         _setHeaderModoVenta(false);
-        _refreshResultadosBadges();
+        _refreshResultadosBadges(); // carrito vacío: re-render del listado es necesario para limpiar badges
         if (MOBILE) {
-            // En QWERTY el FAB stack se mantiene visible por el botón 🔍
-        document.getElementById('fabStack').style.display = 'none';
+            document.getElementById('fabStack').style.display = 'none';
         } else {
             const pv = document.getElementById('panelVenta');
-            if (pv) pv.style.display = 'flex'; // siempre visible en desktop
+            if (pv) pv.style.display = 'flex';
         }
         return;
     }
 
     _setHeaderModoVenta(true);
-
-    const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
-    const totalItems = ventaActual.reduce((s, i) => s + i.qty, 0);
-    if (totalEl) totalEl.textContent = '$' + total.toLocaleString('es-AR');
-    if (btnConfirmar) btnConfirmar.disabled = false;
     activarGuardiaAtras();
-
     if (MOBILE) {
         document.getElementById('fabStack').style.display = 'flex';
-        document.getElementById('btnCobrarTotal').textContent = '$' + Math.round(ventaActual.reduce((s,i)=>s+i.price*i.qty,0)).toLocaleString('es-AR');
-        const hayMultiple = ventaActual.some(i => i.qty > 1);
-        document.getElementById('fabSubir').style.display = hayMultiple ? 'block' : 'none';
-        document.getElementById('btnCobrarTotal').textContent = '$' + Math.round(total).toLocaleString('es-AR');
-
     } else {
         const pv = document.getElementById('panelVenta');
         if (pv) pv.style.display = 'flex';
         actualizarBarraMinimizada();
     }
 
-    if (!ligero) {
-        const term = document.getElementById('buscador').value.trim();
-        const listaResultados = term.length >= 1 ? buscarProductos(term)
-            : _sortProductos(productos, new Set(ventaActual.map(i => i.esPeso ? i.idOriginal : i.id)));
-        renderResultados(listaResultados, term);
+    if (ligero) {
+        // ── Ruta quirúrgica: solo actualiza totales + sincroniza filas DOM ──
+        _actualizarTotalesVenta();
+        const esDesktopPanel = window.innerWidth >= 768;
+        const idsEnVenta = new Set(ventaActual.map(i => i.esPeso ? 'peso_' + i.idOriginal : String(i.id)));
+
+        // Eliminar filas que ya no están en ventaActual
+        contenedor.querySelectorAll('.item-venta[data-item-id]').forEach(fila => {
+            if (!idsEnVenta.has(fila.dataset.itemId)) fila.remove();
+        });
+
+        // Insertar filas nuevas que no están en el DOM
+        ventaActual.forEach(item => {
+            const itemId = item.esPeso ? 'peso_' + item.idOriginal : String(item.id);
+            if (!contenedor.querySelector(`.item-venta[data-item-id="${itemId}"]`)) {
+                contenedor.insertAdjacentHTML('beforeend', _buildItemVentaHTML(item, esDesktopPanel));
+            }
+        });
+
+        // Actualizar qty y subtotal de filas existentes
+        ventaActual.forEach(item => {
+            const itemId = item.esPeso ? 'peso_' + item.idOriginal : String(item.id);
+            const fila = contenedor.querySelector(`.item-venta[data-item-id="${itemId}"]`);
+            if (!fila) return;
+            const cantEl = fila.querySelector('.item-cant');
+            const subEl  = fila.querySelector('.item-subtotal');
+            if (cantEl) cantEl.textContent = item.esPeso ? `${item.qty}g` : item.qty;
+            if (subEl)  subEl.textContent  = '$' + Math.round(item.price * item.qty).toLocaleString('es-AR');
+        });
+        return;
     }
 
+    // ── Ruta completa (llamadas no quirúrgicas: recuperar carrito, confirmar, etc.) ──
+    const total      = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
+    const totalItems = ventaActual.reduce((s, i) => s + i.qty, 0);
+    if (totalEl) totalEl.textContent = '$' + total.toLocaleString('es-AR');
+    if (btnConfirmar) btnConfirmar.disabled = false;
+
+    if (MOBILE) {
+        document.getElementById('btnCobrarTotal').textContent = '$' + Math.round(total).toLocaleString('es-AR');
+        const hayMultiple = ventaActual.some(i => i.qty > 1);
+        document.getElementById('fabSubir').style.display = hayMultiple ? 'block' : 'none';
+    }
+
+    const term = document.getElementById('buscador').value.trim();
+    const listaResultados = term.length >= 1 ? buscarProductos(term)
+        : _sortProductos(productos, new Set(ventaActual.map(i => i.esPeso ? i.idOriginal : i.id)));
+    renderResultados(listaResultados, term);
+
     const esDesktopPanel = window.innerWidth >= 768;
+    contenedor.innerHTML = ventaActual.map(item => _buildItemVentaHTML(item, esDesktopPanel)).join('');
 
-    contenedor.innerHTML = ventaActual.map(item => {
-        const imgSrc = `imagenes-productos/${simplificarNombre(item.name)}.jpg`;
-
-        // ── Calcular precios y ahorro ──────────────────────────────
-        const tieneOferta  = item.precioModificado && item.precioOriginal > 0;
-        const precioUnit   = item.price;
-        const subtotal     = Math.round(precioUnit * item.qty);
-        const ahorroTotal  = tieneOferta ? Math.round(item.precioOriginal * item.qty - subtotal) : 0;
-
-        // ── Texto de fórmula según tipo ────────────────────────────
-        let formulaHTML = '';
-        let colOferta   = '';   // color del badge
-        if (tieneOferta && item.ofertaEtiqueta) {
-            const tipo = item.ofertaTipo || '';
-            if (tipo === 'cervecero') {
-                colOferta = '#1565c0';
-                formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">🍺 Jueves Cervecero</div>`;
-            } else if (tipo === 'relampago') {
-                colOferta = '#f9a825';
-                const etiq = item.ofertaEtiqueta || '⚡ Relámpago';
-                formulaHTML = `<div class="item-oferta-formula" style="color:#b06000">${etiq}</div>`;
-            } else if (tipo === 'destacadas') {
-                colOferta = '#ff6f00';
-                formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">🔥 Destacada</div>`;
-            } else if (tipo === 'especiales') {
-                colOferta = '#00bcd4';
-                formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">⭐ Especial</div>`;
-            } else if (tipo === 'ultimas') {
-                colOferta = '#b71c1c';
-                formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">${item.ofertaEtiqueta || '🏷️ ÚLTIMAS UNIDADES'}</div>`;
-            } else if (tipo === 'normal') {
-                colOferta = '#43a047';
-                formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">↓ Precio rebajado</div>`;
-            }
-        }
-
-        // ── Columna de precio ──────────────────────────────────────
-        const precioColHTML = tieneOferta
-            ? `<div style="flex-shrink:0;text-align:right;min-width:64px;">
-                <span class="item-precio-antes">$${item.precioOriginal.toLocaleString('es-AR')}</span>
-                <span class="item-precio-con-oferta" style="color:${colOferta||'var(--verde-oscuro)'}">$${precioUnit.toLocaleString('es-AR')}</span>
-                <span class="item-ahorro-badge">−$${ahorroTotal.toLocaleString('es-AR')}</span>
-              </div>`
-            : `<span class="item-precio-editable ${item.precioModificado ? 'modificado' : ''}"
-                     onclick="editarPrecioCarrito('${item.id}')"
-                     title="Tocar para cambiar precio">
-                 $${precioUnit.toLocaleString('es-AR')}
-               </span>`;
-
-        return `
-        <div class="item-venta">
-            ${esDesktopPanel ? `<img class="item-venta-img" src="${imgSrc}"
-                 onerror="this.style.display='none'"
-                 onclick="abrirInfoProd(${item.esPeso ? item.idOriginal : item.id})"
-                 title="Ver historial">` : ''}
-            <div class="item-venta-nombre" style="flex:1;min-width:0;">
-                <div style="font-size:0.88rem;font-weight:600;line-height:1.3;white-space:normal;word-break:break-word;">
-                    ${item.name}${item.vencimiento ? badgeVencimiento(item) : ''}
-                </div>
-                ${formulaHTML}
-            </div>
-            <div class="item-venta-controles">
-                ${item.esPeso ? `
-                    <button class="btn-cant" onclick="cambiarCantidad('${item.id}', -99)" style="background:#ffebee;color:#e53935;font-size:0.8rem;">🗑</button>
-                    <span class="item-cant" style="font-size:0.75rem;">${item.qty}g</span>
-                ` : `
-                    <button class="btn-cant" onclick="cambiarCantidad('${item.id}', -1)">−</button>
-                    <span class="item-cant">${item.qty}</span>
-                    <button class="btn-cant" onclick="cambiarCantidad('${item.id}', +1)">+</button>
-                `}
-            </div>
-            ${precioColHTML}
-            <div class="item-subtotal">$${subtotal.toLocaleString('es-AR')}</div>
-        </div>`;
-    }).join('');
-
-    // Mostrar imagen solo en desktop
     if (esDesktopPanel) {
-        contenedor.querySelectorAll('.item-venta-img').forEach(img => {
-            img.style.display = 'block';
-        });
+        contenedor.querySelectorAll('.item-venta-img').forEach(img => { img.style.display = 'block'; });
     }
 }
 
@@ -5540,7 +5561,7 @@ function toggleCervecero() {
 // Sincronizar badge de versión desde el <title>
 (function(){
     const el = document.getElementById('versionTag');
-    if (el) el.textContent = 'v158';
+    if (el) el.textContent = 'v159';
 })();
 
 // ── WakeLock: mantener pantalla encendida mientras la app está activa ──
@@ -5639,9 +5660,9 @@ function cerrarBuscadorFlotante() {
             const item = ventaActual[idxPeso];
             mostrarToast(`🗑 Quitado ${item.gramos}gr — ${item.name.substring(0,20)}`, 'rojo');
             ventaActual.splice(idxPeso, 1);
-            renderVenta(true);             // ligero: omite renderResultados
-            _guardarCarritoDiferido();     // diferido 300ms
-            _refreshResultadosBadges(id); // quirúrgico
+            renderVenta(true);
+            _guardarCarritoDiferido();
+            _refreshResultadosBadges(id);
             return;
         }
 
@@ -5654,9 +5675,9 @@ function cerrarBuscadorFlotante() {
                 ventaActual.splice(idx, 1);
                 mostrarToast('🗑 Quitado', 'rojo');
             }
-            renderVenta(true);             // ligero
-            _guardarCarritoDiferido();     // diferido
-            _refreshResultadosBadges(id); // quirúrgico
+            renderVenta(true);
+            _guardarCarritoDiferido();
+            _refreshResultadosBadges(id);
         } else {
             mostrarToast('No está en el carrito', '');
         }
