@@ -2383,8 +2383,8 @@ function cambiarCantidad(id, delta) {
     } else {
         item.qty = nuevaCant;
     }
-    renderVenta(true);
-    _guardarCarritoDiferido();
+    renderVenta(true);        // ligero: solo totales/header, NO toca el scroll
+    _guardarCarritoDiferido(); // debounce 300ms
     _refreshResultadosBadges(typeof id === 'string' && id.startsWith('peso_') ? null : Number(id));
 }
 
@@ -2690,13 +2690,13 @@ function _buildDetalleModalHTML() {
     return items + `<div class="confirm-total-row"><span>TOTAL</span><span>$${total.toLocaleString('es-AR')}</span></div>`;
 }
 
-// Set de ids tocados durante la sesión del modal — se limpia al abrir, se usa al cerrar
+// ids tocados durante la sesión del modal — se usa para sync quirúrgico al cerrar
 const _idsTocadosEnModal = new Set();
 
 function _modalQty(idx, delta) {
     if (idx < 0 || idx >= ventaActual.length) return;
     const item = ventaActual[idx];
-    _idsTocadosEnModal.add(item.esPeso ? item.idOriginal : item.id); // registrar id tocado
+    _idsTocadosEnModal.add(item.esPeso ? item.idOriginal : item.id);
     const newQty = (item.qty || 1) + delta;
     if (newQty <= 0) { _modalDel(idx); return; }
     item.qty = newQty;
@@ -2714,7 +2714,7 @@ function _modalQty(idx, delta) {
 function _modalDel(idx) {
     if (idx < 0 || idx >= ventaActual.length) return;
     const item = ventaActual[idx];
-    _idsTocadosEnModal.add(item.esPeso ? item.idOriginal : item.id); // registrar id tocado
+    _idsTocadosEnModal.add(item.esPeso ? item.idOriginal : item.id);
     ventaActual.splice(idx, 1);
     renderVenta(true);
     _guardarCarritoDiferido();
@@ -2783,7 +2783,7 @@ function abrirConfirmacion() {
     window._totalConRedondeo = total;
     window._descuentoRedondeo = 0;
 
-    _idsTocadosEnModal.clear(); // limpiar ids tocados de sesión anterior
+    _idsTocadosEnModal.clear(); // limpiar sesión anterior
     seleccionarMetodo('efectivo');
     document.getElementById('modalConfirm').classList.add('open');
     _bindSwipeConfirmacion();
@@ -2947,9 +2947,7 @@ function cerrarConfirm() {
     if (sel) sel.style.display = 'none';
     const nuevoPanel = document.getElementById('nuevoClientePanel');
     if (nuevoPanel) nuevoPanel.style.display = 'none';
-
-    // Sync quirúrgico: SOLO los ids tocados durante la sesión del modal
-    // No recorre todo el scroll, no llama renderResultados, no reordena nada
+    // Sync solo los ids tocados durante el modal — sin renderResultados, sin reordenar
     _idsTocadosEnModal.forEach(id => _refreshResultadosBadges(id));
     _idsTocadosEnModal.clear();
 }
