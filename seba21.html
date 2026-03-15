@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v164</title>
+    <title>Copihue — POS v165</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2926,6 +2926,65 @@ function enviarTicketWA() {
     }
 }
 
+// ── Sincroniza los cards VISIBLES del scroll con ventaActual ──────────────
+// Recorre solo los nodos ya renderizados en el DOM (los visible en pantalla),
+// nunca re-renderiza el listado completo. Ideal para usar al cerrar el modal.
+function syncListadoDesdeVentaActual() {
+    const cards = document.querySelectorAll('.resultado-item[data-prod-id]');
+    if (!cards.length) return;
+
+    // Índice rápido de ventaActual por id
+    const mapaCarrito = new Map();
+    ventaActual.forEach(i => {
+        const key = i.esPeso ? i.idOriginal : i.id;
+        mapaCarrito.set(key, i);
+    });
+
+    cards.forEach(card => {
+        const id  = parseInt(card.dataset.prodId);
+        const item = mapaCarrito.get(id);
+        const qty  = item ? item.qty : 0;
+        const gramos = item && item.esPeso ? item.gramos : 0;
+        const enCart = qty > 0;
+
+        // Badge de cantidad
+        const imgWrap = card.querySelector('div[style*="position:relative"]');
+        if (imgWrap) {
+            let badge = imgWrap.querySelector('[data-badge]');
+            if (enCart) {
+                const label = gramos ? `${gramos}g` : qty;
+                if (!badge) {
+                    badge = document.createElement('div');
+                    badge.dataset.badge = '1';
+                    badge.style.cssText = `position:absolute;top:-5px;left:-5px;background:#e53935;color:white;border-radius:10px;width:${gramos?'28px':'20px'};height:20px;font-size:0.6rem;font-weight:900;display:flex;align-items:center;justify-content:center;border:2px solid white;z-index:2;line-height:1;`;
+                    imgWrap.insertBefore(badge, imgWrap.firstChild);
+                }
+                badge.textContent = label;
+                badge.style.width = gramos ? '28px' : '20px';
+            } else if (badge) {
+                badge.remove();
+            }
+        }
+
+        // Fondo y borde
+        card.style.background = enCart ? '#f1f8e9' : 'white';
+        card.style.borderLeft  = enCart ? '3px solid #43a047' : '3px solid transparent';
+
+        // Total
+        const totalDiv = card.querySelector('[data-total]');
+        if (enCart && item) {
+            const totalVal = item.price * qty;
+            if (totalDiv) {
+                totalDiv.querySelector('div:last-child').textContent = '$' + totalVal.toLocaleString('es-AR');
+            }
+            // Si no tiene totalDiv pero debería, no lo creamos aquí para no complicar el layout
+            // — se creará cuando renderResultados lo pinte en el próximo ciclo normal
+        } else if (totalDiv) {
+            totalDiv.remove();
+        }
+    });
+}
+
 function cerrarConfirm() {
     document.getElementById('modalConfirm').classList.remove('open');
     const btnTicket = document.getElementById('btnTicketWA');
@@ -2942,6 +3001,8 @@ function cerrarConfirm() {
     if (sel) sel.style.display = 'none';
     const nuevoPanel = document.getElementById('nuevoClientePanel');
     if (nuevoPanel) nuevoPanel.style.display = 'none';
+    // Sincronizar badges del scroll con ventaActual real (sin re-render global)
+    syncListadoDesdeVentaActual();
 }
 
 // ========== RESUMEN DEL DÍA ==========
@@ -5574,7 +5635,7 @@ function toggleCervecero() {
 // Sincronizar badge de versión desde el <title>
 (function(){
     const el = document.getElementById('versionTag');
-    if (el) el.textContent = 'v164';
+    if (el) el.textContent = 'v165';
 })();
 
 // ── WakeLock: mantener pantalla encendida mientras la app está activa ──
