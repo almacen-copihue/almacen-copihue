@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v160</title>
+    <title>Copihue — POS v161</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2167,26 +2167,19 @@ function esPorPeso(producto) {
 }
 
 // ── syncProductoUI(id): sincroniza el card del scroll con ventaActual ──────────────────
-// Siempre recalcula desde ventaActual, nunca desde el DOM previo.
-// Lock por id con rAF para evitar doble update en taps rápidos.
 const _syncLock = new Set();
 function syncProductoUI(id) {
     if (id == null) { _refreshResultadosBadges(); return; }
-    if (_syncLock.has(id)) return; // ya hay un update pendiente para este id
+    if (_syncLock.has(id)) return;
     _syncLock.add(id);
     requestAnimationFrame(() => {
         _syncLock.delete(id);
-        // Estado real desde ventaActual (fuente de verdad)
         const item   = ventaActual.find(i => (i.esPeso ? i.idOriginal : i.id) === id);
         const qty    = item ? item.qty : 0;
         const gramos = item && item.esPeso ? item.gramos : 0;
         const enCart = qty > 0;
-
-        // Selector estricto: solo el card del listado de productos (no botones del swipe)
-        const card = document.querySelector(`.resultado-item[data-prod-id="${id}"]`);
-        if (!card) return; // card no visible en pantalla — no hay nada que actualizar
-
-        // 1. Badge de cantidad sobre la foto
+        const card   = document.querySelector(`.resultado-item[data-prod-id="${id}"]`);
+        if (!card) return;
         const imgWrap = card.querySelector('div[style*="position:relative"]');
         if (imgWrap) {
             let badge = imgWrap.querySelector('[data-badge]');
@@ -2201,45 +2194,33 @@ function syncProductoUI(id) {
                 badge.textContent = label;
                 badge.style.width = gramos ? '28px' : '20px';
             } else if (badge) {
-                badge.remove(); // qty=0: siempre eliminar badge
+                badge.remove();
             }
         }
-
-        // 2. Fondo y borde verde
-        card.style.background  = enCart ? '#f1f8e9' : 'white';
+        card.style.background = enCart ? '#f1f8e9' : 'white';
         card.style.borderLeft  = enCart ? '3px solid #43a047' : '3px solid transparent';
-
-        // 3. Total en carrito — reconstruir desde cero según estado real
         const existingTotal = card.querySelector('[data-total]');
         if (enCart) {
-            const precio   = item.price;
-            const totalVal = precio * qty;
+            const totalVal = item.price * qty;
             if (existingTotal) {
                 existingTotal.querySelector('div:last-child').textContent = '$' + totalVal.toLocaleString('es-AR');
             } else {
-                // Insertar el div de total si no existía
                 const totalDiv = document.createElement('div');
                 totalDiv.dataset.total = '1';
                 totalDiv.style.cssText = 'flex-shrink:0;text-align:right;pointer-events:none;';
                 totalDiv.innerHTML = `<div style="font-size:.62rem;color:#888;line-height:1;">total</div><div style="font-weight:900;font-size:.92rem;color:#2e7d32;line-height:1.1;">$${totalVal.toLocaleString('es-AR')}</div>`;
-                // Insertar antes del botón ⚠️
                 const btnAjuste = card.querySelector('button[title="Ajuste rápido"]');
                 if (btnAjuste) card.insertBefore(totalDiv, btnAjuste);
                 else card.appendChild(totalDiv);
             }
         } else if (existingTotal) {
-            existingTotal.remove(); // qty=0: eliminar total siempre
+            existingTotal.remove();
         }
     });
 }
 
 function _refreshResultadosBadges(idActualizado) {
-    // Actualización quirúrgica: delega en syncProductoUI si hay id
-    if (idActualizado != null) {
-        syncProductoUI(idActualizado);
-        return;
-    }
-    // Sin id: re-render completo del listado (carrito vacío u otros casos)
+    if (idActualizado != null) { syncProductoUI(idActualizado); return; }
     const termActual = document.getElementById('buscador').value.trim();
     const contenedor = document.getElementById('resultados');
     const scrollPos  = contenedor ? contenedor.scrollTop : 0;
@@ -2503,18 +2484,21 @@ function renderVenta(ligero = false) {
     const totalEl      = document.getElementById('totalMonto');
 
     if (ventaActual.length === 0) {
+        // ── OPTIMISTIC UI: cambios visuales principales INMEDIATOS ──
         if (contenedor) contenedor.innerHTML = '<div class="venta-vacia">Sin productos aún</div>';
         if (totalEl)      totalEl.textContent = '$0';
         if (btnConfirmar) btnConfirmar.disabled = true;
         desactivarGuardiaAtras();
         _setHeaderModoVenta(false);
-        _refreshResultadosBadges(); // carrito vacío: limpiar todos los badges del listado
         if (MOBILE) {
             document.getElementById('fabStack').style.display = 'none';
         } else {
             const pv = document.getElementById('panelVenta');
             if (pv) pv.style.display = 'flex';
         }
+        // ── Limpieza de badges diferida al siguiente frame ──
+        // El usuario ya ve el carrito vacío; los badges se limpian imperceptiblemente
+        requestAnimationFrame(() => _refreshResultadosBadges());
         return;
     }
 
@@ -2533,19 +2517,15 @@ function renderVenta(ligero = false) {
         _actualizarTotalesVenta();
         const esDesktopPanel = window.innerWidth >= 768;
         const idsEnVenta = new Set(ventaActual.map(i => i.esPeso ? 'peso_' + i.idOriginal : String(i.id)));
-
-        // Eliminar filas que ya no están en ventaActual
         contenedor.querySelectorAll('.item-venta[data-item-id]').forEach(fila => {
             if (!idsEnVenta.has(fila.dataset.itemId)) fila.remove();
         });
-        // Insertar filas nuevas que no están en el DOM
         ventaActual.forEach(item => {
             const itemId = item.esPeso ? 'peso_' + item.idOriginal : String(item.id);
             if (!contenedor.querySelector(`.item-venta[data-item-id="${itemId}"]`)) {
                 contenedor.insertAdjacentHTML('beforeend', _buildItemVentaHTML(item, esDesktopPanel));
             }
         });
-        // Actualizar qty y subtotal de filas existentes
         ventaActual.forEach(item => {
             const itemId = item.esPeso ? 'peso_' + item.idOriginal : String(item.id);
             const fila = contenedor.querySelector(`.item-venta[data-item-id="${itemId}"]`);
@@ -2558,9 +2538,8 @@ function renderVenta(ligero = false) {
         return;
     }
 
-    // ── Ruta completa (recuperar carrito, confirmar venta, etc.) ──
-    const total      = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
-    const totalItems = ventaActual.reduce((s, i) => s + i.qty, 0);
+    // ── Ruta completa ──
+    const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
     if (totalEl) totalEl.textContent = '$' + total.toLocaleString('es-AR');
     if (btnConfirmar) btnConfirmar.disabled = false;
     if (MOBILE) {
@@ -2572,7 +2551,6 @@ function renderVenta(ligero = false) {
     const listaResultados = term.length >= 1 ? buscarProductos(term)
         : _sortProductos(productos, new Set(ventaActual.map(i => i.esPeso ? i.idOriginal : i.id)));
     renderResultados(listaResultados, term);
-
     const esDesktopPanel = window.innerWidth >= 768;
     contenedor.innerHTML = ventaActual.map(item => _buildItemVentaHTML(item, esDesktopPanel)).join('');
     if (esDesktopPanel) {
@@ -5581,7 +5559,7 @@ function toggleCervecero() {
 // Sincronizar badge de versión desde el <title>
 (function(){
     const el = document.getElementById('versionTag');
-    if (el) el.textContent = 'v160';
+    if (el) el.textContent = 'v161';
 })();
 
 // ── WakeLock: mantener pantalla encendida mientras la app está activa ──
@@ -5619,22 +5597,16 @@ function cerrarBuscadorFlotante() {
 }
 
 // ===== SWIPE EN CARDS DE PRODUCTO =====
-// Swipe izquierda → quitar del carrito
 (function initSwipeProductos() {
     if (!MOBILE) return;
     let sx = 0, sy = 0, startEl = null, didSwipe = false, dirLocked = false;
-    const UMBRAL      = 35;
-    const LOCK_UMBRAL = 10;
-    const RATIO       = 1.2;
+    const UMBRAL = 35, LOCK_UMBRAL = 10, RATIO = 1.2;
 
     document.addEventListener('touchstart', function(e) {
         const btn = e.target.closest('[data-prod-id]');
         if (!btn) { startEl = null; return; }
-        sx = e.touches[0].clientX;
-        sy = e.touches[0].clientY;
-        startEl = btn;
-        didSwipe = false;
-        dirLocked = false;
+        sx = e.touches[0].clientX; sy = e.touches[0].clientY;
+        startEl = btn; didSwipe = false; dirLocked = false;
         btn.style.willChange = 'transform';
     }, { passive: true });
 
@@ -5643,13 +5615,8 @@ function cerrarBuscadorFlotante() {
         const dx = Math.abs(e.touches[0].clientX - sx);
         const dy = Math.abs(e.touches[0].clientY - sy);
         if (dx < LOCK_UMBRAL && dy < LOCK_UMBRAL) return;
-        if (dx > dy * RATIO) {
-            didSwipe = true;
-            dirLocked = true;
-        } else if (dy > dx) {
-            startEl = null;
-            dirLocked = true;
-        }
+        if (dx > dy * RATIO) { didSwipe = true; dirLocked = true; }
+        else if (dy > dx)    { startEl = null;  dirLocked = true; }
     }, { passive: true });
 
     document.addEventListener('touchend', function(e) {
@@ -5657,35 +5624,26 @@ function cerrarBuscadorFlotante() {
         const btn = startEl;
         const dx = e.changedTouches[0].clientX - sx;
         const dy = e.changedTouches[0].clientY - sy;
-        startEl = null;
-        btn.style.willChange = '';
-
+        startEl = null; btn.style.willChange = '';
         if (!didSwipe || Math.abs(dx) < UMBRAL) return;
         if (Math.abs(dx) < Math.abs(dy) * RATIO) return;
         if (dx > 0) return;
-
         requestAnimationFrame(() => {
             btn.style.transition = 'transform 0.15s';
             btn.style.transform = 'translateX(-12px)';
             setTimeout(() => { btn.style.transform = ''; btn.style.transition = ''; }, 180);
         });
-
         const id = parseInt(btn.dataset.prodId);
-
         const idxPeso = ventaActual.findLastIndex
             ? ventaActual.findLastIndex(i => i.esPeso && i.idOriginal === id)
             : ventaActual.length - 1 - [...ventaActual].reverse().findIndex(i => i.esPeso && i.idOriginal === id);
-
         if (idxPeso !== -1 && idxPeso >= 0) {
             const item = ventaActual[idxPeso];
             mostrarToast(`🗑 Quitado ${item.gramos}gr — ${item.name.substring(0,20)}`, 'rojo');
             ventaActual.splice(idxPeso, 1);
-            renderVenta(true);
-            _guardarCarritoDiferido();
-            syncProductoUI(id);
+            renderVenta(true); _guardarCarritoDiferido(); syncProductoUI(id);
             return;
         }
-
         const idx = ventaActual.findIndex(i => i.id === id);
         if (idx !== -1) {
             if (ventaActual[idx].qty > 1) {
@@ -5695,9 +5653,7 @@ function cerrarBuscadorFlotante() {
                 ventaActual.splice(idx, 1);
                 mostrarToast('🗑 Quitado', 'rojo');
             }
-            renderVenta(true);
-            _guardarCarritoDiferido();
-            syncProductoUI(id);
+            renderVenta(true); _guardarCarritoDiferido(); syncProductoUI(id);
         } else {
             mostrarToast('No está en el carrito', '');
         }
