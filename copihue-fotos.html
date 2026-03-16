@@ -546,35 +546,6 @@
     .logo span { display: none; }
     .counter { display: none; }
   }
-
-  /* ── EDITAR NOMBRE EN CARD ──────────────── */
-  .card-name {
-    cursor: pointer;
-  }
-  .card-name:hover {
-    color: var(--accent);
-    text-decoration: underline dotted;
-  }
-  .card-name-input {
-    width: 100%;
-    background: var(--surface2);
-    border: 1.5px solid var(--accent);
-    border-radius: 6px;
-    padding: 3px 6px;
-    color: var(--text);
-    font-family: 'DM Sans', sans-serif;
-    font-size: 0.72rem; font-weight: 600;
-    outline: none;
-    display: none;
-    box-sizing: border-box;
-    text-transform: uppercase;
-    margin-bottom: 2px;
-  }
-  .card-name-saving {
-    font-size: 0.6rem; color: var(--accent);
-    display: none; align-items: center; gap: 3px;
-    margin-bottom: 2px;
-  }
 </style>
 </head>
 <body>
@@ -976,31 +947,7 @@ function renderGrid() {
 
     const info = document.createElement('div');
     info.className = 'card-info';
-
-    const nameDiv = document.createElement('div');
-    nameDiv.className = 'card-name';
-    nameDiv.textContent = p.name;
-    nameDiv.title = 'Clic para editar nombre';
-    nameDiv.onclick = e => { e.stopPropagation(); editarNombreCard(p.id, nameDiv, slugDiv, card); };
-
-    const nameInput = document.createElement('input');
-    nameInput.className = 'card-name-input';
-    nameInput.type = 'text';
-    nameInput.autocomplete = 'off';
-    nameInput.spellcheck = false;
-
-    const nameSaving = document.createElement('div');
-    nameSaving.className = 'card-name-saving';
-    nameSaving.innerHTML = '<div class="spin" style="width:9px;height:9px;border-width:1.5px;display:inline-block;"></div> guardando…';
-
-    const slugDiv = document.createElement('div');
-    slugDiv.className = 'card-slug';
-    slugDiv.textContent = p.slug + '.jpg';
-
-    info.appendChild(nameDiv);
-    info.appendChild(nameInput);
-    info.appendChild(nameSaving);
-    info.appendChild(slugDiv);
+    info.innerHTML = '<div class="card-name">' + p.name + '</div><div class="card-slug">' + p.slug + '.jpg</div>';
 
     const copyBtn = document.createElement('button');
     copyBtn.className = 'copy-btn';
@@ -1012,84 +959,6 @@ function renderGrid() {
     card.appendChild(copyBtn);
     grid.appendChild(card);
   });
-}
-
-
-// ═══════════════════════════════════════════
-// EDITAR NOMBRE DESDE LA CARD
-// ═══════════════════════════════════════════
-function editarNombreCard(prodId, nameDiv, slugDiv, card) {
-  const p = productos.find(x => x.id === prodId);
-  if (!p) return;
-
-  const info     = nameDiv.parentElement;
-  const input    = info.querySelector('.card-name-input');
-  const saving   = info.querySelector('.card-name-saving');
-
-  // Abrir input
-  input.value = p.name;
-  nameDiv.style.display = 'none';
-  input.style.display   = 'block';
-  input.focus();
-  input.select();
-
-  // Evitar que el card se abra mientras edita
-  const oldOnclick = card.onclick;
-  card.onclick = null;
-
-  function cerrar() {
-    input.style.display = 'none';
-    nameDiv.style.display = '';
-    card.onclick = oldOnclick;
-    input.removeEventListener('keydown', onKey);
-    input.removeEventListener('blur', onBlur);
-  }
-
-  async function confirmar() {
-    const nuevoNombre = input.value.trim().toUpperCase();
-    if (!nuevoNombre || nuevoNombre === p.name.toUpperCase()) { cerrar(); return; }
-
-    input.style.display  = 'none';
-    saving.style.display = 'flex';
-    card.onclick = null;
-
-    try {
-      const payload = {
-        producto:     p.name,
-        nombreNuevo:  nuevoNombre,
-        stockDespues: p.stock ?? null,
-        stockAntes:   p.stock ?? null
-      };
-      const url = API_URL + '?action=ajusteRapido&data=' + encodeURIComponent(JSON.stringify(payload));
-      const resp = await fetch(url);
-      const data = await resp.json();
-
-      if (data.success) {
-        const nuevoSlug = simplificarNombre(nuevoNombre);
-        p.name = nuevoNombre;
-        p.slug = nuevoSlug;
-        nameDiv.textContent  = nuevoNombre;
-        slugDiv.textContent  = nuevoSlug + '.jpg';
-        toast('✅ ' + nuevoNombre, 'ok');
-      } else {
-        toast('❌ ' + (data.mensaje || 'Error al guardar'), 'error');
-      }
-    } catch(e) {
-      toast('❌ Error de red: ' + e.message, 'error');
-    }
-
-    saving.style.display = 'none';
-    cerrar();
-  }
-
-  function onKey(e) {
-    if (e.key === 'Enter')  { e.preventDefault(); e.stopPropagation(); confirmar(); }
-    if (e.key === 'Escape') { e.stopPropagation(); cerrar(); }
-  }
-  function onBlur() { setTimeout(confirmar, 150); }
-
-  input.addEventListener('keydown', onKey);
-  input.addEventListener('blur', onBlur);
 }
 
 function updateCounter() {
@@ -1378,20 +1247,45 @@ async function publicarEnGitHub() {
   };
 
   try {
+    // Siempre buscar el SHA actual — sin caché — para evitar conflictos 409
     let sha = null;
+    _setGHStatus('<div style="display:flex;align-items:center;gap:8px;"><div class="spin"></div> Leyendo versión actual en GitHub...</div>', 'loading');
     try {
-      const chk = await fetch(apiBase + '?ref=' + (cfg.branch||'main'), { headers: hdrs });
+      const chk = await fetch(apiBase + '?ref=' + (cfg.branch||'main') + '&_=' + Date.now(), {
+        headers: { ...hdrs, 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+      });
       if (chk.ok) {
         const chkData = await chk.json();
         sha = chkData.sha || null;
+      } else if (chk.status === 404) {
+        sha = null; // archivo nuevo, no hay SHA
       }
-    } catch(e) {}
+    } catch(e) { /* si falla el GET seguimos sin SHA, GitHub lo rechazará si existe */ }
 
     const body = { message: 'Foto: ' + fname + ' · Copihue POS', content: b64, branch: cfg.branch || 'main' };
     if (sha) body.sha = sha;
 
     _setGHStatus('<div style="display:flex;align-items:center;gap:8px;"><div class="spin"></div> Subiendo imagen a GitHub...</div>', 'loading');
-    const put = await fetch(apiBase, { method: 'PUT', headers: hdrs, body: JSON.stringify(body) });
+    let put = await fetch(apiBase, { method: 'PUT', headers: hdrs, body: JSON.stringify(body) });
+
+    // Si GitHub devuelve 409 (conflict), el SHA cambió entre el GET y el PUT
+    // Reintentar una vez con el SHA fresco que viene en el error
+    if (put.status === 409 || put.status === 422) {
+      _setGHStatus('<div style="display:flex;align-items:center;gap:8px;"><div class="spin"></div> Conflicto detectado, reintentando...</div>', 'loading');
+      try {
+        const chk2 = await fetch(apiBase + '?ref=' + (cfg.branch||'main') + '&_=' + Date.now(), {
+          headers: { ...hdrs, 'Cache-Control': 'no-cache' }
+        });
+        if (chk2.ok) {
+          const chkData2 = await chk2.json();
+          const shaFresco = chkData2.sha || null;
+          if (shaFresco) {
+            body.sha = shaFresco;
+            put = await fetch(apiBase, { method: 'PUT', headers: hdrs, body: JSON.stringify(body) });
+          }
+        }
+      } catch(e2) {}
+    }
 
     if (!put.ok) {
       const err = await put.json().catch(() => ({}));
