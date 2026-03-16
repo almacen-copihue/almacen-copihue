@@ -2361,8 +2361,8 @@ async function cargarConfigSistema() {
                 if (!isNaN(n)) _horaCierreLocal = n;
             }
         }
-        // Actualizar HORA_CIERRE_MODAL si existe (modal horario)
-        if (typeof window !== 'undefined') window._HORA_CIERRE_MODAL_DYN = _horaCierreLocal;
+        // Actualizar HORA_CIERRE_MODAL para el modal de horario
+        HORA_CIERRE_MODAL = _horaCierreLocal;
         _aplicarHorarioUI();
         actualizarMensajesOfertas();
     } catch(e) {
@@ -5685,17 +5685,13 @@ window.addEventListener('popstate', function(e) {
 
 <script>
 const WA_HORARIO = '542944907380';
-// HORA_CIERRE_MODAL se actualiza desde config_sistema via _horaCierreLocal
-// Usamos un getter para que siempre lea el valor actualizado
-Object.defineProperty(window, 'HORA_CIERRE_MODAL', {
-    get: function() { return (typeof _horaCierreLocal !== 'undefined') ? _horaCierreLocal : 22; },
-    configurable: true
-});
+// HORA_CIERRE_MODAL — se actualiza desde config_sistema. NO hardcodear.
+let HORA_CIERRE_MODAL = 22; // fallback, se sobreescribe en cargarConfigSistema()
 
 function avisarLlego() {
     const ahora = new Date();
     const cierre = new Date();
-    cierre.setHours(HORA_CIERRE_MODAL, 0, 0, 0);
+    cierre.setHours((typeof _horaCierreLocal !== 'undefined') ? _horaCierreLocal : HORA_CIERRE_MODAL, 0, 0, 0);
     const mins = Math.round((cierre - ahora) / 60000);
     const texto = mins > 0
         ? `Hola! Ya voy al almacén, llego en unos minutos 🏃 (Cerrás a las ${String(HORA_CIERRE_MODAL).padStart(2,'0')}:00 hs)`
@@ -5735,27 +5731,45 @@ function iniciarRelojModal() {
         const reloj = document.getElementById('horarioReloj');
         if (reloj) reloj.textContent = h + ':' + m + ':' + s;
 
-        const cierre = new Date(); cierre.setHours(HORA_CIERRE_MODAL, 0, 0, 0);
-        const mins = Math.round((cierre - ahora) / 60000);
-        const badge = document.getElementById('horarioEstadoBadge');
+        // Leer siempre los valores actuales (se actualizan desde config_sistema)
+        const hCierre   = (typeof _horaCierreLocal   !== 'undefined') ? _horaCierreLocal   : 22;
+        const hApertura = (typeof _horaAperturaLocal !== 'undefined') ? _horaAperturaLocal : 11;
+
+        const cierre   = new Date(); cierre.setHours(hCierre, 0, 0, 0);
+        const apertura = new Date(); apertura.setHours(hApertura, 0, 0, 0);
+        const minsParaCierre   = Math.round((cierre   - ahora) / 60000);
+        const minsParaApertura = Math.round((apertura - ahora) / 60000);
+
+        const badge    = document.getElementById('horarioEstadoBadge');
         const estadoTxt = document.getElementById('estadoTexto');
         const btnLlego = document.getElementById('horarioBtnLlego');
-        const punto = document.getElementById('puntoBadge');
+        const punto    = document.getElementById('puntoBadge');
 
-        if (mins <= 0) {
+        const estaAbierto = minsParaApertura <= 0 && minsParaCierre > 0;
+
+        if (!estaAbierto) {
             if (badge) badge.style.background = 'linear-gradient(135deg,#b71c1c,#e53935)';
-            if (estadoTxt) estadoTxt.textContent = 'Cerrado';
+            if (estadoTxt) {
+                if (minsParaApertura > 0)
+                    estadoTxt.textContent = `Abre en ${minsParaApertura} min`;
+                else
+                    estadoTxt.textContent = 'Cerrado';
+            }
             if (punto) { punto.style.background='#ef9a9a'; punto.style.boxShadow='none'; }
             if (btnLlego) btnLlego.style.display = 'none';
-        } else if (mins <= 60) {
-            if (estadoTxt) estadoTxt.textContent = `Cierra en ${mins} min`;
+        } else if (minsParaCierre <= 60) {
+            if (badge) badge.style.background = 'linear-gradient(135deg,#e65100,#ff9800)';
+            if (estadoTxt) estadoTxt.textContent = `Cierra en ${minsParaCierre} min`;
+            if (punto) { punto.style.background='#69f0ae'; punto.style.boxShadow='0 0 6px #69f0ae'; }
             if (btnLlego) {
                 btnLlego.style.display = 'block';
                 const btn = btnLlego.querySelector('button');
-                if (btn) btn.textContent = `🏃 ¡Aún llego! (${mins} min)`;
+                if (btn) btn.textContent = `🏃 ¡Aún llego! (${minsParaCierre} min)`;
             }
         } else {
+            if (badge) badge.style.background = 'linear-gradient(135deg,#1b5e20,#388e3c)';
             if (estadoTxt) estadoTxt.textContent = 'Abierto ahora';
+            if (punto) { punto.style.background='#69f0ae'; punto.style.boxShadow='0 0 6px #69f0ae'; }
             if (btnLlego) btnLlego.style.display = 'none';
         }
     }
