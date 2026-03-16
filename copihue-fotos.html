@@ -667,7 +667,7 @@ header {
 
 <!-- FILTROS -->
 <div class="filters-bar" id="filtersBar">
-  <button class="filter-chip active" data-f="TODOS" onclick="setFiltro('TODOS',this)">Todos</button>
+  <button class="filter-chip" data-f="TODOS" onclick="setFiltro('TODOS',this)">Todos</button>
   <button class="filter-chip danger"  data-f="SIN_FOTO" onclick="setFiltro('SIN_FOTO',this)">❌ Sin foto</button>
   <button class="filter-chip ok"      data-f="CON_FOTO" onclick="setFiltro('CON_FOTO',this)">✅ Con foto</button>
   <div class="filter-sep"></div>
@@ -817,7 +817,7 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6
 // ═══════════════════════════════════════════
 let productos     = [];
 let sinFotoSet    = new Set();
-let filtroActual  = 'TODOS';
+let filtroActual  = 'ALMACEN';
 let productoActual = null;
 let listaFiltrada = [];   // lista actualmente visible (para navegación modal)
 let modalIdx      = -1;   // índice en listaFiltrada del producto abierto
@@ -858,56 +858,65 @@ async function cargarProductos() {
       slug:     simplificarNombre(String(p.name).trim())
     }));
     document.getElementById('countTotal').textContent = productos.length;
-    _buildCategoryFilters();
-    await verificarFotos();
-    renderGrid();
+    _buildCategoryFilters();  // activa chip ALMACEN
+
+    // ── Fase 1: verificar solo ALMACEN y mostrar inmediatamente ──
+    const almacen = productos.filter(p => p.category === 'ALMACEN');
+    await _verificarLote(almacen, true);  // true = mostrar progreso
+    renderGrid();  // mostrar ALMACEN ya verificado
+
+    // ── Fase 2: verificar el resto en segundo plano ──
+    const resto = productos.filter(p => p.category !== 'ALMACEN');
+    // Ordenar resto de menor a mayor categoría
+    const porCat = {};
+    resto.forEach(p => { (porCat[p.category] = porCat[p.category]||[]).push(p); });
+    const restoOrdenado = Object.entries(porCat)
+      .sort((a, b) => a[1].length - b[1].length)
+      .flatMap(([, prods]) => prods);
+    await _verificarLote(restoOrdenado, true);
+    renderGrid();  // re-render final con todo verificado
+
   } catch(e) {
     document.getElementById('productsGrid').innerHTML =
       '<div class="empty-state"><div class="icon">⚠️</div><p>Error al cargar productos.<br>Verificá la conexión.</p></div>';
   }
 }
 
-async function verificarFotos() {
-  sinFotoSet = new Set();
+async function _verificarLote(lista, mostrarProgreso) {
+  if (!lista.length) return;
   const pw = document.getElementById('progressWrap');
   const pf = document.getElementById('progressFill');
   const pl = document.getElementById('progressLabel');
-  pw.classList.add('visible');
-
-  // Ordenar de categoría más chica a más grande → progreso inicial rápido
-  const porCat = {};
-  productos.forEach(p => { (porCat[p.category] = porCat[p.category]||[]).push(p); });
-  const ordenados = Object.entries(porCat)
-    .sort((a, b) => a[1].length - b[1].length)  // menor a mayor
-    .flatMap(([, prods]) => prods);
-
+  if (mostrarProgreso) pw.classList.add('visible');
   const BATCH = 24;
   let done = 0;
-  for (let i = 0; i < ordenados.length; i += BATCH) {
-    const lote = ordenados.slice(i, i+BATCH);
+  for (let i = 0; i < lista.length; i += BATCH) {
+    const lote = lista.slice(i, i+BATCH);
     await Promise.all(lote.map(p => new Promise(res => {
       const img = new Image();
       img.onload = res;
       img.onerror = () => { sinFotoSet.add(p.id); res(); };
       img.src = 'imagenes-productos/' + p.slug + '.jpg?t=' + Date.now();
     })));
-    done = Math.min(i + BATCH, ordenados.length);
-    const pct = Math.round(done / ordenados.length * 100);
-    pf.style.width = pct + '%';
-    // Mostrar qué categoría se está procesando ahora
-    const catActual = lote[0]?.category || '';
-    pl.textContent = `${catActual} · ${done}/${ordenados.length}`;
+    done = Math.min(i + BATCH, lista.length);
+    if (mostrarProgreso) {
+      const pct = Math.round(done / lista.length * 100);
+      pf.style.width = pct + '%';
+      const catActual = lote[0]?.category || '';
+      pl.textContent = `${catActual} · ${done}/${lista.length}`;
+    }
   }
-  pw.classList.remove('visible');
+  if (mostrarProgreso) pw.classList.remove('visible');
   updateCounter();
 }
+
+
 
 // ═══════════════════════════════════════════
 // FILTROS
 // ═══════════════════════════════════════════
 function _buildCategoryFilters() {
   const bar = document.getElementById('filtersBar');
-  // Limpiar categorías anteriores
   bar.querySelectorAll('[data-cat]').forEach(e => e.remove());
   const cats = [...new Set(productos.map(p => p.category))].sort();
   cats.forEach(cat => {
@@ -919,6 +928,18 @@ function _buildCategoryFilters() {
     btn.onclick = () => setFiltro(cat, btn);
     bar.appendChild(btn);
   });
+  // Activar ALMACEN por defecto si existe
+  const btnAlmacen = bar.querySelector('[data-f="ALMACEN"]');
+  if (btnAlmacen) {
+    document.querySelectorAll('.filter-chip').forEach(b => b.classList.remove('active'));
+    btnAlmacen.classList.add('active');
+    filtroActual = 'ALMACEN';
+  } else {
+    // fallback: activar TODOS si no hay ALMACEN
+    const btnTodos = bar.querySelector('[data-f="TODOS"]');
+    if (btnTodos) btnTodos.classList.add('active');
+    filtroActual = 'TODOS';
+  }
 }
 
 function setFiltro(f, btn) {
