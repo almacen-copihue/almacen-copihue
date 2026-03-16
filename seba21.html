@@ -2096,19 +2096,23 @@ function renderResultados(results, term = '') {
                 <div style="font-size:.62rem;color:#888;line-height:1;">total</div>
                 <div style="font-weight:900;font-size:.92rem;color:#2e7d32;line-height:1.1;">$${totalCart.toLocaleString('es-AR')}</div>
             </div>` : ''}
-            <div style="flex-shrink:0;display:flex;flex-direction:column;gap:4px;align-items:center;pointer-events:auto;">
+            <div style="flex-shrink:0;display:flex;flex-direction:column;gap:3px;pointer-events:auto;margin-left:2px;">
                 <button onclick="event.stopPropagation();abrirAjusteStockRapido(${p.id})"
                         title="Editar producto"
-                        style="background:#f5f5f5;border:1px solid #ddd;border-radius:8px;cursor:pointer;
-                               font-size:0.7rem;font-weight:700;color:#555;padding:4px 7px;
-                               touch-action:manipulation;min-width:44px;min-height:28px;
-                               display:flex;align-items:center;justify-content:center;gap:2px;">✏️ Ed</button>
+                        style="width:44px;height:44px;border:1.5px solid #ddd;border-radius:10px;
+                               background:#f8f8f8;cursor:pointer;touch-action:manipulation;
+                               font-size:1.1rem;display:flex;align-items:center;justify-content:center;">✏️</button>
                 <button onclick="event.stopPropagation();bajarStockRapido(${p.id})"
                         title="Bajar stock −1"
-                        style="background:#fff3e0;border:1px solid #ffb74d;border-radius:8px;cursor:pointer;
-                               font-size:0.7rem;font-weight:800;color:#e65100;padding:4px 7px;
-                               touch-action:manipulation;min-width:44px;min-height:28px;
+                        style="width:44px;height:44px;border:1.5px solid #ffb74d;border-radius:10px;
+                               background:#fff3e0;cursor:pointer;touch-action:manipulation;
+                               font-size:0.85rem;font-weight:900;color:#e65100;
                                display:flex;align-items:center;justify-content:center;">−1</button>
+                <button onclick="event.stopPropagation();abrirAjusteStockRapido(${p.id})"
+                        title="Ajuste de stock"
+                        style="width:44px;height:44px;border:none;border-radius:10px;
+                               background:none;cursor:pointer;touch-action:manipulation;
+                               font-size:1.3rem;display:flex;align-items:center;justify-content:center;opacity:0.6;">⚠️</button>
             </div>
         </div>`;
     }
@@ -3965,7 +3969,6 @@ function toggleAjusteExtra() {
 }
 
 // Abrir ajuste directo desde el buscador (producto sin stock)
-// Baja el stock del producto en −1 directamente, sin abrir modal
 async function bajarStockRapido(id) {
     const p = productos.find(pr => pr.id === id);
     if (!p) return;
@@ -3989,7 +3992,7 @@ async function bajarStockRapido(id) {
         if (resp.success) {
             p.stock = nuevoStock;
             mostrarToast(`✅ Stock ${p.name.substring(0,20)} → ${nuevoStock}`, 'verde');
-            _refreshResultadosBadges(id); // actualiza el label de stock en el card
+            _refreshResultadosBadges(id);
         } else {
             mostrarToast('❌ ' + (resp.mensaje || 'Error al bajar stock'), 'rojo');
         }
@@ -4192,9 +4195,10 @@ function programarRecordatorioCierre() {
 
     const ahora = new Date();
     const cierre = new Date();
-    cierre.setHours(22, 5, 0, 0); // 22:05
+    const _hCierre = (typeof _horaCierreSistema !== 'undefined') ? _horaCierreSistema : 22;
+    cierre.setHours(_hCierre, 5, 0, 0); // cierre + 5 min
 
-    // Si ya pasó las 22:05 hoy, no programar
+    // Si ya pasó el horario de cierre hoy, no programar
     if (ahora >= cierre) return;
 
     const msHastaCierre = cierre - ahora;
@@ -4208,13 +4212,13 @@ function programarRecordatorioCierre() {
         // Notificación del navegador
         if (Notification.permission === 'granted') {
             new Notification('🔒 Almacén Copihue', {
-                body: '¡Son las 22:05! Cerrá el día en el punto de venta.',
+                body: `¡Son las ${_hCierre}:05! Cerrá el día en el punto de venta.`,
                 icon: 'iconos-pwa/android/android-launchericon-48-48.png'
             });
         }
 
         // Toast en pantalla igual
-        mostrarToast('🔒 ¡Son las 22:05! Cerrá el día', 'naranja');
+        mostrarToast(`🔒 ¡Son las ${_hCierre}:05! Cerrá el día`, 'naranja');
 
         // Vibrar si tiene vibración
         if (navigator.vibrate) navigator.vibrate([400, 200, 400]);
@@ -5039,6 +5043,7 @@ if ('serviceWorker' in navigator) {
 // ========== INIT ==========
 inicializarVendedor();
 cargarConfig();
+_cargarHorarioSistema();
 // ========== SISTEMA DE CLIENTES ==========
 const CLIENTES_KEY = 'copihue_clientes';
 let _clienteActual = null; // { nombre, telefono } seleccionado para esta venta
@@ -5491,6 +5496,28 @@ function _pintarToggle(tipo, activo) {
     btn.textContent       = cfg.emoji + ' ' + cfg.label + (activo ? ' ✓' : ' ✗');
 }
 
+// Hora de cierre del sistema — se lee desde config_sistema
+let _horaCierreSistema = 22; // fallback mientras carga
+
+// ── Cargar horario desde config_sistema ──
+async function _cargarHorarioSistema() {
+    try {
+        const r = await fetch(API_URL + '?action=getConfig&t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(8000) });
+        const data = await r.json();
+        if (!data.success || !data.config) return;
+        const cfg = data.config;
+        const diaIdx = _diaActualIdx();
+        const rowCi = cfg['horario|Horario cierre local'] || cfg['Horario cierre local'];
+        if (rowCi) {
+            const v = rowCi[diaIdx];
+            if (v !== null && v !== undefined) {
+                const n = parseFloat(String(v).split(':')[0]);
+                if (!isNaN(n)) _horaCierreSistema = n;
+            }
+        }
+    } catch(e) { console.warn('⚠️ No se pudo leer horario:', e.message); }
+}
+
 async function cargarEstadoToggles() {
     try {
         const r = await fetch(API_URL + '?action=getConfig&t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(8000) });
@@ -5562,7 +5589,7 @@ if (_cerveceroOverride === 'true')  _cerveceroOverride = true;
 else if (_cerveceroOverride === 'false') _cerveceroOverride = false;
 else _cerveceroOverride = null;
 
-let _jcHoraCierre = 22; // se actualiza al cargar el pool cervecero
+let _jcHoraCierre = (typeof _horaCierreSistema !== 'undefined') ? _horaCierreSistema : 22; // se actualiza al cargar el pool cervecero
 
 function _esCerveceroAutoActivo() {
     const now = new Date();
