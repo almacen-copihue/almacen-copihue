@@ -873,20 +873,30 @@ async function verificarFotos() {
   const pf = document.getElementById('progressFill');
   const pl = document.getElementById('progressLabel');
   pw.classList.add('visible');
+
+  // Ordenar de categoría más chica a más grande → progreso inicial rápido
+  const porCat = {};
+  productos.forEach(p => { (porCat[p.category] = porCat[p.category]||[]).push(p); });
+  const ordenados = Object.entries(porCat)
+    .sort((a, b) => a[1].length - b[1].length)  // menor a mayor
+    .flatMap(([, prods]) => prods);
+
   const BATCH = 24;
   let done = 0;
-  for (let i = 0; i < productos.length; i += BATCH) {
-    const lote = productos.slice(i, i+BATCH);
+  for (let i = 0; i < ordenados.length; i += BATCH) {
+    const lote = ordenados.slice(i, i+BATCH);
     await Promise.all(lote.map(p => new Promise(res => {
       const img = new Image();
       img.onload = res;
       img.onerror = () => { sinFotoSet.add(p.id); res(); };
       img.src = 'imagenes-productos/' + p.slug + '.jpg?t=' + Date.now();
     })));
-    done = Math.min(i + BATCH, productos.length);
-    const pct = Math.round(done / productos.length * 100);
+    done = Math.min(i + BATCH, ordenados.length);
+    const pct = Math.round(done / ordenados.length * 100);
     pf.style.width = pct + '%';
-    pl.textContent = `Verificando fotos… ${done}/${productos.length}`;
+    // Mostrar qué categoría se está procesando ahora
+    const catActual = lote[0]?.category || '';
+    pl.textContent = `${catActual} · ${done}/${ordenados.length}`;
   }
   pw.classList.remove('visible');
   updateCounter();
