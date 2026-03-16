@@ -1455,14 +1455,27 @@ async function publicarEnGitHub() {
   const hdrs = { 'Authorization':'token '+cfg.token, 'Content-Type':'application/json', 'Accept':'application/vnd.github+json' };
 
   try {
-    // SHA fresco sin caché
-    let sha = null;
-    try {
-      const chk = await fetch(apiBase+'?ref='+(cfg.branch||'main')+'&_='+Date.now(), {
-        headers: { ...hdrs, 'Cache-Control':'no-cache', 'Pragma':'no-cache' }
-      });
-      if (chk.ok) sha = (await chk.json()).sha || null;
-    } catch(e) {}
+    // ── Obtener SHA actual (necesario si el archivo ya existe) ──────────
+    // Función helper que reintenta hasta 3 veces con backoff
+    async function _getSHA() {
+      for (let intento = 0; intento < 3; intento++) {
+        try {
+          if (intento > 0) await new Promise(r => setTimeout(r, 800 * intento));
+          const r = await fetch(apiBase + '?ref=' + (cfg.branch||'main') + '&_=' + Date.now(), {
+            headers: { ...hdrs, 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+          });
+          if (r.ok) {
+            const d = await r.json();
+            return d.sha || null;
+          }
+          if (r.status === 404) return null; // archivo nuevo, no hay SHA
+        } catch(e) {}
+      }
+      return null;
+    }
+
+    _setGHStatus('<div style="display:flex;align-items:center;gap:8px;"><div class="spin"></div> Leyendo versión en GitHub…</div>','loading');
+    let sha = await _getSHA();
 
     const body = { message:'Foto: '+fname+' · Copihue POS', content:b64, branch:cfg.branch||'main' };
     if (sha) body.sha = sha;
@@ -1470,13 +1483,24 @@ async function publicarEnGitHub() {
     _setGHStatus('<div style="display:flex;align-items:center;gap:8px;"><div class="spin"></div> Subiendo a GitHub…</div>','loading');
     let put = await fetch(apiBase, { method:'PUT', headers:hdrs, body:JSON.stringify(body) });
 
-    // Reintento en conflicto
-    if (put.status===409||put.status===422) {
-      _setGHStatus('<div style="display:flex;align-items:center;gap:8px;"><div class="spin"></div> Conflicto, reintentando…</div>','loading');
-      try {
-        const chk2 = await fetch(apiBase+'?ref='+(cfg.branch||'main')+'&_='+Date.now(), { headers:{...hdrs,'Cache-Control':'no-cache'} });
-        if (chk2.ok) { const sha2=(await chk2.json()).sha||null; if(sha2){body.sha=sha2;put=await fetch(apiBase,{method:'PUT',headers:hdrs,body:JSON.stringify(body)});} }
-      } catch(e2) {}
+    // Si falla por SHA incorrecto o faltante — extraer SHA del error y reintentar
+    if (!put.ok && (put.status === 409 || put.status === 422 || put.status === 400)) {
+      _setGHStatus('<div style="display:flex;align-items:center;gap:8px;"><div class="spin"></div> Resolviendo conflicto…</div>','loading');
+      // Primer intento: leer SHA fresco del GET
+      const shaFresco = await _getSHA();
+      if (shaFresco) {
+        body.sha = shaFresco;
+        put = await fetch(apiBase, { method:'PUT', headers:hdrs, body:JSON.stringify(body) });
+      }
+      // Segundo intento: si sigue fallando, esperar y reintentar una vez más
+      if (!put.ok && (put.status === 409 || put.status === 422 || put.status === 400)) {
+        await new Promise(r => setTimeout(r, 1200));
+        const shaFresco2 = await _getSHA();
+        if (shaFresco2) {
+          body.sha = shaFresco2;
+          put = await fetch(apiBase, { method:'PUT', headers:hdrs, body:JSON.stringify(body) });
+        }
+      }
     }
 
     if (!put.ok) {
