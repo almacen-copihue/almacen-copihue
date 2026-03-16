@@ -1468,96 +1468,77 @@ function _setGHStatus(msg, tipo) {
   el.style.display = 'block'; el.className = tipo; el.innerHTML = msg;
 }
 
+// ── GitHub helpers (directo a la API, sin backend) ─────
+async function _obtenerSHA(owner, repo, path, token, branch) {
+  const res = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${branch}`,
+    { headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github+json' } }
+  );
+  if (res.status === 404) return null;   // archivo nuevo
+  if (!res.ok) throw new Error('Error obteniendo SHA: ' + res.status);
+  const data = await res.json();
+  return data.sha || null;
+}
+
+async function _subirArchivoGitHub({ owner, repo, path, base64, token, branch, mensaje }) {
+  const sha = await _obtenerSHA(owner, repo, path, token, branch);
+  const body = { message: mensaje, content: base64, branch };
+  if (sha) body.sha = sha;
+  const res = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/contents/${path}`,
+    {
+      method: 'PUT',
+      headers: { 'Authorization': `token ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }
+  );
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || 'Error subiendo archivo');
+  return data;
+}
+// ────────────────────────────────────────────────────────
+
 async function publicarEnGitHub() {
   if (!productoActual) return;
   const cfg = _ghCfg(); if (!cfg||!cfg.token) { abrirConfig(); return; }
-  const slug = productoActual.slug, fname = slug+'.jpg', path='imagenes-productos/'+fname;
-  const b64 = (document.getElementById('fotosOffscreen').toDataURL('image/jpeg',0.93)
-             ||document.getElementById('fotosCanvas').toDataURL('image/jpeg',0.93)).split(',')[1];
-  const btn = document.getElementById('btnPublicarGH'); btn.disabled=true;
+  const slug  = productoActual.slug;
+  const fname = slug + '.jpg';
+  const path  = 'imagenes-productos/' + fname;
+  const base64 = (document.getElementById('fotosOffscreen').toDataURL('image/jpeg', 0.93)
+               || document.getElementById('fotosCanvas').toDataURL('image/jpeg', 0.93)).split(',')[1];
+  const btn = document.getElementById('btnPublicarGH'); btn.disabled = true;
 
   _showPublishChecks();
   _resetPublishChecks();
-  _setCheck('checkGitHub','running','Subiendo archivo…');
+  _setCheck('checkGitHub', 'running', 'Subiendo archivo…');
   document.getElementById('publishCheckActions').style.display = 'none';
-  _setGHStatus('<div style="display:flex;align-items:center;gap:8px;"><div class="spin"></div> Leyendo versión en GitHub…</div>','loading');
-
-  const apiBase = `https://api.github.com/repos/${cfg.owner}/${cfg.repo}/contents/${path}`;
-  const hdrs = { 'Authorization':'token '+cfg.token, 'Content-Type':'application/json', 'Accept':'application/vnd.github+json' };
+  _setGHStatus('<div style="display:flex;align-items:center;gap:8px;"><div class="spin"></div> Subiendo a GitHub…</div>', 'loading');
 
   try {
-    // ── Obtener SHA actual (necesario si el archivo ya existe) ──────────
-    // Función helper que reintenta hasta 3 veces con backoff
-    async function _getSHA() {
-      for (let intento = 0; intento < 3; intento++) {
-        try {
-          if (intento > 0) await new Promise(r => setTimeout(r, 800 * intento));
-          const r = await fetch(apiBase + '?ref=' + (cfg.branch||'main') + '&_=' + Date.now(), {
-            headers: { ...hdrs, 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
-          });
-          if (r.ok) {
-            const d = await r.json();
-            return d.sha || null;
-          }
-          if (r.status === 404) return null; // archivo nuevo, no hay SHA
-        } catch(e) {}
-      }
-      return null;
-    }
+    const res = await _subirArchivoGitHub({
+      owner:   cfg.owner,
+      repo:    cfg.repo,
+      path:    path,
+      base64:  base64,
+      token:   cfg.token,
+      branch:  cfg.branch || 'main',
+      mensaje: 'Foto: ' + fname + ' · Copihue POS'
+    });
 
-    _setGHStatus('<div style="display:flex;align-items:center;gap:8px;"><div class="spin"></div> Leyendo versión en GitHub…</div>','loading');
-    let sha = await _getSHA();
+    const commitUrl = res.commit?.html_url || '#';
+    _setCheck('checkGitHub', 'ok', 'Archivo confirmado en GitHub');
+    _setCheck('checkCDN', 'running', 'Esperando propagación…');
+    _setGHStatus('<div style="display:flex;align-items:center;gap:8px;"><div class="spin"></div> Validando URL pública…</div>', 'loading');
 
-    const body = { message:'Foto: '+fname+' · Copihue POS', content:b64, branch:cfg.branch||'main' };
-    if (sha) body.sha = sha;
-
-    _setGHStatus('<div style="display:flex;align-items:center;gap:8px;"><div class="spin"></div> Subiendo a GitHub…</div>','loading');
-    let put = await fetch(apiBase, { method:'PUT', headers:hdrs, body:JSON.stringify(body) });
-
-    // Si falla por SHA incorrecto o faltante — extraer SHA del error y reintentar
-    if (!put.ok && (put.status === 409 || put.status === 422 || put.status === 400)) {
-      _setGHStatus('<div style="display:flex;align-items:center;gap:8px;"><div class="spin"></div> Resolviendo conflicto…</div>','loading');
-      // Primer intento: leer SHA fresco del GET
-      const shaFresco = await _getSHA();
-      if (shaFresco) {
-        body.sha = shaFresco;
-        put = await fetch(apiBase, { method:'PUT', headers:hdrs, body:JSON.stringify(body) });
-      }
-      // Segundo intento: si sigue fallando, esperar y reintentar una vez más
-      if (!put.ok && (put.status === 409 || put.status === 422 || put.status === 400)) {
-        await new Promise(r => setTimeout(r, 1200));
-        const shaFresco2 = await _getSHA();
-        if (shaFresco2) {
-          body.sha = shaFresco2;
-          put = await fetch(apiBase, { method:'PUT', headers:hdrs, body:JSON.stringify(body) });
-        }
-      }
-    }
-
-    if (!put.ok) {
-      const err = await put.json().catch(()=>({}));
-      _setCheck('checkGitHub','error','GitHub rechazó la subida');
-      _setCheck('checkCDN','error','No se puede validar'); _setCheck('checkPreview','error','No confirmado');
-      if (put.status===401) _setGHStatus('❌ Token inválido. <button onclick="abrirConfig()" style="background:none;border:none;color:var(--danger);font-weight:700;cursor:pointer;text-decoration:underline;">Actualizar ↗</button>','error');
-      else if (put.status===404) _setGHStatus('❌ Repo no encontrado. <button onclick="abrirConfig()" style="background:none;border:none;color:var(--danger);font-weight:700;cursor:pointer;text-decoration:underline;">Cambiar config ↗</button>','error');
-      else _setGHStatus('❌ Error: '+(err.message||put.statusText),'error');
-      return;
-    }
-
-    const res = await put.json();
-    const commitUrl = res.commit?.html_url||'#';
-    _setCheck('checkGitHub','ok','Archivo confirmado en GitHub');
-    _setCheck('checkCDN','running','Esperando propagación…');
-    _setGHStatus('<div style="display:flex;align-items:center;gap:8px;"><div class="spin"></div> Validando URL pública…</div>','loading');
-
-    const publicado = await _esperarImagenPublica(slug,12,2500);
+    const publicado = await _esperarImagenPublica(slug, 12, 2500);
 
     if (!publicado.ok) {
-      _setCheck('checkCDN','error','GitHub OK, web aún no responde');
-      _setCheck('checkPreview','error','Revalidar manualmente');
-      _setGHStatus(`⚠️ <strong>${fname}</strong> subido, pero la web no responde aún.<br><small><a href="${commitUrl}" target="_blank" style="color:var(--warn);">Ver commit ↗</a></small>`,'error');
-      document.getElementById('publishCheckActions').style.display='flex';
-      toast('⚠️ Subida OK, la web aún no responde','warn'); return;
+      _setCheck('checkCDN', 'error', 'GitHub OK, web aún no responde');
+      _setCheck('checkPreview', 'error', 'Revalidar manualmente');
+      _setGHStatus(`⚠️ <strong>${fname}</strong> subido, pero la web no responde aún.<br><small><a href="${commitUrl}" target="_blank" style="color:var(--warn);">Ver commit ↗</a></small>`, 'error');
+      document.getElementById('publishCheckActions').style.display = 'flex';
+      toast('⚠️ Subida OK, la web aún no responde', 'warn');
+      return;
     }
 
     // Actualizar card en grid
@@ -1567,24 +1548,27 @@ async function publicarEnGitHub() {
       card.classList.remove('sin-foto'); card.classList.add('recien-subida');
       const iw = card.querySelector('.card-img');
       if (iw) iw.innerHTML = `<img src="${publicado.url}" class="loaded" style="width:100%;height:100%;object-fit:cover;display:block;"><div class="card-num">${modalIdx+1}</div>`;
-      setTimeout(()=>card.classList.remove('recien-subida'),2000);
+      setTimeout(() => card.classList.remove('recien-subida'), 2000);
     }
     sinFotoSet.delete(productoActual.id);
     updateCounter();
 
-    _setCheck('checkCDN','ok','URL pública respondió');
-    _setCheck('checkPreview','ok','Vista previa y grilla actualizadas');
-    document.getElementById('publishCheckActions').style.display='flex';
-    _setGHStatus(`✅ <strong>${fname}</strong> publicado y verificado.<br><small><a href="${commitUrl}" target="_blank" style="color:var(--ok);">Ver commit ↗</a> · <a href="${publicado.url}" target="_blank" style="color:var(--ok);">Abrir imagen ↗</a></small>`,'ok');
-    toast('✅ Foto publicada y verificada','ok');
+    _setCheck('checkCDN', 'ok', 'URL pública respondió');
+    _setCheck('checkPreview', 'ok', 'Vista previa y grilla actualizadas');
+    document.getElementById('publishCheckActions').style.display = 'flex';
+    _setGHStatus(`✅ <strong>${fname}</strong> publicado y verificado.<br><small><a href="${commitUrl}" target="_blank" style="color:var(--ok);">Ver commit ↗</a> · <a href="${publicado.url}" target="_blank" style="color:var(--ok);">Abrir imagen ↗</a></small>`, 'ok');
+    toast('✅ Foto publicada y verificada', 'ok');
 
   } catch(e) {
-    _setCheck('checkGitHub','error','Error de red'); _setCheck('checkCDN','error','No se pudo validar'); _setCheck('checkPreview','error','No confirmado');
-    _setGHStatus('❌ Error de red: '+e.message,'error');
+    _setCheck('checkGitHub', 'error', 'Error: ' + e.message);
+    _setCheck('checkCDN', 'error', 'No se pudo validar');
+    _setCheck('checkPreview', 'error', 'No confirmado');
+    _setGHStatus('❌ ' + e.message, 'error');
   } finally {
-    btn.disabled=false;
+    btn.disabled = false;
   }
 }
+
 
 // ═══════════════════════════════════════════
 // CONFIG PANEL
