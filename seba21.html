@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v165</title>
+    <title>Copihue — POS v166</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2096,10 +2096,20 @@ function renderResultados(results, term = '') {
                 <div style="font-size:.62rem;color:#888;line-height:1;">total</div>
                 <div style="font-weight:900;font-size:.92rem;color:#2e7d32;line-height:1.1;">$${totalCart.toLocaleString('es-AR')}</div>
             </div>` : ''}
-            <button onclick="event.stopPropagation();abrirAjusteStockRapido(${p.id})"
-                    title="Ajuste rápido"
-                    style="flex-shrink:0;background:none;border:none;cursor:pointer;
-                           font-size:1rem;padding:4px;pointer-events:auto;opacity:0.5;">⚠️</button>
+            <div style="flex-shrink:0;display:flex;flex-direction:column;gap:4px;align-items:center;pointer-events:auto;">
+                <button onclick="event.stopPropagation();abrirAjusteStockRapido(${p.id})"
+                        title="Editar producto"
+                        style="background:#f5f5f5;border:1px solid #ddd;border-radius:8px;cursor:pointer;
+                               font-size:0.7rem;font-weight:700;color:#555;padding:4px 7px;
+                               touch-action:manipulation;min-width:44px;min-height:28px;
+                               display:flex;align-items:center;justify-content:center;gap:2px;">✏️ Ed</button>
+                <button onclick="event.stopPropagation();bajarStockRapido(${p.id})"
+                        title="Bajar stock −1"
+                        style="background:#fff3e0;border:1px solid #ffb74d;border-radius:8px;cursor:pointer;
+                               font-size:0.7rem;font-weight:800;color:#e65100;padding:4px 7px;
+                               touch-action:manipulation;min-width:44px;min-height:28px;
+                               display:flex;align-items:center;justify-content:center;">−1</button>
+            </div>
         </div>`;
     }
 
@@ -2274,9 +2284,10 @@ function agregarProducto(id) {
         if (oferta.tieneOferta) mostrarToast(`${oferta.etiqueta} — ${producto.name.substring(0,25)}`, 'naranja');
     }
 
-    renderVenta(true);
-    _guardarCarritoDiferido();
-    _refreshResultadosBadges(id); // quirúrgico: solo el card tocado
+    renderVenta();
+    guardarCarritoPendiente();
+    // Mantener búsqueda activa — el botón ✕ rojo cierra la búsqueda
+    _refreshResultadosBadges();
 }
 
 // ===== SELECTOR DE CANTIDAD ANTES DE AGREGAR =====
@@ -2383,8 +2394,8 @@ function cambiarCantidad(id, delta) {
     } else {
         item.qty = nuevaCant;
     }
-    renderVenta(true);        // ligero: solo totales/header, NO toca el scroll
-    _guardarCarritoDiferido(); // debounce 300ms
+    renderVenta();
+    guardarCarritoPendiente();
     _refreshResultadosBadges(typeof id === 'string' && id.startsWith('peso_') ? null : Number(id));
 }
 
@@ -2690,13 +2701,9 @@ function _buildDetalleModalHTML() {
     return items + `<div class="confirm-total-row"><span>TOTAL</span><span>$${total.toLocaleString('es-AR')}</span></div>`;
 }
 
-// ids tocados durante la sesión del modal — se usa para sync quirúrgico al cerrar
-const _idsTocadosEnModal = new Set();
-
 function _modalQty(idx, delta) {
     if (idx < 0 || idx >= ventaActual.length) return;
     const item = ventaActual[idx];
-    _idsTocadosEnModal.add(item.esPeso ? item.idOriginal : item.id);
     const newQty = (item.qty || 1) + delta;
     if (newQty <= 0) { _modalDel(idx); return; }
     item.qty = newQty;
@@ -2706,15 +2713,13 @@ function _modalQty(idx, delta) {
         item.price = oferta.precioUnitario || p.price;
         item.ofertaEtiqueta = oferta.etiqueta || null;
     }
-    renderVenta(true);
-    _guardarCarritoDiferido();
+    renderVenta(true);             // ligero: actualiza totales sin tocar el scroll
+    _guardarCarritoDiferido();     // diferido: no bloquea la interacción
     _reRenderModal();
 }
 
 function _modalDel(idx) {
     if (idx < 0 || idx >= ventaActual.length) return;
-    const item = ventaActual[idx];
-    _idsTocadosEnModal.add(item.esPeso ? item.idOriginal : item.id);
     ventaActual.splice(idx, 1);
     renderVenta(true);
     _guardarCarritoDiferido();
@@ -2783,10 +2788,9 @@ function abrirConfirmacion() {
     window._totalConRedondeo = total;
     window._descuentoRedondeo = 0;
 
-    _idsTocadosEnModal.clear(); // limpiar sesión anterior
     seleccionarMetodo('efectivo');
     document.getElementById('modalConfirm').classList.add('open');
-    _bindSwipeConfirmacion();
+    _bindSwipeConfirmacion(); // swipe izquierda = −1 en cada fila
 }
 
 async function confirmarVenta() {
@@ -2940,6 +2944,7 @@ function cerrarConfirm() {
     if (btnOk) { btnOk.textContent = '✅ Confirmar cobro'; btnOk.disabled = false; btnOk.onclick = confirmarVenta; }
     const btnCancelar = document.querySelector('.btn-cancelar-confirm');
     if (btnCancelar) { btnCancelar.textContent = 'Cancelar'; btnCancelar.onclick = cerrarConfirm; }
+    // Resetear cliente
     _clienteActual = null;
     const buscador = document.getElementById('clienteBuscador');
     if (buscador) buscador.value = '';
@@ -2947,9 +2952,6 @@ function cerrarConfirm() {
     if (sel) sel.style.display = 'none';
     const nuevoPanel = document.getElementById('nuevoClientePanel');
     if (nuevoPanel) nuevoPanel.style.display = 'none';
-    // Sync solo los ids tocados durante el modal — sin renderResultados, sin reordenar
-    _idsTocadosEnModal.forEach(id => _refreshResultadosBadges(id));
-    _idsTocadosEnModal.clear();
 }
 
 // ========== RESUMEN DEL DÍA ==========
@@ -3963,6 +3965,39 @@ function toggleAjusteExtra() {
 }
 
 // Abrir ajuste directo desde el buscador (producto sin stock)
+// Baja el stock del producto en −1 directamente, sin abrir modal
+async function bajarStockRapido(id) {
+    const p = productos.find(pr => pr.id === id);
+    if (!p) return;
+    if (p.stock <= 0) { mostrarToast('⚠️ Stock ya es 0', 'naranja'); return; }
+    const nuevoStock = p.stock - 1;
+    mostrarToast('⏳ Bajando stock...', 'naranja');
+    try {
+        const datos = {
+            producto: p.name,
+            stockAntes: p.stock,
+            stockDespues: nuevoStock,
+            precioAntes: p.price,
+            precioDespues: null,
+            categoriaAntes: p.category,
+            categoriaDespues: null,
+            nombreNuevo: null
+        };
+        const url = API_URL + '?action=ajusteRapido&data=' + encodeURIComponent(JSON.stringify(datos));
+        const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(10000) });
+        const resp = await r.json();
+        if (resp.success) {
+            p.stock = nuevoStock;
+            mostrarToast(`✅ Stock ${p.name.substring(0,20)} → ${nuevoStock}`, 'verde');
+            _refreshResultadosBadges(id); // actualiza el label de stock en el card
+        } else {
+            mostrarToast('❌ ' + (resp.mensaje || 'Error al bajar stock'), 'rojo');
+        }
+    } catch(e) {
+        mostrarToast('❌ Sin conexión', 'rojo');
+    }
+}
+
 function abrirAjusteStockRapido(id) {
     abrirAjuste();
     // Esperar a que el modal abra, luego precargar el producto
@@ -5582,7 +5617,7 @@ function toggleCervecero() {
 // Sincronizar badge de versión desde el <title>
 (function(){
     const el = document.getElementById('versionTag');
-    if (el) el.textContent = 'v165';
+    if (el) el.textContent = 'v166';
 })();
 
 // ── WakeLock: mantener pantalla encendida mientras la app está activa ──
