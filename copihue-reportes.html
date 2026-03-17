@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Copihue · Reportes v1.18-c0002a</title>
+<title>ver.1 · Copihue · Reportes</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -855,7 +855,10 @@ function renderApp(){
         return '<div class="anios-wrap">'+
           '<button class="btn-anio-toggle" onclick="toggleAnio('+a+')">'+
             '<span>📆 '+a+'</span>'+
-            '<span>'+(abierto?'▲':'▶')+'</span>'+
+            '<div style="display:flex;align-items:center;gap:8px">'+
+              '<button onclick="event.stopPropagation();selAnio('+a+')" style="background:var(--vl);border:1.5px solid var(--verde);border-radius:8px;padding:2px 9px;font-size:.63rem;font-weight:700;color:var(--vd);cursor:pointer;font-family:inherit">📅 Todo</button>'+
+              '<span>'+(abierto?'▲':'▶')+'</span>'+
+            '</div>'+
           '</button>'+
           '<div class="anio-panel'+(abierto?' open':'')+'">'+
             (hayMeses
@@ -898,7 +901,13 @@ function renderApp(){
 
         // 4. Meses del año actual
         '<div class="sel-sec">'+
-          '<div class="sel-sec-lbl">'+anio+'</div>'+
+          '<div class="sel-sec-lbl" style="display:flex;align-items:center;justify-content:space-between">'+
+            '<span>'+anio+'</span>'+
+            '<div style="display:flex;align-items:center;gap:6px">'+
+              '<span style="font-size:.58rem;color:var(--gris);font-weight:400;font-style:italic">toque para acumular</span>'+
+              '<button onclick="selAnioActual()" style="background:var(--vl);border:1.5px solid var(--verde);border-radius:8px;padding:3px 10px;font-size:.65rem;font-weight:700;color:var(--vd);cursor:pointer;font-family:inherit">📅 Todo el año</button>'+
+            '</div>'+
+          '</div>'+
           '<div class="meses-row">'+mesesH+'</div>'+
         '</div>'+
 
@@ -1085,15 +1094,50 @@ function selSemana(n){
   renderApp();
 }
 function selMesCal(a,m){
-  // Seleccionar mes completo de cualquier año
-  diasSel.clear();
+  // Toggle acumulativo: si todos los días del mes ya están → deseleccionar; si no → agregar
   const prefix=a+'-'+String(m+1).padStart(2,'0');
   const n=new Date(a,m+1,0).getDate();
-  for(let d=1;d<=n;d++) diasSel.add(prefix+'-'+String(d).padStart(2,'0'));
-  mes=m; anio=a;
+  const diasDelMes=Array.from({length:n},(_,i)=>prefix+'-'+String(i+1).padStart(2,'0'));
+  const todosSelec=diasDelMes.every(d=>diasSel.has(d));
+  if(todosSelec){
+    diasDelMes.forEach(d=>diasSel.delete(d));
+  } else {
+    diasDelMes.forEach(d=>diasSel.add(d));
+    mes=m; anio=a;
+  }
   renderApp();
 }
 function selMes(m){selMesCal(anio,m);}
+function selAnio(a){
+  // Toggle acumulativo: todos los meses con datos de ese año
+  const diasDelAnio=[];
+  for(let mi=0;mi<12;mi++){
+    const prefix=a+'-'+String(mi+1).padStart(2,'0');
+    const hayData=raw&&raw.totales.some(t=>t.fechaStr&&t.fechaStr.startsWith(prefix));
+    if(!hayData) continue;
+    const n=new Date(a,mi+1,0).getDate();
+    for(let d=1;d<=n;d++) diasDelAnio.push(prefix+'-'+String(d).padStart(2,'0'));
+  }
+  const todosSelec=diasDelAnio.length>0&&diasDelAnio.every(d=>diasSel.has(d));
+  if(todosSelec) diasDelAnio.forEach(d=>diasSel.delete(d));
+  else diasDelAnio.forEach(d=>diasSel.add(d));
+  renderApp();
+}
+function selAnioActual(){
+  // Toggle acumulativo: todos los meses NO futuros del año actual
+  const diasDelAnio=[];
+  const hoy=new Date();
+  for(let mi=0;mi<12;mi++){
+    if(new Date(anio,mi,1)>hoy) break;
+    const prefix=anio+'-'+String(mi+1).padStart(2,'0');
+    const n=new Date(anio,mi+1,0).getDate();
+    for(let d=1;d<=n;d++) diasDelAnio.push(prefix+'-'+String(d).padStart(2,'0'));
+  }
+  const todosSelec=diasDelAnio.length>0&&diasDelAnio.every(d=>diasSel.has(d));
+  if(todosSelec) diasDelAnio.forEach(d=>diasSel.delete(d));
+  else diasDelAnio.forEach(d=>diasSel.add(d));
+  renderApp();
+}
 function toggleAnio(a){
   aniosAbiertos.has(a)?aniosAbiertos.delete(a):aniosAbiertos.add(a);
   renderApp();
