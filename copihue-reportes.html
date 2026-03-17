@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>ver.2 · Copihue · Reportes</title>
+<title>ver.3 · Copihue · Reportes</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
@@ -1586,33 +1586,68 @@ function descargarExcel(){
   ws1['!cols']=[{wch:30},{wch:18},{wch:10}];
   XLSX.utils.book_append_sheet(wb,ws1,'Resumen');
 
-  // ===== HOJA 2: TOP PRODUCTOS =====
-  const topRows=[
-    ['TOP PRODUCTOS — período: '+periodoLabel()],
-    ['#','Producto','Unidades','Venta $','Ganancia $','Con costo real'],
-    ...stats.top.map((p,i)=>[
-      i+1,
-      p.nombre,
-      p.qty,
-      fmtN(p.total),
-      fmtN(p.conCosto?p.ganReal:p.ganAprox),
-      p.conCosto?'Sí':'Aprox',
-    ])
-  ];
-  const ws2=XLSX.utils.aoa_to_sheet(topRows);
-  ws2['!cols']=[{wch:4},{wch:35},{wch:10},{wch:14},{wch:14},{wch:12}];
-  XLSX.utils.book_append_sheet(wb,ws2,'Top Productos');
+  // ===== HOJA 2: TOP POR VENTA (todos los productos) =====
+  // Reconstruir ranking completo desde items (no limitado a 15)
+  const prodsMap={};
+  items.forEach(i=>{
+    if(!i.nombre) return;
+    if(!prodsMap[i.nombre]) prodsMap[i.nombre]={nombre:i.nombre,qty:0,total:0,ganReal:0,ganAprox:0,conCosto:false,tickets:new Set()};
+    prodsMap[i.nombre].qty+=i.qty||0;
+    prodsMap[i.nombre].total+=i.subtotal||0;
+    prodsMap[i.nombre].ganReal+=i.tieneCosto?(i.gananciaReal||0):0;
+    prodsMap[i.nombre].ganAprox+=i.gananciaAprox||0;
+    if(i.tieneCosto) prodsMap[i.nombre].conCosto=true;
+    prodsMap[i.nombre].tickets.add(i.ticket);
+  });
+  const todosProds=Object.values(prodsMap).map(p=>({...p,qty:Math.round(p.qty*10)/10,tickets:p.tickets.size}));
+  const topVenta=[...todosProds].sort((a,b)=>b.total-a.total);
+  const topGan=[...todosProds].sort((a,b)=>{
+    const ga=a.conCosto?a.ganReal:a.ganAprox;
+    const gb=b.conCosto?b.ganReal:b.ganAprox;
+    return gb-ga;
+  });
+  const totalVentas=stats.venta||1;
 
-  // ===== HOJA 3: DETALLE TICKETS =====
+  const tvRows=[
+    ['🏆 TOP PRODUCTOS POR VENTA — período: '+periodoLabel()],
+    ['','','','','','',''],
+    ['#','Producto','Unidades vendidas','Venta $','% del total','En tickets','Ganancia $','Tipo ganancia'],
+    ...topVenta.map((p,i)=>{
+      const gan=p.conCosto?p.ganReal:p.ganAprox;
+      const pctV=Math.round(p.total/totalVentas*100);
+      return [i+1, p.nombre, p.qty, fmtN(p.total), pctV+'%', p.tickets, fmtN(gan), p.conCosto?'Real':'Aprox ★'];
+    })
+  ];
+  const ws2=XLSX.utils.aoa_to_sheet(tvRows);
+  ws2['!cols']=[{wch:4},{wch:38},{wch:18},{wch:14},{wch:12},{wch:10},{wch:14},{wch:12}];
+  XLSX.utils.book_append_sheet(wb,ws2,'Top por Venta');
+
+  // ===== HOJA 3: TOP POR GANANCIA (todos los productos) =====
+  const tgRows=[
+    ['💰 TOP PRODUCTOS POR GANANCIA — período: '+periodoLabel()],
+    ['','','','','','',''],
+    ['#','Producto','Ganancia $','Tipo','% margen s/venta','Venta $','Unidades','En tickets'],
+    ...topGan.map((p,i)=>{
+      const gan=p.conCosto?p.ganReal:p.ganAprox;
+      const margen=p.total>0?Math.round(gan/p.total*100):0;
+      return [i+1, p.nombre, fmtN(gan), p.conCosto?'Real':'Aprox ★', margen+'%', fmtN(p.total), p.qty, p.tickets];
+    })
+  ];
+  const ws3=XLSX.utils.aoa_to_sheet(tgRows);
+  ws3['!cols']=[{wch:4},{wch:38},{wch:14},{wch:10},{wch:18},{wch:14},{wch:10},{wch:10}];
+  XLSX.utils.book_append_sheet(wb,ws3,'Top por Ganancia');
+
+
+  // ===== HOJA 4: DETALLE TICKETS =====
   const tkRows=[['DETALLE DE TICKETS'],['Fecha','N° Ticket','Hora','Vendedor','Método','Total $']];
   totals.sort((a,b)=>a.fechaStr>b.fechaStr?1:-1).forEach(t=>{
     tkRows.push([t.fechaStr,t.ticket,t.hora||'',t.vendedor||'',t.metodo||'',fmtN(t.total||0)]);
   });
-  const ws3=XLSX.utils.aoa_to_sheet(tkRows);
-  ws3['!cols']=[{wch:12},{wch:10},{wch:8},{wch:16},{wch:14},{wch:12}];
-  XLSX.utils.book_append_sheet(wb,ws3,'Tickets');
+  const ws4tk=XLSX.utils.aoa_to_sheet(tkRows);
+  ws4tk['!cols']=[{wch:12},{wch:10},{wch:8},{wch:16},{wch:14},{wch:12}];
+  XLSX.utils.book_append_sheet(wb,ws4tk,'Tickets');
 
-  // ===== HOJA 4: DETALLE ITEMS =====
+  // ===== HOJA 5: DETALLE ITEMS =====
   const itRows=[['DETALLE DE ITEMS VENDIDOS'],['Fecha','N° Ticket','Producto','Cantidad','Subtotal $','Ganancia $','Con costo']];
   items.sort((a,b)=>a.fechaStr>b.fechaStr?1:-1).forEach(i=>{
     itRows.push([
@@ -1623,11 +1658,11 @@ function descargarExcel(){
       i.tieneCosto?'Sí':'Aprox'
     ]);
   });
-  const ws4=XLSX.utils.aoa_to_sheet(itRows);
-  ws4['!cols']=[{wch:12},{wch:10},{wch:35},{wch:10},{wch:12},{wch:12},{wch:8}];
-  XLSX.utils.book_append_sheet(wb,ws4,'Items Vendidos');
+  const ws5it=XLSX.utils.aoa_to_sheet(itRows);
+  ws5it['!cols']=[{wch:12},{wch:10},{wch:35},{wch:10},{wch:12},{wch:12},{wch:8}];
+  XLSX.utils.book_append_sheet(wb,ws5it,'Items Vendidos');
 
-  // ===== HOJA 5: POR DÍA =====
+  // ===== HOJA 6: POR DÍA =====
   const porDiaMap={};
   totals.forEach(t=>{if(!porDiaMap[t.fechaStr])porDiaMap[t.fechaStr]={venta:0,gan:0,tks:0};porDiaMap[t.fechaStr].venta+=t.total||0;porDiaMap[t.fechaStr].tks++;});
   items.forEach(i=>{if(!porDiaMap[i.fechaStr])porDiaMap[i.fechaStr]={venta:0,gan:0,tks:0};porDiaMap[i.fechaStr].gan+=i.gananciaAprox||0;});
@@ -1637,18 +1672,18 @@ function descargarExcel(){
     const dow=DOW2[new Date(ds+'T12:00:00').getDay()];
     diaRows.push([ds,dow,fmtN(v.venta),fmtN(v.gan),v.tks]);
   });
-  const ws5=XLSX.utils.aoa_to_sheet(diaRows);
-  ws5['!cols']=[{wch:12},{wch:6},{wch:14},{wch:14},{wch:8}];
-  XLSX.utils.book_append_sheet(wb,ws5,'Por Día');
+  const ws6d=XLSX.utils.aoa_to_sheet(diaRows);
+  ws6d['!cols']=[{wch:12},{wch:6},{wch:14},{wch:14},{wch:8}];
+  XLSX.utils.book_append_sheet(wb,ws6d,'Por Día');
 
-  // ===== HOJA 6: VENCIMIENTOS =====
+  // ===== HOJA 7: VENCIMIENTOS =====
   const venc=raw.vencProximos||[];
   if(venc.length){
     const vRows=[['VENCIMIENTOS PRÓXIMOS'],['Producto','Stock','Fecha venc.','Días restantes','Estado']];
     venc.forEach(v=>vRows.push([v.nombre,v.stock,v.fecha,v.dias,v.vencido?'VENCIDO':v.dias<=3?'URGENTE':v.dias<=7?'MUY PRONTO':'Próximo']));
-    const ws6=XLSX.utils.aoa_to_sheet(vRows);
-    ws6['!cols']=[{wch:35},{wch:8},{wch:14},{wch:14},{wch:12}];
-    XLSX.utils.book_append_sheet(wb,ws6,'Vencimientos');
+    const ws7v=XLSX.utils.aoa_to_sheet(vRows);
+    ws7v['!cols']=[{wch:35},{wch:8},{wch:14},{wch:14},{wch:12}];
+    XLSX.utils.book_append_sheet(wb,ws7v,'Vencimientos');
   }
 
   // --- Nombre del archivo ---
