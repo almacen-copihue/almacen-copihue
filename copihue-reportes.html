@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>ver.1 · Copihue · Reportes</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 :root{
   --v0:#b71c1c; --v1:#e64a19; --v2:#ff8f00; --v3:#66bb6a; --v4:#2e7d32; --v5:#1b5e20; --v6:#0a3d0f;
@@ -926,6 +927,10 @@ function renderApp(){
 
     // RESULTADOS
     '<div class="resultados">'+
+      // Botón Excel
+      (stats.venta>0?
+        '<button onclick="descargarExcel()" style="display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:11px;background:linear-gradient(135deg,#1b5e20,#2e7d32);border:none;border-radius:14px;color:#fff;font-size:.85rem;font-weight:900;cursor:pointer;font-family:inherit;margin-bottom:12px;box-shadow:0 2px 8px rgba(46,125,50,.3)">📥 Descargar informe Excel</button>'
+        :'')+
       // Resumen
       cardsH+
       // Métodos
@@ -1533,6 +1538,127 @@ function renderCompraSugerida() {
   return resumen+filtros+tabla;
 }
 // ====== FIN COMPRA SUGERIDA INTELIGENTE ======
+
+// ====== EXPORTAR EXCEL ======
+function descargarExcel(){
+  if(!raw||!diasSel.size) return;
+  const diasArr=Array.from(diasSel).sort();
+  const {items,totals}=filtrar(diasArr);
+  const stats=calcStats(items,totals);
+  const wb=XLSX.utils.book_new();
+
+  // --- Helpers ---
+  const fmtN=n=>Math.round(n);
+  const periodoLabel=()=>{
+    if(!diasArr.length) return 'Sin selección';
+    if(diasArr.length===1) return diasArr[0];
+    return diasArr[0]+' al '+diasArr[diasArr.length-1]+' ('+diasArr.length+' días)';
+  };
+
+  // ===== HOJA 1: RESUMEN =====
+  const pctG=stats.venta>0?Math.round(stats.ganReal/stats.venta*100):0;
+  const pctGA=stats.venta>0?Math.round(stats.ganAprox/stats.venta*100):0;
+  const wsRes=[
+    ['INFORME ALMACÉN COPIHUE','',''],
+    ['Período',periodoLabel(),''],
+    ['Generado',new Date().toLocaleDateString('es-AR'),''],
+    ['','',''],
+    ['RESUMEN GENERAL','',''],
+    ['Concepto','Valor',''],
+    ['Ventas totales',fmtN(stats.venta),''],
+    ['Ganancia real',fmtN(stats.ganReal),pctG+'%'],
+    ['Ganancia aprox ★',fmtN(stats.ganAprox),pctGA+'%'],
+    ['Cantidad de tickets',stats.nTks,''],
+    ['Días con ventas',diasArr.length,''],
+    ['Ticket promedio',stats.nTks>0?fmtN(stats.venta/stats.nTks):0,''],
+    ['','',''],
+    ['POR MÉTODO DE PAGO','',''],
+    ['Método','Total','% del total'],
+    ...Object.entries(stats.metodos).sort((a,b)=>b[1]-a[1])
+      .map(([m,t])=>[m,fmtN(t),stats.venta>0?Math.round(t/stats.venta*100)+'%':'0%']),
+    ['','',''],
+    ['POR VENDEDOR','',''],
+    ['Vendedor','Total','% del total'],
+    ...Object.values(stats.vendedores).sort((a,b)=>b.total-a.total)
+      .map(({nombre,total})=>[nombre,fmtN(total),stats.venta>0?Math.round(total/stats.venta*100)+'%':'0%']),
+  ];
+  const ws1=XLSX.utils.aoa_to_sheet(wsRes);
+  ws1['!cols']=[{wch:30},{wch:18},{wch:10}];
+  XLSX.utils.book_append_sheet(wb,ws1,'Resumen');
+
+  // ===== HOJA 2: TOP PRODUCTOS =====
+  const topRows=[
+    ['TOP PRODUCTOS — período: '+periodoLabel()],
+    ['#','Producto','Unidades','Venta $','Ganancia $','Con costo real'],
+    ...stats.top.map((p,i)=>[
+      i+1,
+      p.nombre,
+      p.qty,
+      fmtN(p.total),
+      fmtN(p.conCosto?p.ganReal:p.ganAprox),
+      p.conCosto?'Sí':'Aprox',
+    ])
+  ];
+  const ws2=XLSX.utils.aoa_to_sheet(topRows);
+  ws2['!cols']=[{wch:4},{wch:35},{wch:10},{wch:14},{wch:14},{wch:12}];
+  XLSX.utils.book_append_sheet(wb,ws2,'Top Productos');
+
+  // ===== HOJA 3: DETALLE TICKETS =====
+  const tkRows=[['DETALLE DE TICKETS'],['Fecha','N° Ticket','Hora','Vendedor','Método','Total $']];
+  totals.sort((a,b)=>a.fechaStr>b.fechaStr?1:-1).forEach(t=>{
+    tkRows.push([t.fechaStr,t.ticket,t.hora||'',t.vendedor||'',t.metodo||'',fmtN(t.total||0)]);
+  });
+  const ws3=XLSX.utils.aoa_to_sheet(tkRows);
+  ws3['!cols']=[{wch:12},{wch:10},{wch:8},{wch:16},{wch:14},{wch:12}];
+  XLSX.utils.book_append_sheet(wb,ws3,'Tickets');
+
+  // ===== HOJA 4: DETALLE ITEMS =====
+  const itRows=[['DETALLE DE ITEMS VENDIDOS'],['Fecha','N° Ticket','Producto','Cantidad','Subtotal $','Ganancia $','Con costo']];
+  items.sort((a,b)=>a.fechaStr>b.fechaStr?1:-1).forEach(i=>{
+    itRows.push([
+      i.fechaStr,i.ticket,i.nombre||'',
+      Math.round((i.qty||0)*10)/10,
+      fmtN(i.subtotal||0),
+      fmtN(i.tieneCosto?(i.gananciaReal||0):(i.gananciaAprox||0)),
+      i.tieneCosto?'Sí':'Aprox'
+    ]);
+  });
+  const ws4=XLSX.utils.aoa_to_sheet(itRows);
+  ws4['!cols']=[{wch:12},{wch:10},{wch:35},{wch:10},{wch:12},{wch:12},{wch:8}];
+  XLSX.utils.book_append_sheet(wb,ws4,'Items Vendidos');
+
+  // ===== HOJA 5: POR DÍA =====
+  const porDiaMap={};
+  totals.forEach(t=>{if(!porDiaMap[t.fechaStr])porDiaMap[t.fechaStr]={venta:0,gan:0,tks:0};porDiaMap[t.fechaStr].venta+=t.total||0;porDiaMap[t.fechaStr].tks++;});
+  items.forEach(i=>{if(!porDiaMap[i.fechaStr])porDiaMap[i.fechaStr]={venta:0,gan:0,tks:0};porDiaMap[i.fechaStr].gan+=i.gananciaAprox||0;});
+  const DOW2=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+  const diaRows=[['VENTAS POR DÍA'],['Fecha','Día','Venta $','Ganancia $','Tickets']];
+  Object.entries(porDiaMap).sort((a,b)=>a[0]>b[0]?1:-1).forEach(([ds,v])=>{
+    const dow=DOW2[new Date(ds+'T12:00:00').getDay()];
+    diaRows.push([ds,dow,fmtN(v.venta),fmtN(v.gan),v.tks]);
+  });
+  const ws5=XLSX.utils.aoa_to_sheet(diaRows);
+  ws5['!cols']=[{wch:12},{wch:6},{wch:14},{wch:14},{wch:8}];
+  XLSX.utils.book_append_sheet(wb,ws5,'Por Día');
+
+  // ===== HOJA 6: VENCIMIENTOS =====
+  const venc=raw.vencProximos||[];
+  if(venc.length){
+    const vRows=[['VENCIMIENTOS PRÓXIMOS'],['Producto','Stock','Fecha venc.','Días restantes','Estado']];
+    venc.forEach(v=>vRows.push([v.nombre,v.stock,v.fecha,v.dias,v.vencido?'VENCIDO':v.dias<=3?'URGENTE':v.dias<=7?'MUY PRONTO':'Próximo']));
+    const ws6=XLSX.utils.aoa_to_sheet(vRows);
+    ws6['!cols']=[{wch:35},{wch:8},{wch:14},{wch:14},{wch:12}];
+    XLSX.utils.book_append_sheet(wb,ws6,'Vencimientos');
+  }
+
+  // --- Nombre del archivo ---
+  const hoy=new Date();
+  const fechaFile=hoy.getFullYear()+'-'+String(hoy.getMonth()+1).padStart(2,'0')+'-'+String(hoy.getDate()).padStart(2,'0');
+  const nombre='Copihue_Reporte_'+fechaFile+(diasArr.length===1?'_'+diasArr[0]:'')+'.xlsx';
+
+  XLSX.writeFile(wb,nombre);
+}
+// ====== FIN EXPORTAR EXCEL ======
 
 init();
 </script>
