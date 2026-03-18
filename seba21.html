@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v174</title>
+    <title>Copihue — POS v175</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2054,12 +2054,19 @@ function renderResultados(results, term = '') {
         .sort((a, b) => (ordenCarrito[a.id] || 0) - (ordenCarrito[b.id] || 0));
     const resto     = results.filter(p => !idsEnCarrito[p.id]);
 
+    // Pre-calcular ofertas UNA sola vez para todos los productos visibles
+    const ofertaCache = {};
+    results.forEach(p => {
+        const qty = idsEnCarrito[p.id] || 0;
+        ofertaCache[p.id] = calcularOfertaPOS(p, Math.max(qty, 1));
+    });
+
     function cardHTML(p) {
         const sinStock  = p.stock === 0;
         const stockBajo = p.stock > 0 && p.stock <= 3;
         const qty       = idsEnCarrito[p.id] || 0;
         const esPesoCard = ventaActual.some(i => i.esPeso && i.idOriginal === p.id);
-        const oferta    = calcularOfertaPOS(p, Math.max(qty, 1));
+        const oferta    = ofertaCache[p.id];
         const precio    = oferta.precioUnitario || p.price;
         const totalCart = qty > 0
             ? (esPesoCard ? Math.round((precio / 1000) * qty) : precio * qty)
@@ -2071,10 +2078,10 @@ function renderResultados(results, term = '') {
         const badgeQtyLabel = esPesoCard ? `${qty}g` : qty;
         const badgeFoto = qty > 0
             ? `<div style="position:absolute;top:-5px;left:-5px;
-                           background:#e53935;color:white;border-radius:50%;
+                           background:#e53935;color:white;border-radius:10px;
                            width:${esPesoCard?'28px':'20px'};height:20px;font-size:0.6rem;font-weight:900;
                            display:flex;align-items:center;justify-content:center;
-                           border:2px solid white;z-index:2;line-height:1;border-radius:10px;">${badgeQtyLabel}</div>`
+                           border:2px solid white;z-index:2;line-height:1;">${badgeQtyLabel}</div>`
             : '';
 
         const esNxMSinActivar = oferta.tieneOferta && oferta.tipoOferta === 'relampago' && precio === p.price;
@@ -2085,12 +2092,10 @@ function renderResultados(results, term = '') {
         const stockColor = sinStock ? '#e53935' : stockBajo ? '#f57c00' : '#aaa';
         const stockLabel = sinStock ? 'sin stock' : stockBajo ? `${p.stock} u. (poco)` : `stock: ${p.stock}`;
 
-        const tapAction = `agregarProducto(${p.id})`;
-
         return `
         <div class="resultado-item ${sinStock ? 'sin-stock' : ''} ${qty > 0 ? 'en-carrito' : ''}"
                 data-prod-id="${p.id}"
-                onclick="${tapAction}"
+                onclick="agregarProducto(${p.id})"
                 style="width:100%;text-align:left;border:none;border-radius:0;
                        background:${qty>0?'#f1f8e9':'white'};
                        cursor:pointer;font-family:inherit;padding:8px 10px;
@@ -2117,22 +2122,32 @@ function renderResultados(results, term = '') {
                     <span style="color:${stockColor};font-size:.6rem;">${stockLabel}</span>
                 </div>
             </div>
-            ${totalCart ? `<div style="flex-shrink:0;text-align:right;pointer-events:none;">
+            ${totalCart ? `<div data-total style="flex-shrink:0;text-align:right;pointer-events:none;">
                 <div style="font-size:.62rem;color:#888;line-height:1;">total</div>
                 <div style="font-weight:900;font-size:.92rem;color:#2e7d32;line-height:1.1;">$${totalCart.toLocaleString('es-AR')}</div>
             </div>` : ''}
             <div style="flex-shrink:0;display:flex;flex-direction:column;gap:3px;pointer-events:auto;margin-left:2px;">
+                <!-- Editor -->
                 <button onclick="event.stopPropagation();abrirAjusteStockRapido(${p.id})"
                         title="Editar producto"
                         style="width:44px;height:44px;border:1.5px solid #ddd;border-radius:10px;
                                background:#f8f8f8;cursor:pointer;touch-action:manipulation;
                                font-size:1.1rem;display:flex;align-items:center;justify-content:center;">✏️</button>
-                <button onclick="event.stopPropagation();bajarStockRapido(${p.id})"
-                        title="Bajar stock −1"
-                        style="width:44px;height:44px;border:1.5px solid #ffb74d;border-radius:10px;
-                               background:#fff3e0;cursor:pointer;touch-action:manipulation;
-                               font-size:0.85rem;font-weight:900;color:#e65100;
-                               display:flex;align-items:center;justify-content:center;">−1</button>
+                <!-- Quitar una unidad del carrito -->
+                <button onclick="event.stopPropagation();cambiarCantidad('${p.id}',-1)"
+                        title="Quitar una unidad"
+                        style="width:44px;height:44px;border:1.5px solid #ef9a9a;border-radius:10px;
+                               background:#ffebee;cursor:pointer;touch-action:manipulation;
+                               font-size:1.3rem;font-weight:900;color:#c62828;
+                               display:flex;align-items:center;justify-content:center;line-height:1;">−</button>
+                <!-- Agregar una unidad (duplica el click del card) -->
+                <button onclick="event.stopPropagation();agregarProducto(${p.id})"
+                        title="Agregar una unidad"
+                        style="width:44px;height:44px;border:1.5px solid #a5d6a7;border-radius:10px;
+                               background:#e8f5e9;cursor:pointer;touch-action:manipulation;
+                               font-size:1.3rem;font-weight:900;color:#2e7d32;
+                               display:flex;align-items:center;justify-content:center;line-height:1;">+</button>
+                <!-- Warning / Ajuste -->
                 <button onclick="event.stopPropagation();abrirAjusteStockRapido(${p.id})"
                         title="Ajuste de stock"
                         style="width:44px;height:44px;border:none;border-radius:10px;
