@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Almacén Copihue - Productos de calidad con la confianza de siempre</title>
+    <title>Almacén Copihue v79</title>
     
     <!-- META TAGS PARA PWA -->
     <meta name="theme-color" content="#2e7d32">
@@ -2084,7 +2084,7 @@
 // ========== VERSIÓN Y CONFIGURACIÓN ==========
 const APP_VERSION = 'V2.9-GANCHO-250305';
 // Tag versión automático con fecha
-(function(){ const el=document.getElementById('versionTag'); if(el) el.textContent='v005'; })();
+(function(){ const el=document.getElementById('versionTag'); if(el){ const m=document.title.match(/v(\d+)/i); el.textContent=m?'v'+m[1]:'v79'; } })();
 
 // ========== MAPEO DE OFERTAS RELÁMPAGO ==========
 const OFERTAS_RELAMPAGO_SISTEMA = {
@@ -3566,20 +3566,28 @@ function processAPIData(apiData) {
     
     console.log(`✅ ${products.length} productos cargados`);
 
-    // Cargar los 3 relámpago del backend en paralelo — NO bloquea el render
+    // Mostrar spinner en relámpago mientras sincroniza con backend
+    const elRel = document.getElementById('ofertasRelampago');
+    if (elRel) {
+        elRel.style.display = 'block';
+        elRel.innerHTML = '<div style="text-align:center;padding:24px;color:#ff6f00;font-size:0.9rem;">⚡ Cargando ofertas relámpago…</div>';
+    }
+
+    // Sincronizar los 3 relámpago del backend ANTES del primer render — sin flash
     const GAS_URL = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-    fetch(GAS_URL + '?action=getOfertas&t=' + Date.now(), { redirect: 'follow' })
-        .then(r => r.json())
-        .then(d => {
-            if (d.success && d.relampagoActivo) {
-                _relampagoActivoBackend = d.relampagoActivo.map(p => Number(p.id));
-                console.log(`⚡ Relámpago backend sync: ${_relampagoActivoBackend.length} productos`);
-                // Re-renderizar solo relámpago con los IDs correctos
-                seleccionarProductosOfertas();
-                renderizarContenedorOfertas('relampago', productosRelampago);
-            }
-        })
-        .catch(e => console.warn('⚠️ Sync relámpago fallback local:', e.message));
+    try {
+        const rOfertas = await Promise.race([
+            fetch(GAS_URL + '?action=getOfertas&t=' + Date.now(), { redirect: 'follow' }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000))
+        ]);
+        const dOfertas = await rOfertas.json();
+        if (dOfertas.success && dOfertas.relampagoActivo) {
+            _relampagoActivoBackend = dOfertas.relampagoActivo.map(p => Number(p.id));
+            console.log(`⚡ Relámpago backend sync: ${_relampagoActivoBackend.length} productos`);
+        }
+    } catch(e) {
+        console.warn('⚠️ Sync relámpago fallback local:', e.message);
+    }
 
     renderCategories();
     actualizarTodasLasVistas();
