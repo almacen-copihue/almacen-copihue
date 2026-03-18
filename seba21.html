@@ -3079,17 +3079,28 @@ function _tieneOfertaActiva(p) {
 }
 
 function _sortProductos(lista, idsEnCarrito) {
-    return [...lista].sort((a, b) => {
-        if (a.stock === 0 && b.stock > 0) return 1;
-        if (a.stock > 0 && b.stock === 0) return -1;
-        const aOf = _tieneOfertaActiva(a) ? 1 : 0;
-        const bOf = _tieneOfertaActiva(b) ? 1 : 0;
-        if (bOf !== aOf) return bOf - aOf;
-        const aC = (idsEnCarrito && idsEnCarrito.has(a.id)) ? 1 : 0;
-        const bC = (idsEnCarrito && idsEnCarrito.has(b.id)) ? 1 : 0;
-        if (bC !== aC) return bC - aC;
-        return rankScore(b.id) - rankScore(a.id);
+    // Pre-calcular peso de categoría UNA vez por producto (no dentro del comparador)
+    function _catPeso(p) {
+        const cat = String(p.category || p.categoria || '').toUpperCase();
+        const nom = String(p.name || '').toUpperCase();
+        if (cat.includes('PANADERIA') || cat.includes('PANIFICADO') || nom.includes('PAN ')) return 3000;
+        if (cat.includes('COMPUTA') || cat.includes('ELECTRON') || cat.includes('TECNOL')) return -9999;
+        return 0;
+    }
+    const scored = lista.map(p => ({
+        p,
+        oferta:  _tieneOfertaActiva(p) ? 1 : 0,
+        carrito: (idsEnCarrito && idsEnCarrito.has(p.id)) ? 1 : 0,
+        rank:    rankScore(p.id) + _catPeso(p)
+    }));
+    scored.sort((a, b) => {
+        if (a.p.stock === 0 && b.p.stock > 0) return 1;
+        if (a.p.stock > 0 && b.p.stock === 0) return -1;
+        if (b.oferta  !== a.oferta)  return b.oferta  - a.oferta;
+        if (b.carrito !== a.carrito) return b.carrito - a.carrito;
+        return b.rank - a.rank;
     });
+    return scored.map(s => s.p);
 }
 
 function reporteOfertasPOS(origen = 'manual') {
@@ -5654,7 +5665,10 @@ function toggleCervecero() {
 // Sincronizar badge de versión desde el <title>
 (function(){
     const el = document.getElementById('versionTag');
-    if (el) el.textContent = 'v166';
+    if (el) {
+        const m = document.title.match(/v(\d+)/);
+        el.textContent = m ? 'v' + m[1] : 'v167';
+    }
 })();
 
 // ── WakeLock: mantener pantalla encendida mientras la app está activa ──
