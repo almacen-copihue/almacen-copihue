@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Almacén Copihue v83</title>
+    <title>Almacén Copihue v84</title>
     
     <!-- META TAGS PARA PWA -->
     <meta name="theme-color" content="#2e7d32">
@@ -1812,7 +1812,7 @@
         <div class="logo">
             <img src="iconos-pwa/android/android-launchericon-48-48.png" alt="Logo Almacén Copihue" class="logo-icon">
             Almacén Copihue
-            <span id="versionTag" style="font-size:0.72rem;font-weight:700;opacity:0.9;margin-left:8px;background:rgba(255,255,255,0.2);padding:2px 7px;border-radius:10px;color:white;letter-spacing:0.3px;vertical-align:middle;">v83</span>
+            <span id="versionTag" style="font-size:0.72rem;font-weight:700;opacity:0.9;margin-left:8px;background:rgba(255,255,255,0.2);padding:2px 7px;border-radius:10px;color:white;letter-spacing:0.3px;vertical-align:middle;">v84</span>
             <span id="adminBadge" class="admin-badge" style="display: none;">ADMIN</span>
             <span id="relojHeader" onclick="abrirModalHorario()"
                   style="font-size:0.75rem;font-weight:600;color:rgba(255,255,255,0.7);
@@ -3631,13 +3631,26 @@ function processAPIData(apiData) {
 }
 
 function actualizarSoloOfertas() {
-    // Reconstruye pools y secciones de ofertas SIN tocar el grid principal del usuario
-    construirPools();
-    seleccionarProductosOfertas();
-    renderizarContenedorOfertas('relampago', productosRelampago);
-    renderizarContenedorOfertas('destacadas', productosDestacadas);
-    renderizarContenedorOfertas('especiales', productosEspeciales);
-    // NO llama a renderizarProductosNormales() para no interrumpir al usuario
+    const GAS_URL = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
+
+    // Sync relámpago y últimas desde backend, luego re-renderizar
+    Promise.all([
+        fetch(GAS_URL + '?action=getOfertas&t=' + Date.now(), { redirect: 'follow' }).then(r => r.json()).catch(() => null),
+        fetch(GAS_URL + '?action=getUltimasSeleccion&t=' + Date.now(), { redirect: 'follow' }).then(r => r.json()).catch(() => null)
+    ]).then(([dOfertas, dUltimas]) => {
+        if (dOfertas && dOfertas.success && dOfertas.relampagoActivo) {
+            _relampagoActivoBackend = dOfertas.relampagoActivo.map(p => Number(p.id));
+        }
+        if (dUltimas && dUltimas.ok && dUltimas.seleccion) {
+            _ultimasSeleccionBackend = dUltimas.seleccion.map(Number);
+        }
+        construirPools();
+        seleccionarProductosOfertas();
+        renderizarContenedorOfertas('relampago', productosRelampago);
+        renderizarContenedorOfertas('destacadas', productosDestacadas);
+        renderizarContenedorOfertas('especiales', productosEspeciales);
+        renderizarContenedorOfertas('ultimas', productosUltimas);
+    });
 }
 
 function simplificarNombre(nombre) {
