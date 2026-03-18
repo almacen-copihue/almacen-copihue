@@ -2291,25 +2291,41 @@ function _diaActualColIdx() {
 // ── Variables de horario — se llenan desde config_sistema ──
 let _horaAperturaLocal = 11;   // fallback
 let _horaCierreLocal   = 22;   // fallback
-let _minsAperturaLocal = 0;    // minutos apertura (ej: 10 para 18:10)
+let _minsAperturaLocal = 0;    // minutos apertura
 let _minsCierreLocal   = 0;    // minutos cierre
 
-// Parsea un valor de hora desde GAS: soporta ISO "1899-12-30T18:10:00.000Z",
-// string "18:10", string "18" y número 18
+// Parsea un valor de hora desde GAS. Soporta:
+//  - ISO UTC "1899-12-31T01:10:00.000Z" → convierte con getHours() (timezone local del browser)
+//  - Fracción de día 0.92361 (formato interno de Sheets)
+//  - Número entero 22
+//  - String "22:10" o "22"
 function _parsearValorHora(v) {
     if (v === null || v === undefined) return null;
-    const s = String(v);
-    // Formato ISO que envía GAS cuando la celda tiene minutos (ej: "1899-12-30T18:10:00.000Z")
-    if (s.includes('T')) {
-        const m = s.match(/T(\d{2}):(\d{2})/);
-        if (m) return { h: parseInt(m[1]), m: parseInt(m[2]) };
+    const s = String(v).trim();
+    // ISO string que envía GAS cuando la celda tiene minutos
+    // Usar Date.getHours/getMinutes para respetar el timezone local del browser
+    if (s.includes('T') && s.includes('Z')) {
+        try {
+            const d = new Date(s);
+            if (!isNaN(d)) return { h: d.getHours(), m: d.getMinutes() };
+        } catch(e) {}
         return null;
     }
-    // Formato "18:10" o "18" o número
+    // Fracción de día (0 a <1) — formato interno de Sheets a veces enviado como número
+    const numVal = parseFloat(s);
+    if (!s.includes(':') && !isNaN(numVal) && numVal >= 0 && numVal < 1) {
+        const totalMins = Math.round(numVal * 24 * 60);
+        return { h: Math.floor(totalMins / 60) % 24, m: totalMins % 60 };
+    }
+    // Número entero o con decimales de horas (ej: 22, 18.5)
+    if (!s.includes(':') && !isNaN(numVal)) {
+        return { h: Math.floor(numVal), m: Math.round((numVal % 1) * 60) };
+    }
+    // String "22:10" o "22"
     const parts = s.split(':');
-    const h = parseFloat(parts[0]);
-    const min = parts.length > 1 ? (parseInt(parts[1]) || 0) : 0;
-    return isNaN(h) ? null : { h, m: min };
+    const h = parseInt(parts[0]);
+    const m = parts.length > 1 ? (parseInt(parts[1]) || 0) : 0;
+    return isNaN(h) ? null : { h, m };
 }
 
 // Actualiza todos los elementos de UI que muestran horario
@@ -2317,7 +2333,6 @@ function _aplicarHorarioUI() {
     const apStr = String(_horaAperturaLocal).padStart(2,'0') + ':' + String(_minsAperturaLocal).padStart(2,'0');
     const ciStr = String(_horaCierreLocal).padStart(2,'0') + ':' + String(_minsCierreLocal).padStart(2,'0');
     const rango = apStr + ' a ' + ciStr + ' hrs.';
-    // Textos estáticos de horario
     document.querySelectorAll('[data-horario-rango]').forEach(el => el.textContent = rango);
     document.querySelectorAll('[data-hora-cierre]').forEach(el => el.textContent = ciStr);
     document.querySelectorAll('[data-hora-apertura]').forEach(el => el.textContent = apStr);
