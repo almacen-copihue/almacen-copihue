@@ -3565,18 +3565,21 @@ function processAPIData(apiData) {
     });
     
     console.log(`✅ ${products.length} productos cargados`);
-    
-    // Cargar los 3 relámpago del día desde backend (mismos que seba21)
-    try {
-        const rOfertas = await fetch(TU_APPS_SCRIPT_URL + '?action=getOfertas&t=' + Date.now(), { redirect: 'follow' });
-        const dOfertas = await rOfertas.json();
-        if (dOfertas.success && dOfertas.relampagoActivo) {
-            _relampagoActivoBackend = dOfertas.relampagoActivo.map(p => Number(p.id));
-            console.log(`⚡ Relámpago backend: ${_relampagoActivoBackend.length} productos sincronizados con seba21`);
-        }
-    } catch(e) {
-        console.warn('⚠️ No se pudo sincronizar relámpago con backend:', e.message);
-    }
+
+    // Cargar los 3 relámpago del backend en paralelo — NO bloquea el render
+    const GAS_URL = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
+    fetch(GAS_URL + '?action=getOfertas&t=' + Date.now(), { redirect: 'follow' })
+        .then(r => r.json())
+        .then(d => {
+            if (d.success && d.relampagoActivo) {
+                _relampagoActivoBackend = d.relampagoActivo.map(p => Number(p.id));
+                console.log(`⚡ Relámpago backend sync: ${_relampagoActivoBackend.length} productos`);
+                // Re-renderizar solo relámpago con los IDs correctos
+                seleccionarProductosOfertas();
+                renderizarContenedorOfertas('relampago', productosRelampago);
+            }
+        })
+        .catch(e => console.warn('⚠️ Sync relámpago fallback local:', e.message));
 
     renderCategories();
     actualizarTodasLasVistas();
