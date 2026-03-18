@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Almacén Copihue v80</title>
+    <title>Almacén Copihue v81</title>
     
     <!-- META TAGS PARA PWA -->
     <meta name="theme-color" content="#2e7d32">
@@ -1812,7 +1812,7 @@
         <div class="logo">
             <img src="iconos-pwa/android/android-launchericon-48-48.png" alt="Logo Almacén Copihue" class="logo-icon">
             Almacén Copihue
-            <span id="versionTag" style="font-size:0.72rem;font-weight:700;opacity:0.9;margin-left:8px;background:rgba(255,255,255,0.2);padding:2px 7px;border-radius:10px;color:white;letter-spacing:0.3px;vertical-align:middle;">v80</span>
+            <span id="versionTag" style="font-size:0.72rem;font-weight:700;opacity:0.9;margin-left:8px;background:rgba(255,255,255,0.2);padding:2px 7px;border-radius:10px;color:white;letter-spacing:0.3px;vertical-align:middle;">v81</span>
             <span id="adminBadge" class="admin-badge" style="display: none;">ADMIN</span>
             <span id="relojHeader" onclick="abrirModalHorario()"
                   style="font-size:0.75rem;font-weight:600;color:rgba(255,255,255,0.7);
@@ -2188,6 +2188,7 @@ let esAdmin = false;
 // Pools de ofertas
 let poolRelampago = [];
 let _relampagoActivoBackend = []; // Los 3 del día según code.gs — fuente de verdad compartida con seba21
+let _ultimasSeleccionBackend = []; // IDs seleccionados manualmente en seba21
 let poolUltimas = [];
 let _limiteDestacadas = 9; // configurable desde config_sistema → "máximo destacadas"
 let _limiteUltimas    = 3; // configurable desde config_sistema → "máximo ultimas"
@@ -3418,10 +3419,25 @@ function actualizarTodasLasVistas() {
     renderizarContenedorOfertas('relampago', productosRelampago);
     // Últimas unidades: solo si el horario está activo según config_sistema
     if (validarHorario('ultimas') || (esAdmin && modoMostrarTodasOfertas)) {
-        const candidatas = poolUltimas.filter(p => !idsEnOfertas.has(p.id));
-        productosUltimas = candidatas.slice(0, _limiteUltimas);
-        if (candidatas.length > _limiteUltimas) {
-            console.warn(`🏷️ Últimas Unidades: hay ${candidatas.length} productos para empujar pero el límite es ${_limiteUltimas}. Considerá aumentar "máximo ultimas" en config_sistema.`);
+        if (_ultimasSeleccionBackend.length > 0) {
+            // Usar selección manual del día hecha en seba21
+            productosUltimas = poolUltimas.filter(p => _ultimasSeleccionBackend.includes(p.id));
+            // Si algún ID seleccionado no está en poolUltimas (distinto relampago), buscarlo en products
+            if (productosUltimas.length < _ultimasSeleccionBackend.length) {
+                const yaIds = new Set(productosUltimas.map(p => p.id));
+                _ultimasSeleccionBackend.forEach(id => {
+                    if (!yaIds.has(id)) {
+                        const p = products.find(pr => pr.id === id);
+                        if (p && p.stockNumber > 0) productosUltimas.push({...p, _urgencia: 'seleccion'});
+                    }
+                });
+            }
+        } else {
+            const candidatas = poolUltimas.filter(p => !idsEnOfertas.has(p.id));
+            productosUltimas = candidatas.slice(0, _limiteUltimas);
+            if (candidatas.length > _limiteUltimas) {
+                console.warn(`🏷️ Últimas Unidades: hay ${candidatas.length} productos para empujar pero el límite es ${_limiteUltimas}. Considerá aumentar "máximo ultimas" en config_sistema.`);
+            }
         }
     } else {
         productosUltimas = [];
@@ -3475,6 +3491,19 @@ async function loadProductsFromAPI() {
                 }
             })
             .catch(e => console.warn('⚠️ Sync relámpago fallback local:', e.message));
+
+        // Sync últimas unidades seleccionadas manualmente en seba21
+        fetch(TU_APPS_SCRIPT_URL + '?action=getUltimasSeleccion&t=' + Date.now(), { redirect: 'follow' })
+            .then(r => r.json())
+            .then(d => {
+                if (d.ok && d.seleccion && d.seleccion.length > 0) {
+                    _ultimasSeleccionBackend = d.seleccion.map(Number);
+                    console.log(`🏷️ Últimas backend sync: ${_ultimasSeleccionBackend.length} productos`);
+                    seleccionarProductosOfertas();
+                    renderizarContenedorOfertas('ultimas', productosUltimas);
+                }
+            })
+            .catch(e => console.warn('⚠️ Sync últimas fallback local:', e.message));
 
         renderCategories();
         actualizarTodasLasVistas();
