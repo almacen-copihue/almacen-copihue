@@ -673,29 +673,34 @@ function calcularOfertas() {
   var idsUsados = {};
   var candidatosUltimas = [];
 
-  // Candidatos últimas unidades (por vencimiento próximo)
+  // REGLA DE ORO — ÚLTIMAS UNIDADES:
+  // Solo productos CON fecha de vencimiento donde diasStock > diasVencimiento
+  // (van a sobrar unidades al vencer) O vencen en ≤15 días
+  var hoyUlt = new Date(); hoyUlt.setHours(0,0,0,0);
   for (var i = 1; i < datos.length; i++) {
     var fila = datos[i];
     if (!fila[0]) continue;
     var stock = parseInt(fila[5]) || 0;
     if (stock <= 0) continue;
-    var dv = _ofertaDiasVencer_(fila);
-    if (dv === null || dv > 3) continue;
-    candidatosUltimas.push({ fila: fila, i: i, p: _ofertaPuntaje_(fila) + 10 });
-  }
+    var catUlt = String(fila[2] || '').trim().toUpperCase();
+    if (catUlt === 'CERVEZAS') continue;
 
-  // Candidatos por PrioridadEmpuje (EMPUJAR YA o EMPUJAR) — sin cervezas
-  for (var ie = 1; ie < datos.length; ie++) {
-    var filaE = datos[ie];
-    if (!filaE[0]) continue;
-    if (idsUsados[ie]) continue; // ya está por vencimiento
-    var stockE = parseInt(filaE[5]) || 0;
-    if (stockE <= 0) continue;
-    var catE = String(filaE[2] || '').trim().toUpperCase();
-    if (catE === 'CERVEZAS') continue;
-    var priorE = String(filaE[31] || '').trim().toUpperCase();
-    if (priorE !== 'EMPUJAR YA' && priorE !== 'EMPUJAR') continue;
-    candidatosUltimas.push({ fila: filaE, i: ie, p: _ofertaPuntaje_(filaE) + (priorE === 'EMPUJAR YA' ? 8 : 4) });
+    // Sin vencimiento → nunca entra
+    var vencUlt = fila[15];
+    if (!vencUlt || !(vencUlt instanceof Date)) continue;
+    var vNorm = new Date(vencUlt); vNorm.setHours(0,0,0,0);
+    var diasVenc = Math.round((vNorm - hoyUlt) / 86400000);
+    if (diasVenc <= 0) continue; // ya vencido
+
+    // Calcular días de stock
+    var promDiaUlt = parseFloat(fila[23]) || 0; // col X = PromDia
+    var diasStockUlt = promDiaUlt > 0 ? stock / promDiaUlt : 999;
+
+    // Entra si no alcanza a venderlo todo O si vence pronto (≤15 días)
+    if (diasStockUlt <= diasVenc && diasVenc > 15) continue;
+
+    var puntajeUlt = _ofertaPuntaje_(fila) + Math.max(0, 100 - diasVenc);
+    candidatosUltimas.push({ fila: fila, i: i, p: puntajeUlt, diasVenc: diasVenc });
   }
 
   var totalCandidatosUltimas = candidatosUltimas.length;
@@ -703,7 +708,9 @@ function calcularOfertas() {
     .sort(function(a, b) { return b.p - a.p; })
     .slice(0, limites.ultimas)
     .forEach(function(c) {
-      ultimasUnidades.push(_ofertaBuildProducto_(c.fila, c.i));
+      var prod = _ofertaBuildProducto_(c.fila, c.i);
+      prod.diasParaVencer = c.diasVenc;
+      ultimasUnidades.push(prod);
       idsUsados[c.i] = true;
     });
 
@@ -1863,11 +1870,14 @@ function getCandidatosUltimas() {
       if (stock <= 0) continue;               // sin stock no hay nada que empujar
       if (categoria === 'CERVEZAS') continue;
 
-      // Días hasta vencimiento
+      // Días hasta vencimiento — acepta Date o string "yyyy-MM-dd"
       var diasVenc = null;
-      if (venc instanceof Date) {
-        var vNorm = new Date(venc); vNorm.setHours(0,0,0,0);
-        diasVenc = Math.round((vNorm - hoy) / 86400000);
+      if (venc) {
+        var fechaVenc = venc instanceof Date ? venc : new Date(String(venc).trim());
+        if (!isNaN(fechaVenc.getTime())) {
+          var vNorm = new Date(fechaVenc); vNorm.setHours(0,0,0,0);
+          diasVenc = Math.round((vNorm - hoy) / 86400000);
+        }
       }
 
       // CONDICIÓN PRINCIPAL: el producto no se va a vender todo antes de vencer
