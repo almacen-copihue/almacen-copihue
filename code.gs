@@ -843,19 +843,67 @@ function calcularOfertas() {
     especialesActivas = rotados;
   }
 
+  // ── Leer selección manual de Últimas Unidades (hecha en seba21) ──
+  var ultimasSeleccionadas = [];
+  try {
+    var ssCfgU = SpreadsheetApp.openById(SS_ID);
+    var shCfgU = ssCfgU.getSheetByName(HOJA_CONFIG);
+    if (shCfgU) {
+      var cfgRowsU = shCfgU.getDataRange().getValues();
+      for (var ui = 0; ui < cfgRowsU.length; ui++) {
+        if (String(cfgRowsU[ui][0]).trim() === 'ultimas_seleccion') {
+          var rawU = cfgRowsU[ui][1];
+          var tsU  = cfgRowsU[ui][2];
+          if (rawU && tsU) {
+            var fechaU = new Date(tsU);
+            var hoyU   = new Date();
+            var mismoDiaU = fechaU.getFullYear() === hoyU.getFullYear()
+                         && fechaU.getMonth()    === hoyU.getMonth()
+                         && fechaU.getDate()     === hoyU.getDate();
+            if (mismoDiaU) {
+              var idsU = JSON.parse(rawU);
+              // Buscar cada producto por su ID (índice de fila en inventario)
+              for (var uj = 0; uj < idsU.length; uj++) {
+                var idxU = parseInt(idsU[uj]);
+                if (idxU > 0 && idxU < datos.length) {
+                  var filaU = datos[idxU];
+                  if (filaU && filaU[0]) {
+                    var prodU = _ofertaBuildProducto_(filaU, idxU);
+                    // Calcular días para vencer
+                    var vencU = filaU[15];
+                    if (vencU) {
+                      var fechaVencU = vencU instanceof Date ? vencU : new Date(String(vencU).trim());
+                      if (!isNaN(fechaVencU.getTime())) {
+                        var hoyU2 = new Date(); hoyU2.setHours(0,0,0,0);
+                        prodU.diasParaVencer = Math.round((fechaVencU - hoyU2) / 86400000);
+                      }
+                    }
+                    ultimasSeleccionadas.push(prodU);
+                  }
+                }
+              }
+            }
+          }
+          break;
+        }
+      }
+    }
+  } catch(eU) { /* sin selección guardada */ }
+
   return {
     success: true,
-    relampagoActivo:   relampagoActivo,        // 3 rotados del día — para mostrar en contenedor
-    relampagoPool:     relampagoPoolCompleto,   // todos — para calcular precios en POS
-    ultimasUnidades:   ultimasUnidades,
-    destacadasActivas: destacadasActivas,
-    especialesActivas: especialesActivas,   // ya filtradas y rotadas (máx limites.especiales)
+    relampagoActivo:      relampagoActivo,
+    relampagoPool:        relampagoPoolCompleto,
+    ultimasUnidades:      ultimasUnidades,
+    ultimasSeleccionadas: ultimasSeleccionadas,  // selección manual del día desde seba21
+    destacadasActivas:    destacadasActivas,
+    especialesActivas:    especialesActivas,
     limites: limites,
     fecha: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm'),
     stats: {
       totalRelampago:          relampagoActivo.length,
       totalUltimas:            ultimasUnidades.length,
-      totalUltimasCandidatos:  totalCandidatosUltimas,  // para sugerir ampliar el contenedor
+      totalUltimasCandidatos:  totalCandidatosUltimas,
       totalDestacadas:         destacadasActivas.length,
       totalEspeciales:         especialesPool.length,
       especialesMostradas:     especialesActivas.length
