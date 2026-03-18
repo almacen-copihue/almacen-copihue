@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v180</title>
+    <title>Copihue — POS v181</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2812,6 +2812,10 @@ function _modalQty(idx, delta) {
     const item = ventaActual[idx];
     const newQty = (item.qty || 1) + delta;
     if (newQty <= 0) { _modalDel(idx); return; }
+    if (delta > 0 && !item.esPeso && newQty > (item.stockDisponible || 999)) {
+        mostrarToast(`⚠️ Stock máximo: ${item.stockDisponible}`, 'rojo');
+        return;
+    }
     item.qty = newQty;
     const p = productos.find(pr => pr.id === item.id);
     if (p && !item.esPeso) {
@@ -2819,8 +2823,8 @@ function _modalQty(idx, delta) {
         item.price = oferta.precioUnitario || p.price;
         item.ofertaEtiqueta = oferta.etiqueta || null;
     }
-    renderVenta(true);             // ligero: actualiza totales sin tocar el scroll
-    _guardarCarritoDiferido();     // diferido: no bloquea la interacción
+    renderVenta(true);
+    _guardarCarritoDiferido();
     _reRenderModal();
 }
 
@@ -5546,7 +5550,11 @@ function calcularOfertaPOS(producto, qty) {
                 r.etiqueta       = `🏷️ -${cfgUlt.descuento}% ÚLTIMAS UNIDADES`;
                 r.tieneOferta    = true;
             } else {
-                r.etiqueta = `🏷️ ÚLTIMAS UNIDADES`;
+                // Sin relampago configurado → descuento automático 10% por ser Últimas Unidades
+                r.precioUnitario = Math.round(producto.price * 0.9);
+                r.precioTotal    = r.precioUnitario * qty;
+                r.etiqueta       = `🏷️ -10% ÚLTIMAS UNIDADES`;
+                r.tieneOferta    = true;
             }
         }
         r.tieneOferta = esUrgente || r.tieneOferta; // no pisar el true seteado en el else
