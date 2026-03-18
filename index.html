@@ -2521,14 +2521,27 @@ function construirPools() {
         p.stockNumber > 0
     );
 
-    // POOL ÚLTIMAS UNIDADES: solo productos con vencimiento crítico (<= 3 días), sin cervezas
+    // POOL ÚLTIMAS UNIDADES:
+    // Prioridad 1: vencimiento crítico (<= 3 días) con stock, sin cervezas
+    // Prioridad 2: relampago > 0, con stock, sin cervezas, NO duplicar los que ya van a Relámpago
+    const idsEnRelampago = new Set(poolRelampago.map(p => p.id));
+
     const ultimasVenc = products.filter(p =>
         p.categoria !== 'CERVEZAS' &&
         esVencimientoCritico(p) && p.stockNumber > 0
     ).map(p => ({ ...p, _puntaje: calcularPuntaje(p) + 10, _urgencia: 'vencimiento' }));
 
-    ultimasVenc.sort((a, b) => b._puntaje - a._puntaje);
-    poolUltimas = ultimasVenc;
+    const ultimasBajoStock = products.filter(p =>
+        p.categoria !== 'CERVEZAS' &&
+        p.relampago > 0 &&
+        p.stockNumber > 0 &&
+        !idsVencCritico.has(p.id) &&     // ya están en ultimasVenc
+        !idsEnRelampago.has(p.id)         // ya están en Relámpago — no duplicar
+    ).map(p => ({ ...p, _puntaje: calcularPuntaje(p), _urgencia: 'stock' }));
+
+    const todasUltimas = [...ultimasVenc, ...ultimasBajoStock];
+    todasUltimas.sort((a, b) => b._puntaje - a._puntaje);
+    poolUltimas = todasUltimas;
     
     console.log(`⚡ Pool Relámpago: ${poolRelampago.length} | 🔥 Destacadas: ${poolDestacadas.length} | 🏷️ Últimas: ${poolUltimas.length}`);
 }
@@ -3792,11 +3805,12 @@ function addToCart(productId, tipoForzado) {
         const configRelampago = OFERTAS_RELAMPAGO_SISTEMA[product.relampago];
         if (configRelampago) {
             ofertaConfig = {
-                nombre: configRelampago.nombre,
-                tipo: configRelampago.tipo,
-                eslogan: configRelampago.eslogan,
-                cantidad: configRelampago.cantidad,
-                pagas: configRelampago.pagas
+                nombre:    configRelampago.nombre,
+                tipo:      configRelampago.tipo,
+                eslogan:   configRelampago.eslogan,
+                descuento: configRelampago.descuento || 0,
+                cantidad:  configRelampago.cantidad,
+                pagas:     configRelampago.pagas
             };
             console.log('✅ Producto tiene oferta RELÁMPAGO:', configRelampago.nombre);
         }
@@ -3939,8 +3953,18 @@ function renderCartItems() {
         // ===== OFERTAS RELÁMPAGO =====
         else if (item.esOfertaRelampago && item.oferta) {
             esProductoNormal = false; // Tiene oferta
+            // pct: porcentaje de descuento (10%, 15%, 20%, 25%)
+            if (item.oferta.tipo === 'pct') {
+                const pct = item.oferta.descuento / 100;
+                const precioUnitario = Math.round(product.price * (1 - pct));
+                precioTotalItem = precioUnitario * item.quantity;
+                ahorroItem = precioNormalTotal - precioTotalItem;
+                badgeColor = '#c62828';
+                badge = `${item.oferta.descuento}off`;
+                formula = `<div style="color:#c62828;font-size:0.7rem;">👉 -${item.oferta.descuento}% c/u</div>`;
+            }
             // 2da50
-            if (item.oferta.tipo === '2da50') {
+            else if (item.oferta.tipo === '2da50') {
                 const pares = Math.floor(item.quantity / 2);
                 const sueltas = item.quantity % 2;
                 const precioPar = product.price * 1.5;
