@@ -1280,7 +1280,7 @@ function _csiCat(nombre, catField) {
   if (catField) return catField.toUpperCase().trim();
   var n = (nombre||'').toUpperCase();
   if (/\bLECHE\b|YOGUR|QUESO|MANTECA|\bCREMA\b|RICOTA/.test(n)) return 'LACTEOS';
-  if (/\bPAN\b|\bPANES\b|PANIF|FACTUR|MEDIALUNAS?|BIZCOCHO|BUDIN/.test(n)) return 'PANIFICADOS';
+  if (/\bPAN\b|\bPANES\b|PANIF|FACTUR|MEDIALUNAS?|BIZCOCHO/.test(n)) return 'PANIFICADOS';
   if (/TOMATE|LECHUGA|ZAPALLO|\bCEBOLLA\b|\bPAPA\b|\bFRUTA\b|VERDU|MANZANA|NARANJA/.test(n)) return 'FRESCOS';
   if (/NOTEBOOK|TABLET|\bMOUSE\b|TECLADO|AURICU|CABLE USB|PENDRIVE|COMPUT|ROUTER|IMPRES/.test(n)) return 'ELECTRONICA';
   return 'ALMACEN';
@@ -1351,10 +1351,19 @@ function calcularMotorCSI() {
     if (diasVenc !== undefined && diasVenc <= 10) { nVencOmit++; return; }
 
     var stockConocido = stockMap[nombre] !== undefined;
-    var stock = stockConocido ? stockMap[nombre] : null; // null = sin dato confiable, NO asumir 0
+    var stock = stockConocido ? stockMap[nombre] : null;
     var cat = _csiCat(nombre, catMap[nombre]);
     var periodoBase = _csiPer(cat);
     var promDia = v.v90 / 90;
+
+    // ── Regla urgente transversal ──────────────────────────────────────────
+    // Si vende ≥1/día en promedio Y stock ≤1 confirmado → reposición urgente
+    // independientemente de la categoría (almacén, bebidas, snacks, etc.)
+    // Solo si periodoBase NO es ya 'diario' para no duplicar
+    if (stockConocido && stock <= 1 && promDia >= 1 && periodoBase !== 'diario') {
+      periodoBase = 'diario'; // sube a urgente
+    }
+    // ──────────────────────────────────────────────────────────────────────
 
     var compraSugerida=null, ventaProyectada=0, motivo='', periodo=periodoBase;
 
@@ -1370,9 +1379,11 @@ function calcularMotorCSI() {
       ventaProyectada = Math.max(promDia, v.v7 / 7, 1);
       var brutoDiario  = ventaProyectada - stock;
       compraSugerida   = stock === 0
-        ? Math.max(Math.ceil(brutoDiario), 1)   // piso garantizado en stock vacío
-        : Math.ceil(brutoDiario);               // ceil normal si hay algo de stock
-      motivo = 'reposicion diaria';
+        ? Math.max(Math.ceil(brutoDiario), 1)
+        : Math.ceil(brutoDiario);
+      // Distinguir si es panificados nativo o urgencia transversal
+      var esPanCat = _CSI_DIARIOS.some(function(c){return cat.indexOf(c)>=0;});
+      motivo = esPanCat ? 'reposicion diaria' : 'alta rotacion · stock critico';
       periodo = 'diario';
     }
     // Regla 3: Electrónica / Computación — lógica especial por demanda 60d
@@ -1426,15 +1437,21 @@ function calcularMotorCSI() {
     });
   });
 
-  // Orden: diario > especial > semanal > reactivacion > mensual > sin dato al final
+  // Orden grupos: diario > especial > semanal > reactivacion > mensual > sin dato al final
+  // Dentro de cada grupo: mayor rotación primero (promDia desc), luego menor stock (más urgente)
   var ORD = {diario:0, especial:1, semanal:2, reactivacion:3, mensual:4};
   filas.sort(function(a,b) {
     var aSD = a.compraSugerida === null, bSD = b.compraSugerida === null;
-    if (aSD !== bSD) return aSD ? 1 : -1; // sin dato siempre al final
-    var oa = ORD[a.periodo] !== undefined ? ORD[a.periodo] : 3;
-    var ob = ORD[b.periodo] !== undefined ? ORD[b.periodo] : 3;
+    if (aSD !== bSD) return aSD ? 1 : -1;
+    var oa = ORD[a.periodo] !== undefined ? ORD[a.periodo] : 4;
+    var ob = ORD[b.periodo] !== undefined ? ORD[b.periodo] : 4;
     if (oa !== ob) return oa - ob;
-    return b.compraSugerida - a.compraSugerida;
+    // Mismo período: alta rotación primero
+    if (Math.abs(b.promDia - a.promDia) > 0.01) return b.promDia - a.promDia;
+    // Mismo promDia: menor stock primero (más urgente)
+    var sa = a.stock === -1 ? 9999 : a.stock;
+    var sb = b.stock === -1 ? 9999 : b.stock;
+    return sa - sb;
   });
 
   var nSinStock = filas.filter(function(p){return p.compraSugerida===null;}).length;
