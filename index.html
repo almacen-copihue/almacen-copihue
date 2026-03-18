@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Almacén Copihue v81</title>
+    <title>Almacén Copihue v83</title>
     
     <!-- META TAGS PARA PWA -->
     <meta name="theme-color" content="#2e7d32">
@@ -1812,7 +1812,7 @@
         <div class="logo">
             <img src="iconos-pwa/android/android-launchericon-48-48.png" alt="Logo Almacén Copihue" class="logo-icon">
             Almacén Copihue
-            <span id="versionTag" style="font-size:0.72rem;font-weight:700;opacity:0.9;margin-left:8px;background:rgba(255,255,255,0.2);padding:2px 7px;border-radius:10px;color:white;letter-spacing:0.3px;vertical-align:middle;">v81</span>
+            <span id="versionTag" style="font-size:0.72rem;font-weight:700;opacity:0.9;margin-left:8px;background:rgba(255,255,255,0.2);padding:2px 7px;border-radius:10px;color:white;letter-spacing:0.3px;vertical-align:middle;">v83</span>
             <span id="adminBadge" class="admin-badge" style="display: none;">ADMIN</span>
             <span id="relojHeader" onclick="abrirModalHorario()"
                   style="font-size:0.75rem;font-weight:600;color:rgba(255,255,255,0.7);
@@ -2536,25 +2536,40 @@ function construirPools() {
         p.stockNumber > 0
     );
 
-    // POOL ÚLTIMAS UNIDADES:
-    // Prioridad 1: vencimiento crítico (<= 3 días) con stock, sin cervezas
-    // Prioridad 2: relampago > 0 con stock, sin cervezas
-    const ultimasVenc = products.filter(p =>
-        p.categoria !== 'CERVEZAS' &&
-        esVencimientoCritico(p) && p.stockNumber > 0
-    ).map(p => ({ ...p, _puntaje: calcularPuntaje(p) + 10, _urgencia: 'vencimiento' }));
+    // POOL ÚLTIMAS UNIDADES — REGLA DE ORO:
+    // Solo productos CON fecha de vencimiento donde diasStock > diasVencimiento
+    // (el algoritmo detecta que van a sobrar unidades al vencer)
+    // El sistema puede "mentir" en el badge — es intencional para empujar ventas
+    const hoyUlt = new Date(); hoyUlt.setHours(0,0,0,0);
+    poolUltimas = products.filter(p => {
+        if (p.categoria === 'CERVEZAS') return false;
+        if (!p.vencimiento) return false;        // SIN vencimiento → nunca entra
+        if (p.stockNumber <= 0) return false;
 
-    const ultimasBajoStock = products.filter(p =>
-        p.categoria !== 'CERVEZAS' &&
-        p.relampago > 0 &&
-        p.stockNumber > 0 &&
-        !idsVencCritico.has(p.id)
-    ).map(p => ({ ...p, _puntaje: calcularPuntaje(p), _urgencia: 'stock' }));
+        // Calcular días hasta vencimiento
+        const partes = String(p.vencimiento).split('-');
+        if (partes.length !== 3) return false;
+        const vD = new Date(parseInt(partes[0]), parseInt(partes[1])-1, parseInt(partes[2]));
+        vD.setHours(0,0,0,0);
+        const diasVenc = Math.round((vD - hoyUlt) / 86400000);
+        if (diasVenc <= 0) return false;         // ya vencido
 
-    const todasUltimas = [...ultimasVenc, ...ultimasBajoStock];
-    todasUltimas.sort((a, b) => b._puntaje - a._puntaje);
-    poolUltimas = todasUltimas;
-    
+        // Calcular días de stock disponibles según rotación/ventas
+        const rotacion = p.rotacion || 1;
+        const promDia = rotacion > 0 ? rotacion / 30 : 0;
+        const diasStock = promDia > 0 ? p.stockNumber / promDia : 999;
+
+        // Entra si no se va a vender todo antes de vencer
+        // O si vence en ≤15 días (urgencia automática aunque la rotación alcance)
+        return diasStock > diasVenc || diasVenc <= 15;
+    }).map(p => {
+        const partes = String(p.vencimiento).split('-');
+        const vD = new Date(parseInt(partes[0]), parseInt(partes[1])-1, parseInt(partes[2]));
+        const diasVenc = Math.round((vD - hoyUlt) / 86400000);
+        return { ...p, _diasVenc: diasVenc, _puntaje: 100 - diasVenc };
+    });
+    poolUltimas.sort((a, b) => b._puntaje - a._puntaje);
+
     console.log(`⚡ Pool Relámpago: ${poolRelampago.length} | 🔥 Destacadas: ${poolDestacadas.length} | 🏷️ Últimas: ${poolUltimas.length}`);
 }
 
@@ -3833,7 +3848,6 @@ function addToCart(productId, tipoForzado) {
     }
     // 2b. Verificar ÚLTIMAS UNIDADES
     else if (tipoForzado === 'ultimas' || productosUltimas.some(p => p.id === productId)) {
-        // Calcular días para vencer desde el campo vencimiento del producto
         let diasVenc = null;
         if (product.vencimiento) {
             const partes = String(product.vencimiento).split('-');
@@ -3843,17 +3857,29 @@ function addToCart(productId, tipoForzado) {
                 diasVenc = Math.round((vD - hoy) / 86400000);
             }
         }
-        // También intentar desde el pool (que tiene diasParaVencer del backend)
         const enPool = productosUltimas.find(p => p.id === productId);
         if (diasVenc === null && enPool && enPool.diasParaVencer !== undefined) diasVenc = enPool.diasParaVencer;
-        const pct = diasVenc !== null && diasVenc <= 1 ? 25 : 15;
+
         esOfertaUltimas = true;
-        ofertaConfig = {
-            nombre: "Últimas",
-            tipo: "ultimas",
-            descuento: pct,
-            eslogan: `🏷️ -${pct}% ÚLTIMAS UNIDADES`
-        };
+        let pct;
+        let eslogan;
+
+        if (diasVenc !== null && diasVenc <= 3) {
+            // Vencimiento urgente → descuento por días
+            pct = diasVenc <= 1 ? 25 : 15;
+            eslogan = `🏷️ -${pct}% ÚLTIMAS UNIDADES`;
+        } else {
+            // Sin urgencia de vencimiento → usar relampago configurado o 10% por defecto
+            const cfgRel = OFERTAS_RELAMPAGO_SISTEMA[String(product.relampago)];
+            if (cfgRel && cfgRel.tipo === 'pct' && cfgRel.descuento > 0) {
+                pct = cfgRel.descuento;
+            } else {
+                pct = 10; // descuento automático por ser Últimas Unidades
+            }
+            eslogan = `🏷️ -${pct}% ÚLTIMAS UNIDADES`;
+        }
+
+        ofertaConfig = { nombre: "Últimas", tipo: "ultimas", descuento: pct, eslogan };
         console.log('✅ Producto tiene oferta ÚLTIMAS UNIDADES:', pct + '% off');
     }
     // 3. Verificar RELÁMPAGO
