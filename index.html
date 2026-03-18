@@ -2187,6 +2187,7 @@ let esAdmin = false;
 
 // Pools de ofertas
 let poolRelampago = [];
+let _relampagoActivoBackend = []; // Los 3 del día según code.gs — fuente de verdad compartida con seba21
 let poolUltimas = [];
 let _limiteDestacadas = 9; // configurable desde config_sistema → "máximo destacadas"
 let _limiteUltimas    = 3; // configurable desde config_sistema → "máximo ultimas"
@@ -2568,13 +2569,18 @@ function seleccionarProductosOfertas() {
         productosRelampago.forEach(p => idsEnOfertas.add(p.id));
         console.log(`⚡ [ADMIN] Mostrando TODOS los productos relámpago: ${productosRelampago.length}`);
     }
-    // MODO NORMAL: RELÁMPAGO (prioridad máxima)
+    // MODO NORMAL: RELÁMPAGO — usar los 3 que ya rotó code.gs (mismos que seba21)
     else if (validarHorario('relampago')) {
-        productosRelampago = ROTACION_SISTEMA.selectRotatedProducts(
-            poolRelampago, 
-            3, 
-            'rotacion_relampago'
-        );
+        if (_relampagoActivoBackend.length > 0) {
+            // Backend ya eligió los 3 del día — usar directamente
+            productosRelampago = poolRelampago.filter(p => _relampagoActivoBackend.includes(p.id));
+            if (productosRelampago.length === 0) {
+                // Fallback: rotar localmente si el filtro no matchea
+                productosRelampago = ROTACION_SISTEMA.selectRotatedProducts(poolRelampago, 3, 'rotacion_relampago');
+            }
+        } else {
+            productosRelampago = ROTACION_SISTEMA.selectRotatedProducts(poolRelampago, 3, 'rotacion_relampago');
+        }
         productosRelampago.forEach(p => idsEnOfertas.add(p.id));
         console.log(`⚡ Relámpago activo: ${productosRelampago.length} productos`);
     }
@@ -3560,6 +3566,18 @@ function processAPIData(apiData) {
     
     console.log(`✅ ${products.length} productos cargados`);
     
+    // Cargar los 3 relámpago del día desde backend (mismos que seba21)
+    try {
+        const rOfertas = await fetch(TU_APPS_SCRIPT_URL + '?action=getOfertas&t=' + Date.now(), { redirect: 'follow' });
+        const dOfertas = await rOfertas.json();
+        if (dOfertas.success && dOfertas.relampagoActivo) {
+            _relampagoActivoBackend = dOfertas.relampagoActivo.map(p => Number(p.id));
+            console.log(`⚡ Relámpago backend: ${_relampagoActivoBackend.length} productos sincronizados con seba21`);
+        }
+    } catch(e) {
+        console.warn('⚠️ No se pudo sincronizar relámpago con backend:', e.message);
+    }
+
     renderCategories();
     actualizarTodasLasVistas();
     
