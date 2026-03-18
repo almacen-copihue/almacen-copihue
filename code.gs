@@ -760,6 +760,11 @@ function calcularOfertas() {
     }
     relampagoCandidatosParaRotar = rotadosR;
   }
+  // Pool completo para que seba21 calcule precios correctos en todos los productos con relampago
+  var relampagoPoolCompleto = candidatosRelampago.map(function(c) {
+    return _ofertaBuildProducto_(c.fila, c.i);
+  });
+
   relampagoCandidatosParaRotar.forEach(function(c) {
     relampagoActivo.push(_ofertaBuildProducto_(c.fila, c.i));
   });
@@ -818,7 +823,8 @@ function calcularOfertas() {
 
   return {
     success: true,
-    relampagoActivo:   relampagoActivo,
+    relampagoActivo:   relampagoActivo,        // 3 rotados del día — para mostrar en contenedor
+    relampagoPool:     relampagoPoolCompleto,   // todos — para calcular precios en POS
     ultimasUnidades:   ultimasUnidades,
     destacadasActivas: destacadasActivas,
     especialesActivas: especialesActivas,   // ya filtradas y rotadas (máx limites.especiales)
