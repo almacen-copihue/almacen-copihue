@@ -3,6 +3,9 @@
 //  Función principal: actualizarMotorInventario()
 //  Escribe columnas V..AH en hoja "inventario"
 //  usando datos reales de hoja "Ventas"
+//
+//  ⚠️ NO hay onOpen() aquí — está en Code.gs (único del proyecto)
+//  ⚠️ NO hay actualizarTodo() aquí — está en Code.gs
 // ============================================================
 
 /**
@@ -20,7 +23,7 @@
  *  AE (31) RiesgoVencimiento
  *  AF (32) PrioridadEmpuje
  *  AG (33) StockPisoManual  ← NO SE TOCA si ya tiene valor
- *  AH (34) AlertaPisoManual ← nueva columna, se agrega si no existe
+ *  AH (34) AlertaPisoManual
  */
 
 function actualizarMotorInventario() {
@@ -46,14 +49,13 @@ function actualizarMotorInventario() {
   var hace7  = new Date(hoy); hace7.setDate(hoy.getDate() - 7);
   var hace30 = new Date(hoy); hace30.setDate(hoy.getDate() - 30);
 
-  // Construir mapa { nombreProducto: { v7: N, v30: N } }
+  // Mapa { nombreProducto: { v7: N, v30: N } }
   var ventasMap = {};
   for (var r = 1; r < ventasData.length; r++) {
-    var prod  = ventasData[r][3];   // col D = Producto
-    var fecha = ventasData[r][1];   // col B = Fecha
-    var cant  = ventasData[r][4];   // col E = Cantidad
+    var prod  = ventasData[r][3];
+    var fecha = ventasData[r][1];
+    var cant  = ventasData[r][4];
 
-    // Ignorar filas basura (totales de ticket, vacíos)
     if (!prod || typeof prod !== 'string') continue;
     if (prod.indexOf('─── TOTAL') !== -1) continue;
     if (!cant || isNaN(cant) || cant <= 0) continue;
@@ -68,35 +70,29 @@ function actualizarMotorInventario() {
 
   // ── 3. Leer inventario de una vez ───────────────────────────
   var invData = shInv.getDataRange().getValues();
-  var numRows = invData.length - 1; // sin header
+  var numRows = invData.length - 1;
 
-  // Arrays de salida (índice 0 = fila 2 de la hoja)
-  // Columnas que vamos a escribir en bloque: V..AH = cols 22..34
-  // Usamos offset: colIdx - 1 dentro del array de 13 valores
-  // [V, W, X, Y, Z, N(stock_min), AA, AB, AC, AD, AE, AF, AG, AH]
-  //  0  1  2  3  4     5          6   7   8   9  10  11  12  13
+  var outVtoAH = [];
+  var outN     = [];
 
-  // Pero N está en col 14 — la escribimos por separado en otro array
-  // Para eficiencia: escribimos V..AH (cols 22..34) = 13 cols en un setValues
-  // y N (col 14) en otro setValues de 1 col.
-
-  var outVtoAH  = []; // 13 columnas: V(22) a AH(34)
-  var outN      = []; // 1 columna: N(14) stock_min_popup
-
-  // Tablas de referencia por rotación
-  var diasRepo     = { 5: 5,  4: 7,  3: 10, 2: 14, 1: 21 };
-  var diasCobertura= { 5: 21, 4: 18, 3: 14, 2: 10, 1: 7  };
-  var fallbackMin  = { 5: 5,  4: 4,  3: 5,  2: 3,  1: 2  };
+  var diasRepo      = { 5: 5,  4: 7,  3: 10, 2: 14, 1: 21 };
+  var diasCobertura = { 5: 21, 4: 18, 3: 14, 2: 10, 1: 7  };
+  var fallbackMin   = { 5: 5,  4: 4,  3: 5,  2: 3,  1: 2  };
 
   for (var i = 1; i <= numRows; i++) {
-    var row      = invData[i];
-    var nombre   = row[0];   // A = PRODUCTOS
-    var stock    = parseFloat(row[5])  || 0;   // F = STOCK
-    var rotacionManual = parseInt(row[14]) || 0;  // O = ROTACION (valor manual)
+    var row            = invData[i];
+    var nombre         = row[0];
+    var stock          = parseFloat(row[5])  || 0;
+    var rotacionManual = parseInt(row[14])   || 0;
+    var venc           = row[15];
+    var pisoManu       = row[32];
 
-    // ── ROTACION: siempre calculada desde ventas reales ──────
-    // Si hay datos → se calcula sola. Si no hay datos → usa el manual como fallback.
-    // Nunca se maquilla. La planilla es siempre fuente de verdad.
+    // ── Ventas PRIMERO (deben declararse antes de usarse en rotación)
+    var vm  = ventasMap[nombre] || { v7: 0, v30: 0 };
+    var v7  = vm.v7;
+    var v30 = vm.v30;
+
+    // ── Rotación calculada desde ventas reales ────────────────
     var rotacion;
     if (v30 > 0 || v7 > 0) {
       if      (v30 > 60) rotacion = 5;
@@ -105,46 +101,32 @@ function actualizarMotorInventario() {
       else if (v30 > 5)  rotacion = 2;
       else               rotacion = 1;
     } else {
-      // Sin historial → respeta el valor manual de columna O
       rotacion = rotacionManual || 2;
     }
-    var venc     = row[15];                    // P = Vencimiento
-    var pisoManu = row[32];                    // AG = StockPisoManual (índice 32 = col 33)
-
-    // Ventas
-    var vm   = ventasMap[nombre] || { v7: 0, v30: 0 };
-    var v7   = vm.v7;
-    var v30  = vm.v30;
 
     // PromDia ponderado
     var promDia = ((v7 / 7) * 3 + (v30 / 30) * 2) / 5;
-    promDia = Math.round(promDia * 1000) / 1000; // 3 decimales
+    promDia = Math.round(promDia * 1000) / 1000;
 
-    // DiasStock
-    var diasStock = (promDia > 0) ? (stock / promDia) : '';
-
-    // DiasRepo
-    var dRepo = (rotacion >= 1 && rotacion <= 5) ? diasRepo[rotacion] : 14;
-
-    // stock_min_popup (N)
+    var diasStock    = (promDia > 0) ? (stock / promDia) : '';
+    var dRepo        = (rotacion >= 1 && rotacion <= 5) ? diasRepo[rotacion] : 14;
     var sinHistorial = (v7 === 0 && v30 === 0);
+
+    // stock_min (N)
     var stockMin;
     if (promDia > 0) {
       stockMin = Math.ceil(promDia * dRepo);
     } else if (!sinHistorial) {
-      // Tiene algo de historial pero promedio reciente bajo → usar fallback
       stockMin = (rotacion >= 1 && rotacion <= 5) ? fallbackMin[rotacion] : 3;
     } else {
-      // Sin historial de ventas → no sugerir mínimo
       stockMin = 0;
     }
 
     // StockObjetivo
-    var cobDias = (rotacion >= 1 && rotacion <= 5) ? diasCobertura[rotacion] : 14;
+    var cobDias  = (rotacion >= 1 && rotacion <= 5) ? diasCobertura[rotacion] : 14;
     var stockObj = promDia > 0 ? promDia * cobDias : 0;
 
     // CompraSugerida
-    // Si nunca se vendió → no sugerir compra (evita sugerir hobby/electrónica sin movimiento)
     var compra;
     if (sinHistorial) {
       compra = 0;
@@ -154,11 +136,7 @@ function actualizarMotorInventario() {
         compra = 0;
       } else {
         var falta = objCompra - stock;
-        if (falta < 1) {
-          compra = 1;
-        } else {
-          compra = Math.ceil(falta);
-        }
+        compra = falta < 1 ? 1 : Math.ceil(falta);
       }
     }
 
@@ -169,10 +147,8 @@ function actualizarMotorInventario() {
       diasVencer = Math.round((vencNorm - hoy) / 86400000);
     }
 
-    // DiasParaLiquidar
     var diasLiquidar = (promDia > 0) ? (stock / promDia) : '';
 
-    // RiesgoVencimiento
     var riesgo;
     if (diasVencer === '') {
       riesgo = 'OK';
@@ -182,7 +158,6 @@ function actualizarMotorInventario() {
       riesgo = 'OK';
     }
 
-    // PrioridadEmpuje
     var prioridad;
     if (riesgo === 'ALERTA') {
       prioridad = 'EMPUJAR YA';
@@ -194,16 +169,13 @@ function actualizarMotorInventario() {
       prioridad = 'NORMAL';
     }
 
-    // AlertaPisoManual
     var alertaPiso = '';
     if (pisoManu !== null && pisoManu !== '' && !isNaN(pisoManu)) {
       alertaPiso = (stock <= pisoManu) ? 'PEDIR YA' : 'OK';
     }
 
-    // StockPisoManual — NO sobrescribir si ya tiene valor
     var pisoSalida = (pisoManu !== null && pisoManu !== '') ? pisoManu : '';
 
-    // Armar fila de salida V..AH (13 valores)
     outVtoAH.push([
       v7,           // V  col22
       v30,          // W  col23
@@ -220,52 +192,33 @@ function actualizarMotorInventario() {
       alertaPiso    // AH col34
     ]);
 
-    outN.push([stockMin]); // N col14
+    outN.push([stockMin]);
   }
 
-  // ── 4. Escribir todo en bloque ──────────────────────────────
+  // ── 4. Escribir en bloque ───────────────────────────────────
   if (outVtoAH.length > 0) {
-    // V..AH: columnas 22 a 34 (13 columnas)
     shInv.getRange(2, 22, outVtoAH.length, 13).setValues(outVtoAH);
-    // N: columna 14
     shInv.getRange(2, 14, outN.length, 1).setValues(outN);
   }
 
-  // ── 5. Flush y aviso ────────────────────────────────────────
   SpreadsheetApp.flush();
   Logger.log('✅ Motor ejecutado: ' + numRows + ' productos actualizados.');
 
-  // Mostrar resumen rápido
-  var alertas  = outVtoAH.filter(function(r){ return r[9] === 'ALERTA'; }).length;
-  var compras  = outVtoAH.filter(function(r){ return r[6]  >  0;       }).length;
-  var pisosYa  = outVtoAH.filter(function(r){ return r[12] === 'PEDIR YA'; }).length;
+  var alertas = outVtoAH.filter(function(r){ return r[9]  === 'ALERTA';    }).length;
+  var compras = outVtoAH.filter(function(r){ return r[6]  >   0;           }).length;
+  var pisosYa = outVtoAH.filter(function(r){ return r[12] === 'PEDIR YA'; }).length;
 
   SpreadsheetApp.getUi().alert(
     '✅ Motor actualizado\n\n' +
     '📦 Productos procesados: ' + numRows + '\n' +
-    '🛒 Con compra sugerida: ' + compras + '\n' +
-    '⚠️ Riesgo vencimiento: ' + alertas + '\n' +
-    '🔔 Piso manual activo: ' + pisosYa
+    '🛒 Con compra sugerida: '  + compras + '\n' +
+    '⚠️ Riesgo vencimiento: '   + alertas + '\n' +
+    '🔔 Piso manual activo: '   + pisosYa
   );
-}
-
-// ── Menú para ejecutar desde Sheets ────────────────────────────
-function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu('🛒 Copihue')
-    .addItem('▶ Actualizar motor inventario', 'actualizarMotorInventario')
-    .addItem('📋 Generar lista de compra', 'actualizarListaCompra')
-    .addSeparator()
-    .addItem('⚡ Actualizar todo', 'actualizarTodo')
-    .addToUi();
 }
 
 // ============================================================
 //  LISTA DE COMPRA AUTOMÁTICA
-//  Función: actualizarListaCompra()
-//  Lee inventario donde CompraSugerida > 0
-//  Ordena por prioridad y DiasStock
-//  Escribe en hoja "Lista de compra"
 // ============================================================
 
 function actualizarListaCompra() {
@@ -278,46 +231,36 @@ function actualizarListaCompra() {
     return;
   }
 
-  // Leer inventario completo
-  var inv = shInv.getDataRange().getValues();
-
-  // Índices de columnas (base 0)
-  // A=0 PRODUCTOS, B=1 PRECIO, E=4 Proveedor, F=5 STOCK
-  // N=13 stock_min_popup, AB=27 CompraSugerida
-  // Y=24 DiasStock, AF=31 PrioridadEmpuje, AE=30 RiesgoVencimiento
-  // AH=33 AlertaPisoManual
-
+  var inv   = shInv.getDataRange().getValues();
   var items = [];
 
   for (var i = 1; i < inv.length; i++) {
-    var row      = inv[i];
-    var nombre   = row[0];
-    var precio   = row[1]  || 0;
-    var proveedor= row[4]  || '';
-    var stock    = row[5]  || 0;
-    var stockMin = row[13] || 0;
-    var compra   = row[27] || 0;
-    var diasStock= row[24];
-    var prioridad= row[31] || 'NORMAL';
-    var riesgo   = row[30] || 'OK';
+    var row        = inv[i];
+    var nombre     = row[0];
+    var precio     = row[1]  || 0;
+    var proveedor  = row[4]  || '';
+    var stock      = row[5]  || 0;
+    var stockMin   = row[13] || 0;
+    var compra     = row[27] || 0;
+    var diasStock  = row[24];
+    var prioridad  = row[31] || 'NORMAL';
+    var riesgo     = row[30] || 'OK';
     var alertaPiso = row[33] || '';
 
     if (!nombre) continue;
     if (compra <= 0 && alertaPiso !== 'PEDIR YA') continue;
 
-    // Cantidad a pedir: usar compra sugerida, mínimo 1
     var cantidad = compra > 0 ? compra : 1;
 
-    // Orden de prioridad numérico (menor = más urgente)
     var orden;
-    if (alertaPiso === 'PEDIR YA')      orden = 0;
-    else if (prioridad === 'EMPUJAR YA') orden = 1;
-    else if (riesgo    === 'ALERTA')     orden = 2;
-    else if (prioridad === 'EMPUJAR')    orden = 3;
-    else if (prioridad === 'EMPUJAR SUAVE') orden = 4;
-    else if (typeof diasStock === 'number' && diasStock <= 3) orden = 5;
-    else if (typeof diasStock === 'number' && diasStock <= 7) orden = 6;
-    else orden = 7;
+    if      (alertaPiso === 'PEDIR YA')                              orden = 0;
+    else if (prioridad  === 'EMPUJAR YA')                            orden = 1;
+    else if (riesgo     === 'ALERTA')                                orden = 2;
+    else if (prioridad  === 'EMPUJAR')                               orden = 3;
+    else if (prioridad  === 'EMPUJAR SUAVE')                         orden = 4;
+    else if (typeof diasStock === 'number' && diasStock <= 3)        orden = 5;
+    else if (typeof diasStock === 'number' && diasStock <= 7)        orden = 6;
+    else                                                             orden = 7;
 
     items.push({
       nombre:    nombre,
@@ -332,47 +275,32 @@ function actualizarListaCompra() {
     });
   }
 
-  // Ordenar: por orden de prioridad, luego por diasStock asc
   items.sort(function(a, b) {
     if (a.orden !== b.orden) return a.orden - b.orden;
     return a.diasStock - b.diasStock;
   });
 
-  // Limpiar hoja (excepto header fila 1)
   var lastRow = shLista.getLastRow();
-  if (lastRow > 1) {
-    shLista.getRange(2, 1, lastRow - 1, 7).clearContent();
-  }
+  if (lastRow > 1) shLista.getRange(2, 1, lastRow - 1, 7).clearContent();
 
   if (items.length === 0) {
     SpreadsheetApp.getUi().alert('✅ No hay productos para comprar hoy.');
     return;
   }
 
-  // Escribir en bloque
   var out = items.map(function(it) {
-    return [
-      it.nombre,
-      it.stock,
-      it.minimo,
-      it.cantidad,
-      it.precio,
-      it.total,
-      it.proveedor
-    ];
+    return [it.nombre, it.stock, it.minimo, it.cantidad, it.precio, it.total, it.proveedor];
   });
 
   shLista.getRange(2, 1, out.length, 7).setValues(out);
 
-  // Totales en la fila siguiente
-  var totalFila = out.length + 2;
+  var totalFila  = out.length + 2;
   var totalPesos = items.reduce(function(s, it){ return s + it.total; }, 0);
   shLista.getRange(totalFila, 1).setValue('── TOTAL ──');
   shLista.getRange(totalFila, 6).setValue(totalPesos);
 
   SpreadsheetApp.flush();
 
-  // Agregar al menú si hace falta (ya se agrega en onOpen)
   SpreadsheetApp.getUi().alert(
     '🛒 Lista de compra actualizada\n\n' +
     '📋 Productos a comprar: ' + items.length + '\n' +
@@ -380,10 +308,4 @@ function actualizarListaCompra() {
     '⚡ Urgentes (piso / vencimiento): ' +
     items.filter(function(it){ return it.orden <= 2; }).length
   );
-}
-
-// ── Actualizar ambos de una sola vez ───────────────────────────
-function actualizarTodo() {
-  actualizarMotorInventario();
-  actualizarListaCompra();
 }

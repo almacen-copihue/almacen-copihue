@@ -684,23 +684,9 @@ function calcularOfertas() {
     candidatosUltimas.push({ fila: fila, i: i, p: _ofertaPuntaje_(fila) + 10 });
   }
 
-  // Candidatos relámpago que también entran a últimas
-  for (var i2 = 1; i2 < datos.length; i2++) {
-    var fila2 = datos[i2];
-    if (!fila2[0]) continue;
-    var stock2 = parseInt(fila2[5]) || 0;
-    var relampago2 = parseInt(fila2[6]) || 0;
-    if (stock2 <= 0 || relampago2 <= 0) continue;
-    var dv2 = _ofertaDiasVencer_(fila2);
-    if (dv2 !== null && dv2 <= 3) continue;
-    var p2 = _ofertaPuntaje_(fila2);
-    if (p2 <= -99) continue;
-    candidatosUltimas.push({ fila: fila2, i: i2, p: p2 });
-  }
-
   candidatosUltimas
     .sort(function(a, b) { return b.p - a.p; })
-    .slice(0, 20)
+    .slice(0, limites.ultimas)
     .forEach(function(c) {
       ultimasUnidades.push(_ofertaBuildProducto_(c.fila, c.i));
       idsUsados[c.i] = true;
