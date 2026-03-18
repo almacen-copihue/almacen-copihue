@@ -2291,13 +2291,31 @@ function _diaActualColIdx() {
 // ── Variables de horario — se llenan desde config_sistema ──
 let _horaAperturaLocal = 11;   // fallback
 let _horaCierreLocal   = 22;   // fallback
+let _minsAperturaLocal = 0;    // minutos apertura (ej: 10 para 18:10)
+let _minsCierreLocal   = 0;    // minutos cierre
+
+// Parsea un valor de hora desde GAS: soporta ISO "1899-12-30T18:10:00.000Z",
+// string "18:10", string "18" y número 18
+function _parsearValorHora(v) {
+    if (v === null || v === undefined) return null;
+    const s = String(v);
+    // Formato ISO que envía GAS cuando la celda tiene minutos (ej: "1899-12-30T18:10:00.000Z")
+    if (s.includes('T')) {
+        const m = s.match(/T(\d{2}):(\d{2})/);
+        if (m) return { h: parseInt(m[1]), m: parseInt(m[2]) };
+        return null;
+    }
+    // Formato "18:10" o "18" o número
+    const parts = s.split(':');
+    const h = parseFloat(parts[0]);
+    const min = parts.length > 1 ? (parseInt(parts[1]) || 0) : 0;
+    return isNaN(h) ? null : { h, m: min };
+}
 
 // Actualiza todos los elementos de UI que muestran horario
 function _aplicarHorarioUI() {
-    const ap = _horaAperturaLocal;
-    const ci = _horaCierreLocal;
-    const apStr = String(ap).padStart(2,'0') + ':00';
-    const ciStr = String(ci).padStart(2,'0') + ':00';
+    const apStr = String(_horaAperturaLocal).padStart(2,'0') + ':' + String(_minsAperturaLocal).padStart(2,'0');
+    const ciStr = String(_horaCierreLocal).padStart(2,'0') + ':' + String(_minsCierreLocal).padStart(2,'0');
     const rango = apStr + ' a ' + ciStr + ' hrs.';
     // Textos estáticos de horario
     document.querySelectorAll('[data-horario-rango]').forEach(el => el.textContent = rango);
@@ -2348,18 +2366,12 @@ async function cargarConfigSistema() {
         const rowAp = cfg['horario|Horario apertura local'] || cfg['Horario apertura local'];
         const rowCi = cfg['horario|Horario cierre local']   || cfg['Horario cierre local'];
         if (rowAp) {
-            const v = rowAp[diaIdx];
-            if (v !== null && v !== undefined) {
-                const n = parseFloat(String(v).split(':')[0]);
-                if (!isNaN(n)) _horaAperturaLocal = n;
-            }
+            const parsed = _parsearValorHora(rowAp[diaIdx]);
+            if (parsed) { _horaAperturaLocal = parsed.h; _minsAperturaLocal = parsed.m; }
         }
         if (rowCi) {
-            const v = rowCi[diaIdx];
-            if (v !== null && v !== undefined) {
-                const n = parseFloat(String(v).split(':')[0]);
-                if (!isNaN(n)) _horaCierreLocal = n;
-            }
+            const parsed = _parsearValorHora(rowCi[diaIdx]);
+            if (parsed) { _horaCierreLocal = parsed.h; _minsCierreLocal = parsed.m; }
         }
         // Actualizar HORA_CIERRE_MODAL para el modal de horario
         HORA_CIERRE_MODAL = _horaCierreLocal;
@@ -2508,7 +2520,7 @@ function construirPools() {
         p.categoria !== 'CERVEZAS' &&
         p.relampago > 0 &&
         p.stockNumber > 0 &&
-        !idsVencCritico.has(p.id)
+        !idsVencCritico.has(p.id) // ya están en ultimasVenc
     ).map(p => ({ ...p, _puntaje: calcularPuntaje(p), _urgencia: 'stock' }));
 
     const todasUltimas = [...ultimasVenc, ...ultimasBajoStock];
