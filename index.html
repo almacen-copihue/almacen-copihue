@@ -3462,8 +3462,34 @@ async function loadProductsFromAPI() {
         } else {
             throw new Error('Formato de datos no reconocido');
         }
-        
-    } catch (error) {
+
+        // Mostrar spinner en relámpago mientras sincroniza con backend
+        const elRel = document.getElementById('ofertasRelampago');
+        if (elRel) {
+            elRel.style.display = 'block';
+            elRel.innerHTML = '<div style="text-align:center;padding:24px;color:#ff6f00;font-size:0.9rem;">⚡ Cargando ofertas relámpago…</div>';
+        }
+
+        // Sincronizar los 3 relámpago del backend ANTES del primer render — sin flash
+        try {
+            const rOfertas = await Promise.race([
+                fetch(TU_APPS_SCRIPT_URL + '?action=getOfertas&t=' + Date.now(), { redirect: 'follow' }),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000))
+            ]);
+            const dOfertas = await rOfertas.json();
+            if (dOfertas.success && dOfertas.relampagoActivo) {
+                _relampagoActivoBackend = dOfertas.relampagoActivo.map(p => Number(p.id));
+                console.log(`⚡ Relámpago backend sync: ${_relampagoActivoBackend.length} productos`);
+            }
+        } catch(e) {
+            console.warn('⚠️ Sync relámpago fallback local:', e.message);
+        }
+
+        renderCategories();
+        actualizarTodasLasVistas();
+
+        if (window._intervaloActualizacion) clearInterval(window._intervaloActualizacion);
+        window._intervaloActualizacion = setInterval(actualizarSoloOfertas, 60000);
         console.error('💥 ERROR:', error);
         document.getElementById('productsGrid').innerHTML = `
             <div class="error-message">
@@ -3565,38 +3591,6 @@ function processAPIData(apiData) {
     });
     
     console.log(`✅ ${products.length} productos cargados`);
-
-    // Mostrar spinner en relámpago mientras sincroniza con backend
-    const elRel = document.getElementById('ofertasRelampago');
-    if (elRel) {
-        elRel.style.display = 'block';
-        elRel.innerHTML = '<div style="text-align:center;padding:24px;color:#ff6f00;font-size:0.9rem;">⚡ Cargando ofertas relámpago…</div>';
-    }
-
-    // Sincronizar los 3 relámpago del backend ANTES del primer render — sin flash
-    const GAS_URL = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-    try {
-        const rOfertas = await Promise.race([
-            fetch(GAS_URL + '?action=getOfertas&t=' + Date.now(), { redirect: 'follow' }),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000))
-        ]);
-        const dOfertas = await rOfertas.json();
-        if (dOfertas.success && dOfertas.relampagoActivo) {
-            _relampagoActivoBackend = dOfertas.relampagoActivo.map(p => Number(p.id));
-            console.log(`⚡ Relámpago backend sync: ${_relampagoActivoBackend.length} productos`);
-        }
-    } catch(e) {
-        console.warn('⚠️ Sync relámpago fallback local:', e.message);
-    }
-
-    renderCategories();
-    actualizarTodasLasVistas();
-    
-    // Actualizar solo las secciones de ofertas cada minuto (UNA sola instancia)
-    if (window._intervaloActualizacion) {
-        clearInterval(window._intervaloActualizacion);
-    }
-    window._intervaloActualizacion = setInterval(actualizarSoloOfertas, 60000);
 }
 
 function actualizarSoloOfertas() {
