@@ -2189,6 +2189,7 @@ let esAdmin = false;
 let poolRelampago = [];
 let poolUltimas = [];
 let _limiteDestacadas = 9; // configurable desde config_sistema → "máximo destacadas"
+let _limiteUltimas    = 3; // configurable desde config_sistema → "máximo ultimas"
 let productosUltimas = [];
 let poolDestacadas = [];
 let poolEspeciales = [];
@@ -2377,6 +2378,17 @@ async function cargarConfigSistema() {
             }
         }
 
+        // Leer límite configurable de últimas unidades
+        const claveMaxUlt = Object.keys(cfg).find(k => k.toLowerCase().includes('máximo ultimas') || k.toLowerCase().includes('maximo ultimas'));
+        if (claveMaxUlt) {
+            const rowMaxUlt = cfg[claveMaxUlt];
+            const valMaxUlt = rowMaxUlt ? rowMaxUlt[diaIdx] : null;
+            if (valMaxUlt !== null && !isNaN(parseInt(valMaxUlt)) && parseInt(valMaxUlt) > 0) {
+                _limiteUltimas = parseInt(valMaxUlt);
+                console.log('🏷️ Límite últimas configurado desde planilla:', _limiteUltimas);
+            }
+        }
+
         // Leer horario apertura y cierre local desde la planilla
         const rowAp = cfg['horario|Horario apertura local'] || cfg['Horario apertura local'];
         const rowCi = cfg['horario|Horario cierre local']   || cfg['Horario cierre local'];
@@ -2524,7 +2536,7 @@ function construirPools() {
 
     // POOL ÚLTIMAS UNIDADES:
     // Prioridad 1: vencimiento crítico (<= 3 días) con stock, sin cervezas
-    // Prioridad 2: relampago > 0, con stock, sin cervezas
+    // Prioridad 2: PrioridadEmpuje = EMPUJAR YA o EMPUJAR (stock excede objetivo o riesgo vencimiento)
     // Nota: los que aparezcan en Relámpago ese día se excluyen después via idsEnOfertas
     const ultimasVenc = products.filter(p =>
         p.categoria !== 'CERVEZAS' &&
@@ -2533,10 +2545,10 @@ function construirPools() {
 
     const ultimasBajoStock = products.filter(p =>
         p.categoria !== 'CERVEZAS' &&
-        p.relampago > 0 &&
         p.stockNumber > 0 &&
-        !idsVencCritico.has(p.id)
-    ).map(p => ({ ...p, _puntaje: calcularPuntaje(p), _urgencia: 'stock' }));
+        !idsVencCritico.has(p.id) &&
+        (p.prioridad === 'EMPUJAR YA' || p.prioridad === 'EMPUJAR')
+    ).map(p => ({ ...p, _puntaje: calcularPuntaje(p) + (p.prioridad === 'EMPUJAR YA' ? 8 : 4), _urgencia: 'empuje' }));
 
     const todasUltimas = [...ultimasVenc, ...ultimasBajoStock];
     todasUltimas.sort((a, b) => b._puntaje - a._puntaje);
@@ -3401,7 +3413,11 @@ function actualizarTodasLasVistas() {
     renderizarContenedorOfertas('relampago', productosRelampago);
     // Últimas unidades: solo si el horario está activo según config_sistema
     if (validarHorario('ultimas') || (esAdmin && modoMostrarTodasOfertas)) {
-        productosUltimas = poolUltimas.filter(p => !idsEnOfertas.has(p.id)).slice(0, 3);
+        const candidatas = poolUltimas.filter(p => !idsEnOfertas.has(p.id));
+        productosUltimas = candidatas.slice(0, _limiteUltimas);
+        if (candidatas.length > _limiteUltimas) {
+            console.warn(`🏷️ Últimas Unidades: hay ${candidatas.length} productos para empujar pero el límite es ${_limiteUltimas}. Considerá aumentar "máximo ultimas" en config_sistema.`);
+        }
     } else {
         productosUltimas = [];
     }
