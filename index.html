@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Almacén Copihue v86</title>
+    <title>Almacén Copihue v88</title>
     
     <!-- META TAGS PARA PWA -->
     <meta name="theme-color" content="#2e7d32">
@@ -1812,7 +1812,7 @@
         <div class="logo">
             <img src="iconos-pwa/android/android-launchericon-48-48.png" alt="Logo Almacén Copihue" class="logo-icon">
             Almacén Copihue
-            <span id="versionTag" style="font-size:0.72rem;font-weight:700;opacity:0.9;margin-left:8px;background:rgba(255,255,255,0.2);padding:2px 7px;border-radius:10px;color:white;letter-spacing:0.3px;vertical-align:middle;">v86</span>
+            <span id="versionTag" style="font-size:0.72rem;font-weight:700;opacity:0.9;margin-left:8px;background:rgba(255,255,255,0.2);padding:2px 7px;border-radius:10px;color:white;letter-spacing:0.3px;vertical-align:middle;">v88</span>
             <span id="adminBadge" class="admin-badge" style="display: none;">ADMIN</span>
             <span id="relojHeader" onclick="abrirModalHorario()"
                   style="font-size:0.75rem;font-weight:600;color:rgba(255,255,255,0.7);
@@ -3433,17 +3433,15 @@ function actualizarTodasLasVistas() {
     
     renderizarContenedorOfertas('relampago', productosRelampago);
     // Últimas unidades
-    if (validarHorario('ultimas') || (esAdmin && modoMostrarTodasOfertas)) {
-        if (_ultimasSeleccionBackend.length > 0) {
-            // Selección manual del día — buscar cada ID en products
-            productosUltimas = _ultimasSeleccionBackend
-                .map(id => products.find(p => p.id === id))
-                .filter(p => p && p.stockNumber > 0);
-            console.log(`🏷️ Últimas selección manual: ${productosUltimas.length} productos`);
-        } else {
-            // Sin selección → pool automático por vencimiento
-            productosUltimas = poolUltimas.filter(p => !idsEnOfertas.has(p.id)).slice(0, _limiteUltimas);
-        }
+    if (_ultimasSeleccionBackend.length > 0) {
+        // Selección manual del día — siempre mostrar, ignorar horario
+        productosUltimas = _ultimasSeleccionBackend
+            .map(id => products.find(p => p.id === id))
+            .filter(p => p && p.stockNumber > 0);
+        console.log(`🏷️ Últimas selección manual: ${productosUltimas.length} productos`);
+    } else if (validarHorario('ultimas') || (esAdmin && modoMostrarTodasOfertas)) {
+        // Sin selección → pool automático por vencimiento, respeta horario
+        productosUltimas = poolUltimas.filter(p => !idsEnOfertas.has(p.id)).slice(0, _limiteUltimas);
     } else {
         productosUltimas = [];
     }
@@ -3492,14 +3490,10 @@ async function loadProductsFromAPI() {
                     if (d.relampagoActivo) {
                         _relampagoActivoBackend = d.relampagoActivo.map(p => Number(p.id));
                     }
-                    if (d.ultimasSeleccionadas && d.ultimasSeleccionadas.length > 0) {
-                        _ultimasSeleccionBackend = d.ultimasSeleccionadas.map(p => Number(p.id));
-                    } else {
-                        _ultimasSeleccionBackend = [];
-                    }
-                    seleccionarProductosOfertas();
-                    renderizarContenedorOfertas('relampago', productosRelampago);
-                    renderizarContenedorOfertas('ultimas', productosUltimas);
+                    _ultimasSeleccionBackend = (d.ultimasSeleccionadas && d.ultimasSeleccionadas.length > 0)
+                        ? d.ultimasSeleccionadas.map(p => Number(p.id))
+                        : [];
+                    actualizarTodasLasVistas(); // recalcula y renderiza todo con los nuevos datos
                 }
             })
             .catch(e => console.warn('⚠️ Sync backend fallback local:', e.message));
