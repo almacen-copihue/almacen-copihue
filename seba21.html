@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v170</title>
+    <title>Copihue — POS v172</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2417,13 +2417,24 @@ function cambiarCantidad(id, delta) {
     const nuevaCant = item.qty + delta;
     if (nuevaCant <= 0) {
         ventaActual = ventaActual.filter(i => String(i.id) !== String(id));
+        renderVenta(); // eliminado: necesita re-sort completo
     } else if (nuevaCant > item.stockDisponible) {
         mostrarToast(`⚠️ Stock máximo: ${item.stockDisponible}`, 'rojo');
         return;
     } else {
+        // Para NxM recalcular precio según nueva cantidad
+        const p = productos.find(pr => pr.id === Number(id));
+        if (p) {
+            const oferta = calcularOfertaPOS(p, nuevaCant);
+            item.price           = oferta.precioUnitario;
+            item.precioOriginal  = oferta.tieneOferta ? p.price : 0;
+            item.precioModificado = oferta.tieneOferta;
+            item.ofertaEtiqueta  = oferta.etiqueta || null;
+            item.ofertaTipo      = oferta.tipoOferta || null;
+        }
         item.qty = nuevaCant;
+        renderVenta(true); // ligero: solo actualiza panel y totales
     }
-    renderVenta();
     guardarCarritoPendiente();
     _refreshResultadosBadges(typeof id === 'string' && id.startsWith('peso_') ? null : Number(id));
 }
@@ -5526,10 +5537,10 @@ function badgeOfertaPOS(producto) {
 // Leen el estado real de la planilla (día actual) y escriben via GAS
 
 const _TOGGLE_CONFIG = {
-    relampago:  { id: 'toggleRelampago',  emoji: '⚡', label: 'REL',  clave: 'Dias ofertas relampago',  colorActivo: 'rgba(249,168,37,0.5)',  bordeActivo: '#f9a825'  },
-    destacadas: { id: 'toggleDestacadas', emoji: '🔥', label: 'DEST', clave: 'Dias ofertas destacadas', colorActivo: 'rgba(255,111,0,0.5)',  bordeActivo: '#ff6f00'  },
-    especiales: { id: 'toggleEspeciales', emoji: '⭐', label: 'ESP',  clave: 'Dias ofertas especiales', colorActivo: 'rgba(0,188,212,0.5)',   bordeActivo: '#00bcd4'  },
-    ultimas:    { id: 'toggleUltimas',    emoji: '🏷️', label: 'ULT',  clave: 'Dias ofertas UNIDADES',  colorActivo: 'rgba(229,57,53,0.5)',   bordeActivo: '#e53935'  }
+    relampago:  { id: 'toggleRelampago',  emoji: '⚡', label: 'REL',  clave: 'Dias ofertas RELAMPAGO',         colorActivo: 'rgba(249,168,37,0.5)',  bordeActivo: '#f9a825'  },
+    destacadas: { id: 'toggleDestacadas', emoji: '🔥', label: 'DEST', clave: 'Dias ofertas FINDE DESTACADAS',  colorActivo: 'rgba(255,111,0,0.5)',  bordeActivo: '#ff6f00'  },
+    especiales: { id: 'toggleEspeciales', emoji: '⭐', label: 'ESP',  clave: 'Dias ofertas ESPECIALES',        colorActivo: 'rgba(0,188,212,0.5)',   bordeActivo: '#00bcd4'  },
+    ultimas:    { id: 'toggleUltimas',    emoji: '🏷️', label: 'ULT',  clave: 'Dias ofertas ULTIMAS UNIDADES', colorActivo: 'rgba(229,57,53,0.5)',   bordeActivo: '#e53935'  }
 };
 
 // Estado en memoria (cargado desde planilla)
@@ -5833,52 +5844,60 @@ function cerrarBuscadorFlotante() {
 })();
 
 cargarProductos().then(() => {
-    actualizarRanking(); // calcular ranking de más vendido al arrancar
+    actualizarRanking();
     reporteOfertasPOS('post-productos');
     iniciarToggleOfertas();
-    cargarPoolsOfertas();
     renderResultados(_sortProductos(productos, new Set()));
-    // En desktop: panel siempre visible (cobrar siempre accesible)
     if (!MOBILE) {
         const pv = document.getElementById('panelVenta');
         if (pv) pv.style.display = 'flex';
     }
 
-    // Primero verificar si hay venta pendiente y recuperarla silenciosamente
-    const guardado = localStorage.getItem(CARRITO_KEY);
-    if (guardado) {
-        try {
-            const items = JSON.parse(guardado);
-            if (items && items.length > 0) {
-                // Recuperar automáticamente sin preguntar
-                ventaActual = items.filter(item => {
-                    const p = productos.find(pr => pr.id === (item.esPeso ? item.idOriginal : item.id));
-                    return p != null; // recuperar aunque stock sea 0
-                }).map(item => {
-                    const p = productos.find(pr => pr.id === (item.esPeso ? item.idOriginal : item.id));
-                    // Productos por peso: conservar el precio calculado en gramos, NO pisar con precio/kg
-                    return { ...item, price: item.esPeso ? item.price : p.price, stockDisponible: p.stock };
-                });
-                
-                if (ventaActual.length > 0) {
-                    renderVenta();
-                    const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
-                    // Banner persistente naranja — más visible que toast
-                    mostrarBannerRecuperado(total);
+    // Cargar pools primero, LUEGO recuperar carrito con precios correctos
+    cargarPoolsOfertas().then(() => {
+        const guardado = localStorage.getItem(CARRITO_KEY);
+        if (guardado) {
+            try {
+                const items = JSON.parse(guardado);
+                if (items && items.length > 0) {
+                    ventaActual = items.filter(item => {
+                        const p = productos.find(pr => pr.id === (item.esPeso ? item.idOriginal : item.id));
+                        return p != null;
+                    }).map(item => {
+                        const p = productos.find(pr => pr.id === (item.esPeso ? item.idOriginal : item.id));
+                        if (item.esPeso) return { ...item, stockDisponible: p.stock };
+                        // Recalcular oferta con pools ya cargados
+                        const oferta = calcularOfertaPOS(p, item.qty);
+                        return {
+                            ...item,
+                            price:            oferta.precioUnitario,
+                            precioOriginal:   oferta.tieneOferta ? p.price : 0,
+                            precioModificado: oferta.tieneOferta,
+                            ofertaEtiqueta:   oferta.etiqueta || null,
+                            ofertaTipo:       oferta.tipoOferta || null,
+                            stockDisponible:  p.stock
+                        };
+                    });
+                    if (ventaActual.length > 0) {
+                        renderVenta();
+                        const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
+                        mostrarBannerRecuperado(total);
+                    } else {
+                        localStorage.removeItem(CARRITO_KEY);
+                        renderVenta();
+                    }
                 } else {
-                    localStorage.removeItem(CARRITO_KEY);
                     renderVenta();
                 }
-            } else {
+            } catch(e) {
+                localStorage.removeItem(CARRITO_KEY);
                 renderVenta();
             }
-        } catch(e) {
-            localStorage.removeItem(CARRITO_KEY);
+        } else {
             renderVenta();
         }
-    } else {
-        renderVenta();
-    }
+        _refreshResultadosBadges();
+    });
 });
 </script>
 <!-- MODAL SELECTOR DE CANTIDAD -->
