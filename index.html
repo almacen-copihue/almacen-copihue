@@ -3463,27 +3463,18 @@ async function loadProductsFromAPI() {
             throw new Error('Formato de datos no reconocido');
         }
 
-        // Mostrar spinner en relámpago mientras sincroniza con backend
-        const elRel = document.getElementById('ofertasRelampago');
-        if (elRel) {
-            elRel.style.display = 'block';
-            elRel.innerHTML = '<div style="text-align:center;padding:24px;color:#ff6f00;font-size:0.9rem;">⚡ Cargando ofertas relámpago…</div>';
-        }
-
-        // Sincronizar los 3 relámpago del backend ANTES del primer render — sin flash
-        try {
-            const rOfertas = await Promise.race([
-                fetch(TU_APPS_SCRIPT_URL + '?action=getOfertas&t=' + Date.now(), { redirect: 'follow' }),
-                new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000))
-            ]);
-            const dOfertas = await rOfertas.json();
-            if (dOfertas.success && dOfertas.relampagoActivo) {
-                _relampagoActivoBackend = dOfertas.relampagoActivo.map(p => Number(p.id));
-                console.log(`⚡ Relámpago backend sync: ${_relampagoActivoBackend.length} productos`);
-            }
-        } catch(e) {
-            console.warn('⚠️ Sync relámpago fallback local:', e.message);
-        }
+        // Sync relámpago con backend — no bloqueante
+        fetch(TU_APPS_SCRIPT_URL + '?action=getOfertas&t=' + Date.now(), { redirect: 'follow' })
+            .then(r => r.json())
+            .then(d => {
+                if (d.success && d.relampagoActivo) {
+                    _relampagoActivoBackend = d.relampagoActivo.map(p => Number(p.id));
+                    console.log(`⚡ Relámpago backend sync: ${_relampagoActivoBackend.length} productos`);
+                    seleccionarProductosOfertas();
+                    renderizarContenedorOfertas('relampago', productosRelampago);
+                }
+            })
+            .catch(e => console.warn('⚠️ Sync relámpago fallback local:', e.message));
 
         renderCategories();
         actualizarTodasLasVistas();
