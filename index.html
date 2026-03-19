@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Almacén Copihue v93</title>
+    <title>Almacén Copihue v96</title>
     
     <!-- META TAGS PARA PWA -->
     <meta name="theme-color" content="#2e7d32">
@@ -2178,6 +2178,41 @@ const OFERTAS_RELAMPAGO_SISTEMA = {
 let products = [];
 let cart = [];
 
+// ─── FUENTE ÚNICA DE VERDAD — DESCUENTO ÚLTIMAS UNIDADES ───────────────────
+// Regla: ≤3 días → 25% | >3 días → % del código relampago | sin código → 10%
+// Retorna { pct, precio, caso } donde caso es el string del caso aplicado
+function calcularDescuentoUltimas(diasVenc, relampagoCodigo, precioBase) {
+    let pct, caso;
+
+    // PUNTO 2: productos vencidos (diasVenc <= 0) → excluidos del pool
+    // Si por algún motivo llegan aquí, no aplicar descuento y marcar como vencido
+    if (diasVenc !== null && diasVenc <= 0) {
+        caso = 'VENCIDO — no debería estar en Últimas';
+        pct = 0;
+        console.debug(`[calcularDescuentoUltimas] ⚠️ VENCIDO diasVenc=${diasVenc} precio=$${precioBase} → sin descuento (excluir del pool)`);
+        return { pct: 0, precio: precioBase, caso };
+    }
+
+    if (diasVenc !== null && diasVenc <= 3) {
+        pct = 25;
+        caso = `URGENTE ≤3d (diasVenc=${diasVenc})`;
+    } else {
+        const cfg = OFERTAS_RELAMPAGO_SISTEMA[String(relampagoCodigo)];
+        if (cfg && cfg.tipo === 'pct' && cfg.descuento > 0) {
+            pct = cfg.descuento;
+            caso = `RELAMPAGO codigo=${relampagoCodigo} → ${pct}%`;
+        } else {
+            pct = 10;
+            caso = `AUTO 10% (diasVenc=${diasVenc ?? 'null'}, sin código relampago)`;
+        }
+    }
+
+    const precio = Math.round(precioBase * (1 - pct / 100));
+    console.debug(`[calcularDescuentoUltimas] caso="${caso}" precio=$${precioBase} → -${pct}% = $${precio}`);
+    return { pct, precio, caso };
+}
+// ───────────────────────────────────────────────────────────────────────────
+
 // ========== PAGINACIÓN ==========
 let paginaActual = 1;
 const PRODUCTOS_POR_PAGINA = 50;
@@ -2730,70 +2765,34 @@ function renderizarContenedorOfertas(tipo, productos) {
             // Mentira intencional: mostrar número pequeño para crear urgencia
             // El cliente ve urgencia, vos movés el stock que se va a vencer
             const stockNumMostrar = stockNum > 6 ? 3 : stockNum > 3 ? 2 : stockNum;
-            // Calcular días para vencer con fix UTC
+            // PUNTO 1: card visual — usa calcularDescuentoUltimas (fuente única)
             let diasVencUlt = null;
             if (product.vencimiento) {
                 const hoyU = new Date(); hoyU.setHours(0,0,0,0);
                 const vU = parseFechaLocal(product.vencimiento);
                 if (vU) diasVencUlt = Math.round((vU - hoyU) / 86400000);
             }
-            const esUrgente = diasVencUlt !== null && diasVencUlt <= 2;
-            const pctDesc = esUrgente ? 25 : 0;
-            const precioDesc = esUrgente ? Math.round(product.price * 0.75) : product.price;
+            const descUlt = calcularDescuentoUltimas(diasVencUlt, product.relampago, product.price);
+            const esUrgente = diasVencUlt !== null && diasVencUlt <= 3;
             const labelDias = diasVencUlt === 0 ? 'Vence HOY' : diasVencUlt === 1 ? 'Vence mañana' : `Vence en ${diasVencUlt} días`;
 
-            if (esUrgente) {
-                badgeTexto = `⚡ OFERTA VENCIMIENTO · ÚLTIMAS ${stockNumMostrar} UNIDADES`;
-                precioHTML = `
-                    <div style="margin:10px 0;">
-                        <div style="font-size:0.78rem;color:#999;text-decoration:line-through;">$${product.price}</div>
-                        <div style="font-size:1.4rem;font-weight:900;color:#b71c1c;">$${precioDesc}</div>
-                        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
-                            <span style="background:#b71c1c;color:white;padding:4px 10px;border-radius:12px;font-size:0.82rem;font-weight:700;">-${pctDesc}% OFF</span>
-                            <span style="background:#ff6f00;color:white;padding:4px 10px;border-radius:12px;font-size:0.82rem;font-weight:700;">⏰ ${labelDias}</span>
-                        </div>
-                        <div style="background:#fff3e0;border-left:3px solid #ff6f00;padding:6px 10px;border-radius:0 8px 8px 0;margin-top:8px;font-size:0.75rem;color:#e65100;font-weight:600;">
-                            ¡Llevátelo antes de que venza!
-                        </div>
+            badgeTexto = esUrgente
+                ? `⚡ OFERTA VENCIMIENTO · ÚLTIMAS ${stockNumMostrar} UNIDADES`
+                : `🏷️ ÚLTIMAS ${stockNumMostrar} UNIDADES · -${descUlt.pct}% OFF`;
+
+            precioHTML = `
+                <div style="margin:10px 0;">
+                    <div style="font-size:0.78rem;color:#999;text-decoration:line-through;">$${product.price.toLocaleString('es-AR')}</div>
+                    <div style="font-size:1.4rem;font-weight:900;color:#b71c1c;">$${descUlt.precio.toLocaleString('es-AR')}</div>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
+                        <span style="background:#b71c1c;color:white;padding:4px 10px;border-radius:12px;font-size:0.82rem;font-weight:700;">-${descUlt.pct}% OFF</span>
+                        ${esUrgente ? `<span style="background:#ff6f00;color:white;padding:4px 10px;border-radius:12px;font-size:0.82rem;font-weight:700;">⏰ ${labelDias}</span>` : `<span style="background:#ff6f00;color:white;padding:4px 10px;border-radius:12px;font-size:0.82rem;font-weight:700;">⚠️ Solo quedan ${stockNumMostrar}</span>`}
                     </div>
-                `;
-            } else {
-                // Si el producto tiene relámpago configurado, aplicar su descuento
-                const ofertaUlt = OFERTAS_RELAMPAGO_SISTEMA[String(product.relampago)];
-                const tieneDescuento = ofertaUlt && ofertaUlt.tipo === 'pct' && ofertaUlt.descuento > 0;
-                const pctDescUlt = tieneDescuento ? ofertaUlt.descuento : 0;
-                const precioDescUlt = tieneDescuento ? Math.round(product.price * (1 - pctDescUlt / 100)) : product.price;
-
-                badgeTexto = tieneDescuento
-                    ? `🏷️ ÚLTIMAS ${stockNumMostrar} UNIDADES · -${pctDescUlt}% OFF`
-                    : `🏷️ ÚLTIMAS ${stockNumMostrar} UNIDADES`;
-
-                if (tieneDescuento) {
-                    precioHTML = `
-                        <div style="margin:10px 0;">
-                            <div style="font-size:0.78rem;color:#999;text-decoration:line-through;">$${product.price}</div>
-                            <div style="font-size:1.4rem;font-weight:900;color:#c62828;">$${precioDescUlt}</div>
-                            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
-                                <span style="background:#c62828;color:white;padding:4px 10px;border-radius:12px;font-size:0.82rem;font-weight:700;">-${pctDescUlt}% OFF</span>
-                                <span style="background:#ff6f00;color:white;padding:4px 10px;border-radius:12px;font-size:0.82rem;font-weight:700;">⚠️ Solo quedan ${stockNumMostrar}</span>
-                            </div>
-                            <div style="background:#fff3e0;border-left:3px solid #c62828;padding:6px 10px;border-radius:0 8px 8px 0;margin-top:8px;font-size:0.75rem;color:#c62828;font-weight:600;">
-                                ✅ Ahorrás $${product.price - precioDescUlt}
-                            </div>
-                        </div>
-                    `;
-                } else {
-                    precioHTML = `
-                        <div style="margin:10px 0;">
-                            <div style="font-size:1.3rem;font-weight:bold;color:#c62828;">$${product.price}</div>
-                            <div style="background:#c62828;color:white;padding:4px 10px;border-radius:12px;
-                                        display:inline-block;margin-top:5px;font-size:0.82rem;font-weight:700;">
-                                ⚠️ Solo quedan ${stockNumMostrar}
-                            </div>
-                        </div>
-                    `;
-                }
-            }
+                    <div style="background:#fff3e0;border-left:3px solid #b71c1c;padding:6px 10px;border-radius:0 8px 8px 0;margin-top:8px;font-size:0.75rem;color:#b71c1c;font-weight:600;">
+                        ${esUrgente ? '¡Llevátelo antes de que venza!' : `✅ Ahorrás $${(product.price - descUlt.precio).toLocaleString('es-AR')}`}
+                    </div>
+                </div>
+            `;
         }
         else if (tipo === 'especiales' && product.especial) {
             const precioConDescuento = Math.round(product.price * 0.9);
@@ -3786,6 +3785,16 @@ function addToCart(productId, tipoForzado) {
         showNotification("❌ Producto no encontrado", "error");
         return;
     }
+
+    // BLOQUEO: productos vencidos no se venden al público
+    if (product.vencimiento) {
+        const hoyV = new Date(); hoyV.setHours(0,0,0,0);
+        const vV = parseFechaLocal(product.vencimiento);
+        if (vV && Math.round((vV - hoyV) / 86400000) <= 0) {
+            showNotification("⚠️ Este producto está vencido", "error");
+            return;
+        }
+    }
     
     const existingItem = cart.find(item => item.id === productId);
     const currentQuantity = existingItem ? existingItem.quantity : 0;
@@ -3838,6 +3847,7 @@ function addToCart(productId, tipoForzado) {
     }
     // 2b. Verificar ÚLTIMAS UNIDADES
     else if (tipoForzado === 'ultimas' || productosUltimas.some(p => p.id === productId)) {
+        // PUNTO 2: carrito addToCart — usa calcularDescuentoUltimas (fuente única)
         let diasVenc = null;
         if (product.vencimiento) {
             const partes = String(product.vencimiento).split('-');
@@ -3851,26 +3861,9 @@ function addToCart(productId, tipoForzado) {
         if (diasVenc === null && enPool && enPool.diasParaVencer !== undefined) diasVenc = enPool.diasParaVencer;
 
         esOfertaUltimas = true;
-        let pct;
-        let eslogan;
-
-        if (diasVenc !== null && diasVenc <= 3) {
-            // Vencimiento urgente → descuento por días
-            pct = diasVenc <= 1 ? 25 : 15;
-            eslogan = `🏷️ -${pct}% ÚLTIMAS UNIDADES`;
-        } else {
-            // Sin urgencia de vencimiento → usar relampago configurado o 10% por defecto
-            const cfgRel = OFERTAS_RELAMPAGO_SISTEMA[String(product.relampago)];
-            if (cfgRel && cfgRel.tipo === 'pct' && cfgRel.descuento > 0) {
-                pct = cfgRel.descuento;
-            } else {
-                pct = 10; // descuento automático por ser Últimas Unidades
-            }
-            eslogan = `🏷️ -${pct}% ÚLTIMAS UNIDADES`;
-        }
-
-        ofertaConfig = { nombre: "Últimas", tipo: "ultimas", descuento: pct, eslogan };
-        console.log('✅ Producto tiene oferta ÚLTIMAS UNIDADES:', pct + '% off');
+        const descUltCarrito = calcularDescuentoUltimas(diasVenc, product.relampago, product.price);
+        ofertaConfig = { nombre: "Últimas", tipo: "ultimas", descuento: descUltCarrito.pct, eslogan: `🏷️ -${descUltCarrito.pct}% ÚLTIMAS UNIDADES` };
+        console.log('✅ Producto tiene oferta ÚLTIMAS UNIDADES:', descUltCarrito.pct + '% off');
     }
     // 3. Verificar RELÁMPAGO
     else if (tipoForzado === 'relampago' ||

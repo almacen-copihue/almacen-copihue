@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v195</title>
+    <title>Copihue — POS v199</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2383,6 +2383,19 @@ function _refreshResultadosBadges(idActualizado) {
 function agregarProducto(id) {
     const producto = productos.find(p => p.id === id);
     if (!producto || producto.stock === 0) return;
+
+    // BLOQUEO VENCIDOS: no se venden aunque estén en stock
+    if (producto.vencimiento) {
+        const partes = String(producto.vencimiento).split('-');
+        if (partes.length === 3) {
+            const vD = new Date(parseInt(partes[0]), parseInt(partes[1])-1, parseInt(partes[2]));
+            const hoy = new Date(); hoy.setHours(0,0,0,0);
+            if (Math.round((vD - hoy) / 86400000) <= 0) {
+                mostrarToast(`⚠️ ${producto.name.substring(0,25)} está VENCIDO — no se puede vender`, 'rojo');
+                return;
+            }
+        }
+    }
 
     // Si es producto por peso, abrir modal de peso
     if (esPorPeso(producto)) {
@@ -5526,10 +5539,57 @@ function _esCerveceroActivo() {
     return _cerveceroOverride !== null ? _cerveceroOverride : _esCerveceroAutoActivo();
 }
 
+// ─── FUENTE ÚNICA DE VERDAD — DESCUENTO ÚLTIMAS UNIDADES ───────────────────
+// Regla: ≤3 días → 25% | >3 días → % del código relampago | sin código → 10%
+// Misma función que index.html — NO duplicar lógica aquí
+function calcularDescuentoUltimas(diasVenc, relampagoCodigo, precioBase) {
+    var pct, caso;
+
+    // PUNTO 2: vencidos → no deberían llegar aquí, devolver sin descuento
+    if (diasVenc !== null && diasVenc !== undefined && diasVenc <= 0) {
+        console.debug('[calcularDescuentoUltimas] ⚠️ VENCIDO diasVenc=' + diasVenc + ' → sin descuento (excluir del pool)');
+        return { pct: 0, precio: precioBase, caso: 'VENCIDO' };
+    }
+
+    if (diasVenc !== null && diasVenc !== undefined && diasVenc <= 3) {
+        pct = 25;
+        caso = 'URGENTE ≤3d (diasVenc=' + diasVenc + ')';
+    } else {
+        var cfg = OFERTAS_RELAMPAGO_SISTEMA[String(relampagoCodigo)];
+        if (cfg && cfg.tipo === 'pct' && cfg.descuento > 0) {
+            pct = cfg.descuento;
+            caso = 'RELAMPAGO codigo=' + relampagoCodigo + ' → ' + pct + '%';
+        } else {
+            pct = 10;
+            caso = 'AUTO 10% (diasVenc=' + (diasVenc ?? 'null') + ', sin código relampago)';
+        }
+    }
+
+    var precio = Math.round(precioBase * (1 - pct / 100));
+    console.debug('[calcularDescuentoUltimas] caso="' + caso + '" precio=$' + precioBase + ' → -' + pct + '% = $' + precio);
+    return { pct: pct, precio: precio, caso: caso };
+}
+// ───────────────────────────────────────────────────────────────────────────
+
 // Calcula precio y etiqueta de oferta para un producto en el POS
 // Retorna { precioUnitario, etiqueta, tieneOferta, tipoOferta }
 function calcularOfertaPOS(producto, qty) {
     const r = { precioUnitario: producto.price, precioTotal: producto.price * qty, etiqueta: null, tieneOferta: false, tipoOferta: null };
+
+    // BLOQUEO VENCIDOS: producto vencido → solo alerta interna, sin descuento, sin oferta
+    if (producto.vencimiento) {
+        const partes = String(producto.vencimiento).split('-');
+        if (partes.length === 3) {
+            const vD = new Date(parseInt(partes[0]), parseInt(partes[1])-1, parseInt(partes[2]));
+            const hoy = new Date(); hoy.setHours(0,0,0,0);
+            if (Math.round((vD - hoy) / 86400000) <= 0) {
+                r.etiqueta   = '⚠️ VENCIDO';
+                r.tipoOferta = 'vencido';
+                // Sin descuento, sin tieneOferta — visible solo en seba21 como alerta
+                return r;
+            }
+        }
+    }
 
     // 0. JUEVES CERVECERO — prioridad sobre todo si el toggle está activo
     if (_esCerveceroActivo() && _poolCervecero.has(producto.id)) {
@@ -5572,7 +5632,7 @@ function calcularOfertaPOS(producto, qty) {
     }
     // 1b. ÚLTIMAS UNIDADES — toggle activo (null = default on) Y producto en el pool
     else if (_toggleEstado.ultimas !== false && _poolIdsUltimas.has(producto.id)) {
-        // Prioridad: vencimiento propio del producto → fallback a diasParaVencer del pool
+        // PUNTOS 3,4,5: calcularOfertaPOS — usa calcularDescuentoUltimas (fuente única)
         let diasVenc = null;
         if (producto.vencimiento) {
             const partes = String(producto.vencimiento).split('-');
@@ -5582,33 +5642,15 @@ function calcularOfertaPOS(producto, qty) {
                 diasVenc = Math.round((vD - hoy) / 86400000);
             }
         }
-        if (diasVenc === null) diasVenc = _poolIdsUltimas.get(producto.id); // viene del backend
+        if (diasVenc === null) diasVenc = _poolIdsUltimas.get(producto.id);
 
-        const esUrgente = diasVenc !== null && diasVenc <= 3;
-        if (esUrgente) {
-            const pct = diasVenc <= 1 ? 25 : 15;
-            r.precioUnitario = Math.round(producto.price * (1 - pct / 100));
-            r.precioTotal    = r.precioUnitario * qty;
-            const labelDia = diasVenc === 0 ? 'VENCE HOY' : diasVenc === 1 ? 'VENCE MAÑANA' : `VENCE EN ${diasVenc}D`;
-            r.etiqueta       = `🏷️ -${pct}% ${labelDia}`;
-        } else {
-            // Si el producto tiene relámpago configurado, aplicar su descuento
-            const cfgUlt = OFERTAS_RELAMPAGO_SISTEMA[String(producto.relampago)];
-            if (cfgUlt && cfgUlt.tipo === 'pct' && cfgUlt.descuento > 0) {
-                r.precioUnitario = Math.round(producto.price * (1 - cfgUlt.descuento / 100));
-                r.precioTotal    = r.precioUnitario * qty;
-                r.etiqueta       = `🏷️ -${cfgUlt.descuento}% ÚLTIMAS UNIDADES`;
-                r.tieneOferta    = true;
-            } else {
-                // Sin relampago configurado → descuento automático 10% por ser Últimas Unidades
-                r.precioUnitario = Math.round(producto.price * 0.9);
-                r.precioTotal    = r.precioUnitario * qty;
-                r.etiqueta       = `🏷️ -10% ÚLTIMAS UNIDADES`;
-                r.tieneOferta    = true;
-            }
-        }
-        r.tieneOferta = esUrgente || r.tieneOferta; // no pisar el true seteado en el else
-        r.tipoOferta  = 'ultimas';
+        const descUlt = calcularDescuentoUltimas(diasVenc, producto.relampago, producto.price);
+        r.precioUnitario = descUlt.precio;
+        r.precioTotal    = descUlt.precio * qty;
+        const labelDia   = diasVenc === 0 ? 'VENCE HOY' : diasVenc === 1 ? 'VENCE MAÑANA' : diasVenc !== null && diasVenc <= 3 ? `VENCE EN ${diasVenc}D` : null;
+        r.etiqueta       = labelDia ? `🏷️ -${descUlt.pct}% ${labelDia}` : `🏷️ -${descUlt.pct}% ÚLTIMAS UNIDADES`;
+        r.tieneOferta    = true;
+        r.tipoOferta     = 'ultimas';
     }
     // 2. DESTACADAS — toggle activo Y en pool
     else if (producto.destacada > 0 && _toggleEstado.destacadas !== false && _destacadasFiltradas.has(producto.id)) {

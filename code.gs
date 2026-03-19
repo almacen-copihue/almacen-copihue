@@ -644,19 +644,27 @@ function _ofertaBuildProducto_(fila, i) {
       venc = v instanceof Date ? Utilities.formatDate(v, tz, 'yyyy-MM-dd') : String(v).trim();
     }
   } catch(e) {}
+  var dpv = _ofertaDiasVencer_(fila);
+  var estadoVencimiento = 'ok';
+  if (dpv !== null) {
+    if (dpv <= 0)  estadoVencimiento = 'vencido';
+    else if (dpv <= 3)  estadoVencimiento = 'urgente';
+    else if (dpv <= 15) estadoVencimiento = 'proximo';
+  }
   return {
-    id:           i,
-    name:         String(fila[0] || '').trim(),
-    price:        parseInt(fila[1]) || 0,
-    category:     String(fila[2] || 'ALMACEN').trim().toUpperCase(),
-    stock:        parseInt(fila[5]) || 0,
-    relampago:    parseInt(fila[6]) || 0,
-    destacada:    parseInt(fila[7]) || 0,   // ← incluido para que el index lo use
-    especial:     parseInt(fila[8]) || 0,   // ← incluido para que el index lo use
-    rotacion:     fila.length > 14 ? (parseInt(fila[14]) || 0) : 0,
-    vencimiento:  venc,
-    diasParaVencer: _ofertaDiasVencer_(fila),
-    puntaje:      _ofertaPuntaje_(fila)
+    id:                i,
+    name:              String(fila[0] || '').trim(),
+    price:             parseInt(fila[1]) || 0,
+    category:          String(fila[2] || 'ALMACEN').trim().toUpperCase(),
+    stock:             parseInt(fila[5]) || 0,
+    relampago:         parseInt(fila[6]) || 0,
+    destacada:         parseInt(fila[7]) || 0,
+    especial:          parseInt(fila[8]) || 0,
+    rotacion:          fila.length > 14 ? (parseInt(fila[14]) || 0) : 0,
+    vencimiento:       venc,
+    diasParaVencer:    dpv,
+    estadoVencimiento: estadoVencimiento,  // 'vencido' | 'urgente' | 'proximo' | 'ok'
+    puntaje:           _ofertaPuntaje_(fila)
   };
 }
 
@@ -1812,13 +1820,14 @@ function getListaCompraJSON() {
         var nombre = String(row[0] || '').trim();
         if (!nombre) continue;
         invMap[nombre] = {
-          v7:        parseFloat(row[21]) || 0,  // col V
-          v30:       parseFloat(row[22]) || 0,  // col W
-          diasStock: row[24] !== '' && row[24] !== null ? (parseFloat(row[24]) || 0) : null, // col Y
-          riesgo:    String(row[30] || '').trim().toUpperCase(),   // col AE
-          prioridad: String(row[31] || '').trim().toUpperCase(),   // col AF
-          pisoManu:  row[32] !== '' && row[32] !== null ? parseFloat(row[32]) : null, // col AG
-          alertaPiso: String(row[33] || '').trim().toUpperCase()   // col AH
+          categoria: String(row[2] || '').trim().toUpperCase(),  // col C
+          v7:        parseFloat(row[21]) || 0,
+          v30:       parseFloat(row[22]) || 0,
+          diasStock: row[24] !== '' && row[24] !== null ? (parseFloat(row[24]) || 0) : null,
+          riesgo:    String(row[30] || '').trim().toUpperCase(),
+          prioridad: String(row[31] || '').trim().toUpperCase(),
+          pisoManu:  row[32] !== '' && row[32] !== null ? parseFloat(row[32]) : null,
+          alertaPiso: String(row[33] || '').trim().toUpperCase()
         };
       }
     }
@@ -1840,6 +1849,11 @@ function getListaCompraJSON() {
       var proveedor = String(lr[6] || '').trim();
 
       var inv = invMap[nombre] || {};
+
+      // Excluir categorías que no se recompran
+      var catInv = inv.categoria || '';
+      if (catInv === 'COMPUTACION' || catInv === 'ELECTRONICA' || catInv === 'TECNOLOGIA') continue;
+
       var diasStock = inv.diasStock !== undefined ? inv.diasStock : null;
       var v7  = inv.v7  || 0;
       var v30 = inv.v30 || 0;
