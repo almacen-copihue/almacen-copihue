@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Almacén Copihue v91</title>
+    <title>Almacén Copihue v92</title>
     
     <!-- META TAGS PARA PWA -->
     <meta name="theme-color" content="#2e7d32">
@@ -1812,7 +1812,7 @@
         <div class="logo">
             <img src="iconos-pwa/android/android-launchericon-48-48.png" alt="Logo Almacén Copihue" class="logo-icon">
             Almacén Copihue
-            <span id="versionTag" style="font-size:0.72rem;font-weight:700;opacity:0.9;margin-left:8px;background:rgba(255,255,255,0.2);padding:2px 7px;border-radius:10px;color:white;letter-spacing:0.3px;vertical-align:middle;">v91</span>
+            <span id="versionTag" style="font-size:0.72rem;font-weight:700;opacity:0.9;margin-left:8px;background:rgba(255,255,255,0.2);padding:2px 7px;border-radius:10px;color:white;letter-spacing:0.3px;vertical-align:middle;">v92</span>
             <span id="adminBadge" class="admin-badge" style="display: none;">ADMIN</span>
             <span id="relojHeader" onclick="abrirModalHorario()"
                   style="font-size:0.75rem;font-weight:600;color:rgba(255,255,255,0.7);
@@ -2187,8 +2187,9 @@ let esAdmin = false;
 
 // Pools de ofertas
 let poolRelampago = [];
-let _relampagoActivoBackend = []; // Los 3 del día según code.gs — fuente de verdad compartida con seba21
+let _relampagoActivoBackend = []; // Los 3 del día según code.gs
 let _ultimasSeleccionBackend = []; // IDs seleccionados manualmente en seba21
+let _destacadasBackend = []; // IDs de destacadas rotadas del día según code.gs
 let poolUltimas = [];
 let _limiteDestacadas = 9; // configurable desde config_sistema → "máximo destacadas"
 let _limiteUltimas    = 3; // configurable desde config_sistema → "máximo ultimas"
@@ -2601,28 +2602,19 @@ function seleccionarProductosOfertas() {
         console.log(`⚡ Relámpago activo: ${productosRelampago.length} productos`);
     }
     
-    // 2. DESTACADAS (segunda prioridad)
+    // 2. DESTACADAS — usar backend si está disponible (igual que relámpago)
     if (validarHorario('destacadas') || (esAdmin && modoMostrarTodasDestacadas)) {
         const poolFiltrado = poolDestacadas.filter(p => !idsEnOfertas.has(p.id));
-        
-        // MODO ADMIN: mostrar TODAS
         if (esAdmin && modoMostrarTodasDestacadas) {
             productosDestacadas = poolFiltrado;
-            console.log(`🔥 [ADMIN] Mostrando TODAS las destacadas: ${productosDestacadas.length}`);
-        }
-        // Si hay más de _limiteDestacadas, rotar; si no, mostrar todos
-        else if (poolFiltrado.length > _limiteDestacadas) {
-            productosDestacadas = ROTACION_SISTEMA.selectRotatedProducts(
-                poolFiltrado, 
-                _limiteDestacadas, 
-                'rotacion_destacadas'
-            );
-            console.log(`🔥 Destacadas activo (rotando): ${productosDestacadas.length} de ${poolFiltrado.length}`);
+        } else if (_destacadasBackend.length > 0) {
+            // Backend ya rotó — usar esos IDs directo
+            productosDestacadas = poolFiltrado.filter(p => _destacadasBackend.includes(p.id));
+        } else if (poolFiltrado.length > _limiteDestacadas) {
+            productosDestacadas = ROTACION_SISTEMA.selectRotatedProducts(poolFiltrado, _limiteDestacadas, 'rotacion_destacadas');
         } else {
             productosDestacadas = poolFiltrado;
-            console.log(`🔥 Destacadas activo (todas): ${productosDestacadas.length} productos`);
         }
-        
         productosDestacadas.forEach(p => idsEnOfertas.add(p.id));
     }
     
@@ -3491,6 +3483,7 @@ async function loadProductsFromAPI() {
             const dOfertas = await rOfertas.json();
             if (dOfertas.success) {
                 if (dOfertas.relampagoActivo) _relampagoActivoBackend = dOfertas.relampagoActivo.map(p => Number(p.id));
+                if (dOfertas.destacadasActivas) _destacadasBackend = dOfertas.destacadasActivas.map(p => Number(p.id));
                 _ultimasSeleccionBackend = (dOfertas.ultimasSeleccionadas && dOfertas.ultimasSeleccionadas.length > 0)
                     ? dOfertas.ultimasSeleccionadas.map(p => Number(p.id))
                     : [];
@@ -3616,6 +3609,7 @@ function actualizarSoloOfertas() {
         .then(d => {
             if (!d.success) return;
             if (d.relampagoActivo) _relampagoActivoBackend = d.relampagoActivo.map(p => Number(p.id));
+            if (d.destacadasActivas) _destacadasBackend = d.destacadasActivas.map(p => Number(p.id));
             _ultimasSeleccionBackend = (d.ultimasSeleccionadas || []).map(p => Number(p.id));
             construirPools();
             seleccionarProductosOfertas();

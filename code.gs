@@ -824,8 +824,7 @@ function calcularOfertas() {
   } catch(eCfg) { /* usa el default 9 */ }
 
   // ── Rotación diaria de especiales ──────────────────────────
-  // Mismo algoritmo que ROTACION_SISTEMA en index.html (misma seed = mismo resultado para todos)
-  var especialesPool = especialesActivas; // pool completo (para stats)
+  var especialesPool = especialesActivas;
   if (especialesActivas.length > limites.especiales) {
     var tzDate    = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
     var dateKey   = tzDate.getFullYear() + '-' +
@@ -841,6 +840,25 @@ function calcularOfertas() {
       rotados.push(especialesActivas[(startIdx + ri) % especialesActivas.length]);
     }
     especialesActivas = rotados;
+  }
+
+  // ── Rotación diaria de destacadas (mismo algoritmo) ────────
+  var destacadasPool = destacadasActivas.slice(); // pool completo
+  var destacadasRotadas = destacadasActivas.slice();
+  if (destacadasActivas.length > limites.destacadas) {
+    var tzDateD   = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+    var dateKeyD  = tzDateD.getFullYear() + '-' +
+                    String(tzDateD.getMonth() + 1).padStart(2, '0') + '-' +
+                    String(tzDateD.getDate()).padStart(2, '0');
+    var argDateD  = new Date(dateKeyD);
+    var dayOfYearD = Math.floor((argDateD - new Date(argDateD.getFullYear(), 0, 0)) / 86400000);
+    var totalSetsD = Math.ceil(destacadasActivas.length / limites.destacadas);
+    var setNumberD = dayOfYearD % totalSetsD;
+    var startIdxD  = (setNumberD * limites.destacadas) % destacadasActivas.length;
+    destacadasRotadas = [];
+    for (var rdi = 0; rdi < limites.destacadas; rdi++) {
+      destacadasRotadas.push(destacadasActivas[(startIdxD + rdi) % destacadasActivas.length]);
+    }
   }
 
   // ── Leer selección manual de Últimas Unidades (hecha en seba21) ──
@@ -895,8 +913,9 @@ function calcularOfertas() {
     relampagoActivo:      relampagoActivo,
     relampagoPool:        relampagoPoolCompleto,
     ultimasUnidades:      ultimasUnidades,
-    ultimasSeleccionadas: ultimasSeleccionadas,  // selección manual del día desde seba21
-    destacadasActivas:    destacadasActivas,
+    ultimasSeleccionadas: ultimasSeleccionadas,
+    destacadasActivas:    destacadasRotadas,    // ya rotadas — mismas que verán index y seba21
+    destacadasPool:       destacadasPool,        // pool completo (para stats)
     especialesActivas:    especialesActivas,
     limites: limites,
     fecha: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm'),
