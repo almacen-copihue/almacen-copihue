@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Almacén Copihue v92</title>
+    <title>Almacén Copihue v93</title>
     
     <!-- META TAGS PARA PWA -->
     <meta name="theme-color" content="#2e7d32">
@@ -2189,6 +2189,7 @@ let esAdmin = false;
 let poolRelampago = [];
 let _relampagoActivoBackend = []; // Los 3 del día según code.gs
 let _ultimasSeleccionBackend = []; // IDs seleccionados manualmente en seba21
+let _ultimasAutoBackend = [];      // Pool automático por vencimiento (del JSON, sin límite local)
 let _destacadasBackend = []; // IDs de destacadas rotadas del día según code.gs
 let poolUltimas = [];
 let _limiteDestacadas = 9; // configurable desde config_sistema → "máximo destacadas"
@@ -3429,13 +3430,19 @@ function actualizarTodasLasVistas() {
     renderizarContenedorOfertas('relampago', productosRelampago);
     // Últimas unidades
     if (_ultimasSeleccionBackend.length > 0) {
-        // Selección manual del día — siempre mostrar, ignorar horario
+        // Selección manual del día — siempre mostrar, ignorar horario y límite
         productosUltimas = _ultimasSeleccionBackend
             .map(id => products.find(p => p.id === id))
             .filter(p => p && p.stockNumber > 0);
         console.log(`🏷️ Últimas selección manual: ${productosUltimas.length} productos`);
+    } else if (_ultimasAutoBackend.length > 0) {
+        // Pool automático del backend — ya calculado por code.gs, sin límite local
+        productosUltimas = _ultimasAutoBackend
+            .map(id => products.find(p => p.id === id))
+            .filter(p => p && p.stockNumber > 0);
+        console.log(`🏷️ Últimas auto backend: ${productosUltimas.length} productos`);
     } else if (validarHorario('ultimas') || (esAdmin && modoMostrarTodasOfertas)) {
-        // Sin selección → pool automático por vencimiento, respeta horario
+        // Último recurso — pool local
         productosUltimas = poolUltimas.filter(p => !idsEnOfertas.has(p.id)).slice(0, _limiteUltimas);
     } else {
         productosUltimas = [];
@@ -3484,6 +3491,7 @@ async function loadProductsFromAPI() {
             if (dOfertas.success) {
                 if (dOfertas.relampagoActivo) _relampagoActivoBackend = dOfertas.relampagoActivo.map(p => Number(p.id));
                 if (dOfertas.destacadasActivas) _destacadasBackend = dOfertas.destacadasActivas.map(p => Number(p.id));
+                if (dOfertas.ultimasUnidades) _ultimasAutoBackend = dOfertas.ultimasUnidades.map(p => Number(p.id));
                 _ultimasSeleccionBackend = (dOfertas.ultimasSeleccionadas && dOfertas.ultimasSeleccionadas.length > 0)
                     ? dOfertas.ultimasSeleccionadas.map(p => Number(p.id))
                     : [];
@@ -3608,15 +3616,16 @@ function actualizarSoloOfertas() {
         .then(r => r.json())
         .then(d => {
             if (!d.success) return;
-            if (d.relampagoActivo) _relampagoActivoBackend = d.relampagoActivo.map(p => Number(p.id));
+            if (d.relampagoActivo)  _relampagoActivoBackend = d.relampagoActivo.map(p => Number(p.id));
             if (d.destacadasActivas) _destacadasBackend = d.destacadasActivas.map(p => Number(p.id));
+            if (d.ultimasUnidades)   _ultimasAutoBackend = d.ultimasUnidades.map(p => Number(p.id));
             _ultimasSeleccionBackend = (d.ultimasSeleccionadas || []).map(p => Number(p.id));
-            construirPools();
+            // Re-seleccionar y re-renderizar sin tocar los pools base
             seleccionarProductosOfertas();
-            renderizarContenedorOfertas('relampago',   productosRelampago);
-            renderizarContenedorOfertas('destacadas',  productosDestacadas);
-            renderizarContenedorOfertas('especiales',  productosEspeciales);
-            renderizarContenedorOfertas('ultimas',     productosUltimas);
+            renderizarContenedorOfertas('relampago',  productosRelampago);
+            renderizarContenedorOfertas('destacadas', productosDestacadas);
+            renderizarContenedorOfertas('especiales', productosEspeciales);
+            renderizarContenedorOfertas('ultimas',    productosUltimas);
         })
         .catch(() => {}); // silencioso — siguiente ciclo lo reintenta
 }
