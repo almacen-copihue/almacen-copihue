@@ -1471,6 +1471,7 @@ function procesarVenta(dataStr) {
     const items = Array.isArray(payload) ? payload : (payload.items || []);
     const metodoPago = Array.isArray(payload) ? 'efectivo' : (payload.metodoPago || 'efectivo');
     const vendedor = Array.isArray(payload) ? '' : (payload.vendedor || '');
+    const ventaPayload = Array.isArray(payload) ? {} : payload; // para acceder a campos extra
 
     if (!items || !Array.isArray(items) || items.length === 0) return respuestaJSON({ success: false, mensaje: 'Sin items' });
 
@@ -1546,8 +1547,11 @@ function procesarVenta(dataStr) {
         }
 
         const totalUnidades = procesados.reduce((s, p) => s + (p.esPeso ? 1 : p.qty), 0);
-        const metodoPagoEmoji = metodoPago === 'posnet' ? '💳' : metodoPago === 'transferencia' ? '📱' : '💵';
-        sheetVentas.appendRow(['', fecha, hora, '─── TOTAL TICKET N° ' + ticketStr + ' ───', totalUnidades, metodoPagoEmoji + ' ' + metodoPago.toUpperCase(), vendedor, totalVenta]);
+        const metodoPagoEmoji = metodoPago === 'posnet' ? '💳' : metodoPago === 'transferencia' ? '📱' : metodoPago === 'FIADO' ? '🧾' : '💵';
+        const clienteInfo = (metodoPago === 'FIADO' && ventaPayload.clienteFiado)
+          ? ' | 👤 ' + ventaPayload.clienteFiado + (ventaPayload.telefonoFiado ? ' · ' + ventaPayload.telefonoFiado : '')
+          : '';
+        sheetVentas.appendRow(['', fecha, hora, '─── TOTAL TICKET N° ' + ticketStr + ' ───', totalUnidades, metodoPagoEmoji + ' ' + metodoPago.toUpperCase() + clienteInfo, vendedor, totalVenta]);
       }
     } catch (e) {
       console.warn('No se pudo registrar en hoja Ventas:', e);
