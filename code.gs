@@ -300,10 +300,12 @@ function ingresarMercaderia(datos) {
       if (fechaVencimiento) sheetInventario.getRange(ultimaFila, 16).setValue(fechaVencimiento);
 
       const fechaNuevo = new Date();
-      sheetHistorial.appendRow([
-        fechaNuevo, producto, cantidad, nuevoStock, nuevoId,
-        proveedor || '', precioCosto || '', precioVenta || '', fechaVencimiento || ''
-      ]);
+      if (cantidad > 0 || precioCosto || precioVenta) {
+        sheetHistorial.appendRow([
+          fechaNuevo, producto, cantidad, nuevoStock, nuevoId,
+          proveedor || '', precioCosto || '', precioVenta || '', fechaVencimiento || ''
+        ]);
+      }
 
       let mensajeNuevo = '✅ Producto NUEVO creado!\n📦 ' + producto + '\n🆔 ' + nuevoId + '\n📊 Stock inicial: ' + nuevoStock;
       if (precioVenta) mensajeNuevo += '\n💰 Precio venta: $' + precioVenta;
@@ -327,10 +329,14 @@ function ingresarMercaderia(datos) {
     if (datos.categoria && datos.categoria.trim()) sheetInventario.getRange(filaProducto, 3).setValue(datos.categoria.trim().toUpperCase());
 
     const fecha = new Date();
-    sheetHistorial.appendRow([
-      fecha, producto, cantidad, nuevoStock, '',
-      proveedor || '', precioCosto || '', precioVenta || '', fechaVencimiento || ''
-    ]);
+    // Solo escribir en Historial si es un ingreso real (cantidad > 0) o si trae precio/costo
+    const esIngresoReal = cantidad > 0 || precioCosto || precioVenta;
+    if (esIngresoReal) {
+      sheetHistorial.appendRow([
+        fecha, producto, cantidad, nuevoStock, '',
+        proveedor || '', precioCosto || '', precioVenta || '', fechaVencimiento || ''
+      ]);
+    }
 
     let mensaje = '✅ Ingreso exitoso!\n📦 ' + producto + '\n➕ Cantidad: ' + cantidad + '\n📊 Stock: ' + stockActual + ' → ' + nuevoStock;
     if (precioVenta) mensaje += '\n💰 Precio venta actualizado: $' + precioVenta;
@@ -1297,6 +1303,10 @@ function doGet(e) {
     if (e && e.parameter && e.parameter.action === 'getInfoProducto') {
       return respuestaJSON(obtenerInfoProducto(e.parameter.nombre || ''));
     }
+    if (e && e.parameter && e.parameter.action === 'salidaInterna') {
+      var datosSalida = JSON.parse(decodeURIComponent(e.parameter.data));
+      return respuestaJSON(registrarSalidaInterna(datosSalida));
+    }
     if (e && e.parameter && e.parameter.action === 'ajusteRapido') {
       const datos = JSON.parse(decodeURIComponent(e.parameter.data));
       return respuestaJSON(ajustarProducto(datos));
@@ -2191,6 +2201,66 @@ function cobrarFiado(datos) {
       }
     }
     return { success: false, mensaje: 'Fiado no encontrado: ' + datos.idFiado };
+  } catch(e) {
+    return { success: false, mensaje: e.toString() };
+  }
+}
+
+// ========== SALIDA INTERNA ==========
+function registrarSalidaInterna(datos) {
+  try {
+    var ss = SpreadsheetApp.openById(SS_ID);
+    var shInv  = ss.getSheetByName(HOJA_INVENTARIO);
+    var shSal  = ss.getSheetByName('SALIDAS');
+
+    if (!shInv) return { success: false, mensaje: 'Hoja inventario no encontrada' };
+
+    // Crear hoja SALIDAS si no existe
+    if (!shSal) {
+      shSal = ss.insertSheet('SALIDAS');
+      shSal.getRange(1, 1, 1, 10).setValues([[
+        'Fecha', 'Hora', 'Producto', 'ID', 'Cantidad', 'Costo Unit.', 'Precio Venta', 'Motivo', 'Observación', 'Vendedor'
+      ]]);
+      shSal.getRange(1, 1, 1, 10).setFontWeight('bold');
+    }
+
+    // Buscar producto en inventario
+    var invData = shInv.getDataRange().getValues();
+    var filaIdx = datos.id; // id = fila index
+    if (!filaIdx || filaIdx < 1 || filaIdx >= invData.length) {
+      return { success: false, mensaje: 'Producto no encontrado' };
+    }
+
+    var stockActual = parseFloat(invData[filaIdx][5]) || 0;
+    var cantidad    = parseFloat(datos.cantidad) || 0;
+
+    if (cantidad <= 0) return { success: false, mensaje: 'Cantidad inválida' };
+    if (cantidad > stockActual) return { success: false, mensaje: 'Stock insuficiente (hay ' + stockActual + ')' };
+
+    // Descontar stock
+    var nuevoStock = Math.max(0, stockActual - cantidad);
+    shInv.getRange(filaIdx + 1, 6).setValue(nuevoStock);
+
+    // Registrar en SALIDAS
+    var tz    = Session.getScriptTimeZone();
+    var now   = new Date();
+    var fecha = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+    var hora  = Utilities.formatDate(now, tz, 'HH:mm');
+
+    shSal.appendRow([
+      fecha,
+      hora,
+      datos.nombre || '',
+      'ID' + filaIdx,
+      cantidad,
+      datos.costo  || 0,
+      datos.precio || 0,
+      datos.motivo || '',
+      datos.obs    || '',
+      datos.vendedor || ''
+    ]);
+
+    return { success: true, nuevoStock: nuevoStock };
   } catch(e) {
     return { success: false, mensaje: e.toString() };
   }

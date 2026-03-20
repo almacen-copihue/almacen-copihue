@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v221</title>
+    <title>Copihue — POS v223</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -943,6 +943,10 @@
             <button class="btn-resumen" onclick="abrirPanelFiados()" title="Fiados pendientes" id="btnFiadoPanel"
                     style="background:rgba(230,81,0,0.3);border-color:rgba(230,81,0,0.6);flex:1;text-align:center;position:relative;display:flex;align-items:center;justify-content:center;">
                 🧾<span id="badgeFiados" style="display:none;position:absolute;top:-4px;right:-4px;background:#e65100;color:white;border-radius:50%;min-width:16px;height:16px;font-size:0.6rem;font-weight:900;align-items:center;justify-content:center;line-height:1;padding:0 2px;"></span>
+            </button>
+            <button class="btn-resumen" onclick="abrirSalidaInterna()" title="Sacar del local" id="btnSalida"
+                    style="background:rgba(96,125,139,0.3);border-color:rgba(96,125,139,0.6);flex:1;text-align:center;position:relative;display:flex;align-items:center;justify-content:center;">
+                🏠
             </button>
             <button class="btn-resumen" onclick="abrirSelectorUltimas()" title="Seleccionar Últimas Unidades" id="btnUltimas"
                     style="background:rgba(183,28,28,0.3);border-color:rgba(183,28,28,0.6);flex:1;text-align:center;position:relative;display:flex;align-items:center;justify-content:center;">
@@ -1934,6 +1938,8 @@ async function cargarProductos() {
         setTimeout(procesarVencidosDeAyer, 1500); // auto-zero stock confirmados ayer
         setTimeout(verificarAlertasDelDia, 800);
         programarRecordatorioCierre();
+        // Recuperar carrito pendiente si existe
+        setTimeout(verificarVentaPendiente, 1000);
         // Sugerencia relámpago (después de alertas)
         setTimeout(sugerirRelampago, 2000);
         // Ofertas automáticas por vencimiento (después del relámpago)
@@ -5811,8 +5817,22 @@ const _TOGGLE_CONFIG = {
     ultimas:    { id: 'toggleUltimas',    emoji: '🏷️', label: 'ULT',  clave: 'Dias ofertas ULTIMAS UNIDADES', colorActivo: 'rgba(229,57,53,0.5)',   bordeActivo: '#e53935'  }
 };
 
-// Estado en memoria (cargado desde planilla)
-const _toggleEstado = { relampago: null, destacadas: null, especiales: null, ultimas: null };
+// Estado en memoria (cargado desde planilla + persistido en localStorage)
+const _TOGGLE_STORAGE_KEY = 'copihue_toggles_v2';
+function _cargarTogglesPersistidos() {
+    try {
+        const raw = localStorage.getItem(_TOGGLE_STORAGE_KEY);
+        if (raw) return JSON.parse(raw);
+    } catch(e) {}
+    return null;
+}
+function _guardarTogglesPersistidos() {
+    try { localStorage.setItem(_TOGGLE_STORAGE_KEY, JSON.stringify(_toggleEstado)); } catch(e) {}
+}
+const _toggleEstado = (() => {
+    const persistido = _cargarTogglesPersistidos();
+    return persistido || { relampago: null, destacadas: null, especiales: null, ultimas: null };
+})();
 
 // Día actual → índice columna planilla (0=Lun...6=Dom)
 function _diaActualIdx() {
@@ -5876,6 +5896,7 @@ async function cargarEstadoToggles() {
             _toggleEstado[tipo] = activo;
             _pintarToggle(tipo, activo);
         });
+        _guardarTogglesPersistidos(); // persistir para próxima carga
         reporteOfertasPOS('post-toggles');
     } catch(e) {
         console.warn('⚠️ No se pudo cargar estado toggles:', e.message);
@@ -5899,6 +5920,7 @@ async function toggleOferta(tipo) {
         const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(10000) });
         const resp = await r.json();
         if (resp.success) {
+            _guardarTogglesPersistidos(); // persistir
             mostrarToast((nuevoValor ? '🟢 ' : '🔴 ') + cfg.emoji + ' ' + tipo + (nuevoValor ? ' activada' : ' desactivada'), nuevoValor ? 'verde' : 'rojo');
             // Registrar en log (sin esperar respuesta para no bloquear)
             const logDatos = { tipo, estado: nuevoValor, vendedor: vendedorActual || 'POS' };
@@ -7035,7 +7057,75 @@ abrirNuevoProducto = function() {
 };
 </script>
 
-<!-- ========== MODAL PANEL FIADOS ========== -->
+<!-- ========== MODAL SALIDA INTERNA ========== -->
+<div id="modalSalidaInterna" style="display:none;position:fixed;inset:0;z-index:5000;background:rgba(0,0,0,0.75);align-items:flex-end;justify-content:center;">
+  <div style="background:white;border-radius:18px 18px 0 0;width:100%;max-width:600px;max-height:92vh;display:flex;flex-direction:column;">
+    <!-- Header -->
+    <div style="padding:16px 20px 12px;border-bottom:1px solid #eee;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
+      <div>
+        <div style="font-size:1.05rem;font-weight:900;color:#1a1a1a;">🏠 Sacar del local</div>
+        <div style="font-size:0.72rem;color:#888;margin-top:2px;">Consumo, merma, regalo — no entra como venta</div>
+      </div>
+      <button onclick="cerrarSalidaInterna()" style="background:#f44336;color:white;border:none;border-radius:50%;width:32px;height:32px;font-size:1rem;cursor:pointer;">✕</button>
+    </div>
+
+    <!-- Buscador -->
+    <div style="padding:12px 16px 8px;flex-shrink:0;border-bottom:1px solid #f0f0f0;">
+      <input id="salidaBuscador" type="text" placeholder="Buscar producto..."
+        oninput="salidaBuscar()"
+        style="width:100%;padding:10px 14px;border:2px solid #ddd;border-radius:12px;font-size:0.95rem;box-sizing:border-box;">
+      <div id="salidaResultados" style="max-height:180px;overflow-y:auto;margin-top:6px;"></div>
+    </div>
+
+    <!-- Producto seleccionado -->
+    <div id="salidaProductoSelWrap" style="display:none;padding:12px 16px;border-bottom:1px solid #f0f0f0;flex-shrink:0;">
+      <div style="background:#f5f5f5;border-radius:10px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;">
+        <div>
+          <div id="salidaNombreProd" style="font-weight:700;font-size:0.9rem;color:#1a1a1a;"></div>
+          <div id="salidaInfoProd" style="font-size:0.72rem;color:#888;margin-top:2px;"></div>
+        </div>
+        <button onclick="salidaDeseleccionar()" style="background:none;border:none;color:#aaa;font-size:1.2rem;cursor:pointer;">✕</button>
+      </div>
+
+      <!-- Cantidad -->
+      <div style="display:flex;align-items:center;gap:12px;margin-top:12px;">
+        <div style="font-size:0.8rem;font-weight:700;color:#555;">Cantidad:</div>
+        <button onclick="salidaCantidad(-1)" style="width:36px;height:36px;border-radius:50%;border:2px solid #ddd;background:white;font-size:1.2rem;cursor:pointer;display:flex;align-items:center;justify-content:center;">−</button>
+        <input id="salidaCantidad" type="number" min="1" value="1"
+          style="width:60px;text-align:center;padding:6px;border:2px solid #ddd;border-radius:10px;font-size:1rem;font-weight:700;">
+        <button onclick="salidaCantidad(1)" style="width:36px;height:36px;border-radius:50%;border:2px solid #ddd;background:white;font-size:1.2rem;cursor:pointer;display:flex;align-items:center;justify-content:center;">+</button>
+      </div>
+
+      <!-- Motivo -->
+      <div style="margin-top:12px;">
+        <div style="font-size:0.8rem;font-weight:700;color:#555;margin-bottom:8px;">Motivo:</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;" id="salidaMotivosBtns">
+          <button onclick="salidaSelMotivo(this,'CONSUMO')"    class="salida-motivo" style="padding:7px 14px;border-radius:20px;border:2px solid #ddd;background:white;font-size:0.82rem;cursor:pointer;">🍽️ Consumo</button>
+          <button onclick="salidaSelMotivo(this,'MERMA')"      class="salida-motivo" style="padding:7px 14px;border-radius:20px;border:2px solid #ddd;background:white;font-size:0.82rem;cursor:pointer;">📉 Merma</button>
+          <button onclick="salidaSelMotivo(this,'VENCIDO')"    class="salida-motivo" style="padding:7px 14px;border-radius:20px;border:2px solid #ddd;background:white;font-size:0.82rem;cursor:pointer;">⏰ Vencido</button>
+          <button onclick="salidaSelMotivo(this,'REGALO')"     class="salida-motivo" style="padding:7px 14px;border-radius:20px;border:2px solid #ddd;background:white;font-size:0.82rem;cursor:pointer;">🎁 Regalo</button>
+          <button onclick="salidaSelMotivo(this,'ROTURA')"     class="salida-motivo" style="padding:7px 14px;border-radius:20px;border:2px solid #ddd;background:white;font-size:0.82rem;cursor:pointer;">💥 Rotura</button>
+          <button onclick="salidaSelMotivo(this,'USO_INTERNO')" class="salida-motivo" style="padding:7px 14px;border-radius:20px;border:2px solid #ddd;background:white;font-size:0.82rem;cursor:pointer;">🏪 Uso interno</button>
+        </div>
+      </div>
+
+      <!-- Observación -->
+      <div style="margin-top:10px;">
+        <textarea id="salidaObs" placeholder="Observación opcional..."
+          style="width:100%;padding:9px 12px;border:2px solid #ddd;border-radius:10px;font-size:0.85rem;resize:none;height:52px;box-sizing:border-box;font-family:inherit;"></textarea>
+      </div>
+
+      <!-- Confirmar -->
+      <button onclick="confirmarSalidaInterna()"
+        style="width:100%;margin-top:12px;padding:13px;border:none;border-radius:12px;background:#546e7a;color:white;font-weight:700;font-size:0.95rem;cursor:pointer;">
+        ✅ Confirmar salida
+      </button>
+    </div>
+  </div>
+</div>
+<!-- ============================================= -->
+
+</body>
 <div id="modalPanelFiados" style="display:none;position:fixed;inset:0;z-index:5000;background:rgba(0,0,0,0.7);align-items:flex-end;justify-content:center;">
   <div style="background:white;border-radius:18px 18px 0 0;width:100%;max-width:600px;max-height:90vh;display:flex;flex-direction:column;">
     <!-- Header -->
@@ -7779,6 +7869,135 @@ setTimeout(async () => {
         }
     } catch(e) {}
 }, 8000);
+// ============================================
+
+// ========== SALIDA INTERNA ==========
+var _salidaProducto = null;
+var _salidaMotivo   = null;
+
+function abrirSalidaInterna() {
+    document.getElementById('modalSalidaInterna').style.display = 'flex';
+    document.getElementById('salidaBuscador').value = '';
+    document.getElementById('salidaResultados').innerHTML = '';
+    document.getElementById('salidaProductoSelWrap').style.display = 'none';
+    _salidaProducto = null;
+    _salidaMotivo   = null;
+    setTimeout(() => document.getElementById('salidaBuscador').focus(), 100);
+}
+
+function cerrarSalidaInterna() {
+    document.getElementById('modalSalidaInterna').style.display = 'none';
+}
+
+function salidaBuscar() {
+    const q = document.getElementById('salidaBuscador').value.trim().toLowerCase();
+    const div = document.getElementById('salidaResultados');
+    if (q.length < 2) { div.innerHTML = ''; return; }
+
+    const matches = productos
+        .filter(p => p.stock > 0 && p.name.toLowerCase().includes(q))
+        .slice(0, 8);
+
+    if (!matches.length) {
+        div.innerHTML = '<div style="padding:10px;color:#aaa;font-size:0.85rem;">Sin resultados</div>';
+        return;
+    }
+    div.innerHTML = matches.map(p => `
+        <div onclick="salidaSeleccionar(${p.id})"
+          style="padding:10px 14px;border-bottom:1px solid #f0f0f0;cursor:pointer;display:flex;justify-content:space-between;align-items:center;">
+          <div>
+            <div style="font-size:0.88rem;font-weight:600;">${p.name}</div>
+            <div style="font-size:0.7rem;color:#888;">Stock: ${p.stock}</div>
+          </div>
+          <div style="font-size:0.85rem;color:#555;">$${p.price.toLocaleString('es-AR')}</div>
+        </div>`).join('');
+}
+
+function salidaSeleccionar(id) {
+    _salidaProducto = productos.find(p => p.id === id);
+    if (!_salidaProducto) return;
+
+    document.getElementById('salidaBuscador').value = _salidaProducto.name;
+    document.getElementById('salidaResultados').innerHTML = '';
+    document.getElementById('salidaNombreProd').textContent = _salidaProducto.name;
+    document.getElementById('salidaInfoProd').textContent =
+        'Stock: ' + _salidaProducto.stock + '  ·  $' + _salidaProducto.price.toLocaleString('es-AR');
+    document.getElementById('salidaCantidad').value = 1;
+    document.getElementById('salidaObs').value = '';
+    // Resetear motivos
+    document.querySelectorAll('.salida-motivo').forEach(b => {
+        b.style.background = 'white'; b.style.borderColor = '#ddd'; b.style.color = '#333';
+    });
+    _salidaMotivo = null;
+    document.getElementById('salidaProductoSelWrap').style.display = 'block';
+}
+
+function salidaDeseleccionar() {
+    _salidaProducto = null;
+    document.getElementById('salidaProductoSelWrap').style.display = 'none';
+    document.getElementById('salidaBuscador').value = '';
+    document.getElementById('salidaBuscador').focus();
+}
+
+function salidaCantidad(delta) {
+    const input = document.getElementById('salidaCantidad');
+    const val = Math.max(1, (parseInt(input.value) || 1) + delta);
+    input.value = val;
+}
+
+function salidaSelMotivo(btn, motivo) {
+    _salidaMotivo = motivo;
+    document.querySelectorAll('.salida-motivo').forEach(b => {
+        b.style.background = 'white'; b.style.borderColor = '#ddd'; b.style.color = '#333';
+    });
+    btn.style.background = '#546e7a'; btn.style.borderColor = '#546e7a'; btn.style.color = 'white';
+}
+
+async function confirmarSalidaInterna() {
+    if (!_salidaProducto) { mostrarToast('⚠️ Seleccioná un producto', 'rojo'); return; }
+    if (!_salidaMotivo)   { mostrarToast('⚠️ Seleccioná un motivo', 'rojo'); return; }
+
+    const cantidad = parseInt(document.getElementById('salidaCantidad').value) || 1;
+    const obs      = document.getElementById('salidaObs').value.trim();
+
+    if (cantidad > _salidaProducto.stock) {
+        mostrarToast(`⚠️ Stock insuficiente (hay ${_salidaProducto.stock})`, 'rojo');
+        return;
+    }
+
+    const btn = document.querySelector('#modalSalidaInterna button[onclick="confirmarSalidaInterna()"]');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Registrando...'; }
+
+    try {
+        const datos = {
+            id:        _salidaProducto.id,
+            nombre:    _salidaProducto.name,
+            cantidad,
+            motivo:    _salidaMotivo,
+            obs,
+            costo:     _salidaProducto.precioCosto || 0,
+            precio:    _salidaProducto.price,
+            vendedor:  vendedorActual || ''
+        };
+        const url = API_URL + '?action=salidaInterna&data=' + encodeURIComponent(JSON.stringify(datos));
+        const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
+        const resp = await r.json();
+
+        if (resp.success) {
+            // Actualizar stock local
+            _salidaProducto.stock = Math.max(0, _salidaProducto.stock - cantidad);
+            mostrarToast(`✅ Salida registrada — ${_salidaProducto.name} x${cantidad} (${_salidaMotivo})`, 'verde');
+            cerrarSalidaInterna();
+            renderResultados(_sortProductos(productos, new Set(ventaActual.map(i => i.esPeso ? i.idOriginal : i.id))));
+        } else {
+            mostrarToast('❌ ' + (resp.mensaje || 'Error al registrar'), 'rojo');
+            if (btn) { btn.disabled = false; btn.textContent = '✅ Confirmar salida'; }
+        }
+    } catch(e) {
+        mostrarToast('❌ Error de conexión', 'rojo');
+        if (btn) { btn.disabled = false; btn.textContent = '✅ Confirmar salida'; }
+    }
+}
 // ============================================
 
 function abrirModalFiado() {
