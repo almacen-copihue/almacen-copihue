@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v211</title>
+    <title>Copihue — POS v212</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -6879,6 +6879,8 @@ function lcCopiarTexto() {
     mostrarToast('✅ Lista copiada', 'verde');
   });
 }
+
+function lcCompartirWA() {
   if (!_lcItems.length) return;
 
   var texto = '🛒 *Lista de compra Almacén Copihue*\n';
@@ -7712,119 +7714,3 @@ async function _procesarVentaFiado(datosFiado) {
 }
 </script>
 </body>
-</html>
-
-<script>
-// ========== SISTEMA FIADO ==========
-
-function abrirModalFiado() {
-    // Calcular total actual
-    const total = ventaActual.reduce((s, i) => {
-        if (i.esPeso) return s + i.price;
-        return s + (i.price * i.qty);
-    }, 0);
-    document.getElementById('fiadoTotal').textContent = '$' + Math.round(total).toLocaleString('es-AR');
-
-    // Fecha vencimiento default = hoy + 7 días
-    const venc = new Date();
-    venc.setDate(venc.getDate() + 7);
-    document.getElementById('fiadoVencimiento').value = venc.toISOString().split('T')[0];
-
-    // Limpiar campos
-    document.getElementById('fiadoCliente').value = '';
-    document.getElementById('fiadoTelefono').value = '';
-    document.getElementById('fiadoObs').value = '';
-    document.getElementById('fiadoAlertaDeuda').style.display = 'none';
-
-    document.getElementById('modalFiado').style.display = 'flex';
-    setTimeout(() => document.getElementById('fiadoCliente').focus(), 100);
-}
-
-function cerrarModalFiado() {
-    document.getElementById('modalFiado').style.display = 'none';
-    // Si cancela el fiado, volver a efectivo
-    if (metodoPagoActual === 'fiado') seleccionarMetodo('efectivo');
-}
-
-// Busca deuda pendiente del cliente por teléfono (debounce 600ms)
-let _fiadoDeudaTimer = null;
-function fiadoBuscarDeuda() {
-    clearTimeout(_fiadoDeudaTimer);
-    _fiadoDeudaTimer = setTimeout(async () => {
-        const tel = document.getElementById('fiadoTelefono').value.trim();
-        if (tel.length < 6) { document.getElementById('fiadoAlertaDeuda').style.display = 'none'; return; }
-        try {
-            const r = await fetch(API_URL + '?action=consultarFiado&telefono=' + encodeURIComponent(tel) + '&t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(8000) });
-            const d = await r.json();
-            const alerta = document.getElementById('fiadoAlertaDeuda');
-            if (d.ok && d.deuda > 0) {
-                const tieneVencidos = d.vencidos > 0;
-                alerta.style.display = 'block';
-                alerta.style.background = tieneVencidos ? '#ffebee' : '#fff8e1';
-                alerta.style.color = tieneVencidos ? '#b71c1c' : '#e65100';
-                alerta.style.border = `2px solid ${tieneVencidos ? '#ef9a9a' : '#ffcc02'}`;
-                alerta.innerHTML = tieneVencidos
-                    ? `🔴 Este cliente tiene <strong>$${d.deuda.toLocaleString('es-AR')} de deuda vencida</strong> (${d.vencidos} fiado${d.vencidos > 1 ? 's' : ''} sin pagar). Decidís vos.`
-                    : `🟡 Este cliente ya tiene <strong>$${d.deuda.toLocaleString('es-AR')} pendiente</strong> (${d.pendientes} fiado${d.pendientes > 1 ? 's' : ''}). Decidís vos.`;
-            } else {
-                alerta.style.display = 'none';
-            }
-        } catch(e) { /* sin conexión — igual se puede fiar */ }
-    }, 600);
-}
-
-async function confirmarFiado() {
-    const cliente = document.getElementById('fiadoCliente').value.trim();
-    const telefono = document.getElementById('fiadoTelefono').value.trim();
-    const vencimiento = document.getElementById('fiadoVencimiento').value;
-    const obs = document.getElementById('fiadoObs').value.trim();
-
-    if (!cliente) { mostrarToast('⚠️ Ingresá el nombre del cliente', 'rojo'); return; }
-    if (!telefono) { mostrarToast('⚠️ Ingresá el teléfono', 'rojo'); return; }
-    if (!ventaActual.length) { mostrarToast('⚠️ No hay productos en el carrito', 'rojo'); return; }
-
-    // Calcular totales
-    const totalFiado = ventaActual.reduce((s, i) => i.esPeso ? s + i.price : s + (i.price * i.qty), 0);
-    const cantItems  = ventaActual.reduce((s, i) => s + (i.esPeso ? 1 : i.qty), 0);
-    const resumen    = ventaActual.slice(0, 3).map(i => `${i.esPeso ? '1' : i.qty}x ${i.name.substring(0,20)}`).join(' · ') + (ventaActual.length > 3 ? ' ...' : '');
-    const ahora = new Date();
-    const idFiado = 'FIADO-' + ahora.getFullYear() + String(ahora.getMonth()+1).padStart(2,'0') + String(ahora.getDate()).padStart(2,'0') + '-' + String(ahora.getHours()).padStart(2,'0') + String(ahora.getMinutes()).padStart(2,'0') + String(ahora.getSeconds()).padStart(2,'0');
-
-    // Número de ticket (el que usa confirmarVenta)
-    const ticketNum = (typeof _ultimoTicket !== 'undefined' && _ultimoTicket) ? _ultimoTicket : ('T-' + Date.now());
-
-    const datosFiado = {
-        idFiado, ticket: ticketNum, cliente, telefono,
-        descripcion: resumen, cantidadItems: cantItems,
-        total: Math.round(totalFiado), vencimiento: vencimiento || '',
-        observaciones: obs
-    };
-
-    // Cerrar modal y procesar la venta normalmente (método = FIADO)
-    document.getElementById('modalFiado').style.display = 'none';
-
-    // Confirmar venta con método FIADO
-    await confirmarVenta();
-
-    // Registrar en hoja FIADOS en segundo plano
-    try {
-        await fetch(API_URL + '?action=guardarFiado&data=' + encodeURIComponent(JSON.stringify(datosFiado)), { redirect: 'follow', signal: AbortSignal.timeout(15000) });
-        mostrarToast(`🧾 Fiado registrado para ${cliente}`, 'naranja');
-    } catch(e) {
-        console.warn('⚠️ No se pudo guardar fiado en planilla:', e);
-        mostrarToast('⚠️ Fiado procesado pero no guardado en planilla — anotalo manual', 'rojo');
-    }
-}
-
-// Interceptar el botón Cobrar cuando el método es FIADO
-const _confirmarVentaOriginal = confirmarVenta;
-const _btnOkConfirm = document.getElementById('btnOkConfirm');
-if (_btnOkConfirm) {
-    _btnOkConfirm.addEventListener('click', (e) => {
-        if (metodoPagoActual === 'fiado') {
-            e.stopImmediatePropagation();
-            abrirModalFiado();
-        }
-    }, true); // capture = true para interceptar antes del onclick
-}
-</script>
