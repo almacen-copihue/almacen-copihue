@@ -1217,10 +1217,13 @@ function getJuevesCervecero() {
 
     const top6Final = top6.map((c, idx) => {
       let descuento = idx === idxGancho ? 20 : (c.margen > 0.30 ? 15 : 10);
-      const precioPromo = Math.max(
+      const precioBase = Math.max(
         Math.round(c.precio * (1 - descuento / 100)),
         c.costo > 0 ? Math.ceil(c.costo * 1.05) : 0
       );
+      // Efecto psicológico: X99 más cercano, nunca por encima del precio original
+      const precioPromo99 = Math.round((precioBase - 99) / 100) * 100 + 99;
+      const precioPromo = Math.min(precioPromo99, c.precio - 1); // nunca supera el original
       return { ...c, descuento, precioPromo, esGancho: idx === idxGancho };
     });
 
@@ -1368,6 +1371,13 @@ function doGet(e) {
     }
     if (e && e.parameter && e.parameter.action === 'getUltimasSeleccion') {
       return respuestaJSON(getUltimasSeleccion());
+    }
+    if (e && e.parameter && e.parameter.action === 'guardarFiado') {
+      const datos = JSON.parse(decodeURIComponent(e.parameter.data));
+      return respuestaJSON(guardarFiado(datos));
+    }
+    if (e && e.parameter && e.parameter.action === 'consultarFiado') {
+      return respuestaJSON(consultarFiado(e.parameter.telefono));
     }
 
     // ── GET PRODUCTOS (carga la tienda) ──
@@ -2080,5 +2090,105 @@ function getUltimasSeleccion() {
     return { ok: true, seleccion: [] };
   } catch(e) {
     return { ok: true, seleccion: [] };
+  }
+}
+
+// ══════════════════════════════════════════════
+// FIADOS — guardar y consultar
+// ══════════════════════════════════════════════
+var HOJA_FIADOS = 'FIADOS';
+
+function guardarFiado(datos) {
+  try {
+    var ss = SpreadsheetApp.openById(SS_ID);
+    var sh = ss.getSheetByName(HOJA_FIADOS);
+    if (!sh) return { success: false, mensaje: 'Hoja FIADOS no encontrada' };
+
+    var now = new Date();
+    var tz  = Session.getScriptTimeZone();
+    var fechaStr = Utilities.formatDate(now, tz, 'yyyy-MM-dd HH:mm');
+
+    // Calcular ID_FIADO autoincrementalL
+    var ultimaFila = sh.getLastRow();
+    var numFiado = ultimaFila; // fila 1 = header, fila 2 = primer fiado
+    var idFiado = datos.idFiado || ('FIADO-' + String(numFiado).padStart(4, '0'));
+
+    // Estado automático
+    var venc = datos.vencimiento ? new Date(datos.vencimiento) : null;
+    var estado = 'PENDIENTE';
+
+    sh.appendRow([
+      idFiado,                    // A: ID_FIADO
+      fechaStr,                   // B: Fecha
+      datos.ticket || '',         // C: Ticket
+      datos.cliente || '',        // D: Cliente
+      datos.telefono || '',       // E: Teléfono
+      datos.descripcion || 'TICKET COMPLETO', // F: Producto/Descripción
+      datos.cantItems || 1,       // G: Cantidad
+      datos.total || 0,           // H: Precio Unitario (total ticket)
+      datos.total || 0,           // I: Total
+      datos.vencimiento || '',    // J: Fecha Vencimiento
+      estado,                     // K: Estado
+      '',                         // L: Fecha Pago
+      '',                         // M: Método Pago
+      datos.obs || ''             // N: Observaciones
+    ]);
+
+    return { success: true, idFiado: idFiado };
+  } catch(e) {
+    return { success: false, mensaje: e.toString() };
+  }
+}
+
+function consultarFiado(telefono) {
+  try {
+    if (!telefono) return { ok: true, deuda: null };
+    var ss = SpreadsheetApp.openById(SS_ID);
+    var sh = ss.getSheetByName(HOJA_FIADOS);
+    if (!sh) return { ok: true, deuda: null };
+
+    var datos = sh.getDataRange().getValues();
+    var telBuscar = String(telefono).replace(/\D/g, ''); // solo números
+
+    var totalDeuda = 0;
+    var pendientes = 0;
+    var vencidos = 0;
+    var nombreCliente = '';
+    var hoy = new Date(); hoy.setHours(0,0,0,0);
+
+    for (var i = 1; i < datos.length; i++) {
+      var fila = datos[i];
+      var telFila = String(fila[4] || '').replace(/\D/g, '');
+      if (telFila !== telBuscar) continue;
+
+      var estado = String(fila[10] || '').toUpperCase();
+      if (estado === 'PAGADO') continue; // no contar los pagados
+
+      // Recalcular estado por si venció
+      var fechaVenc = fila[9] ? new Date(fila[9]) : null;
+      if (fechaVenc && fechaVenc < hoy && estado !== 'PAGADO') {
+        estado = 'VENCIDO';
+      }
+
+      var total = parseFloat(fila[8]) || 0;
+      totalDeuda += total;
+      pendientes++;
+      if (estado === 'VENCIDO') vencidos++;
+      if (!nombreCliente && fila[3]) nombreCliente = String(fila[3]);
+    }
+
+    if (pendientes === 0) return { ok: true, deuda: null };
+
+    return {
+      ok: true,
+      deuda: {
+        nombre: nombreCliente,
+        total: totalDeuda,
+        pendientes: pendientes,
+        vencidos: vencidos
+      }
+    };
+  } catch(e) {
+    return { ok: true, deuda: null };
   }
 }

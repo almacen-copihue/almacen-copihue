@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v209</title>
+    <title>Copihue — POS v210</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -799,7 +799,29 @@
         .metodo-btn:active { transform: scale(0.97); }
         .metodo-btn.seleccionado.efectivo { border-color: #2e7d32; background: #e8f5e9; }
         .metodo-btn.seleccionado.posnet  { border-color: #1565c0; background: #e3f2fd; }
-        .metodo-btn.seleccionado.transf     { border-color: #6a1b9a; background: #f3e5f5; }
+        .metodo-btn.seleccionado.transf  { border-color: #6a1b9a; background: #f3e5f5; }
+        .metodo-btn.seleccionado.fiado   { border-color: #e65100; background: #fff3e0; }
+
+        /* ===== MODAL FIADO ===== */
+        #modalFiado {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 6000;
+            background: rgba(0,0,0,0.6);
+            align-items: flex-end;
+            justify-content: center;
+        }
+        #modalFiado.open { display: flex; }
+        #modalFiadoInner {
+            background: white;
+            border-radius: 24px 24px 0 0;
+            padding: 24px 20px 32px;
+            width: 100%;
+            max-width: 520px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
 
         /* ===== MODAL PESO ===== */
         .peso-display {
@@ -1424,7 +1446,7 @@
         <div style="padding:8px 20px 0;font-size:0.78rem;font-weight:700;color:var(--subtexto);text-transform:uppercase;letter-spacing:0.5px;">
             Método de pago
         </div>
-        <div class="metodo-pago-grid">
+        <div class="metodo-pago-grid" style="grid-template-columns: repeat(4,1fr);">
             <button class="metodo-btn efectivo seleccionado" id="btnEfectivo" onclick="seleccionarMetodo('efectivo')">
                 <span class="metodo-emoji">💵</span>
                 <span class="metodo-label">Efectivo</span>
@@ -1437,7 +1459,10 @@
                 <span class="metodo-emoji">📱</span>
                 <span class="metodo-label">Transferencia</span>
             </button>
-
+            <button class="metodo-btn fiado" id="btnFiado" onclick="seleccionarMetodo('fiado')">
+                <span class="metodo-emoji">🧾</span>
+                <span class="metodo-label">Fiado</span>
+            </button>
         </div>
 
 
@@ -2983,6 +3008,12 @@ function abrirConfirmacion() {
 }
 
 async function confirmarVenta() {
+    // FIADO: abrir modal de datos del cliente antes de procesar
+    if (metodoPagoActual === 'fiado') {
+        abrirModalFiado();
+        return;
+    }
+
     const btn = document.getElementById('btnOkConfirm');
     btn.disabled = true;
     btn.textContent = '⏳ Procesando...';
@@ -3024,6 +3055,32 @@ async function confirmarVenta() {
 
     // Guardar en historial local del día pase lo que pase
     guardarVentaDia({ items: [...ventaActual], total, hora, stockRebajado: stockOk, metodoPago: metodoPagoFinal || metodoPagoActual });
+
+    // Si falló el stock — guardar para reintento automático en segundo plano
+    if (!stockOk) {
+        const ventaPendiente = {
+            items: ventaActual.map(i => ({
+                id: i.esPeso ? i.idOriginal : i.id,
+                name: i.name,
+                qty: i.qty,
+                esPeso: i.esPeso || false,
+                gramos: i.gramos || 0,
+                precioVenta: i.price,
+                precioModificado: i.precioModificado || false,
+                precioOriginal: i.precioOriginal || 0
+            })),
+            metodoPago: metodoPagoFinal || metodoPagoActual,
+            vendedor: vendedorActual,
+            ts: Date.now()
+        };
+        // Encolar en localStorage para reintento
+        const pendientes = JSON.parse(localStorage.getItem('ventas_pendientes') || '[]');
+        pendientes.push(ventaPendiente);
+        localStorage.setItem('ventas_pendientes', JSON.stringify(pendientes));
+        console.warn('⚠️ Venta encolada para reintento:', ventaPendiente);
+        // Intentar reenviar en 10s
+        setTimeout(() => _reenviarVentasPendientes(), 10000);
+    }
 
     // Actualizar stock local para no vender más de lo que hay
     ventaActual.forEach(item => {
@@ -3342,6 +3399,44 @@ function reporteOfertasPOS(origen = 'manual') {
     console.log('⭐ Especiales activas:', activos.especiales.length, activos.especiales.slice(0, 5));
     console.log('🏷️ Últimas activas:',   activos.ultimas.length,    activos.ultimas.slice(0, 5));
     console.groupEnd();
+}
+
+// Reenvía ventas que fallaron por conexión — corre en background
+async function _reenviarVentasPendientes() {
+    const pendientes = JSON.parse(localStorage.getItem('ventas_pendientes') || '[]');
+    if (!pendientes.length) return;
+    console.log(`🔄 Reintentando ${pendientes.length} venta(s) pendiente(s)...`);
+    const restantes = [];
+    for (const venta of pendientes) {
+        try {
+            const payload = { items: venta.items, metodoPago: venta.metodoPago, vendedor: venta.vendedor };
+            const url = API_URL + '?action=vender&data=' + encodeURIComponent(JSON.stringify(payload));
+            const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
+            const resp = await r.json();
+            if (resp.success) {
+                console.log('✅ Venta pendiente enviada correctamente:', venta.ts);
+                // Marcar como rebajada en el historial local
+                const key = _getDateKeyAR();
+                const keyStore = 'ventas_dia_' + key;
+                try {
+                    const ventasDia = JSON.parse(localStorage.getItem(keyStore) || '[]');
+                    // Buscar por timestamp aproximado (±5s)
+                    const idx = ventasDia.findIndex(v => Math.abs((v.ts || 0) - venta.ts) < 5000);
+                    if (idx >= 0) { ventasDia[idx].stockRebajado = true; localStorage.setItem(keyStore, JSON.stringify(ventasDia)); }
+                } catch(e2) {}
+                mostrarToast('✅ Stock sincronizado con la planilla', 'verde');
+            } else {
+                restantes.push(venta);
+            }
+        } catch(e) {
+            restantes.push(venta); // sigue pendiente
+        }
+    }
+    localStorage.setItem('ventas_pendientes', JSON.stringify(restantes));
+    if (restantes.length > 0) {
+        console.warn(`⚠️ Quedan ${restantes.length} venta(s) pendientes — reintentando en 60s`);
+        setTimeout(() => _reenviarVentasPendientes(), 60000);
+    }
 }
 
 function guardarVentaDia(venta) {
@@ -3784,7 +3879,7 @@ function confirmarPeso() {
 // ========== MÉTODO DE PAGO ==========
 function seleccionarMetodo(metodo) {
     metodoPagoActual = metodo;
-    const mapId = { efectivo: 'btnEfectivo', posnet: 'btnPosnet', transferencia: 'btnTransf' };
+    const mapId = { efectivo: 'btnEfectivo', posnet: 'btnPosnet', transferencia: 'btnTransf', fiado: 'btnFiado' };
     Object.values(mapId).forEach(id => {
         const btn = document.getElementById(id);
         if (btn) btn.classList.remove('seleccionado');
@@ -5235,6 +5330,8 @@ if ('serviceWorker' in navigator) {
 inicializarVendedor();
 cargarConfig();
 _cargarHorarioSistema();
+// Reenviar ventas que fallaron por conexión en sesiones anteriores
+setTimeout(() => _reenviarVentasPendientes(), 5000);
 // ========== SISTEMA DE CLIENTES ==========
 const CLIENTES_KEY = 'copihue_clientes';
 let _clienteActual = null; // { nombre, telefono } seleccionado para esta venta
@@ -7401,5 +7498,297 @@ async function ultiGuardar() {
 </div>
 </div>
 
+<!-- ===== LÓGICA FIADO ===== -->
+<script>
+// ─── FIADO — variables ───────────────────────────────────────
+var _fiadoDatosCliente = null; // datos del cliente con deuda previa si existe
+
+function abrirModalFiado() {
+    const total = window._totalConRedondeo || ventaActual.reduce((s,i) => s + i.price * i.qty, 0);
+    document.getElementById('fiadoTotal').textContent = '$' + Math.round(total).toLocaleString('es-AR');
+    // Vencimiento default +7 días
+    const venc = new Date();
+    venc.setDate(venc.getDate() + 7);
+    document.getElementById('fiadoVencimiento').value = venc.toISOString().split('T')[0];
+    // Limpiar campos
+    document.getElementById('fiadoCliente').value = '';
+    document.getElementById('fiadoTelefono').value = '';
+    document.getElementById('fiadoObs').value = '';
+    document.getElementById('fiadoAlertaDeuda').style.display = 'none';
+    _fiadoDatosCliente = null;
+    // Mostrar
+    const modal = document.getElementById('modalFiado');
+    modal.style.display = 'flex';
+    setTimeout(() => document.getElementById('fiadoCliente').focus(), 200);
+}
+
+function cerrarModalFiado() {
+    document.getElementById('modalFiado').style.display = 'none';
+    // Volver a efectivo si se cierra sin confirmar
+    seleccionarMetodo('efectivo');
+}
+
+// Busca deuda del cliente por teléfono (debounced)
+var _fiadoDeudaTimer = null;
+function fiadoBuscarDeuda() {
+    clearTimeout(_fiadoDeudaTimer);
+    const tel = document.getElementById('fiadoTelefono').value.trim();
+    if (tel.length < 6) {
+        document.getElementById('fiadoAlertaDeuda').style.display = 'none';
+        return;
+    }
+    _fiadoDeudaTimer = setTimeout(() => _consultarDeudaFiado(tel), 600);
+}
+
+async function _consultarDeudaFiado(telefono) {
+    try {
+        const url = API_URL + '?action=consultarFiado&telefono=' + encodeURIComponent(telefono) + '&t=' + Date.now();
+        const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(8000) });
+        const data = await r.json();
+        const alerta = document.getElementById('fiadoAlertaDeuda');
+        if (data.ok && data.deuda && data.deuda.total > 0) {
+            _fiadoDatosCliente = data.deuda;
+            const tieneVencidos = data.deuda.vencidos > 0;
+            alerta.style.display = 'block';
+            alerta.style.background = tieneVencidos ? '#ffebee' : '#fff8e1';
+            alerta.style.color = tieneVencidos ? '#c62828' : '#e65100';
+            alerta.style.border = '1.5px solid ' + (tieneVencidos ? '#ef9a9a' : '#ffe082');
+            alerta.innerHTML = (tieneVencidos ? '🔴' : '🟡') +
+                ' <strong>' + data.deuda.nombre + '</strong> ya debe ' +
+                '<strong>$' + data.deuda.total.toLocaleString('es-AR') + '</strong>' +
+                ' (' + data.deuda.pendientes + ' fiado(s) pendiente(s)' +
+                (tieneVencidos ? ', <span style="color:#c62828">' + data.deuda.vencidos + ' vencido(s)</span>' : '') +
+                '). Podés continuar igual.';
+            // Autocompletar nombre si lo tenemos
+            if (data.deuda.nombre && !document.getElementById('fiadoCliente').value.trim()) {
+                document.getElementById('fiadoCliente').value = data.deuda.nombre;
+            }
+        } else {
+            alerta.style.display = 'none';
+            _fiadoDatosCliente = null;
+        }
+    } catch(e) {
+        // Sin conexión — no bloquear
+    }
+}
+
+async function confirmarFiado() {
+    const cliente = document.getElementById('fiadoCliente').value.trim();
+    const telefono = document.getElementById('fiadoTelefono').value.trim();
+    const vencimiento = document.getElementById('fiadoVencimiento').value;
+    const obs = document.getElementById('fiadoObs').value.trim();
+
+    if (!cliente) { mostrarToast('⚠️ Ingresá el nombre del cliente', 'rojo'); document.getElementById('fiadoCliente').focus(); return; }
+    if (!telefono) { mostrarToast('⚠️ Ingresá el teléfono', 'rojo'); document.getElementById('fiadoTelefono').focus(); return; }
+    if (!vencimiento) { mostrarToast('⚠️ Ingresá la fecha de vencimiento', 'rojo'); return; }
+
+    const btn = document.querySelector('#modalFiado button[onclick="confirmarFiado()"]');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Registrando...'; }
+
+    const total = window._totalConRedondeo || ventaActual.reduce((s,i) => s + i.price * i.qty, 0);
+    const cantItems = ventaActual.reduce((s,i) => s + (i.esPeso ? 1 : i.qty), 0);
+    const now = new Date();
+    const idFiado = 'FIADO-' + now.getFullYear() +
+        String(now.getMonth()+1).padStart(2,'0') +
+        String(now.getDate()).padStart(2,'0') + '-' +
+        String(now.getHours()).padStart(2,'0') +
+        String(now.getMinutes()).padStart(2,'0') +
+        String(now.getSeconds()).padStart(2,'0');
+
+    // Resumen del ticket para descripción
+    const descripcion = ventaActual.slice(0,3).map(i =>
+        (i.esPeso ? i.gramos + 'gr' : i.qty + 'x') + ' ' + i.name.substring(0,15)
+    ).join(' · ') + (ventaActual.length > 3 ? ' (+' + (ventaActual.length-3) + ')' : '');
+
+    const datosFiado = {
+        idFiado, cliente, telefono,
+        descripcion, cantItems,
+        total: Math.round(total),
+        vencimiento, obs,
+        ticket: null // se llenará después de guardar la venta
+    };
+
+    try {
+        // 1. Procesar venta normal (descuenta stock, guarda en ventas con método FIADO)
+        document.getElementById('modalFiado').style.display = 'none';
+        await _procesarVentaFiado(datosFiado);
+    } catch(e) {
+        mostrarToast('❌ Error al registrar: ' + e.message, 'rojo');
+        if (btn) { btn.disabled = false; btn.textContent = '🧾 Registrar fiado'; }
+    }
+}
+
+async function _procesarVentaFiado(datosFiado) {
+    const btn = document.getElementById('btnOkConfirm');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Procesando...'; }
+
+    const totalOriginal = ventaActual.reduce((s,i) => s + i.price * i.qty, 0);
+    const total = window._totalConRedondeo || totalOriginal;
+    const _t = new Date();
+    const hora = _t.getHours().toString().padStart(2,'0') + ':' + _t.getMinutes().toString().padStart(2,'0');
+
+    let stockOk = false;
+    let ticketNum = null;
+    try {
+        const ventaData = ventaActual.map(i => ({
+            id: i.esPeso ? i.idOriginal : i.id,
+            name: i.name, qty: i.qty,
+            esPeso: i.esPeso || false, gramos: i.gramos || 0,
+            precioVenta: i.price, precioModificado: i.precioModificado || false,
+            precioOriginal: i.precioOriginal || 0, precioCosto: i.precioCosto || 0
+        }));
+        const ventaPayload = { items: ventaData, metodoPago: 'FIADO', vendedor: vendedorActual };
+        const url = API_URL + '?action=vender&data=' + encodeURIComponent(JSON.stringify(ventaPayload));
+        const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
+        const resp = await r.json();
+        stockOk = resp.success === true;
+        ticketNum = resp.ticket || resp.numeroTicket || null;
+    } catch(e) { console.warn('⚠️ Error venta fiado:', e); }
+
+    datosFiado.ticket = ticketNum;
+
+    // 2. Guardar en hoja FIADOS
+    try {
+        const url2 = API_URL + '?action=guardarFiado&data=' + encodeURIComponent(JSON.stringify(datosFiado));
+        await fetch(url2, { redirect: 'follow', signal: AbortSignal.timeout(10000) });
+    } catch(e) { console.warn('⚠️ Error guardar fiado:', e); }
+
+    // 3. Guardar historial local
+    guardarVentaDia({ items: [...ventaActual], total, hora, stockRebajado: stockOk, metodoPago: 'FIADO' });
+
+    // 4. Actualizar stock local
+    ventaActual.forEach(item => {
+        const p = productos.find(pr => pr.id === (item.esPeso ? item.idOriginal : item.id));
+        if (!p) return;
+        if (item.esPeso) p.stock = Math.max(0, Math.round((p.stock - (item.gramos||0)/1000)*1000)/1000);
+        else p.stock = Math.max(0, p.stock - item.qty);
+    });
+
+    // 5. Toast y cierre
+    mostrarToast(`✅ Fiado de ${datosFiado.cliente} registrado — $${Math.round(total).toLocaleString('es-AR')}`, 'naranja');
+    seleccionarMetodo('efectivo');
+    ventaActual = [];
+    localStorage.removeItem(CARRITO_KEY);
+    actualizarRanking();
+    renderVenta();
+    if (btn) { btn.textContent = '✅ Confirmar cobro'; btn.disabled = false; btn.onclick = confirmarVenta; }
+    actualizarTotalConRedondeo();
+}
+</script>
 </body>
 </html>
+
+<script>
+// ========== SISTEMA FIADO ==========
+
+function abrirModalFiado() {
+    // Calcular total actual
+    const total = ventaActual.reduce((s, i) => {
+        if (i.esPeso) return s + i.price;
+        return s + (i.price * i.qty);
+    }, 0);
+    document.getElementById('fiadoTotal').textContent = '$' + Math.round(total).toLocaleString('es-AR');
+
+    // Fecha vencimiento default = hoy + 7 días
+    const venc = new Date();
+    venc.setDate(venc.getDate() + 7);
+    document.getElementById('fiadoVencimiento').value = venc.toISOString().split('T')[0];
+
+    // Limpiar campos
+    document.getElementById('fiadoCliente').value = '';
+    document.getElementById('fiadoTelefono').value = '';
+    document.getElementById('fiadoObs').value = '';
+    document.getElementById('fiadoAlertaDeuda').style.display = 'none';
+
+    document.getElementById('modalFiado').style.display = 'flex';
+    setTimeout(() => document.getElementById('fiadoCliente').focus(), 100);
+}
+
+function cerrarModalFiado() {
+    document.getElementById('modalFiado').style.display = 'none';
+    // Si cancela el fiado, volver a efectivo
+    if (metodoPagoActual === 'fiado') seleccionarMetodo('efectivo');
+}
+
+// Busca deuda pendiente del cliente por teléfono (debounce 600ms)
+let _fiadoDeudaTimer = null;
+function fiadoBuscarDeuda() {
+    clearTimeout(_fiadoDeudaTimer);
+    _fiadoDeudaTimer = setTimeout(async () => {
+        const tel = document.getElementById('fiadoTelefono').value.trim();
+        if (tel.length < 6) { document.getElementById('fiadoAlertaDeuda').style.display = 'none'; return; }
+        try {
+            const r = await fetch(API_URL + '?action=consultarFiado&telefono=' + encodeURIComponent(tel) + '&t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(8000) });
+            const d = await r.json();
+            const alerta = document.getElementById('fiadoAlertaDeuda');
+            if (d.ok && d.deuda > 0) {
+                const tieneVencidos = d.vencidos > 0;
+                alerta.style.display = 'block';
+                alerta.style.background = tieneVencidos ? '#ffebee' : '#fff8e1';
+                alerta.style.color = tieneVencidos ? '#b71c1c' : '#e65100';
+                alerta.style.border = `2px solid ${tieneVencidos ? '#ef9a9a' : '#ffcc02'}`;
+                alerta.innerHTML = tieneVencidos
+                    ? `🔴 Este cliente tiene <strong>$${d.deuda.toLocaleString('es-AR')} de deuda vencida</strong> (${d.vencidos} fiado${d.vencidos > 1 ? 's' : ''} sin pagar). Decidís vos.`
+                    : `🟡 Este cliente ya tiene <strong>$${d.deuda.toLocaleString('es-AR')} pendiente</strong> (${d.pendientes} fiado${d.pendientes > 1 ? 's' : ''}). Decidís vos.`;
+            } else {
+                alerta.style.display = 'none';
+            }
+        } catch(e) { /* sin conexión — igual se puede fiar */ }
+    }, 600);
+}
+
+async function confirmarFiado() {
+    const cliente = document.getElementById('fiadoCliente').value.trim();
+    const telefono = document.getElementById('fiadoTelefono').value.trim();
+    const vencimiento = document.getElementById('fiadoVencimiento').value;
+    const obs = document.getElementById('fiadoObs').value.trim();
+
+    if (!cliente) { mostrarToast('⚠️ Ingresá el nombre del cliente', 'rojo'); return; }
+    if (!telefono) { mostrarToast('⚠️ Ingresá el teléfono', 'rojo'); return; }
+    if (!ventaActual.length) { mostrarToast('⚠️ No hay productos en el carrito', 'rojo'); return; }
+
+    // Calcular totales
+    const totalFiado = ventaActual.reduce((s, i) => i.esPeso ? s + i.price : s + (i.price * i.qty), 0);
+    const cantItems  = ventaActual.reduce((s, i) => s + (i.esPeso ? 1 : i.qty), 0);
+    const resumen    = ventaActual.slice(0, 3).map(i => `${i.esPeso ? '1' : i.qty}x ${i.name.substring(0,20)}`).join(' · ') + (ventaActual.length > 3 ? ' ...' : '');
+    const ahora = new Date();
+    const idFiado = 'FIADO-' + ahora.getFullYear() + String(ahora.getMonth()+1).padStart(2,'0') + String(ahora.getDate()).padStart(2,'0') + '-' + String(ahora.getHours()).padStart(2,'0') + String(ahora.getMinutes()).padStart(2,'0') + String(ahora.getSeconds()).padStart(2,'0');
+
+    // Número de ticket (el que usa confirmarVenta)
+    const ticketNum = (typeof _ultimoTicket !== 'undefined' && _ultimoTicket) ? _ultimoTicket : ('T-' + Date.now());
+
+    const datosFiado = {
+        idFiado, ticket: ticketNum, cliente, telefono,
+        descripcion: resumen, cantidadItems: cantItems,
+        total: Math.round(totalFiado), vencimiento: vencimiento || '',
+        observaciones: obs
+    };
+
+    // Cerrar modal y procesar la venta normalmente (método = FIADO)
+    document.getElementById('modalFiado').style.display = 'none';
+
+    // Confirmar venta con método FIADO
+    await confirmarVenta();
+
+    // Registrar en hoja FIADOS en segundo plano
+    try {
+        await fetch(API_URL + '?action=guardarFiado&data=' + encodeURIComponent(JSON.stringify(datosFiado)), { redirect: 'follow', signal: AbortSignal.timeout(15000) });
+        mostrarToast(`🧾 Fiado registrado para ${cliente}`, 'naranja');
+    } catch(e) {
+        console.warn('⚠️ No se pudo guardar fiado en planilla:', e);
+        mostrarToast('⚠️ Fiado procesado pero no guardado en planilla — anotalo manual', 'rojo');
+    }
+}
+
+// Interceptar el botón Cobrar cuando el método es FIADO
+const _confirmarVentaOriginal = confirmarVenta;
+const _btnOkConfirm = document.getElementById('btnOkConfirm');
+if (_btnOkConfirm) {
+    _btnOkConfirm.addEventListener('click', (e) => {
+        if (metodoPagoActual === 'fiado') {
+            e.stopImmediatePropagation();
+            abrirModalFiado();
+        }
+    }, true); // capture = true para interceptar antes del onclick
+}
+</script>
