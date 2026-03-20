@@ -1294,6 +1294,9 @@ function doGet(e) {
       const datos = JSON.parse(decodeURIComponent(e.parameter.data));
       return respuestaJSON(ingresarMercaderia(datos));
     }
+    if (e && e.parameter && e.parameter.action === 'getInfoProducto') {
+      return respuestaJSON(obtenerInfoProducto(e.parameter.nombre || ''));
+    }
     if (e && e.parameter && e.parameter.action === 'ajusteRapido') {
       const datos = JSON.parse(decodeURIComponent(e.parameter.data));
       return respuestaJSON(ajustarProducto(datos));
