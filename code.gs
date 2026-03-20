@@ -1372,9 +1372,16 @@ function doGet(e) {
     if (e && e.parameter && e.parameter.action === 'getUltimasSeleccion') {
       return respuestaJSON(getUltimasSeleccion());
     }
+    if (e && e.parameter && e.parameter.action === 'listarFiados') {
+      return respuestaJSON(listarFiados());
+    }
+    if (e && e.parameter && e.parameter.action === 'cobrarFiado') {
+      var datosCobro = e.parameter.data ? JSON.parse(decodeURIComponent(e.parameter.data)) : {};
+      return respuestaJSON(cobrarFiado(datosCobro));
+    }
     if (e && e.parameter && e.parameter.action === 'guardarFiado') {
-      const datos = JSON.parse(decodeURIComponent(e.parameter.data));
-      return respuestaJSON(guardarFiado(datos));
+      var datosFiado = JSON.parse(decodeURIComponent(e.parameter.data));
+      return respuestaJSON(guardarFiado(datosFiado));
     }
     if (e && e.parameter && e.parameter.action === 'consultarFiado') {
       return respuestaJSON(consultarFiado(e.parameter.telefono));
@@ -2094,6 +2101,70 @@ function getUltimasSeleccion() {
 }
 
 // ══════════════════════════════════════════════
+function listarFiados() {
+  try {
+    var ss = SpreadsheetApp.openById(SS_ID);
+    var sh = ss.getSheetByName(HOJA_FIADOS);
+    if (!sh) return { ok: false, error: 'Hoja FIADOS no encontrada' };
+    var datos = sh.getDataRange().getValues();
+    var hoy = new Date(); hoy.setHours(0,0,0,0);
+    var fiados = [];
+    for (var i = 1; i < datos.length; i++) {
+      var fila = datos[i];
+      if (!fila[0]) continue;
+      var estado = String(fila[10] || '').toUpperCase();
+      if (estado === 'PAGADO') continue; // no mostrar pagados
+      // Recalcular si venció
+      var vencFecha = fila[9] ? new Date(String(fila[9]).split('T')[0] + 'T12:00:00') : null;
+      if (vencFecha && vencFecha < hoy && estado !== 'PAGADO') estado = 'VENCIDO';
+      fiados.push({
+        fila:            i + 1,
+        idFiado:         String(fila[0] || ''),
+        fecha:           String(fila[1] || ''),
+        ticket:          String(fila[2] || ''),
+        cliente:         String(fila[3] || ''),
+        telefono:        String(fila[4] || ''),
+        descripcion:     String(fila[5] || ''),
+        cantItems:       fila[6] || 0,
+        total:           parseFloat(fila[8]) || 0,
+        fechaVencimiento: fila[9] ? String(fila[9]).split('T')[0] : '',
+        estado:          estado
+      });
+    }
+    fiados.sort(function(a, b) {
+      // Vencidos primero, luego por fecha de vencimiento
+      if (a.estado === 'VENCIDO' && b.estado !== 'VENCIDO') return -1;
+      if (b.estado === 'VENCIDO' && a.estado !== 'VENCIDO') return 1;
+      return (a.fechaVencimiento || '').localeCompare(b.fechaVencimiento || '');
+    });
+    return { ok: true, fiados: fiados };
+  } catch(e) {
+    return { ok: false, error: e.toString() };
+  }
+}
+
+function cobrarFiado(datos) {
+  try {
+    if (!datos.idFiado) return { success: false, mensaje: 'Falta ID del fiado' };
+    var ss = SpreadsheetApp.openById(SS_ID);
+    var sh = ss.getSheetByName(HOJA_FIADOS);
+    if (!sh) return { success: false, mensaje: 'Hoja FIADOS no encontrada' };
+    var rows = sh.getDataRange().getValues();
+    for (var i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) === String(datos.idFiado)) {
+        var fechaPago = datos.fechaPago || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+        sh.getRange(i + 1, 11).setValue('PAGADO');        // K: Estado
+        sh.getRange(i + 1, 12).setValue(fechaPago);       // L: Fecha Pago
+        sh.getRange(i + 1, 13).setValue(datos.metodoPago || 'EFECTIVO'); // M: Método Pago
+        return { success: true };
+      }
+    }
+    return { success: false, mensaje: 'Fiado no encontrado: ' + datos.idFiado };
+  } catch(e) {
+    return { success: false, mensaje: e.toString() };
+  }
+}
+
 // FIADOS — guardar y consultar
 // ══════════════════════════════════════════════
 var HOJA_FIADOS = 'FIADOS';
@@ -2128,11 +2199,17 @@ function guardarFiado(datos) {
       datos.total || 0,           // H: Precio Unitario (total ticket)
       datos.total || 0,           // I: Total
       datos.vencimiento || '',    // J: Fecha Vencimiento
-      estado,                     // K: Estado
+      '',                         // K: Estado — la fórmula =SI(L<>"";"PAGADO";SI(HOY()>J;"VENCIDO";"PENDIENTE")) lo calcula
       '',                         // L: Fecha Pago
       '',                         // M: Método Pago
       datos.obs || ''             // N: Observaciones
     ]);
+
+    // Insertar fórmula de estado en la celda K de la nueva fila
+    var nuevaFila = sh.getLastRow();
+    sh.getRange(nuevaFila, 11).setFormula(
+      '=SI(D' + nuevaFila + '="";"";SI(L' + nuevaFila + '<>"";"PAGADO";SI(Y(J' + nuevaFila + '<>"";HOY()>FECHANUMERO(J' + nuevaFila + '));"VENCIDO";"PENDIENTE")))'
+    );
 
     return { success: true, idFiado: idFiado };
   } catch(e) {
