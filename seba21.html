@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v223</title>
+    <title>Copihue — POS v224</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -1405,6 +1405,13 @@
     <div id="infoProdHoy" style="margin-bottom:12px;"></div>
     <!-- Últimos 7 días -->
     <div id="infoProdSemana"></div>
+    <!-- Botón pausar lista de compra -->
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.08);">
+      <button id="btnPausarListaCompra" onclick="togglePausarListaCompra()"
+        style="width:100%;padding:11px;border-radius:12px;border:none;font-size:0.88rem;font-weight:700;cursor:pointer;transition:all 0.2s;">
+        ⏸️ Pausar en lista de compra
+      </button>
+    </div>
   </div>
 </div>
 
@@ -5532,6 +5539,15 @@ function abrirInfoProd(id) {
 
     const modal = document.getElementById('modalInfoProd');
     modal.style.display = 'flex';
+    modal._productoId = id; // guardar id para togglePausarListaCompra
+
+    // Botón pausar — estado actual
+    const btnPausar = document.getElementById('btnPausarListaCompra');
+    const pausado = p.pausadoListaCompra === true || p.pausadoListaCompra === 'SI';
+    btnPausar.textContent = pausado ? '▶️ Reactivar en lista de compra' : '⏸️ Pausar en lista de compra';
+    btnPausar.style.background = pausado ? 'rgba(46,125,50,0.25)' : 'rgba(255,255,255,0.07)';
+    btnPausar.style.color = pausado ? '#66bb6a' : '#aaa';
+    btnPausar.style.border = pausado ? '1px solid rgba(102,187,106,0.4)' : '1px solid rgba(255,255,255,0.1)';
 }
 
 function cerrarInfoProd(e) {
@@ -6842,21 +6858,38 @@ function lcRenderizar(filtro) {
       else if (it.urgencia === 2) tit = '🟠 Riesgo vencimiento';
       else if (it.urgencia === 3) tit = '⏰ Stock crítico (≤3 días)';
       else if (it.urgencia === 4) tit = '🟡 Stock bajo (≤7 días)';
+      else if (it.urgencia === 99) tit = '⏸️ Pausados — no comprar ahora';
       else tit = '🟢 Compra normal';
       html += '<div style="font-size:0.7rem;font-weight:900;color:#888;text-transform:uppercase;letter-spacing:.8px;margin:14px 4px 6px;">' + tit + '</div>';
     }
 
     var esUrgente = it.urgencia <= 2;
     var esPiso    = it.urgencia === 0;
+    var esPausado = it.pausado === true;
     var cardClass = esPiso ? 'lc-card piso' : (esUrgente ? 'lc-card urgente' : 'lc-card');
 
     var diasTxt = (it.diasStock !== null) ? it.diasStock + 'd stock' : 'sin historial';
     var provTxt = it.proveedor ? '<span style="font-size:0.65rem;color:#888;">📦 ' + it.proveedor + '</span>' : '';
-    var badgeTxt = esUrgente
-      ? '<span class="lc-badge-urg">' + (esPiso ? '🔔 PISO' : it.prioridad) + '</span>'
-      : '<span class="lc-badge-ok">OK</span>';
+    var badgeTxt = esPausado
+      ? '<span style="background:#607d8b;color:white;font-size:0.65rem;font-weight:700;padding:2px 7px;border-radius:8px;">⛔ INACTIVO</span>'
+      : (esUrgente
+          ? '<span class="lc-badge-urg">' + (esPiso ? '🔔 PISO' : it.prioridad) + '</span>'
+          : '<span class="lc-badge-ok">OK</span>');
 
-    html += '<div class="' + cardClass + '">'
+    var opacidad = esPausado ? 'opacity:0.5;' : '';
+
+    // Buscar id del producto para el botón
+    var prodRef = productos.find(function(p){ return p.name === it.nombre; });
+    var prodId  = prodRef ? prodRef.id : null;
+    var btnPausarHtml = prodId !== null
+      ? '<button onclick="lcTogglePausado(' + prodId + ', this)" '
+        + 'style="margin-top:6px;width:100%;padding:5px 0;border:1px solid #ccc;border-radius:8px;background:white;'
+        + 'font-size:0.7rem;color:#607d8b;cursor:pointer;">'
+        + (esPausado ? '▶️ Reactivar' : '⛔ Marcar inactivo')
+        + '</button>'
+      : '';
+
+    html += '<div class="' + cardClass + '" style="' + opacidad + '">'
       + '<div style="flex:1;min-width:0;">'
       +   '<div style="font-size:0.82rem;font-weight:700;color:#222;line-height:1.3;margin-bottom:3px;">' + it.nombre + '</div>'
       +   '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'
@@ -6865,6 +6898,7 @@ function lcRenderizar(filtro) {
       +     '<span style="font-size:0.68rem;color:#888;">⏱ ' + diasTxt + '</span>'
       +     provTxt
       +   '</div>'
+      +   btnPausarHtml
       + '</div>'
       + '<div style="text-align:right;min-width:80px;">'
       +   '<div style="font-size:1rem;font-weight:900;color:#e65100;">x' + it.cantidad + '</div>'
@@ -6879,6 +6913,38 @@ function lcRenderizar(filtro) {
   });
 
   document.getElementById('lcCuerpo').innerHTML = html;
+}
+
+async function lcTogglePausado(id, btn) {
+  var p = productos.find(function(pr){ return pr.id === id; });
+  if (!p) return;
+
+  var pausado = p.pausadoListaCompra === true || p.pausadoListaCompra === 'SI';
+  var nuevoPausado = !pausado;
+
+  btn.disabled = true;
+  btn.textContent = '⏳...';
+
+  try {
+    var datos = { id: id, pausado: nuevoPausado ? 'SI' : '' };
+    var url = API_URL + '?action=pausarListaCompra&data=' + encodeURIComponent(JSON.stringify(datos));
+    var r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(10000) });
+    var resp = await r.json();
+    if (resp.success) {
+      p.pausadoListaCompra = nuevoPausado ? 'SI' : '';
+      mostrarToast(nuevoPausado ? '⛔ ' + p.name + ' marcado INACTIVO' : '▶️ ' + p.name + ' reactivado', nuevoPausado ? '' : 'verde');
+      // Recargar la lista para reflejar el cambio
+      abrirListaCompra();
+    } else {
+      btn.disabled = false;
+      btn.textContent = pausado ? '▶️ Reactivar' : '⛔ Marcar inactivo';
+      mostrarToast('❌ Error: ' + (resp.mensaje || ''), 'rojo');
+    }
+  } catch(e) {
+    btn.disabled = false;
+    btn.textContent = pausado ? '▶️ Reactivar' : '⛔ Marcar inactivo';
+    mostrarToast('❌ Sin conexión', 'rojo');
+  }
 }
 
 function lcCopiarTexto() {
@@ -7870,6 +7936,46 @@ setTimeout(async () => {
     } catch(e) {}
 }, 8000);
 // ============================================
+
+// ========== PAUSAR EN LISTA DE COMPRA ==========
+async function togglePausarListaCompra() {
+    const modal = document.getElementById('modalInfoProd');
+    const id = modal._productoId;
+    if (!id) return;
+    const p = productos.find(pr => pr.id === id);
+    if (!p) return;
+
+    const pausado = p.pausadoListaCompra === true || p.pausadoListaCompra === 'SI';
+    const nuevoPausado = !pausado;
+
+    const btn = document.getElementById('btnPausarListaCompra');
+    btn.disabled = true; btn.textContent = '⏳ Guardando...';
+
+    try {
+        const datos = { id, pausado: nuevoPausado ? 'SI' : '' };
+        const r = await fetch(API_URL + '?action=setPausadoListaCompra&data=' + encodeURIComponent(JSON.stringify(datos)),
+            { redirect: 'follow', signal: AbortSignal.timeout(10000) });
+        const resp = await r.json();
+        if (resp.success) {
+            p.pausadoListaCompra = nuevoPausado ? 'SI' : '';
+            btn.disabled = false;
+            btn.textContent = nuevoPausado ? '▶️ Reactivar en lista de compra' : '⏸️ Pausar en lista de compra';
+            btn.style.background = nuevoPausado ? 'rgba(46,125,50,0.25)' : 'rgba(255,255,255,0.07)';
+            btn.style.color = nuevoPausado ? '#66bb6a' : '#aaa';
+            btn.style.border = nuevoPausado ? '1px solid rgba(102,187,106,0.4)' : '1px solid rgba(255,255,255,0.1)';
+            mostrarToast(nuevoPausado ? '⏸️ Pausado en lista de compra' : '▶️ Reactivado en lista de compra', nuevoPausado ? '' : 'verde');
+        } else {
+            btn.disabled = false;
+            btn.textContent = nuevoPausado ? '⏸️ Pausar en lista de compra' : '▶️ Reactivar en lista de compra';
+            mostrarToast('❌ ' + (resp.mensaje || 'Error'), 'rojo');
+        }
+    } catch(e) {
+        btn.disabled = false;
+        btn.textContent = pausado ? '▶️ Reactivar en lista de compra' : '⏸️ Pausar en lista de compra';
+        mostrarToast('❌ Error de conexión', 'rojo');
+    }
+}
+// =============================================
 
 // ========== SALIDA INTERNA ==========
 var _salidaProducto = null;
