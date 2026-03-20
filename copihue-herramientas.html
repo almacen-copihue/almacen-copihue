@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-<title>v1 · Copihue · Herramientas</title>
+<title>v2 · Copihue · Herramientas</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;700&display=swap');
 
@@ -628,6 +628,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
       <div class="topbar-title" id="topbarTitle">Dashboard</div>
       <div class="topbar-subtitle" id="topbarSub">Almacén Copihue</div>
     </div>
+    <span style="font-family:var(--mono);font-size:0.7rem;color:var(--muted);margin-left:10px;">v2</span>
     <a href="seba21.html" class="topbar-back">← Volver al POS</a>
   </div>
 
@@ -1151,17 +1152,29 @@ function renderListaCompra() {
 async function lcTogglePausado(id, btn) {
   const p = _productos.find(pr => pr.id === id);
   if (!p) return;
+
   const pausado = p.pausadoListaCompra === 'SI';
-  btn.disabled = true; btn.textContent = '⏳';
-  try {
-    const r = await fetch(API_URL + '?action=setPausadoListaCompra&data=' + encodeURIComponent(JSON.stringify({ id, pausado: pausado ? '' : 'SI' })), { redirect: 'follow', signal: AbortSignal.timeout(10000) });
-    const resp = await r.json();
-    if (resp.success) {
-      p.pausadoListaCompra = pausado ? '' : 'SI';
-      toast(pausado ? '▶️ Reactivado' : '⛔ Marcado inactivo', 'ok');
-      cargarListaCompra();
-    } else { btn.disabled = false; btn.textContent = pausado ? '▶️ Reactivar' : 'Marcar inactivo'; toast('❌ Error', 'err'); }
-  } catch(e) { btn.disabled = false; btn.textContent = pausado ? '▶️ Reactivar' : 'Marcar inactivo'; toast('❌ Sin conexión', 'err'); }
+  const nuevoPausado = !pausado;
+
+  // Actualizar UI al instante — sin esperar la API
+  p.pausadoListaCompra = nuevoPausado ? 'SI' : '';
+  renderListaCompra();
+
+  // Sincronizar con planilla en segundo plano
+  fetch(API_URL + '?action=setPausadoListaCompra&data=' + encodeURIComponent(JSON.stringify({ id, pausado: nuevoPausado ? 'SI' : '' })),
+    { redirect: 'follow' }
+  ).then(r => r.json()).then(resp => {
+    if (!resp.success) {
+      // Revertir si falló
+      p.pausadoListaCompra = pausado ? 'SI' : '';
+      renderListaCompra();
+      toast('❌ Error al guardar', 'err');
+    }
+  }).catch(() => {
+    p.pausadoListaCompra = pausado ? 'SI' : '';
+    renderListaCompra();
+    toast('❌ Sin conexión', 'err');
+  });
 }
 
 function lcCopiar() {
