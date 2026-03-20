@@ -1349,19 +1349,20 @@ async function confirmarAbono() {
   const metodo = document.getElementById('abonoMetodo').value;
   if (!monto || monto <= 0) { toast('⚠️ Ingresá el monto', 'err'); return; }
 
+  const totalDeuda = g.fiados.reduce((s,f) => s + (parseFloat(f.total)||0), 0);
+
   const btn = document.getElementById('btnConfAbono');
   btn.disabled = true; btn.textContent = '⏳...';
 
-  // Distribuir el abono en los fiados más viejos primero
+  const fiadosOrdenados = [...g.fiados].sort((a,b) => (a.fecha||'').localeCompare(b.fecha||''));
   let restante = monto;
   let cobrados = 0;
-  const fiadosOrdenados = [...g.fiados].sort((a,b) => (a.fecha||'').localeCompare(b.fecha||''));
 
   for (const f of fiadosOrdenados) {
     if (restante <= 0) break;
     const montoFiado = parseFloat(f.total||0);
     if (restante >= montoFiado) {
-      // Cobrar este fiado completo
+      // Cancela este fiado completo
       try {
         const datos = { idFiado: f.idFiado, metodoPago: metodo, fechaPago: new Date().toISOString().split('T')[0] };
         const r = await fetch(API_URL + '?action=cobrarFiado&data=' + encodeURIComponent(JSON.stringify(datos)), { redirect: 'follow', signal: AbortSignal.timeout(10000) });
@@ -1369,18 +1370,46 @@ async function confirmarAbono() {
         if (resp.success) { restante -= montoFiado; cobrados++; }
       } catch(e) {}
     }
-    // Si el abono no alcanza para un fiado completo, solo registramos nota — no cobrar parcial
+  }
+
+  // Si quedó restante sin cancelar ningún fiado completo (abono parcial)
+  // Actualizar observación del fiado más viejo con el abono registrado
+  if (restante === monto && fiadosOrdenados.length > 0) {
+    // No se canceló ninguno — registrar abono parcial en observaciones vía cobrarFiado con obs
+    try {
+      const f0 = fiadosOrdenados[0];
+      const obsAbono = `Abono $${monto.toLocaleString('es-AR')} (${metodo}) ${new Date().toLocaleDateString('es-AR')}`;
+      const datos = { idFiado: f0.idFiado, metodoPago: metodo, fechaPago: '', obs: obsAbono, esAbonoParcial: true };
+      await fetch(API_URL + '?action=cobrarFiado&data=' + encodeURIComponent(JSON.stringify(datos)), { redirect: 'follow', signal: AbortSignal.timeout(10000) });
+    } catch(e) {}
   }
 
   btn.disabled = false; btn.textContent = '💵 Confirmar abono';
   document.getElementById('modalAbono').classList.remove('open');
-  const pagado = monto - restante;
-  toast(`✅ Abono $${Math.round(pagado).toLocaleString('es-AR')} registrado — ${cobrados} fiado${cobrados>1?'s':''} cancelado${cobrados>1?'s':''}`, 'ok');
-  // WA de confirmación
+
+  const quedaPendiente = totalDeuda - monto;
+  const msgToast = cobrados > 0
+    ? `✅ Abono $${Math.round(monto).toLocaleString('es-AR')} — ${cobrados} fiado${cobrados>1?'s':''} cancelado${cobrados>1?'s':''}`
+    : `✅ Abono $${Math.round(monto).toLocaleString('es-AR')} registrado${quedaPendiente > 0 ? ' — queda $'+Math.round(quedaPendiente).toLocaleString('es-AR') : ''}`;
+  toast(msgToast, 'ok');
+
+  // WA con montos correctos
   const tel = (g.telefono||'').replace(/\D/g,'');
   if (tel) {
-    const msg = `💵 *ABONO REGISTRADO — Almacén Copihue*\n\n👤 ${g.cliente}\n💰 Abonó: *$${Math.round(pagado).toLocaleString('es-AR')}*\n📅 ${new Date().toLocaleDateString('es-AR')}\n${restante>0?'Queda pendiente: $'+Math.round(restante).toLocaleString('es-AR'):'✅ Deuda cancelada'}\n\n📍 Almacén Copihue`;
-    let num = tel; if (!num.startsWith('549')) num = '549'+num;
+    const metodoEmoji = { EFECTIVO:'💵', QR:'📱', TRANSFERENCIA:'🏦' }[metodo] || '💵';
+    const msg = [
+      `💵 *ABONO REGISTRADO — Almacén Copihue*`,
+      ``,
+      `👤 ${g.cliente}`,
+      `${metodoEmoji} Abonó: *$${Math.round(monto).toLocaleString('es-AR')}*`,
+      `📅 ${new Date().toLocaleDateString('es-AR')}`,
+      quedaPendiente > 0
+        ? `📋 Queda pendiente: $${Math.round(quedaPendiente).toLocaleString('es-AR')}`
+        : `✅ Deuda cancelada`,
+      ``,
+      `📍 Almacén Copihue`
+    ].join('\n');
+    let num = tel; if (!num.startsWith('549') && !num.startsWith('54')) num = '549'+num;
     window.open('https://wa.me/'+num+'?text='+encodeURIComponent(msg),'_blank');
   }
   cargarFiados();

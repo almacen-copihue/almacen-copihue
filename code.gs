@@ -1307,6 +1307,10 @@ function doGet(e) {
       var datosSalida = JSON.parse(decodeURIComponent(e.parameter.data));
       return respuestaJSON(registrarSalidaInterna(datosSalida));
     }
+    if (e && e.parameter && e.parameter.action === 'setPausadoListaCompra') {
+      var datosPausa = JSON.parse(decodeURIComponent(e.parameter.data));
+      return respuestaJSON(setPausadoListaCompra(datosPausa));
+    }
     if (e && e.parameter && e.parameter.action === 'ajusteRapido') {
       const datos = JSON.parse(decodeURIComponent(e.parameter.data));
       return respuestaJSON(ajustarProducto(datos));
@@ -1439,6 +1443,7 @@ function doGet(e) {
         diaCritico: fila.length > 16 ? String(fila[16] || '').trim().toLowerCase() : '',
         stockMin: parseInt(fila[13]) || 0,
         prioridad: fila.length > 31 ? String(fila[31] || '').trim().toUpperCase() : 'NORMAL',
+        pausadoListaCompra: fila.length > 34 ? String(fila[34] || '').trim().toUpperCase() : '',
         ultimaPromo: ''
       };
 
@@ -1853,15 +1858,17 @@ function getListaCompraJSON() {
         var row = invData[i];
         var nombre = String(row[0] || '').trim();
         if (!nombre) continue;
-        invMap[nombre] = {
-          categoria: String(row[2] || '').trim().toUpperCase(),  // col C
+        var nombreKey = nombre.toUpperCase().replace(/\s+/g,' ');
+        invMap[nombreKey] = {
+          categoria: String(row[2] || '').trim().toUpperCase(),
           v7:        parseFloat(row[21]) || 0,
           v30:       parseFloat(row[22]) || 0,
           diasStock: row[24] !== '' && row[24] !== null ? (parseFloat(row[24]) || 0) : null,
           riesgo:    String(row[30] || '').trim().toUpperCase(),
           prioridad: String(row[31] || '').trim().toUpperCase(),
           pisoManu:  row[32] !== '' && row[32] !== null ? parseFloat(row[32]) : null,
-          alertaPiso: String(row[33] || '').trim().toUpperCase()
+          alertaPiso: String(row[33] || '').trim().toUpperCase(),
+          pausado:   String(row[34] || '').trim().toUpperCase() === 'SI'
         };
       }
     }
@@ -1897,7 +1904,7 @@ function getListaCompraJSON() {
       var total     = parseFloat(lr[5]) || 0;
       var proveedor = String(lr[6] || '').trim();
 
-      var inv = invMap[nombre] || {};
+      var inv = invMap[nombre.toUpperCase().replace(/\s+/g,' ')] || {};
 
       // Excluir categorías que no se recompran
       var catInv = inv.categoria || '';
@@ -1909,6 +1916,17 @@ function getListaCompraJSON() {
       var riesgo    = inv.riesgo    || '';
       var prioridad = inv.prioridad || '';
       var alertaPiso = inv.alertaPiso || '';
+      var pausado   = inv.pausado   || false;
+
+      // Productos pausados — van al final, sin urgencia
+      if (pausado) {
+        items.push({
+          nombre, stock, minimo, cantidad, precio, costo: costoMap[nomKey] || 0,
+          total, totalVenta: total, proveedor, diasStock, urgencia: 99,
+          prioridad: 'PAUSADO', pausado: true
+        });
+        continue;
+      }
 
       // Calcular urgencia según reglas de Javier:
       // 0 = piso manual PEDIR YA
@@ -2194,9 +2212,20 @@ function cobrarFiado(datos) {
     for (var i = 1; i < rows.length; i++) {
       if (String(rows[i][0]) === String(datos.idFiado)) {
         var fechaPago = datos.fechaPago || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
-        sh.getRange(i + 1, 11).setValue('PAGADO');        // K: Estado
-        sh.getRange(i + 1, 12).setValue(fechaPago);       // L: Fecha Pago
-        sh.getRange(i + 1, 13).setValue(datos.metodoPago || 'EFECTIVO'); // M: Método Pago
+        if (datos.esAbonoParcial) {
+          // Solo agregar observación, no cambiar estado a PAGADO
+          var obsActual = String(rows[i][13] || '');
+          var nuevaObs = obsActual ? obsActual + ' | ' + (datos.obs||'') : (datos.obs||'');
+          sh.getRange(i + 1, 14).setValue(nuevaObs); // N: Observaciones
+        } else {
+          sh.getRange(i + 1, 11).setValue('PAGADO');        // K: Estado
+          sh.getRange(i + 1, 12).setValue(fechaPago);       // L: Fecha Pago
+          sh.getRange(i + 1, 13).setValue(datos.metodoPago || 'EFECTIVO'); // M: Método Pago
+          if (datos.obs) {
+            var obsAct = String(rows[i][13] || '');
+            sh.getRange(i + 1, 14).setValue(obsAct ? obsAct + ' | ' + datos.obs : datos.obs);
+          }
+        }
         return { success: true };
       }
     }
@@ -2205,6 +2234,25 @@ function cobrarFiado(datos) {
     return { success: false, mensaje: e.toString() };
   }
 }
+
+// ========== PAUSADO LISTA COMPRA ==========
+// Columna AI = índice 34 (base 0)
+var COL_PAUSADO_LC = 35; // columna 35 en Sheets (1-based) = AI
+
+function setPausadoListaCompra(datos) {
+  try {
+    var ss  = SpreadsheetApp.openById(SS_ID);
+    var sh  = ss.getSheetByName(HOJA_INVENTARIO);
+    if (!sh) return { success: false, mensaje: 'Hoja inventario no encontrada' };
+    var filaIdx = parseInt(datos.id);
+    if (!filaIdx || filaIdx < 1) return { success: false, mensaje: 'ID inválido' };
+    sh.getRange(filaIdx + 1, COL_PAUSADO_LC).setValue(datos.pausado || '');
+    return { success: true };
+  } catch(e) {
+    return { success: false, mensaje: e.toString() };
+  }
+}
+// ==========================================
 
 // ========== SALIDA INTERNA ==========
 function registrarSalidaInterna(datos) {
