@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Almacén Copihue v98</title>
+    <title>Almacén Copihue v99</title>
     
     <!-- META TAGS PARA PWA -->
     <meta name="theme-color" content="#2e7d32">
@@ -2378,6 +2378,26 @@ function _aplicarHorarioUI() {
     document.querySelectorAll('[data-hora-apertura]').forEach(el => el.textContent = apStr);
 }
 
+// Verifica si la hora actual está dentro del horario de una sección
+function _dentroDeHorarioIndex(cfg, tipo, diaIdx) {
+    try {
+        const rowIni = cfg[tipo + '|Hora inicio oferta'] || cfg['Hora inicio oferta'];
+        const rowCie = cfg[tipo + '|Hora cierre oferta'] || cfg['Hora cierre oferta'];
+        if (!rowIni || !rowCie) return false;
+        const ini = rowIni[diaIdx];
+        const cie = rowCie[diaIdx];
+        if (ini === null || ini === undefined || cie === null || cie === undefined) return false;
+        const ph = _parsearValorHora(ini);
+        const pc = _parsearValorHora(cie);
+        if (!ph || !pc) return false;
+        const hIni = ph.h + ph.m / 60;
+        const hCie = pc.h + pc.m / 60;
+        const ahora = new Date();
+        const horaActual = ahora.getHours() + ahora.getMinutes() / 60;
+        return horaActual >= hIni && horaActual < hCie;
+    } catch(e) { return false; }
+}
+
 // ── Cargar config_sistema desde GAS ──
 async function cargarConfigSistema() {
     try {
@@ -2402,8 +2422,16 @@ async function cargarConfigSistema() {
             const row = claves[tipo];
             if (!row) return;
             const val = row[diaIdx];
-            OFERTA_ACTIVA[tipo] = (val === 1 || val === '1' || val === true);
-            console.log('🔘 ' + tipo + ': ' + (OFERTA_ACTIVA[tipo] ? '🟢 ACTIVA' : '🔴 inactiva'));
+            // 1=forzado ON | 0=auto horario | vacío/null=forzado OFF
+            if (val === 1 || val === '1' || val === true) {
+                OFERTA_ACTIVA[tipo] = true;
+            } else if (val === 0 || val === '0') {
+                // Auto — respetar horario de inicio y cierre
+                OFERTA_ACTIVA[tipo] = _dentroDeHorarioIndex(cfg, tipo, diaIdx);
+            } else {
+                OFERTA_ACTIVA[tipo] = false;
+            }
+            console.log('🔘 ' + tipo + ': ' + (OFERTA_ACTIVA[tipo] ? '🟢 ACTIVA' : '🔴 inactiva') + ' (val=' + val + ')');
         });
 
         // Leer límite configurable de destacadas
@@ -3611,6 +3639,8 @@ function processAPIData(apiData) {
 
 function actualizarSoloOfertas() {
     const GAS_URL = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
+    // Re-evaluar horario automático cada 60s sin ir a config
+    cargarConfigSistema().catch(() => {});
     fetch(GAS_URL + '?action=getOfertas&t=' + Date.now(), { redirect: 'follow' })
         .then(r => r.json())
         .then(d => {
