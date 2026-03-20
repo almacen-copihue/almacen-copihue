@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Almacén Copihue v97</title>
+    <title>Almacén Copihue v98</title>
     
     <!-- META TAGS PARA PWA -->
     <meta name="theme-color" content="#2e7d32">
@@ -3642,45 +3642,51 @@ function simplificarNombre(nombre) {
 function renderCategories() {
     const categoriesContainer = document.getElementById('categories');
     if (!categoriesContainer) return;
-    
-    const categories = [...new Set(products.map(p => p.category))];
-    
-    // Verificar si hay PROMOS con stock
-    const promosConStock = products.filter(p => 
-        p.category === 'PROMOS' && 
-        p.stockNumber > 0
-    ).length > 0;
-    
+
+    const categories = [...new Set(products.map(p => p.category))].sort();
+    const promosConStock = products.filter(p => p.category === 'PROMOS' && p.stockNumber > 0).length > 0;
+
+    // Si los botones ya existen y son los mismos — solo actualizar active, no recrear
+    const existentes = categoriesContainer.querySelectorAll('.category-btn');
+    const catActuales = [...existentes].map(b => b.getAttribute('data-category'));
+    const mismasCats = categories.length === catActuales.length && categories.every(c => catActuales.includes(c));
+
+    if (mismasCats && existentes.length > 0) {
+        // Solo actualizar clase active sin tocar el DOM
+        existentes.forEach(btn => {
+            const cat = btn.getAttribute('data-category');
+            btn.classList.toggle('active', cat === currentCategory);
+            if (cat === 'PROMOS') {
+                btn.classList.toggle('promo-activa', promosConStock);
+                btn.textContent = 'PROMOS' + (promosConStock ? ' ✨' : '');
+            }
+        });
+        return;
+    }
+
+    // Primera carga o categorías cambiaron — recrear botones
     categoriesContainer.innerHTML = categories.map(category => {
         const esPromo = category === 'PROMOS';
         const tieneStockPromo = esPromo && promosConStock;
-        const clasePromoActiva = tieneStockPromo ? 'promo-activa' : '';
-        
-        return `
-            <button class="category-btn ${category === currentCategory ? 'active' : ''} ${clasePromoActiva}" 
-                    data-category="${category}">
-                ${category} ${tieneStockPromo ? '✨' : ''}
-            </button>
-        `;
+        return `<button class="category-btn ${category === currentCategory ? 'active' : ''} ${tieneStockPromo ? 'promo-activa' : ''}"
+                        data-category="${category}">
+                    ${category}${tieneStockPromo ? ' ✨' : ''}
+                </button>`;
     }).join('');
-    
+
     categoriesContainer.querySelectorAll('.category-btn').forEach(btn => {
         btn.addEventListener('click', function() {
             currentCategory = this.getAttribute('data-category');
-            paginaActual = 1; // Resetear a página 1 al cambiar categoría
+            paginaActual = 1;
             categoriesContainer.querySelectorAll('.category-btn').forEach(b => b.classList.remove('active'));
             this.classList.add('active');
             renderizarProductosNormales();
-            
             document.getElementById('floatingHome').style.display = 'flex';
         });
     });
-    
-    // Si hay promos activas, mostrar notificación sutil
+
     if (promosConStock && currentCategory !== 'PROMOS') {
-        setTimeout(() => {
-            showNotification("🎉 ¡Hay promociones disponibles! Toca 'PROMOS' para ver", "info");
-        }, 1000);
+        setTimeout(() => { showNotification("🎉 ¡Hay promociones disponibles! Toca 'PROMOS' para ver", "info"); }, 1000);
     }
 }
 
