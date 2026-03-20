@@ -782,6 +782,30 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
   </div>
 </div>
 
+<!-- MODAL ABONO -->
+<div class="modal-overlay" id="modalAbono">
+  <div class="modal-box">
+    <div class="modal-title">💵 Registrar abono</div>
+    <div class="modal-info">
+      <strong id="abonoClienteNombre"></strong><br>
+      Deuda total: <span id="abonoDeudaTotal" style="font-weight:700;color:var(--accent);font-family:var(--mono);"></span>
+    </div>
+    <label class="form-label">Monto a abonar</label>
+    <input class="form-input" id="abonoMonto" type="number" min="1" placeholder="Ej: 1500" oninput="abonoCalcResto()" style="margin-bottom:10px;">
+    <div id="abonoResto" style="display:none;font-size:0.82rem;padding:8px 12px;background:var(--bg);border-radius:8px;margin-bottom:14px;"></div>
+    <label class="form-label">Método de pago</label>
+    <select class="form-input" id="abonoMetodo" style="margin-bottom:16px;">
+      <option value="EFECTIVO">💵 Efectivo</option>
+      <option value="QR">📱 QR</option>
+      <option value="TRANSFERENCIA">🏦 Transferencia</option>
+    </select>
+    <div style="display:flex;gap:10px;">
+      <button class="btn btn-secondary" onclick="document.getElementById('modalAbono').classList.remove('open')">Cancelar</button>
+      <button class="btn btn-primary" id="btnConfAbono" onclick="confirmarAbono()" style="flex:2;">💵 Confirmar abono</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script>
@@ -1171,37 +1195,205 @@ function renderFiados() {
     document.getElementById('fiadosCuerpo').innerHTML = '<div style="text-align:center;padding:60px;color:var(--muted);">✅ No hay fiados pendientes</div>';
     return;
   }
+
+  // Agrupar por teléfono (identificador único del cliente)
+  const grupos = {};
+  _fiadosPendientes.forEach((f, i) => {
+    const key = f.telefono || f.cliente;
+    if (!grupos[key]) grupos[key] = { cliente: f.cliente, telefono: f.telefono, fiados: [] };
+    grupos[key].fiados.push({ ...f, _idx: i });
+  });
+
   const total = _fiadosPendientes.reduce((s,f) => s + (parseFloat(f.total)||0), 0);
+  const clientes = Object.keys(grupos).length;
+
   let html = `<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
-    <div class="lc-stat" style="flex:1;min-width:120px;"><div class="sv">${_fiadosPendientes.length}</div><div class="sl">Pendientes</div></div>
-    <div class="lc-stat" style="flex:1;min-width:120px;"><div class="sv" style="color:var(--danger)">${_fiadosPendientes.filter(f=>f.estado==='VENCIDO').length}</div><div class="sl">Vencidos</div></div>
-    <div class="lc-stat" style="flex:1;min-width:120px;"><div class="sv">$${Math.round(total).toLocaleString('es-AR')}</div><div class="sl">Total deuda</div></div>
+    <div class="lc-stat" style="flex:1;min-width:100px;"><div class="sv">${clientes}</div><div class="sl">Clientes</div></div>
+    <div class="lc-stat" style="flex:1;min-width:100px;"><div class="sv">${_fiadosPendientes.length}</div><div class="sl">Fiados</div></div>
+    <div class="lc-stat" style="flex:1;min-width:100px;"><div class="sv" style="color:var(--danger)">${_fiadosPendientes.filter(f=>f.estado==='VENCIDO').length}</div><div class="sl">Vencidos</div></div>
+    <div class="lc-stat" style="flex:1;min-width:100px;"><div class="sv">$${Math.round(total).toLocaleString('es-AR')}</div><div class="sl">Deuda total</div></div>
   </div>`;
 
-  _fiadosPendientes.forEach((f, i) => {
-    const venc = f.fechaVencimiento ? new Date(f.fechaVencimiento + 'T12:00:00') : null;
-    const diasR = venc ? Math.round((venc - hoy) / 86400000) : null;
-    const esVenc = f.estado === 'VENCIDO';
-    const diasTxt = esVenc ? 'VENCIDO' : (diasR === 0 ? 'Vence HOY' : diasR === 1 ? 'Vence mañana' : diasR !== null ? `Vence en ${diasR}d` : '');
-    html += `<div class="fiado-card ${esVenc ? 'vencido' : 'pendiente'}">
+  Object.keys(grupos).forEach(key => {
+    const g = grupos[key];
+    const totalCliente = g.fiados.reduce((s,f) => s + (parseFloat(f.total)||0), 0);
+    const tieneVencidos = g.fiados.some(f => f.estado === 'VENCIDO');
+
+    html += `<div class="fiado-card ${tieneVencidos ? 'vencido' : 'pendiente'}" style="margin-bottom:16px;">
+      <!-- Header cliente -->
       <div class="fiado-header">
         <div>
-          <div class="fiado-cliente">${f.cliente}</div>
-          <div class="fiado-tel">📞 ${f.telefono || '—'} · ${f.fecha || ''}</div>
+          <div class="fiado-cliente" style="font-size:1rem;">${g.cliente}</div>
+          <div class="fiado-tel">📞 ${g.telefono || '—'} · ${g.fiados.length} fiado${g.fiados.length>1?'s':''}</div>
         </div>
         <div style="text-align:right;">
-          <div class="fiado-monto">$${parseFloat(f.total||0).toLocaleString('es-AR')}</div>
-          <span class="fiado-badge ${esVenc ? 'vencido' : 'pendiente'}">${esVenc ? '🔴 VENCIDO' : (diasTxt ? '⏰ '+diasTxt : 'PENDIENTE')}</span>
+          <div class="fiado-monto" style="font-size:1.3rem;">$${Math.round(totalCliente).toLocaleString('es-AR')}</div>
+          ${tieneVencidos ? '<span class="fiado-badge vencido">🔴 Tiene vencidos</span>' : ''}
         </div>
       </div>
-      <div class="fiado-desc">${f.descripcion || '—'}</div>
-      <div class="fiado-acciones">
-        <button class="btn btn-primary" onclick="abrirCobrarFiado(${i})">✅ Cobrar</button>
-        <button class="btn btn-secondary" onclick="reenviarWAFiado(${i})">📲 WA</button>
+
+      <!-- Detalle de fiados individuales -->
+      <div style="margin:10px 0;border-top:1px solid var(--border);padding-top:10px;">
+        ${g.fiados.map((f,fi) => {
+          const venc = f.fechaVencimiento ? new Date(f.fechaVencimiento+'T12:00:00') : null;
+          const diasR = venc ? Math.round((venc-hoy)/86400000) : null;
+          const esVenc = f.estado === 'VENCIDO';
+          const diasTxt = esVenc ? '🔴 VENCIDO' : (diasR===0?'⏰ Vence HOY': diasR===1?'⏰ Mañana': diasR!==null?`⏰ ${diasR}d`:'');
+          return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:0.78rem;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${f.descripcion||'TICKET COMPLETO'}</div>
+              <div style="font-size:0.65rem;color:var(--muted);margin-top:2px;">${f.fecha||''} ${diasTxt ? '· <span style="color:'+(esVenc?'#fca5a5':'#fcd34d')+'">'+diasTxt+'</span>' : ''}</div>
+            </div>
+            <div style="text-align:right;flex-shrink:0;margin-left:12px;">
+              <div style="font-size:0.88rem;font-weight:700;font-family:var(--mono);">$${parseFloat(f.total||0).toLocaleString('es-AR')}</div>
+              <button onclick="abrirCobrarFiado(${f._idx})" style="font-size:0.62rem;padding:2px 8px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--muted);cursor:pointer;margin-top:2px;font-family:var(--font);">Cobrar este</button>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+
+      <!-- Acciones del cliente -->
+      <div class="fiado-acciones" style="margin-top:10px;">
+        <button class="btn btn-primary" onclick="cobrarTodoCliente('${key}')">✅ Cobrar todo — $${Math.round(totalCliente).toLocaleString('es-AR')}</button>
+        <button class="btn btn-secondary" onclick="abrirAbonoCliente('${key}')">💵 Abonar</button>
+        <button class="btn btn-secondary" style="flex:0.5;" onclick="reenviarWAFiado(${g.fiados[0]._idx})">📲</button>
       </div>
     </div>`;
   });
+
   document.getElementById('fiadosCuerpo').innerHTML = html;
+}
+
+// Cobrar TODOS los fiados de un cliente
+async function cobrarTodoCliente(key) {
+  const grupos = agruparFiados();
+  const g = grupos[key];
+  if (!g) return;
+  const total = g.fiados.reduce((s,f) => s + (parseFloat(f.total)||0), 0);
+  if (!confirm(`¿Cobrar todo a ${g.cliente}?\nTotal: $${Math.round(total).toLocaleString('es-AR')}`)) return;
+
+  _metodoCobroPendiente = 'EFECTIVO';
+  // Mostrar modal de método de pago
+  _cobrarTodoKey = key;
+  document.getElementById('cobrarFiadoInfo').innerHTML =
+    `<strong>${g.cliente}</strong> — ${g.fiados.length} fiado${g.fiados.length>1?'s':''}<br>💰 Total: <strong>$${Math.round(total).toLocaleString('es-AR')}</strong>`;
+  document.getElementById('btnConfCobro').textContent = '✅ Cobrar todo';
+  document.getElementById('btnConfCobro').onclick = confirmarCobrarTodo;
+  selMetodo('EFECTIVO');
+  document.getElementById('modalCobrarFiado').classList.add('open');
+}
+
+let _cobrarTodoKey = null;
+
+async function confirmarCobrarTodo() {
+  const grupos = agruparFiados();
+  const g = grupos[_cobrarTodoKey];
+  if (!g) return;
+  const btn = document.getElementById('btnConfCobro');
+  btn.disabled = true; btn.textContent = '⏳ Procesando...';
+  let ok = 0, err = 0;
+  for (const f of g.fiados) {
+    try {
+      const datos = { idFiado: f.idFiado, metodoPago: _metodoCobroPendiente, fechaPago: new Date().toISOString().split('T')[0] };
+      const r = await fetch(API_URL + '?action=cobrarFiado&data=' + encodeURIComponent(JSON.stringify(datos)), { redirect: 'follow', signal: AbortSignal.timeout(10000) });
+      const resp = await r.json();
+      if (resp.success) ok++; else err++;
+    } catch(e) { err++; }
+  }
+  btn.disabled = false; btn.textContent = '✅ Confirmar pago';
+  btn.onclick = confirmarCobroPendiente;
+  document.getElementById('modalCobrarFiado').classList.remove('open');
+  toast(`✅ ${ok} fiado${ok>1?'s':''} cobrado${ok>1?'s':''}${err?` (${err} error${err>1?'s':''})` : ''}`, ok > 0 ? 'ok' : 'err');
+  const total = g.fiados.reduce((s,f) => s + (parseFloat(f.total)||0), 0);
+  reenviarWACobranza({ cliente: g.cliente, telefono: g.telefono, total });
+  cargarFiados();
+}
+
+// Abono parcial
+let _abonoKey = null;
+function abrirAbonoCliente(key) {
+  _abonoKey = key;
+  const grupos = agruparFiados();
+  const g = grupos[key];
+  if (!g) return;
+  const totalDeuda = g.fiados.reduce((s,f) => s + (parseFloat(f.total)||0), 0);
+  document.getElementById('abonoClienteNombre').textContent = g.cliente;
+  document.getElementById('abonoDeudaTotal').textContent = '$' + Math.round(totalDeuda).toLocaleString('es-AR');
+  document.getElementById('abonoMonto').value = '';
+  document.getElementById('abonoMetodo').value = 'EFECTIVO';
+  document.getElementById('abonoResto').style.display = 'none';
+  document.getElementById('modalAbono').classList.add('open');
+}
+
+function abonoCalcResto() {
+  const grupos = agruparFiados();
+  const g = grupos[_abonoKey];
+  if (!g) return;
+  const totalDeuda = g.fiados.reduce((s,f) => s + (parseFloat(f.total)||0), 0);
+  const abono = parseFloat(document.getElementById('abonoMonto').value) || 0;
+  const div = document.getElementById('abonoResto');
+  if (abono > 0) {
+    const queda = totalDeuda - abono;
+    div.style.display = 'block';
+    div.innerHTML = queda > 0
+      ? `Queda pendiente: <strong style="color:var(--accent);">$${Math.round(queda).toLocaleString('es-AR')}</strong>`
+      : `<strong style="color:var(--accent2);">✅ Cancela toda la deuda</strong>`;
+  } else div.style.display = 'none';
+}
+
+async function confirmarAbono() {
+  const grupos = agruparFiados();
+  const g = grupos[_abonoKey];
+  if (!g) return;
+  const monto = parseFloat(document.getElementById('abonoMonto').value) || 0;
+  const metodo = document.getElementById('abonoMetodo').value;
+  if (!monto || monto <= 0) { toast('⚠️ Ingresá el monto', 'err'); return; }
+
+  const btn = document.getElementById('btnConfAbono');
+  btn.disabled = true; btn.textContent = '⏳...';
+
+  // Distribuir el abono en los fiados más viejos primero
+  let restante = monto;
+  let cobrados = 0;
+  const fiadosOrdenados = [...g.fiados].sort((a,b) => (a.fecha||'').localeCompare(b.fecha||''));
+
+  for (const f of fiadosOrdenados) {
+    if (restante <= 0) break;
+    const montoFiado = parseFloat(f.total||0);
+    if (restante >= montoFiado) {
+      // Cobrar este fiado completo
+      try {
+        const datos = { idFiado: f.idFiado, metodoPago: metodo, fechaPago: new Date().toISOString().split('T')[0] };
+        const r = await fetch(API_URL + '?action=cobrarFiado&data=' + encodeURIComponent(JSON.stringify(datos)), { redirect: 'follow', signal: AbortSignal.timeout(10000) });
+        const resp = await r.json();
+        if (resp.success) { restante -= montoFiado; cobrados++; }
+      } catch(e) {}
+    }
+    // Si el abono no alcanza para un fiado completo, solo registramos nota — no cobrar parcial
+  }
+
+  btn.disabled = false; btn.textContent = '💵 Confirmar abono';
+  document.getElementById('modalAbono').classList.remove('open');
+  const pagado = monto - restante;
+  toast(`✅ Abono $${Math.round(pagado).toLocaleString('es-AR')} registrado — ${cobrados} fiado${cobrados>1?'s':''} cancelado${cobrados>1?'s':''}`, 'ok');
+  // WA de confirmación
+  const tel = (g.telefono||'').replace(/\D/g,'');
+  if (tel) {
+    const msg = `💵 *ABONO REGISTRADO — Almacén Copihue*\n\n👤 ${g.cliente}\n💰 Abonó: *$${Math.round(pagado).toLocaleString('es-AR')}*\n📅 ${new Date().toLocaleDateString('es-AR')}\n${restante>0?'Queda pendiente: $'+Math.round(restante).toLocaleString('es-AR'):'✅ Deuda cancelada'}\n\n📍 Almacén Copihue`;
+    let num = tel; if (!num.startsWith('549')) num = '549'+num;
+    window.open('https://wa.me/'+num+'?text='+encodeURIComponent(msg),'_blank');
+  }
+  cargarFiados();
+}
+
+function agruparFiados() {
+  const grupos = {};
+  _fiadosPendientes.forEach((f,i) => {
+    const key = f.telefono || f.cliente;
+    if (!grupos[key]) grupos[key] = { cliente: f.cliente, telefono: f.telefono, fiados: [] };
+    grupos[key].fiados.push({ ...f, _idx: i });
+  });
+  return grupos;
 }
 
 function abrirCobrarFiado(idx) {
