@@ -297,7 +297,25 @@ function ingresarMercaderia(datos) {
       sheetInventario.getRange(ultimaFila, 4).setValue(nuevoId);
       if (proveedor) sheetInventario.getRange(ultimaFila, 5).setValue(proveedor);
       sheetInventario.getRange(ultimaFila, 6).setValue(nuevoStock);
-      if (fechaVencimiento) sheetInventario.getRange(ultimaFila, 16).setValue(fechaVencimiento);
+
+      // Rellenar columnas automáticas con 0 y fórmulas
+      var f = ultimaFila; // alias corto
+      sheetInventario.getRange(f, 7).setValue(0);   // G: Relampago
+      sheetInventario.getRange(f, 8).setValue(0);   // H: Destacada
+      sheetInventario.getRange(f, 9).setValue(0);   // I: Especial
+      sheetInventario.getRange(f, 12).setValue(0);  // L: promos/antojo_popup
+
+      // J: categoriaOferta — fórmula
+      sheetInventario.getRange(f, 10).setFormula(
+        '=SI(A'+f+'="";"";SI(F'+f+'<=0;"sin stock";SI(NO(O(I'+f+'=0;I'+f+'=1));"ERROR ESPECIAL";SI(NO(ESNUMERO(COINCIDIR(G'+f+';{0;1;2;3;4;5;6;10;11;12;13;14};0)));"ERROR RELAMPAGO";SI(O(H'+f+'>70;Y(H'+f+'>0;H'+f+'<15));"ERROR DESTACADA";SI((I'+f+'=1)+(H'+f+'>0)+(G'+f+'>0)>1;"ERROR DOBLE OFERTA";SI(I'+f+'=1;"especial";SI(H'+f+'>0;"destacada";SI(G'+f+'>0;SI(O(Y(G'+f+'<=6;F'+f+'<(G'+f+'+1));Y(G'+f+'=10;F'+f+'<2);Y(G'+f+'>=11;F'+f+'<1));"REPONER "&SI(G'+f+'<=6;G'+f+'+1-F'+f+';SI(G'+f+'=10;2-F'+f+';1-F'+f+'))&" PARA PROMO";SI(G'+f+'<=6;"relampago "&(G'+f+'+1)&"x"&G'+f+';SI(G'+f+'=10;"2da50off";SI(G'+f+'>=11;"relampago "&ELEGIR(G'+f+'-10;10;15;20;25)&"%";"relampago"))));"sin oferta"))))))))))'
+      );
+
+      // K: PT (Precio Técnico) — fórmula
+      sheetInventario.getRange(f, 11).setFormula(
+        '=SI(Y(C'+f+'="PROMOS";F'+f+'>=1);"COMBO ACTIVADO EN CAT. PROMOS";SI(O(F'+f+'<=0;B'+f+'<=0);"SIN STOCK / CARGAR STOCK";SI(B'+f+'="";"CARGAR PRECIO";SI(Y(ESNUMERO(G'+f+');G'+f+'>0);B'+f+'*BUSCARV(G'+f+';{1\\0,5;2\\0,6667;3\\0,75;4\\0,8;5\\0,8333;6\\0,8571;10\\0,75};2;FALSO);SI(Y(ESNUMERO(H'+f+');H'+f+'>0);B'+f+'*(1-H'+f+'/100);SI(I'+f+'=1;B'+f+'*0,9;"NORMAL / SIN OFERTA"))))))'
+      );
+
+      if (fechaVencimiento) sheetInventario.getRange(f, 16).setValue(fechaVencimiento);
 
       const fechaNuevo = new Date();
       if (cantidad > 0 || precioCosto || precioVenta) {
@@ -1077,7 +1095,8 @@ function setConfig(datos) {
     const seccion  = String(datos.seccion || '').toLowerCase();
     const clave    = String(datos.clave   || '').trim();
     const diaIdx   = parseInt(datos.dia);
-    const valor    = datos.valor === 1 || datos.valor === '1' ? 1 : 0;
+    const valor = datos.valor === null || datos.valor === '' ? '' :
+                  (datos.valor === 1 || datos.valor === '1' ? 1 : 0);
 
     if (isNaN(diaIdx) || diaIdx < 0 || diaIdx > 6) return { success: false, mensaje: 'Día inválido' };
 
@@ -1395,6 +1414,14 @@ function doGet(e) {
     if (e && e.parameter && e.parameter.action === 'cobrarFiado') {
       var datosCobro = e.parameter.data ? JSON.parse(decodeURIComponent(e.parameter.data)) : {};
       return respuestaJSON(cobrarFiado(datosCobro));
+    }
+    if (e && e.parameter && e.parameter.action === 'abonarFiado') {
+      var datosAbono = e.parameter.data ? JSON.parse(decodeURIComponent(e.parameter.data)) : {};
+      return respuestaJSON(abonarFiado(datosAbono));
+    }
+    if (e && e.parameter && e.parameter.action === 'abonoFiado') {
+      var datosAbono = JSON.parse(decodeURIComponent(e.parameter.data));
+      return respuestaJSON(abonoFiado(datosAbono));
     }
     if (e && e.parameter && e.parameter.action === 'guardarFiado') {
       var datosFiado = JSON.parse(decodeURIComponent(e.parameter.data));
@@ -2202,6 +2229,42 @@ function listarFiados() {
   }
 }
 
+// Abono parcial — reduce el total del fiado y agrega obs
+function abonarFiado(datos) {
+  try {
+    if (!datos.idFiado) return { success: false, mensaje: 'Falta ID del fiado' };
+    var ss = SpreadsheetApp.openById(SS_ID);
+    var sh = ss.getSheetByName(HOJA_FIADOS);
+    if (!sh) return { success: false, mensaje: 'Hoja FIADOS no encontrada' };
+    var rows = sh.getDataRange().getValues();
+    for (var i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) !== String(datos.idFiado)) continue;
+      var totalActual = parseFloat(rows[i][8]) || 0;
+      var abono = parseFloat(datos.abono) || 0;
+      if (abono <= 0) return { success: false, mensaje: 'Monto inválido' };
+      var nuevoTotal = Math.max(0, totalActual - abono);
+      sh.getRange(i + 1, 9).setValue(nuevoTotal); // I: Total
+      // Obs
+      var obsActual = String(rows[i][13] || '');
+      var tz = Session.getScriptTimeZone();
+      var fecha = Utilities.formatDate(new Date(), tz, 'dd/MM/yyyy');
+      var nuevaObs = (obsActual ? obsActual + ' | ' : '') +
+        'Abono $' + abono + ' (' + (datos.metodoPago||'EFECTIVO') + ') ' + fecha;
+      sh.getRange(i + 1, 14).setValue(nuevaObs);
+      // Si quedó en 0 → marcar PAGADO
+      if (nuevoTotal === 0) {
+        sh.getRange(i + 1, 11).setValue('PAGADO');
+        sh.getRange(i + 1, 12).setValue(fecha);
+        sh.getRange(i + 1, 13).setValue(datos.metodoPago || 'EFECTIVO');
+      }
+      return { success: true, nuevoTotal: nuevoTotal };
+    }
+    return { success: false, mensaje: 'Fiado no encontrado' };
+  } catch(e) {
+    return { success: false, mensaje: e.toString() };
+  }
+}
+
 function cobrarFiado(datos) {
   try {
     if (!datos.idFiado) return { success: false, mensaje: 'Falta ID del fiado' };
@@ -2309,6 +2372,70 @@ function registrarSalidaInterna(datos) {
     ]);
 
     return { success: true, nuevoStock: nuevoStock };
+  } catch(e) {
+    return { success: false, mensaje: e.toString() };
+  }
+}
+
+function abonoFiado(datos) {
+  // Aplica un abono parcial: cancela fiados completos de más viejo a más nuevo,
+  // y si sobra reduce el total del siguiente fiado.
+  try {
+    var ss = SpreadsheetApp.openById(SS_ID);
+    var sh = ss.getSheetByName(HOJA_FIADOS);
+    if (!sh) return { success: false, mensaje: 'Hoja FIADOS no encontrada' };
+
+    var rows = sh.getDataRange().getValues();
+    var tz   = Session.getScriptTimeZone();
+    var hoy  = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+    var metodo   = datos.metodoPago || 'EFECTIVO';
+    var restante = parseFloat(datos.monto) || 0;
+    var cancelados = 0;
+
+    if (restante <= 0) return { success: false, mensaje: 'Monto inválido' };
+
+    // Identificar fiados del cliente ordenados por fecha (más viejo primero)
+    var fiados = [];
+    for (var i = 1; i < rows.length; i++) {
+      var tel = String(rows[i][4] || '').replace(/\D/g,'');
+      var cli = String(rows[i][3] || '').trim().toLowerCase();
+      var est = String(rows[i][10] || '').toUpperCase();
+      if (est === 'PAGADO') continue;
+      // Matchear por teléfono o por nombre
+      var telBuscar = String(datos.telefono || '').replace(/\D/g,'');
+      var cliBuscar = String(datos.cliente || '').trim().toLowerCase();
+      if ((telBuscar && tel === telBuscar) || (!telBuscar && cli === cliBuscar)) {
+        fiados.push({ fila: i + 1, total: parseFloat(rows[i][8]) || 0, fecha: String(rows[i][1] || '') });
+      }
+    }
+
+    // Ordenar de más viejo a más nuevo
+    fiados.sort(function(a,b){ return a.fecha.localeCompare(b.fecha); });
+
+    for (var j = 0; j < fiados.length; j++) {
+      if (restante <= 0) break;
+      var f = fiados[j];
+      if (restante >= f.total) {
+        // Cancela este fiado completo
+        sh.getRange(f.fila, 11).setValue('PAGADO');
+        sh.getRange(f.fila, 12).setValue(hoy);
+        sh.getRange(f.fila, 13).setValue(metodo);
+        restante = Math.round((restante - f.total) * 100) / 100;
+        cancelados++;
+      } else {
+        // Abono parcial — reduce el total del fiado
+        var nuevoTotal = Math.round((f.total - restante) * 100) / 100;
+        sh.getRange(f.fila, 9).setValue(nuevoTotal);   // I: Total
+        sh.getRange(f.fila, 8).setValue(nuevoTotal);   // H: Precio Unitario
+        var obsActual = String(sh.getRange(f.fila, 14).getValue() || '');
+        var nuevaObs = (obsActual ? obsActual + ' | ' : '') +
+          'Abono $' + datos.monto + ' (' + metodo + ') ' + hoy + ' — queda $' + nuevoTotal;
+        sh.getRange(f.fila, 14).setValue(nuevaObs);
+        restante = 0;
+      }
+    }
+
+    return { success: true, cancelados: cancelados, restante: restante };
   } catch(e) {
     return { success: false, mensaje: e.toString() };
   }

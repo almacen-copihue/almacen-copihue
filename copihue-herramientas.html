@@ -1257,8 +1257,16 @@ function renderFiados() {
       <!-- Detalle de fiados individuales -->
       <div style="margin:10px 0;border-top:1px solid var(--border);padding-top:10px;">
         ${g.fiados.map((f,fi) => {
-          const venc = f.fechaVencimiento ? new Date(f.fechaVencimiento.length <= 10 ? f.fechaVencimiento + 'T12:00:00' : f.fechaVencimiento) : null;
-          const diasR = venc ? Math.round((venc-hoy)/86400000) : null;
+          let diasR = null;
+          if (f.fechaVencimiento) {
+            try {
+              const fvStr = String(f.fechaVencimiento);
+              // Extraer solo YYYY-MM-DD si viene con hora/timezone
+              const match = fvStr.match(/(\d{4}-\d{2}-\d{2})/);
+              const d = match ? new Date(match[1] + 'T12:00:00') : new Date(fvStr);
+              if (!isNaN(d.getTime())) { d.setHours(0,0,0,0); diasR = Math.round((d - hoy) / 86400000); }
+            } catch(e) {}
+          }
           const esVenc = f.estado === 'VENCIDO';
           const diasTxt = esVenc ? '🔴 VENCIDO' : (diasR===0?'⏰ Vence HOY': diasR===1?'⏰ Mañana': diasR!==null?`⏰ ${diasR}d`:'');
           return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
@@ -1372,69 +1380,69 @@ async function confirmarAbono() {
   if (!monto || monto <= 0) { toast('⚠️ Ingresá el monto', 'err'); return; }
 
   const totalDeuda = g.fiados.reduce((s,f) => s + (parseFloat(f.total)||0), 0);
-
   const btn = document.getElementById('btnConfAbono');
   btn.disabled = true; btn.textContent = '⏳...';
 
+  // Distribuir de más viejo a más nuevo
   const fiadosOrdenados = [...g.fiados].sort((a,b) => (a.fecha||'').localeCompare(b.fecha||''));
   let restante = monto;
-  let cobrados = 0;
+  let cobradosCompletos = 0;
+  let abonosParciales = 0;
 
   for (const f of fiadosOrdenados) {
     if (restante <= 0) break;
     const montoFiado = parseFloat(f.total||0);
+
     if (restante >= montoFiado) {
       // Cancela este fiado completo
       try {
-        const datos = { idFiado: f.idFiado, metodoPago: metodo, fechaPago: new Date().toISOString().split('T')[0] };
-        const r = await fetch(API_URL + '?action=cobrarFiado&data=' + encodeURIComponent(JSON.stringify(datos)), { redirect: 'follow', signal: AbortSignal.timeout(10000) });
+        const r = await fetch(API_URL + '?action=cobrarFiado&data=' + encodeURIComponent(JSON.stringify({
+          idFiado: f.idFiado, metodoPago: metodo, fechaPago: new Date().toISOString().split('T')[0]
+        })), { redirect: 'follow', signal: AbortSignal.timeout(10000) });
         const resp = await r.json();
-        if (resp.success) { restante -= montoFiado; cobrados++; }
+        if (resp.success) { restante -= montoFiado; cobradosCompletos++; }
+      } catch(e) {}
+    } else if (restante > 0) {
+      // Abono parcial — reduce el total de este fiado
+      try {
+        const r = await fetch(API_URL + '?action=abonarFiado&data=' + encodeURIComponent(JSON.stringify({
+          idFiado: f.idFiado, abono: restante, metodoPago: metodo
+        })), { redirect: 'follow', signal: AbortSignal.timeout(10000) });
+        const resp = await r.json();
+        if (resp.success) { abonosParciales++; restante = 0; }
       } catch(e) {}
     }
-  }
-
-  // Si quedó restante sin cancelar ningún fiado completo (abono parcial)
-  // Actualizar observación del fiado más viejo con el abono registrado
-  if (restante === monto && fiadosOrdenados.length > 0) {
-    // No se canceló ninguno — registrar abono parcial en observaciones vía cobrarFiado con obs
-    try {
-      const f0 = fiadosOrdenados[0];
-      const obsAbono = `Abono $${monto.toLocaleString('es-AR')} (${metodo}) ${new Date().toLocaleDateString('es-AR')}`;
-      const datos = { idFiado: f0.idFiado, metodoPago: metodo, fechaPago: '', obs: obsAbono, esAbonoParcial: true };
-      await fetch(API_URL + '?action=cobrarFiado&data=' + encodeURIComponent(JSON.stringify(datos)), { redirect: 'follow', signal: AbortSignal.timeout(10000) });
-    } catch(e) {}
   }
 
   btn.disabled = false; btn.textContent = '💵 Confirmar abono';
   document.getElementById('modalAbono').classList.remove('open');
 
-  const quedaPendiente = totalDeuda - monto;
-  const msgToast = cobrados > 0
-    ? `✅ Abono $${Math.round(monto).toLocaleString('es-AR')} — ${cobrados} fiado${cobrados>1?'s':''} cancelado${cobrados>1?'s':''}`
-    : `✅ Abono $${Math.round(monto).toLocaleString('es-AR')} registrado${quedaPendiente > 0 ? ' — queda $'+Math.round(quedaPendiente).toLocaleString('es-AR') : ''}`;
-  toast(msgToast, 'ok');
+  const pagado = monto - restante;
+  const quedaPendiente = Math.max(0, totalDeuda - pagado);
 
-  // WA con montos correctos
-  const tel = (g.telefono||'').replace(/\D/g,'');
-  if (tel) {
-    const metodoEmoji = { EFECTIVO:'💵', QR:'📱', TRANSFERENCIA:'🏦' }[metodo] || '💵';
-    const msg = [
-      `💵 *ABONO REGISTRADO — Almacén Copihue*`,
-      ``,
-      `👤 ${g.cliente}`,
-      `${metodoEmoji} Abonó: *$${Math.round(monto).toLocaleString('es-AR')}*`,
-      `📅 ${new Date().toLocaleDateString('es-AR')}`,
-      quedaPendiente > 0
-        ? `📋 Queda pendiente: $${Math.round(quedaPendiente).toLocaleString('es-AR')}`
-        : `✅ Deuda cancelada`,
-      ``,
-      `📍 Almacén Copihue`
-    ].join('\n');
-    let num = tel; if (!num.startsWith('549') && !num.startsWith('54')) num = '549'+num;
-    window.open('https://wa.me/'+num+'?text='+encodeURIComponent(msg),'_blank');
+  if (pagado > 0) {
+    toast(`✅ Abono $${Math.round(pagado).toLocaleString('es-AR')} registrado`, 'ok');
+    // WA
+    const tel = (g.telefono||'').replace(/\D/g,'');
+    if (tel) {
+      const metodoEmoji = { EFECTIVO:'💵', QR:'📱', TRANSFERENCIA:'🏦' }[metodo] || '💵';
+      const msg = [
+        `💵 *ABONO REGISTRADO — Almacén Copihue*`, ``,
+        `👤 ${g.cliente}`,
+        `${metodoEmoji} Abonó: *$${Math.round(pagado).toLocaleString('es-AR')}*`,
+        `📅 ${new Date().toLocaleDateString('es-AR')}`,
+        quedaPendiente > 0
+          ? `📋 Queda pendiente: *$${Math.round(quedaPendiente).toLocaleString('es-AR')}*`
+          : `✅ ¡Deuda cancelada!`,
+        ``, `📍 Almacén Copihue`
+      ].join('\n');
+      let num = tel; if (!num.startsWith('549') && !num.startsWith('54')) num = '549'+num;
+      window.open('https://wa.me/'+num+'?text='+encodeURIComponent(msg),'_blank');
+    }
+    cargarFiados();
+  } else {
+    toast('❌ No se pudo registrar el abono', 'err');
   }
-  cargarFiados();
 }
 
 function agruparFiados() {
@@ -1486,7 +1494,14 @@ function reenviarWAFiado(idx) {
   const f = _fiadosPendientes[idx];
   const tel = (f.telefono||'').replace(/\D/g,'');
   if (!tel) { toast('⚠️ Sin teléfono', 'err'); return; }
-  const venc = f.fechaVencimiento ? new Date(f.fechaVencimiento+'T12:00:00').toLocaleDateString('es-AR') : '—';
+  let venc = '—';
+  if (f.fechaVencimiento) {
+    try {
+      const match = String(f.fechaVencimiento).match(/(\d{4}-\d{2}-\d{2})/);
+      const d = match ? new Date(match[1]+'T12:00:00') : new Date(f.fechaVencimiento);
+      if (!isNaN(d.getTime())) venc = d.toLocaleDateString('es-AR');
+    } catch(e) {}
+  }
   const msg = `🧾 *COMPROBANTE DE FIADO — Almacén Copihue*\n\n📅 ${new Date().toLocaleDateString('es-AR')}\n👤 ${f.cliente}\n\n🛒 ${f.descripcion||'TICKET COMPLETO'}\n\n💰 *Total: $${parseFloat(f.total||0).toLocaleString('es-AR')}*\n📆 Vence: *${venc}*\n\n✅ Este mensaje es su comprobante.\n📍 Almacén Copihue`;
   let num = tel; if (!num.startsWith('549') && !num.startsWith('54')) num = '549'+num;
   window.open('https://wa.me/'+num+'?text='+encodeURIComponent(msg),'_blank');
