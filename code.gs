@@ -1853,6 +1853,21 @@ function getListaCompraJSON() {
       }
     }
 
+    // Leer Historial para obtener último precio de costo por producto
+    var costoMap = {};
+    var shHist = ss.getSheetByName(HOJA_HISTORIAL);
+    if (shHist) {
+      var histData = shHist.getDataRange().getValues();
+      // Recorrer de atrás hacia adelante → primer match = más reciente
+      for (var h = histData.length - 1; h >= 1; h--) {
+        var nomHist = String(histData[h][1] || '').trim().toUpperCase();
+        var costoHist = parseFloat(histData[h][6]) || 0;
+        if (nomHist && costoHist > 0 && !costoMap[nomHist]) {
+          costoMap[nomHist] = costoHist;
+        }
+      }
+    }
+
     var items = [];
     var totalPesos = 0;
     var urgentes = 0;
@@ -1911,19 +1926,28 @@ function getListaCompraJSON() {
       }
 
       if (urgencia <= 2) urgentes++;
-      totalPesos += total;
+      var nomKey = nombre.trim().toUpperCase();
+      var costo = costoMap[nomKey] || 0;
+      var totalCosto = costo > 0 ? Math.round(costo * cantidad) : 0;
+      totalPesos += totalCosto > 0 ? totalCosto : total;
+
+      var nomKey = nombre.trim().toUpperCase();
+      var costo = costoMap[nomKey] || 0;
+      var totalCosto = costo > 0 ? Math.round(costo * cantidad) : 0;
 
       items.push({
-        nombre:    nombre,
-        stock:     stock,
-        minimo:    minimo,
-        cantidad:  cantidad,
-        precio:    precio,
-        total:     total,
-        proveedor: proveedor,
-        diasStock: diasStock,
-        urgencia:  urgencia,
-        prioridad: prioridad || (urgencia <= 2 ? 'URGENTE' : 'OK')
+        nombre:     nombre,
+        stock:      stock,
+        minimo:     minimo,
+        cantidad:   cantidad,
+        precio:     precio,       // precio de VENTA (referencia)
+        costo:      costo,        // precio de COSTO desde Historial
+        total:      totalCosto > 0 ? totalCosto : total, // usar costo si está disponible
+        totalVenta: total,        // total con precio de venta (para referencia)
+        proveedor:  proveedor,
+        diasStock:  diasStock,
+        urgencia:   urgencia,
+        prioridad:  prioridad || (urgencia <= 2 ? 'URGENTE' : 'OK')
       });
     }
 
