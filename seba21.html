@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v212</title>
+    <title>Copihue — POS v213</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -7702,7 +7702,15 @@ async function _procesarVentaFiado(datosFiado) {
         else p.stock = Math.max(0, p.stock - item.qty);
     });
 
-    // 5. Toast y cierre
+    // 5. Cerrar modal de confirmación de venta
+    const modalConfirmar = document.getElementById('modalConfirmarVenta') || document.querySelector('.modal-confirmar');
+    if (modalConfirmar) modalConfirmar.style.display = 'none';
+    // También cerrar cualquier modal que esté abierto
+    document.querySelectorAll('[id^="modal"]').forEach(m => {
+        if (m.id !== 'modalFiado') m.style.display = 'none';
+    });
+
+    // 6. Toast y cierre de carrito
     mostrarToast(`✅ Fiado de ${datosFiado.cliente} registrado — $${Math.round(total).toLocaleString('es-AR')}`, 'naranja');
     seleccionarMetodo('efectivo');
     ventaActual = [];
@@ -7711,6 +7719,44 @@ async function _procesarVentaFiado(datosFiado) {
     renderVenta();
     if (btn) { btn.textContent = '✅ Confirmar cobro'; btn.disabled = false; btn.onclick = confirmarVenta; }
     actualizarTotalConRedondeo();
+
+    // 7. WhatsApp — compromiso de pago al cliente
+    _enviarFiadoWhatsApp(datosFiado, total);
+}
+
+function _enviarFiadoWhatsApp(datosFiado, total) {
+    const tel = datosFiado.telefono.replace(/\D/g, '');
+    if (!tel || tel.length < 6) return; // sin teléfono válido no abre WA
+
+    const fecha = new Date().toLocaleDateString('es-AR');
+    const venc  = datosFiado.vencimiento
+        ? new Date(datosFiado.vencimiento + 'T12:00:00').toLocaleDateString('es-AR')
+        : '—';
+
+    const msg = [
+        `🧾 *COMPROBANTE DE FIADO — Almacén Copihue*`,
+        ``,
+        `📅 Fecha: ${fecha}`,
+        `👤 Cliente: ${datosFiado.cliente}`,
+        ``,
+        `🛒 *Detalle:*`,
+        datosFiado.descripcion,
+        ``,
+        `💰 *Total fiado: $${Math.round(total).toLocaleString('es-AR')}*`,
+        `📆 Fecha de pago acordada: *${venc}*`,
+        datosFiado.obs ? `📝 Nota: ${datosFiado.obs}` : '',
+        ``,
+        `✅ Este mensaje es su comprobante de fiado.`,
+        `📍 Almacén Copihue — Copihue 457`
+    ].filter(l => l !== '').join('\n');
+
+    // Número argentino — agregar 549 si no lo tiene
+    let numWA = tel;
+    if (!numWA.startsWith('549') && !numWA.startsWith('54')) {
+        numWA = '549' + numWA;
+    }
+
+    window.open(`https://wa.me/${numWA}?text=${encodeURIComponent(msg)}`, '_blank');
 }
 </script>
 </body>
