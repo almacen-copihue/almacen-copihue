@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v226</title>
+    <title>Copihue — POS v228</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -6922,29 +6922,33 @@ async function lcTogglePausado(id, btn) {
   var pausado = p.pausadoListaCompra === true || p.pausadoListaCompra === 'SI';
   var nuevoPausado = !pausado;
 
-  btn.disabled = true;
-  btn.textContent = '⏳...';
-
-  try {
-    var datos = { id: id, pausado: nuevoPausado ? 'SI' : '' };
-    var url = API_URL + '?action=setPausadoListaCompra&data=' + encodeURIComponent(JSON.stringify(datos));
-    var r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(10000) });
-    var resp = await r.json();
-    if (resp.success) {
-      p.pausadoListaCompra = nuevoPausado ? 'SI' : '';
-      mostrarToast(nuevoPausado ? '⛔ ' + p.name + ' marcado INACTIVO' : '▶️ ' + p.name + ' reactivado', nuevoPausado ? '' : 'verde');
-      // Recargar la lista para reflejar el cambio
-      abrirListaCompra();
-    } else {
-      btn.disabled = false;
-      btn.textContent = pausado ? '▶️ Reactivar' : 'Marcar inactivo';
-      mostrarToast('❌ Error: ' + (resp.mensaje || ''), 'rojo');
-    }
-  } catch(e) {
-    btn.disabled = false;
-    btn.textContent = pausado ? '▶️ Reactivar' : 'Marcar inactivo';
-    mostrarToast('❌ Sin conexión', 'rojo');
+  // UI instantánea — actualizar productos Y _lcItems
+  p.pausadoListaCompra = nuevoPausado ? 'SI' : '';
+  var lcItem = _lcItems.find(function(i){ return i.nombre === p.name; });
+  if (lcItem) {
+    lcItem.pausado = nuevoPausado;
+    lcItem.urgencia = nuevoPausado ? 99 : 7;
+    lcItem.prioridad = nuevoPausado ? 'PAUSADO' : 'OK';
   }
+  // Re-renderizar sin recargar desde Sheets
+  lcRenderizar('todos');
+
+  // API en segundo plano
+  fetch(API_URL + '?action=setPausadoListaCompra&data=' + encodeURIComponent(JSON.stringify({ id: id, pausado: nuevoPausado ? 'SI' : '' })),
+    { redirect: 'follow' }
+  ).then(function(r){ return r.json(); }).then(function(resp){
+    if (!resp.success) {
+      p.pausadoListaCompra = pausado ? 'SI' : '';
+      if (lcItem) { lcItem.pausado = pausado; lcItem.urgencia = pausado ? 99 : 7; lcItem.prioridad = pausado ? 'PAUSADO' : 'OK'; }
+      mostrarToast('❌ Error al guardar', 'rojo');
+    } else {
+      mostrarToast(nuevoPausado ? '⛔ Marcado inactivo' : '▶️ Reactivado', nuevoPausado ? '' : 'verde');
+    }
+  }).catch(function(){
+    p.pausadoListaCompra = pausado ? 'SI' : '';
+    if (lcItem) { lcItem.pausado = pausado; lcItem.urgencia = pausado ? 99 : 7; lcItem.prioridad = pausado ? 'PAUSADO' : 'OK'; }
+    mostrarToast('❌ Sin conexión', 'rojo');
+  });
 }
 
 function lcCopiarTexto() {
