@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v230</title>
+    <title>Copihue — POS v231</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -5953,17 +5953,19 @@ async function cargarEstadoToggles() {
             const val = row ? row[diaIdx] : null;
             const rowIni = cfg[tipo + '|Hora inicio oferta'] || cfg['Hora inicio oferta'];
             const rowCie = cfg[tipo + '|Hora cierre oferta'] || cfg['Hora cierre oferta'];
-            console.log(`  ${tipo}: clave="${clave}" val=${JSON.stringify(val)} ini=${rowIni?.[diaIdx]} cie=${rowCie?.[diaIdx]} dentroHorario=${_dentroDeHorario(cfg, tipo, diaIdx)}`);
             let activo;
             if (val === 1 || val === '1') {
-                activo = true;
-            } else if (val === 0 || val === '0') {
-                activo = _dentroDeHorario(cfg, tipo, diaIdx);
+                activo = true;   // forzado ON
+            } else if (val === '' || val === 'OFF') {
+                activo = false;  // cadena vacía explícita = forzado OFF
             } else {
-                activo = false;
+                // 0, null, undefined → auto horario
+                activo = _dentroDeHorario(cfg, tipo, diaIdx);
             }
+            const modo = (val === 1 || val === '1') ? 'on' : (val === '' || val === 'OFF') ? 'off' : 'auto';
             _toggleEstado[tipo] = activo;
-            _toggleModo[tipo] = (val === 1 || val === '1') ? 'on' : (val === 0 || val === '0') ? 'auto' : 'off';
+            _toggleModo[tipo] = modo;
+            console.log(`  ${tipo}: val=${JSON.stringify(val)} modo=${modo} activo=${activo} horario=${rowIni?.[diaIdx]}-${rowCie?.[diaIdx]}`);
             _pintarToggle(tipo, activo);
         });
         _guardarTogglesPersistidos();
@@ -5978,11 +5980,11 @@ async function toggleOferta(tipo) {
     const btn = document.getElementById(cfg.id);
     const diaIdx = _diaActualIdx();
 
-    // Ciclo: off → auto → on → off
-    const modoActual = _toggleModo[tipo] || 'off';
-    const ciclo = { 'off': 'auto', 'auto': 'on', 'on': 'off' };
+    // Ciclo: auto → on → off → auto
+    const modoActual = _toggleModo[tipo] || 'auto';
+    const ciclo = { 'auto': 'on', 'on': 'off', 'off': 'auto' };
     const nuevoModo = ciclo[modoActual];
-    const nuevoValor = nuevoModo === 'on' ? 1 : nuevoModo === 'auto' ? 0 : null;
+    const nuevoValor = nuevoModo === 'on' ? 1 : nuevoModo === 'auto' ? 0 : '';
 
     // UI inmediata
     _toggleModo[tipo] = nuevoModo;
