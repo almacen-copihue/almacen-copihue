@@ -5850,14 +5850,13 @@ function _guardarTogglesPersistidos() {
         }));
     } catch(e) {}
 }
-const _toggleEstado = (() => {
-    const p = _cargarTogglesPersistidos();
-    return (p && p.estado) ? p.estado : { relampago: null, destacadas: null, especiales: null, ultimas: null };
-})();
-const _toggleModo = (() => {
-    const p = _cargarTogglesPersistidos();
-    return (p && p.modo) ? p.modo : { relampago: 'off', destacadas: 'off', especiales: 'off', ultimas: 'off' };
-})();
+// Estado inicial siempre null/auto — la planilla es la única fuente de verdad.
+// localStorage solo se escribe DESPUÉS de que la API confirma un cambio manual.
+// Al arrancar, siempre leer desde config_sistema vía cargarEstadoToggles().
+const _toggleEstado = { relampago: null, destacadas: null, especiales: null, ultimas: null };
+const _toggleModo   = { relampago: 'auto', destacadas: 'auto', especiales: 'auto', ultimas: 'auto' };
+// Limpiar cualquier localStorage stale de sesiones anteriores
+try { localStorage.removeItem(_TOGGLE_STORAGE_KEY); } catch(e) {}
 
 // Día actual → índice columna planilla (0=Lun...6=Dom)
 function _diaActualIdx() {
@@ -5989,11 +5988,11 @@ async function toggleOferta(tipo) {
     const nuevoModo = ciclo[modoActual];
     const nuevoValor = nuevoModo === 'on' ? 1 : nuevoModo === 'auto' ? 0 : '';
 
-    // UI inmediata
+    // UI inmediata (optimista — se revierte si la API falla)
     _toggleModo[tipo] = nuevoModo;
     _toggleEstado[tipo] = nuevoModo === 'on' ? true : nuevoModo === 'off' ? false : true;
     _pintarToggle(tipo, _toggleEstado[tipo]);
-    _guardarTogglesPersistidos();
+    // NO guardar en localStorage aquí — solo se persiste si la API confirma abajo
     if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
 
     try {
@@ -6002,22 +6001,26 @@ async function toggleOferta(tipo) {
         const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(10000) });
         const resp = await r.json();
         if (resp.success) {
-            _guardarTogglesPersistidos();
+            _guardarTogglesPersistidos(); // confirma → ahora sí persiste
             const labels = { 'on': '🔒 Forzado ON', 'auto': '⏰ Automático (respeta horario)', 'off': '✗ Forzado OFF' };
             mostrarToast(cfg.emoji + ' ' + tipo + ' → ' + labels[nuevoModo], nuevoModo === 'off' ? 'rojo' : 'verde');
             const logDatos = { tipo, estado: nuevoValor, vendedor: vendedorActual || 'POS' };
             fetch(API_URL + '?action=logInterruptor&data=' + encodeURIComponent(JSON.stringify(logDatos)), { redirect: 'follow' }).catch(() => {});
             if (nuevoModo === 'auto') setTimeout(() => cargarEstadoToggles(), 500);
         } else {
+            // API rechazó — revertir en memoria y limpiar localStorage
             _toggleModo[tipo] = modoActual;
             _toggleEstado[tipo] = modoActual === 'on';
             _pintarToggle(tipo, _toggleEstado[tipo]);
+            try { localStorage.removeItem(_TOGGLE_STORAGE_KEY); } catch(e) {}
             mostrarToast('❌ Error: ' + resp.mensaje, 'rojo');
         }
     } catch(e) {
+        // Sin conexión — revertir en memoria y limpiar localStorage
         _toggleModo[tipo] = modoActual;
         _toggleEstado[tipo] = modoActual === 'on';
         _pintarToggle(tipo, _toggleEstado[tipo]);
+        try { localStorage.removeItem(_TOGGLE_STORAGE_KEY); } catch(e) {}
         mostrarToast('❌ Sin conexión', 'rojo');
     }
     if (btn) { btn.disabled = false; btn.style.opacity = _toggleEstado[tipo] ? '1' : '0.65'; }
