@@ -3039,7 +3039,6 @@ async function confirmarVenta() {
     const total = window._totalConRedondeo || totalOriginal;
     const descuentoRedondeo = window._descuentoRedondeo || 0;
     const _t = new Date(); const hora = _t.getHours().toString().padStart(2,'0') + ':' + _t.getMinutes().toString().padStart(2,'0');
-    // ID único por venta — evita duplicados si el servidor recibe el request pero el cliente no recibe respuesta
     const idVenta = 'V' + Date.now() + Math.random().toString(36).slice(2,6).toUpperCase();
 
     // Rebajar stock en Apps Script (Google Sheets)
@@ -5852,7 +5851,6 @@ function _guardarTogglesPersistidos() {
 }
 // Estado inicial siempre null/auto — la planilla es la única fuente de verdad.
 // localStorage solo se escribe DESPUÉS de que la API confirma un cambio manual.
-// Al arrancar, siempre leer desde config_sistema vía cargarEstadoToggles().
 const _toggleEstado = { relampago: null, destacadas: null, especiales: null, ultimas: null };
 const _toggleModo   = { relampago: 'auto', destacadas: 'auto', especiales: 'auto', ultimas: 'auto' };
 // Limpiar cualquier localStorage stale de sesiones anteriores
@@ -7690,6 +7688,7 @@ async function publicarEnGitHub(){
 // ========== SELECTOR ÚLTIMAS UNIDADES ==========
 let _candidatosUltimas = [];
 let _ultimasSeleccionados = new Set(); // IDs seleccionados
+let _limiteUltimasSeba   = 3;          // se actualiza desde getConfig al abrir el selector
 
 async function abrirSelectorUltimas() {
     const modal = document.getElementById('modalUltimas');
@@ -7704,6 +7703,22 @@ async function abrirSelectorUltimas() {
         if (!data.ok) throw new Error(data.error || 'Error');
 
         _candidatosUltimas = data.candidatos || [];
+
+        // Leer límite de planilla
+        try {
+            const rc = await fetch(API_URL + '?action=getConfig&t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(6000) });
+            const dc = await rc.json();
+            if (dc.success && dc.config) {
+                const claveMax = Object.keys(dc.config).find(k => k.toLowerCase().includes('máximo ultimas') || k.toLowerCase().includes('maximo ultimas'));
+                if (claveMax) {
+                    const diaIdx = _diaActualIdx();
+                    const valMax = dc.config[claveMax] ? dc.config[claveMax][diaIdx] : null;
+                    if (valMax !== null && !isNaN(parseInt(valMax)) && parseInt(valMax) > 0) {
+                        _limiteUltimasSeba = parseInt(valMax);
+                    }
+                }
+            }
+        } catch(eCfg) { /* usa el default 3 */ }
 
         // Cargar selección vigente del día
         const rs = await fetch(API_URL + '?action=getUltimasSeleccion&t=' + Date.now(), { redirect: 'follow' });
@@ -7769,8 +7784,15 @@ function ultiRenderizar() {
 }
 
 function ultiToggle(id) {
-    if (_ultimasSeleccionados.has(id)) _ultimasSeleccionados.delete(id);
-    else _ultimasSeleccionados.add(id);
+    if (_ultimasSeleccionados.has(id)) {
+        _ultimasSeleccionados.delete(id);
+    } else {
+        if (_ultimasSeleccionados.size >= _limiteUltimasSeba) {
+            mostrarToast(`⚠️ Máximo ${_limiteUltimasSeba} productos (configurado en planilla)`, 'rojo');
+            return;
+        }
+        _ultimasSeleccionados.add(id);
+    }
     ultiRenderizar();
 }
 
