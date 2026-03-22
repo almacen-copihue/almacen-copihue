@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v233</title>
+    <title>Copihue — POS v232</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -1477,10 +1477,6 @@
             <button class="metodo-btn fiado" id="btnFiado" onclick="seleccionarMetodo('fiado')">
                 <span class="metodo-emoji">🧾</span>
                 <span class="metodo-label">Fiado</span>
-            </button>
-            <button class="metodo-btn" id="btnEspecie" onclick="seleccionarMetodo('especie')" style="border-color:#6a1b9a;color:#6a1b9a;">
-                <span class="metodo-emoji">📦</span>
-                <span class="metodo-label">Especie</span>
             </button>
         </div>
 
@@ -3035,12 +3031,6 @@ async function confirmarVenta() {
         return;
     }
 
-    // ESPECIE: abrir modal de datos antes de procesar
-    if (metodoPagoActual === 'especie') {
-        abrirModalEspecie();
-        return;
-    }
-
     const btn = document.getElementById('btnOkConfirm');
     btn.disabled = true;
     btn.textContent = '⏳ Procesando...';
@@ -3483,9 +3473,7 @@ function abrirResumen() {
             return !prod || !CATS_EXCLUIDAS_STATS.includes((prod.category || '').toUpperCase());
         })
     })).filter(v => v.items.length > 0);
-    const totalDia = ventasHoy
-        .filter(v => v.metodoPago !== 'PAGO_MERCADERIA')
-        .reduce((s, v) => s + v.total, 0); // total real de caja (excluye especie)
+    const totalDia = ventasHoy.reduce((s, v) => s + v.total, 0); // total real (con electrónica)
     const cantVentas = ventas.length;
     const ticketPromedio = cantVentas > 0 ? Math.round(totalDia / cantVentas) : 0;
 
@@ -3905,7 +3893,7 @@ function confirmarPeso() {
 // ========== MÉTODO DE PAGO ==========
 function seleccionarMetodo(metodo) {
     metodoPagoActual = metodo;
-    const mapId = { efectivo: 'btnEfectivo', posnet: 'btnPosnet', transferencia: 'btnTransf', fiado: 'btnFiado', especie: 'btnEspecie' };
+    const mapId = { efectivo: 'btnEfectivo', posnet: 'btnPosnet', transferencia: 'btnTransf', fiado: 'btnFiado' };
     Object.values(mapId).forEach(id => {
         const btn = document.getElementById(id);
         if (btn) btn.classList.remove('seleccionado');
@@ -4174,6 +4162,17 @@ function seleccionarProductoIngreso(id) {
         </div>`;
     if (!document.getElementById('ingVenta').value) {
         document.getElementById('ingVenta').value = p.price;
+    }
+    // Precargar costo anterior si existe y el campo está vacío
+    const ingCostoEl = document.getElementById('ingCosto');
+    if (ingCostoEl && !ingCostoEl.value && p.precioCosto > 0) {
+        ingCostoEl.value = p.precioCosto;
+        calcularSugeridoIngreso();
+    }
+    // Precargar vencimiento anterior si existe y el campo está vacío
+    const ingVencEl = document.getElementById('ingVencimiento');
+    if (ingVencEl && !ingVencEl.value && p.vencimiento) {
+        ingVencEl.value = p.vencimiento;
     }
 }
 
@@ -7316,56 +7315,6 @@ abrirNuevoProducto = function() {
 <!-- =========================================== -->
 
 
-<!-- ===== MODAL PAGO CON ESPECIE ===== -->
-<div id="modalEspecie" style="display:none;position:fixed;inset:0;z-index:5000;background:rgba(0,0,0,0.7);align-items:center;justify-content:center;">
-  <div style="background:white;border-radius:18px;padding:24px;width:90%;max-width:420px;max-height:90vh;overflow-y:auto;">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-      <h3 style="margin:0;font-size:1.1rem;color:#4a148c;">📦 Pago con mercadería</h3>
-      <button onclick="cerrarModalEspecie()" style="background:#f44336;color:white;border:none;border-radius:50%;width:32px;height:32px;font-size:1.1rem;cursor:pointer;">✕</button>
-    </div>
-    <div style="background:#f3e5f5;border-radius:10px;padding:10px 14px;margin-bottom:16px;font-size:0.78rem;color:#6a1b9a;line-height:1.5;">
-      ⚠️ Esta operación <strong>no ingresa dinero a caja</strong>. Descuenta stock y registra solo el margen en ganancia.
-    </div>
-    <div id="especieResumen" style="background:#fafafa;border-radius:10px;padding:10px 14px;margin-bottom:16px;font-size:0.82rem;color:#333;"></div>
-    <div style="display:flex;flex-direction:column;gap:10px;">
-      <div>
-        <label style="font-size:0.75rem;font-weight:700;color:#888;text-transform:uppercase;">Destino / Beneficiario *</label>
-        <input id="especieDestino" placeholder="ej: Vecino, Electricista, Flete..." style="width:100%;box-sizing:border-box;padding:10px;border:1.5px solid #ddd;border-radius:10px;font-size:0.9rem;margin-top:4px;">
-      </div>
-      <div>
-        <label style="font-size:0.75rem;font-weight:700;color:#888;text-transform:uppercase;">Motivo *</label>
-        <select id="especieMotivo" style="width:100%;box-sizing:border-box;padding:10px;border:1.5px solid #ddd;border-radius:10px;font-size:0.9rem;margin-top:4px;">
-          <option value="">— Seleccioná —</option>
-          <option value="Pago servicio">Pago servicio</option>
-          <option value="Deuda">Deuda</option>
-          <option value="Intercambio">Intercambio</option>
-          <option value="Favor">Favor</option>
-          <option value="Otro">Otro</option>
-        </select>
-      </div>
-      <div>
-        <label style="font-size:0.75rem;font-weight:700;color:#888;text-transform:uppercase;">Categoría de gasto *</label>
-        <select id="especieCategoria" style="width:100%;box-sizing:border-box;padding:10px;border:1.5px solid #ddd;border-radius:10px;font-size:0.9rem;margin-top:4px;">
-          <option value="">— Seleccioná —</option>
-          <option value="Servicios">Servicios</option>
-          <option value="Mantenimiento">Mantenimiento</option>
-          <option value="Flete">Flete</option>
-          <option value="Personal">Personal</option>
-          <option value="Otros">Otros</option>
-        </select>
-      </div>
-      <div>
-        <label style="font-size:0.75rem;font-weight:700;color:#888;text-transform:uppercase;">Observación</label>
-        <input id="especieObs" placeholder="Detalle opcional..." style="width:100%;box-sizing:border-box;padding:10px;border:1.5px solid #ddd;border-radius:10px;font-size:0.9rem;margin-top:4px;">
-      </div>
-    </div>
-    <div style="display:flex;gap:10px;margin-top:20px;">
-      <button onclick="cerrarModalEspecie()" style="flex:1;padding:12px;border-radius:12px;border:2px solid #ddd;background:white;color:#666;font-weight:700;font-size:0.9rem;cursor:pointer;">Cancelar</button>
-      <button id="btnConfirmarEspecie" onclick="confirmarPagoEspecie()" style="flex:2;padding:12px;border-radius:12px;border:none;background:#6a1b9a;color:white;font-weight:700;font-size:0.9rem;cursor:pointer;">📦 Confirmar pago</button>
-    </div>
-  </div>
-</div>
-
 <div id="modalFiado" style="display:none;position:fixed;inset:0;z-index:5000;background:rgba(0,0,0,0.7);align-items:center;justify-content:center;">
   <div style="background:white;border-radius:18px;padding:24px;width:90%;max-width:420px;max-height:90vh;overflow-y:auto;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
@@ -8240,117 +8189,6 @@ async function confirmarSalidaInterna() {
     }
 }
 // ============================================
-
-// ===== PAGO CON ESPECIE (MERCADERÍA) =====
-function abrirModalEspecie() {
-    const total = window._totalConRedondeo || ventaActual.reduce((s,i) => s + i.price * i.qty, 0);
-    const totalCosto = ventaActual.reduce((s,i) => {
-        const prod = productos.find(p => p.id === (i.esPeso ? i.idOriginal : i.id));
-        const costo = prod ? (prod.costo || 0) : 0;
-        return s + costo * (i.qty || 1);
-    }, 0);
-    const margen = total - totalCosto;
-
-    // Resumen de productos
-    const lineas = ventaActual.map(i => `${i.qty}× ${i.name.substring(0,28)} — $${(i.price * i.qty).toLocaleString('es-AR')}`).join('<br>');
-    document.getElementById('especieResumen').innerHTML =
-        lineas +
-        `<div style="margin-top:8px;padding-top:8px;border-top:1px solid #ddd;">` +
-        `<b>Valor referencial: $${Math.round(total).toLocaleString('es-AR')}</b>` +
-        (totalCosto > 0 ? ` · Costo: $${Math.round(totalCosto).toLocaleString('es-AR')} · <span style="color:#2e7d32;">Margen: $${Math.round(margen).toLocaleString('es-AR')}</span>` : '') +
-        `</div>`;
-
-    // Limpiar campos
-    document.getElementById('especieDestino').value = '';
-    document.getElementById('especieMotivo').value = '';
-    document.getElementById('especieCategoria').value = '';
-    document.getElementById('especieObs').value = '';
-    document.getElementById('modalEspecie').style.display = 'flex';
-}
-
-function cerrarModalEspecie() {
-    document.getElementById('modalEspecie').style.display = 'none';
-}
-
-async function confirmarPagoEspecie() {
-    const destino   = document.getElementById('especieDestino').value.trim();
-    const motivo    = document.getElementById('especieMotivo').value;
-    const categoria = document.getElementById('especieCategoria').value;
-    const obs       = document.getElementById('especieObs').value.trim();
-
-    if (!destino)   { mostrarToast('⚠️ Ingresá el destino/beneficiario', 'rojo'); return; }
-    if (!motivo)    { mostrarToast('⚠️ Seleccioná el motivo', 'rojo'); return; }
-    if (!categoria) { mostrarToast('⚠️ Seleccioná la categoría de gasto', 'rojo'); return; }
-
-    cerrarModalEspecie();
-
-    const btn = document.getElementById('btnOkConfirm');
-    if (btn) { btn.disabled = true; btn.textContent = '⏳ Procesando...'; }
-
-    const total = window._totalConRedondeo || ventaActual.reduce((s,i) => s + i.price * i.qty, 0);
-    const totalCosto = ventaActual.reduce((s,i) => {
-        const prod = productos.find(p => p.id === (i.esPeso ? i.idOriginal : i.id));
-        return s + (prod ? (prod.costo || 0) : 0) * (i.qty || 1);
-    }, 0);
-    const margenTotal = total - totalCosto;
-    const idVenta = 'PM' + Date.now();
-    const _t = new Date();
-    const hora = _t.getHours().toString().padStart(2,'0') + ':' + _t.getMinutes().toString().padStart(2,'0');
-
-    const ventaData = ventaActual.map(i => ({
-        id: i.esPeso ? i.idOriginal : i.id,
-        name: i.name, qty: i.qty,
-        esPeso: i.esPeso || false, gramos: i.gramos || 0,
-        precioVenta: i.price, precioModificado: false, precioOriginal: 0
-    }));
-
-    const notas = `[ESPECIE] ${destino} | ${motivo} | ${categoria}${obs ? ' | ' + obs : ''}`;
-    const ventaPayload = {
-        items: ventaData,
-        metodoPago: 'PAGO_MERCADERIA',
-        vendedor: vendedorActual,
-        idVenta,
-        notas
-    };
-
-    let stockOk = false;
-    try {
-        const url = API_URL + '?action=vender&data=' + encodeURIComponent(JSON.stringify(ventaPayload));
-        const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
-        const resp = await r.json();
-        stockOk = resp.success === true;
-    } catch(e) { console.warn('⚠️ Error especie:', e); }
-
-    // Guardar en historial local como PAGO_MERCADERIA (no suma a caja)
-    guardarVentaDia({
-        items: [...ventaActual], total: 0, hora,
-        stockRebajado: stockOk, metodoPago: 'PAGO_MERCADERIA',
-        meta: { destino, motivo, categoria, obs, totalReferencial: total, totalCosto, margenTotal }
-    });
-
-    // Descontar stock local
-    ventaActual.forEach(item => {
-        const p = productos.find(pr => pr.id === (item.esPeso ? item.idOriginal : item.id));
-        if (!p) return;
-        p.stock = Math.max(0, item.esPeso
-            ? Math.round((p.stock - (item.gramos || 0) / 1000) * 1000) / 1000
-            : p.stock - item.qty);
-    });
-
-    window._ultimaVenta = { items: [...ventaActual], total: 0, totalOriginal: total, descuentoRedondeo: 0, hora, metodo: 'PAGO_MERCADERIA' };
-
-    seleccionarMetodo('efectivo');
-    ventaActual = [];
-    localStorage.removeItem(CARRITO_KEY);
-    actualizarRanking();
-    renderVenta();
-
-    if (btn) { btn.textContent = '✅ Cobro confirmado'; btn.disabled = true; }
-    mostrarToast(stockOk
-        ? `✅ Pago en especie registrado — $${Math.round(total).toLocaleString('es-AR')} en mercadería`
-        : '✅ Especie registrada (stock manual)', 'verde');
-    cerrarConfirm();
-}
 
 function abrirModalFiado() {
     const total = window._totalConRedondeo || ventaActual.reduce((s,i) => s + i.price * i.qty, 0);
