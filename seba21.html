@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v232</title>
+    <title>Copihue — POS v233</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -1477,6 +1477,10 @@
             <button class="metodo-btn fiado" id="btnFiado" onclick="seleccionarMetodo('fiado')">
                 <span class="metodo-emoji">🧾</span>
                 <span class="metodo-label">Fiado</span>
+            </button>
+            <button class="metodo-btn" id="btnEspecie" onclick="seleccionarMetodo('especie')" style="border-color:#6a1b9a;color:#6a1b9a;">
+                <span class="metodo-emoji">📦</span>
+                <span class="metodo-label">Especie</span>
             </button>
         </div>
 
@@ -3031,6 +3035,12 @@ async function confirmarVenta() {
         return;
     }
 
+    // ESPECIE: abrir modal de datos antes de procesar
+    if (metodoPagoActual === 'especie') {
+        abrirModalEspecie();
+        return;
+    }
+
     const btn = document.getElementById('btnOkConfirm');
     btn.disabled = true;
     btn.textContent = '⏳ Procesando...';
@@ -3039,7 +3049,6 @@ async function confirmarVenta() {
     const total = window._totalConRedondeo || totalOriginal;
     const descuentoRedondeo = window._descuentoRedondeo || 0;
     const _t = new Date(); const hora = _t.getHours().toString().padStart(2,'0') + ':' + _t.getMinutes().toString().padStart(2,'0');
-    const idVenta = 'V' + Date.now() + Math.random().toString(36).slice(2,6).toUpperCase();
 
     // Rebajar stock en Apps Script (Google Sheets)
     let stockOk = false;
@@ -3058,7 +3067,7 @@ async function confirmarVenta() {
         }));
         // Agregar método de pago al request
         metodoPagoFinal = metodoPagoActual.toUpperCase();
-        const ventaPayload = { items: ventaData, metodoPago: metodoPagoFinal, vendedor: vendedorActual, idVenta };
+        const ventaPayload = { items: ventaData, metodoPago: metodoPagoFinal, vendedor: vendedorActual };
         const dataEncoded = encodeURIComponent(JSON.stringify(ventaPayload));
         const url = API_URL + '?action=vender&data=' + dataEncoded;
         const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
@@ -3089,7 +3098,6 @@ async function confirmarVenta() {
             })),
             metodoPago: metodoPagoFinal || metodoPagoActual,
             vendedor: vendedorActual,
-            idVenta: idVenta,
             ts: Date.now()
         };
         // Encolar en localStorage para reintento
@@ -3428,7 +3436,7 @@ async function _reenviarVentasPendientes() {
     const restantes = [];
     for (const venta of pendientes) {
         try {
-            const payload = { items: venta.items, metodoPago: venta.metodoPago, vendedor: venta.vendedor, idVenta: venta.idVenta };
+            const payload = { items: venta.items, metodoPago: venta.metodoPago, vendedor: venta.vendedor };
             const url = API_URL + '?action=vender&data=' + encodeURIComponent(JSON.stringify(payload));
             const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
             const resp = await r.json();
@@ -3475,7 +3483,9 @@ function abrirResumen() {
             return !prod || !CATS_EXCLUIDAS_STATS.includes((prod.category || '').toUpperCase());
         })
     })).filter(v => v.items.length > 0);
-    const totalDia = ventasHoy.reduce((s, v) => s + v.total, 0); // total real (con electrónica)
+    const totalDia = ventasHoy
+        .filter(v => v.metodoPago !== 'PAGO_MERCADERIA')
+        .reduce((s, v) => s + v.total, 0); // total real de caja (excluye especie)
     const cantVentas = ventas.length;
     const ticketPromedio = cantVentas > 0 ? Math.round(totalDia / cantVentas) : 0;
 
@@ -3895,7 +3905,7 @@ function confirmarPeso() {
 // ========== MÉTODO DE PAGO ==========
 function seleccionarMetodo(metodo) {
     metodoPagoActual = metodo;
-    const mapId = { efectivo: 'btnEfectivo', posnet: 'btnPosnet', transferencia: 'btnTransf', fiado: 'btnFiado' };
+    const mapId = { efectivo: 'btnEfectivo', posnet: 'btnPosnet', transferencia: 'btnTransf', fiado: 'btnFiado', especie: 'btnEspecie' };
     Object.values(mapId).forEach(id => {
         const btn = document.getElementById(id);
         if (btn) btn.classList.remove('seleccionado');
@@ -5849,12 +5859,14 @@ function _guardarTogglesPersistidos() {
         }));
     } catch(e) {}
 }
-// Estado inicial siempre null/auto — la planilla es la única fuente de verdad.
-// localStorage solo se escribe DESPUÉS de que la API confirma un cambio manual.
-const _toggleEstado = { relampago: null, destacadas: null, especiales: null, ultimas: null };
-const _toggleModo   = { relampago: 'auto', destacadas: 'auto', especiales: 'auto', ultimas: 'auto' };
-// Limpiar cualquier localStorage stale de sesiones anteriores
-try { localStorage.removeItem(_TOGGLE_STORAGE_KEY); } catch(e) {}
+const _toggleEstado = (() => {
+    const p = _cargarTogglesPersistidos();
+    return (p && p.estado) ? p.estado : { relampago: null, destacadas: null, especiales: null, ultimas: null };
+})();
+const _toggleModo = (() => {
+    const p = _cargarTogglesPersistidos();
+    return (p && p.modo) ? p.modo : { relampago: 'off', destacadas: 'off', especiales: 'off', ultimas: 'off' };
+})();
 
 // Día actual → índice columna planilla (0=Lun...6=Dom)
 function _diaActualIdx() {
@@ -5986,11 +5998,11 @@ async function toggleOferta(tipo) {
     const nuevoModo = ciclo[modoActual];
     const nuevoValor = nuevoModo === 'on' ? 1 : nuevoModo === 'auto' ? 0 : '';
 
-    // UI inmediata (optimista — se revierte si la API falla)
+    // UI inmediata
     _toggleModo[tipo] = nuevoModo;
     _toggleEstado[tipo] = nuevoModo === 'on' ? true : nuevoModo === 'off' ? false : true;
     _pintarToggle(tipo, _toggleEstado[tipo]);
-    // NO guardar en localStorage aquí — solo se persiste si la API confirma abajo
+    _guardarTogglesPersistidos();
     if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
 
     try {
@@ -5999,26 +6011,22 @@ async function toggleOferta(tipo) {
         const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(10000) });
         const resp = await r.json();
         if (resp.success) {
-            _guardarTogglesPersistidos(); // confirma → ahora sí persiste
+            _guardarTogglesPersistidos();
             const labels = { 'on': '🔒 Forzado ON', 'auto': '⏰ Automático (respeta horario)', 'off': '✗ Forzado OFF' };
             mostrarToast(cfg.emoji + ' ' + tipo + ' → ' + labels[nuevoModo], nuevoModo === 'off' ? 'rojo' : 'verde');
             const logDatos = { tipo, estado: nuevoValor, vendedor: vendedorActual || 'POS' };
             fetch(API_URL + '?action=logInterruptor&data=' + encodeURIComponent(JSON.stringify(logDatos)), { redirect: 'follow' }).catch(() => {});
             if (nuevoModo === 'auto') setTimeout(() => cargarEstadoToggles(), 500);
         } else {
-            // API rechazó — revertir en memoria y limpiar localStorage
             _toggleModo[tipo] = modoActual;
             _toggleEstado[tipo] = modoActual === 'on';
             _pintarToggle(tipo, _toggleEstado[tipo]);
-            try { localStorage.removeItem(_TOGGLE_STORAGE_KEY); } catch(e) {}
             mostrarToast('❌ Error: ' + resp.mensaje, 'rojo');
         }
     } catch(e) {
-        // Sin conexión — revertir en memoria y limpiar localStorage
         _toggleModo[tipo] = modoActual;
         _toggleEstado[tipo] = modoActual === 'on';
         _pintarToggle(tipo, _toggleEstado[tipo]);
-        try { localStorage.removeItem(_TOGGLE_STORAGE_KEY); } catch(e) {}
         mostrarToast('❌ Sin conexión', 'rojo');
     }
     if (btn) { btn.disabled = false; btn.style.opacity = _toggleEstado[tipo] ? '1' : '0.65'; }
@@ -7308,6 +7316,56 @@ abrirNuevoProducto = function() {
 <!-- =========================================== -->
 
 
+<!-- ===== MODAL PAGO CON ESPECIE ===== -->
+<div id="modalEspecie" style="display:none;position:fixed;inset:0;z-index:5000;background:rgba(0,0,0,0.7);align-items:center;justify-content:center;">
+  <div style="background:white;border-radius:18px;padding:24px;width:90%;max-width:420px;max-height:90vh;overflow-y:auto;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <h3 style="margin:0;font-size:1.1rem;color:#4a148c;">📦 Pago con mercadería</h3>
+      <button onclick="cerrarModalEspecie()" style="background:#f44336;color:white;border:none;border-radius:50%;width:32px;height:32px;font-size:1.1rem;cursor:pointer;">✕</button>
+    </div>
+    <div style="background:#f3e5f5;border-radius:10px;padding:10px 14px;margin-bottom:16px;font-size:0.78rem;color:#6a1b9a;line-height:1.5;">
+      ⚠️ Esta operación <strong>no ingresa dinero a caja</strong>. Descuenta stock y registra solo el margen en ganancia.
+    </div>
+    <div id="especieResumen" style="background:#fafafa;border-radius:10px;padding:10px 14px;margin-bottom:16px;font-size:0.82rem;color:#333;"></div>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <div>
+        <label style="font-size:0.75rem;font-weight:700;color:#888;text-transform:uppercase;">Destino / Beneficiario *</label>
+        <input id="especieDestino" placeholder="ej: Vecino, Electricista, Flete..." style="width:100%;box-sizing:border-box;padding:10px;border:1.5px solid #ddd;border-radius:10px;font-size:0.9rem;margin-top:4px;">
+      </div>
+      <div>
+        <label style="font-size:0.75rem;font-weight:700;color:#888;text-transform:uppercase;">Motivo *</label>
+        <select id="especieMotivo" style="width:100%;box-sizing:border-box;padding:10px;border:1.5px solid #ddd;border-radius:10px;font-size:0.9rem;margin-top:4px;">
+          <option value="">— Seleccioná —</option>
+          <option value="Pago servicio">Pago servicio</option>
+          <option value="Deuda">Deuda</option>
+          <option value="Intercambio">Intercambio</option>
+          <option value="Favor">Favor</option>
+          <option value="Otro">Otro</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:0.75rem;font-weight:700;color:#888;text-transform:uppercase;">Categoría de gasto *</label>
+        <select id="especieCategoria" style="width:100%;box-sizing:border-box;padding:10px;border:1.5px solid #ddd;border-radius:10px;font-size:0.9rem;margin-top:4px;">
+          <option value="">— Seleccioná —</option>
+          <option value="Servicios">Servicios</option>
+          <option value="Mantenimiento">Mantenimiento</option>
+          <option value="Flete">Flete</option>
+          <option value="Personal">Personal</option>
+          <option value="Otros">Otros</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:0.75rem;font-weight:700;color:#888;text-transform:uppercase;">Observación</label>
+        <input id="especieObs" placeholder="Detalle opcional..." style="width:100%;box-sizing:border-box;padding:10px;border:1.5px solid #ddd;border-radius:10px;font-size:0.9rem;margin-top:4px;">
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:20px;">
+      <button onclick="cerrarModalEspecie()" style="flex:1;padding:12px;border-radius:12px;border:2px solid #ddd;background:white;color:#666;font-weight:700;font-size:0.9rem;cursor:pointer;">Cancelar</button>
+      <button id="btnConfirmarEspecie" onclick="confirmarPagoEspecie()" style="flex:2;padding:12px;border-radius:12px;border:none;background:#6a1b9a;color:white;font-weight:700;font-size:0.9rem;cursor:pointer;">📦 Confirmar pago</button>
+    </div>
+  </div>
+</div>
+
 <div id="modalFiado" style="display:none;position:fixed;inset:0;z-index:5000;background:rgba(0,0,0,0.7);align-items:center;justify-content:center;">
   <div style="background:white;border-radius:18px;padding:24px;width:90%;max-width:420px;max-height:90vh;overflow-y:auto;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
@@ -7688,7 +7746,6 @@ async function publicarEnGitHub(){
 // ========== SELECTOR ÚLTIMAS UNIDADES ==========
 let _candidatosUltimas = [];
 let _ultimasSeleccionados = new Set(); // IDs seleccionados
-let _limiteUltimasSeba   = 3;          // se actualiza desde getConfig al abrir el selector
 
 async function abrirSelectorUltimas() {
     const modal = document.getElementById('modalUltimas');
@@ -7703,22 +7760,6 @@ async function abrirSelectorUltimas() {
         if (!data.ok) throw new Error(data.error || 'Error');
 
         _candidatosUltimas = data.candidatos || [];
-
-        // Leer límite de planilla
-        try {
-            const rc = await fetch(API_URL + '?action=getConfig&t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(6000) });
-            const dc = await rc.json();
-            if (dc.success && dc.config) {
-                const claveMax = Object.keys(dc.config).find(k => k.toLowerCase().includes('máximo ultimas') || k.toLowerCase().includes('maximo ultimas'));
-                if (claveMax) {
-                    const diaIdx = _diaActualIdx();
-                    const valMax = dc.config[claveMax] ? dc.config[claveMax][diaIdx] : null;
-                    if (valMax !== null && !isNaN(parseInt(valMax)) && parseInt(valMax) > 0) {
-                        _limiteUltimasSeba = parseInt(valMax);
-                    }
-                }
-            }
-        } catch(eCfg) { /* usa el default 3 */ }
 
         // Cargar selección vigente del día
         const rs = await fetch(API_URL + '?action=getUltimasSeleccion&t=' + Date.now(), { redirect: 'follow' });
@@ -7784,15 +7825,8 @@ function ultiRenderizar() {
 }
 
 function ultiToggle(id) {
-    if (_ultimasSeleccionados.has(id)) {
-        _ultimasSeleccionados.delete(id);
-    } else {
-        if (_ultimasSeleccionados.size >= _limiteUltimasSeba) {
-            mostrarToast(`⚠️ Máximo ${_limiteUltimasSeba} productos (configurado en planilla)`, 'rojo');
-            return;
-        }
-        _ultimasSeleccionados.add(id);
-    }
+    if (_ultimasSeleccionados.has(id)) _ultimasSeleccionados.delete(id);
+    else _ultimasSeleccionados.add(id);
     ultiRenderizar();
 }
 
@@ -8206,6 +8240,117 @@ async function confirmarSalidaInterna() {
     }
 }
 // ============================================
+
+// ===== PAGO CON ESPECIE (MERCADERÍA) =====
+function abrirModalEspecie() {
+    const total = window._totalConRedondeo || ventaActual.reduce((s,i) => s + i.price * i.qty, 0);
+    const totalCosto = ventaActual.reduce((s,i) => {
+        const prod = productos.find(p => p.id === (i.esPeso ? i.idOriginal : i.id));
+        const costo = prod ? (prod.costo || 0) : 0;
+        return s + costo * (i.qty || 1);
+    }, 0);
+    const margen = total - totalCosto;
+
+    // Resumen de productos
+    const lineas = ventaActual.map(i => `${i.qty}× ${i.name.substring(0,28)} — $${(i.price * i.qty).toLocaleString('es-AR')}`).join('<br>');
+    document.getElementById('especieResumen').innerHTML =
+        lineas +
+        `<div style="margin-top:8px;padding-top:8px;border-top:1px solid #ddd;">` +
+        `<b>Valor referencial: $${Math.round(total).toLocaleString('es-AR')}</b>` +
+        (totalCosto > 0 ? ` · Costo: $${Math.round(totalCosto).toLocaleString('es-AR')} · <span style="color:#2e7d32;">Margen: $${Math.round(margen).toLocaleString('es-AR')}</span>` : '') +
+        `</div>`;
+
+    // Limpiar campos
+    document.getElementById('especieDestino').value = '';
+    document.getElementById('especieMotivo').value = '';
+    document.getElementById('especieCategoria').value = '';
+    document.getElementById('especieObs').value = '';
+    document.getElementById('modalEspecie').style.display = 'flex';
+}
+
+function cerrarModalEspecie() {
+    document.getElementById('modalEspecie').style.display = 'none';
+}
+
+async function confirmarPagoEspecie() {
+    const destino   = document.getElementById('especieDestino').value.trim();
+    const motivo    = document.getElementById('especieMotivo').value;
+    const categoria = document.getElementById('especieCategoria').value;
+    const obs       = document.getElementById('especieObs').value.trim();
+
+    if (!destino)   { mostrarToast('⚠️ Ingresá el destino/beneficiario', 'rojo'); return; }
+    if (!motivo)    { mostrarToast('⚠️ Seleccioná el motivo', 'rojo'); return; }
+    if (!categoria) { mostrarToast('⚠️ Seleccioná la categoría de gasto', 'rojo'); return; }
+
+    cerrarModalEspecie();
+
+    const btn = document.getElementById('btnOkConfirm');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Procesando...'; }
+
+    const total = window._totalConRedondeo || ventaActual.reduce((s,i) => s + i.price * i.qty, 0);
+    const totalCosto = ventaActual.reduce((s,i) => {
+        const prod = productos.find(p => p.id === (i.esPeso ? i.idOriginal : i.id));
+        return s + (prod ? (prod.costo || 0) : 0) * (i.qty || 1);
+    }, 0);
+    const margenTotal = total - totalCosto;
+    const idVenta = 'PM' + Date.now();
+    const _t = new Date();
+    const hora = _t.getHours().toString().padStart(2,'0') + ':' + _t.getMinutes().toString().padStart(2,'0');
+
+    const ventaData = ventaActual.map(i => ({
+        id: i.esPeso ? i.idOriginal : i.id,
+        name: i.name, qty: i.qty,
+        esPeso: i.esPeso || false, gramos: i.gramos || 0,
+        precioVenta: i.price, precioModificado: false, precioOriginal: 0
+    }));
+
+    const notas = `[ESPECIE] ${destino} | ${motivo} | ${categoria}${obs ? ' | ' + obs : ''}`;
+    const ventaPayload = {
+        items: ventaData,
+        metodoPago: 'PAGO_MERCADERIA',
+        vendedor: vendedorActual,
+        idVenta,
+        notas
+    };
+
+    let stockOk = false;
+    try {
+        const url = API_URL + '?action=vender&data=' + encodeURIComponent(JSON.stringify(ventaPayload));
+        const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
+        const resp = await r.json();
+        stockOk = resp.success === true;
+    } catch(e) { console.warn('⚠️ Error especie:', e); }
+
+    // Guardar en historial local como PAGO_MERCADERIA (no suma a caja)
+    guardarVentaDia({
+        items: [...ventaActual], total: 0, hora,
+        stockRebajado: stockOk, metodoPago: 'PAGO_MERCADERIA',
+        meta: { destino, motivo, categoria, obs, totalReferencial: total, totalCosto, margenTotal }
+    });
+
+    // Descontar stock local
+    ventaActual.forEach(item => {
+        const p = productos.find(pr => pr.id === (item.esPeso ? item.idOriginal : item.id));
+        if (!p) return;
+        p.stock = Math.max(0, item.esPeso
+            ? Math.round((p.stock - (item.gramos || 0) / 1000) * 1000) / 1000
+            : p.stock - item.qty);
+    });
+
+    window._ultimaVenta = { items: [...ventaActual], total: 0, totalOriginal: total, descuentoRedondeo: 0, hora, metodo: 'PAGO_MERCADERIA' };
+
+    seleccionarMetodo('efectivo');
+    ventaActual = [];
+    localStorage.removeItem(CARRITO_KEY);
+    actualizarRanking();
+    renderVenta();
+
+    if (btn) { btn.textContent = '✅ Cobro confirmado'; btn.disabled = true; }
+    mostrarToast(stockOk
+        ? `✅ Pago en especie registrado — $${Math.round(total).toLocaleString('es-AR')} en mercadería`
+        : '✅ Especie registrada (stock manual)', 'verde');
+    cerrarConfirm();
+}
 
 function abrirModalFiado() {
     const total = window._totalConRedondeo || ventaActual.reduce((s,i) => s + i.price * i.qty, 0);
