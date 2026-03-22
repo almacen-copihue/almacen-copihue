@@ -1311,12 +1311,15 @@ function calcularMotorCSI() {
   raw.items.forEach(function(it) {
     var f = it.fechaStr||'';
     if (f < c90 || !it.nombre) return;
-    if (!vm[it.nombre]) vm[it.nombre] = {v7:0,v30:0,v60:0,v90:0};
+    // Limpiar tag de precio especial del POS ej: [PRECIO ESP: $7000→$5000]
+    var nomLimpio = it.nombre.replace(/\s*\[PRECIO ESP[^\]]*\]/gi,'').trim();
+    if (!nomLimpio) return;
+    if (!vm[nomLimpio]) vm[nomLimpio] = {v7:0,v30:0,v60:0,v90:0};
     var q = it.qty||0;
-    vm[it.nombre].v90 += q;
-    if (f >= c60) vm[it.nombre].v60 += q;
-    if (f >= c30) vm[it.nombre].v30 += q;
-    if (f >= c7)  vm[it.nombre].v7  += q;
+    vm[nomLimpio].v90 += q;
+    if (f >= c60) vm[nomLimpio].v60 += q;
+    if (f >= c30) vm[nomLimpio].v30 += q;
+    if (f >= c7)  vm[nomLimpio].v7  += q;
   });
 
   // Stock real desde raw.stockInfo (cubre TODO el inventario, incluye productos sin vencimiento).
@@ -1465,15 +1468,16 @@ function renderCompraSugerida() {
   var res = calcularMotorCSI();
   var todos = res.filas, nMuertos = res.nMuertos, nVencOmit = res.nVencOmit, nSinStock = res.nSinStock;
 
-  // Orden por urgencia: diario > reactivacion > semanal > mensual > especial
+  // Orden por urgencia: diario > reactivacion > semanal > mensual > especial, S/D al final
   var ORDEN_PERIODO = { diario:0, reactivacion:1, semanal:2, mensual:3, especial:4 };
   todos.sort(function(a,b){
+    var aSD = a.compraSugerida === null, bSD = b.compraSugerida === null;
+    if (aSD !== bSD) return aSD ? 1 : -1;
     var oa = ORDEN_PERIODO[a.periodo] !== undefined ? ORDEN_PERIODO[a.periodo] : 9;
     var ob = ORDEN_PERIODO[b.periodo] !== undefined ? ORDEN_PERIODO[b.periodo] : 9;
     if (oa !== ob) return oa - ob;
-    // Secundario: más urgente = menos stock (o S/D primero)
-    var sa = a.stock === -1 ? -1 : a.stock;
-    var sb = b.stock === -1 ? -1 : b.stock;
+    var sa = a.stock === -1 ? 9999 : a.stock;
+    var sb = b.stock === -1 ? 9999 : b.stock;
     return sa - sb;
   });
 
@@ -1504,19 +1508,18 @@ function renderCompraSugerida() {
       var lbl={todos:'📋 Todos',diario:'🍞 Diario',semanal:'🥛 Semanal',mensual:'📦 Mensual',especial:'💻 Especial',reactivacion:'⚡ Reactiv.'}[f];
       var cnt={todos:todos.length,diario:nDia,semanal:nSem,mensual:nMen,especial:nEsp,reactivacion:nRea}[f];
       if (cnt===0 && f!=='todos') return '';
-      return '<button class="chip'+(csiFiltroPeriodo===f?' activo':'')+(f==='todos'?' chip-urgencia':'')+'" onclick="csiFiltroPeriodo=\''+f+'\';renderApp()">'+lbl+' ('+cnt+')</button>';
+      return '<button class="chip'+(csiFiltroPeriodo===f?' activo':'')+'" onclick="csiFiltroPeriodo=\''+f+'\';renderApp()">'+lbl+' ('+cnt+')</button>';
     }).join('')+
     '</div>';
 
   var lista = csiFiltroPeriodo==='todos' ? todos : todos.filter(function(p){return p.periodo===csiFiltroPeriodo;});
   if (!lista.length) return resumen+filtros+'<div class="empty">✅ Sin sugerencias para este filtro</div>';
 
-  // BADGE colores por período
   var BADGE = {
-    diario:      {cls:'csi-badge-dia', lbl:'🍞 Diario',    color:'#4a148c'},
-    semanal:     {cls:'csi-badge-sem', lbl:'🥛 Semanal',   color:'#1565c0'},
-    mensual:     {cls:'csi-badge-men', lbl:'📦 Mensual',   color:'#2e7d32'},
-    especial:    {cls:'csi-badge-esp', lbl:'💻 Especial',  color:'#e65100'},
+    diario:      {cls:'csi-badge-dia', lbl:'🍞 Diario',   color:'#4a148c'},
+    semanal:     {cls:'csi-badge-sem', lbl:'🥛 Semanal',  color:'#1565c0'},
+    mensual:     {cls:'csi-badge-men', lbl:'📦 Mensual',  color:'#2e7d32'},
+    especial:    {cls:'csi-badge-esp', lbl:'💻 Especial', color:'#e65100'},
     reactivacion:{cls:'csi-badge-rea', lbl:'⚡ Reactiv.', color:'#f9a825'},
   };
 
@@ -1528,11 +1531,10 @@ function renderCompraSugerida() {
     var compraTxt = p.compraSugerida !== null
       ? '<span class="csi-qty">'+p.compraSugerida+'</span>'
       : '<span style="font-size:.7rem;color:var(--naranja);font-weight:700">S/D</span>';
-
-    // Datos expandidos (ocultos por defecto)
+    var nomEnc = encodeURIComponent(p.nombre);
     var detalle =
-      '<div id="csi-det-'+idx+'" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid #eee;font-size:.72rem;color:var(--gris);display:none;">'+
-        '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px 12px;margin-bottom:6px;">'+
+      '<div id="csi-det-'+idx+'" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid #eee;">'+
+        '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px 12px;margin-bottom:6px;font-size:.72rem;color:var(--gris);">'+
           '<span>V7d: <b style="color:#333">'+p.v7+'</b></span>'+
           '<span>V30d: <b style="color:#333">'+p.v30+'</b></span>'+
           '<span>V60d: <b style="color:#333">'+p.v60+'</b></span>'+
@@ -1540,19 +1542,16 @@ function renderCompraSugerida() {
           '<span>P/día: <b style="color:#333">'+p.promDia+'</b></span>'+
           '<span>Venc.: <b>'+vdTxt+'</b></span>'+
         '</div>'+
-        '<div style="color:var(--gris);font-style:italic;line-height:1.4">'+p.motivo+'</div>'+
-        '<div style="margin-top:8px;">'+
-          '<button onclick="csiTogglePausado(\''+encodeURIComponent(p.nombre)+'\','+p.id+',this)" '+
-          'style="width:100%;padding:7px;border-radius:8px;border:1.5px solid #ddd;background:#fafafa;font-size:.72rem;font-weight:700;cursor:pointer;color:#e53935;">'+
-          '⏸️ Desactivar de lista de compra'+
-          '</button>'+
-        '</div>'+
+        '<div style="font-size:.7rem;color:var(--gris);font-style:italic;line-height:1.4;margin-bottom:8px;">'+p.motivo+'</div>'+
+        '<button onclick="csiTogglePausado(\''+nomEnc+'\',this)" '+
+        'style="width:100%;padding:7px;border-radius:8px;border:1.5px solid #ddd;background:#fafafa;font-size:.72rem;font-weight:700;cursor:pointer;color:#e53935;">'+
+        '⏸️ Desactivar de lista de compra'+
+        '</button>'+
       '</div>';
-
     return '<div onclick="csiToggleDetalle('+idx+',event)" style="background:white;border-radius:14px;border:1.5px solid #eee;padding:12px 14px;margin-bottom:8px;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.04);">'+
       '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'+
-        '<span class="badge '+b.cls+'" style="font-size:.62rem;flex-shrink:0">'+b.lbl+'</span>'+
-        '<span style="font-weight:700;font-size:.88rem;flex:1;min-width:0;">'+p.nombre+'</span>'+
+        '<span class="badge '+b.cls+'" style="font-size:.62rem;flex-shrink:0;">'+b.lbl+'</span>'+
+        '<span style="font-weight:700;font-size:.88rem;flex:1;min-width:0;word-break:break-word;">'+p.nombre+'</span>'+
         '<span style="color:'+stkColor+';font-weight:900;font-size:.9rem;flex-shrink:0;">'+stkTxt+'</span>'+
         compraTxt+
       '</div>'+
@@ -1564,28 +1563,26 @@ function renderCompraSugerida() {
   return resumen+filtros+
     '<div style="margin-top:4px;">'+cards+'</div>'+
     '<div style="font-size:.6rem;color:var(--gris);padding:6px 2px;line-height:1.6;margin-top:4px">'+
-      '📌 <strong>S/D</strong>: stock no disponible. Tocá cada producto para ver detalle y desactivarlo de la lista de compra.'+
+      '📌 <b>S/D</b>: stock no disponible. Tocá cada producto para ver detalle y desactivarlo.'+
     '</div>';
 }
-// ====== FIN COMPRA SUGERIDA INTELIGENTE ======
 
 function csiToggleDetalle(idx, e) {
-  if (e && e.target && e.target.tagName === 'BUTTON') return; // no colapsar al tocar botón
+  if (e && e.target && e.target.tagName === 'BUTTON') return;
   var el = document.getElementById('csi-det-' + idx);
   if (!el) return;
-  var visible = el.style.display === 'block';
-  el.style.display = visible ? 'none' : 'block';
+  el.style.display = el.style.display === 'block' ? 'none' : 'block';
 }
 
-async function csiTogglePausado(nombreEncoded, id, btn) {
+async function csiTogglePausado(nombreEncoded, btn) {
   var nombre = decodeURIComponent(nombreEncoded);
   var esPausado = btn.textContent.includes('Reactivar');
   var nuevo = !esPausado;
   btn.disabled = true;
   btn.textContent = '⏳ Guardando...';
   try {
-    var r = await fetch(API_URL + '?action=setPausadoListaCompra&data=' +
-      encodeURIComponent(JSON.stringify({ id: id, pausado: nuevo ? 'SI' : '' })),
+    var r = await fetch(API_URL + '?action=setPausadoNombre&data=' +
+      encodeURIComponent(JSON.stringify({ nombre: nombre, pausado: nuevo ? 'SI' : '' })),
       { redirect: 'follow', signal: AbortSignal.timeout(8000) });
     var resp = await r.json();
     if (resp.success) {
@@ -1593,7 +1590,7 @@ async function csiTogglePausado(nombreEncoded, id, btn) {
       btn.style.color = nuevo ? '#2e7d32' : '#e53935';
       btn.style.borderColor = nuevo ? '#a5d6a7' : '#ddd';
     } else {
-      btn.textContent = '❌ Error — intentá de nuevo';
+      btn.textContent = '❌ ' + (resp.mensaje || 'Error — intentá de nuevo');
     }
   } catch(e) {
     btn.textContent = '❌ Sin conexión';
@@ -1602,6 +1599,7 @@ async function csiTogglePausado(nombreEncoded, id, btn) {
 }
 
 
+// ====== FIN COMPRA SUGERIDA INTELIGENTE ======
 
 // ====== EXPORTAR EXCEL ======
 function descargarExcel(){
