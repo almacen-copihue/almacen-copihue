@@ -328,6 +328,7 @@ let showVenc=false, showDiaSem=false, showHoras=false, showPDias=false;
 let prodSelIdx=-1; // índice del producto seleccionado en el top (-1 = ninguno)
 // ===== COMPRA SUGERIDA INTELIGENTE — estado =====
 let showCSI=false, csiFiltroPeriodo='todos';
+let showRecienLlegados=false;
 
 const fmt=n=>'$'+Math.round(n).toLocaleString('es-AR');
 const hoyStr=()=>{const h=new Date();return h.getFullYear()+'-'+String(h.getMonth()+1).padStart(2,'0')+'-'+String(h.getDate()).padStart(2,'0');};
@@ -1053,6 +1054,20 @@ function renderApp(){
           renderCompraSugerida()+
         '</div>'
       :'')+
+      // ===== RECIÉN LLEGADOS =====
+      (function(){
+        var rl=raw.recienLlegados||[];
+        if(!rl.length) return '';
+        return '<button class="toggle-btn" onclick="showRecienLlegados=!showRecienLlegados;renderApp()" style="border-color:#00897b;color:#00897b;margin-top:4px">'+
+          (showRecienLlegados?'▲':'▼')+' 🆕 Recién Llegados ('+rl.length+')'+
+          '</button>'+
+          (showRecienLlegados?
+            '<div class="tar" style="overflow:visible">'+
+              '<div class="tar-t" style="color:#00897b">🆕 RECIÉN LLEGADOS — últimos 3 días</div>'+
+              renderRecienLlegados(rl)+
+            '</div>'
+          :'');
+      })()+
     '</div>'+
     '<div class="pb"></div>';
 }
@@ -1311,7 +1326,6 @@ function calcularMotorCSI() {
   raw.items.forEach(function(it) {
     var f = it.fechaStr||'';
     if (f < c90 || !it.nombre) return;
-    // Limpiar tag de precio especial del POS ej: [PRECIO ESP: $7000→$5000]
     var nomLimpio = it.nombre.replace(/\s*\[PRECIO ESP[^\]]*\]/gi,'').trim();
     if (!nomLimpio) return;
     if (!vm[nomLimpio]) vm[nomLimpio] = {v7:0,v30:0,v60:0,v90:0};
@@ -1464,142 +1478,169 @@ function calcularMotorCSI() {
 // Genera el HTML completo de la sección Compra Sugerida
 function renderCompraSugerida() {
   if (!raw) return '<div class="empty">Sin datos</div>';
-
   var res = calcularMotorCSI();
   var todos = res.filas, nMuertos = res.nMuertos, nVencOmit = res.nVencOmit, nSinStock = res.nSinStock;
-
-  // Orden por urgencia: diario > reactivacion > semanal > mensual > especial, S/D al final
   var ORDEN_PERIODO = { diario:0, reactivacion:1, semanal:2, mensual:3, especial:4 };
   todos.sort(function(a,b){
-    var aSD = a.compraSugerida === null, bSD = b.compraSugerida === null;
-    if (aSD !== bSD) return aSD ? 1 : -1;
-    var oa = ORDEN_PERIODO[a.periodo] !== undefined ? ORDEN_PERIODO[a.periodo] : 9;
-    var ob = ORDEN_PERIODO[b.periodo] !== undefined ? ORDEN_PERIODO[b.periodo] : 9;
-    if (oa !== ob) return oa - ob;
-    var sa = a.stock === -1 ? 9999 : a.stock;
-    var sb = b.stock === -1 ? 9999 : b.stock;
-    return sa - sb;
+    var aSD = a.compraSugerida===null, bSD = b.compraSugerida===null;
+    if (aSD!==bSD) return aSD?1:-1;
+    var oa=ORDEN_PERIODO[a.periodo]!==undefined?ORDEN_PERIODO[a.periodo]:9;
+    var ob=ORDEN_PERIODO[b.periodo]!==undefined?ORDEN_PERIODO[b.periodo]:9;
+    if (oa!==ob) return oa-ob;
+    return (a.stock===-1?9999:a.stock)-(b.stock===-1?9999:b.stock);
   });
-
-  var nDia = todos.filter(function(p){return p.periodo==='diario';}).length;
-  var nSem = todos.filter(function(p){return p.periodo==='semanal';}).length;
-  var nMen = todos.filter(function(p){return p.periodo==='mensual';}).length;
-  var nEsp = todos.filter(function(p){return p.periodo==='especial';}).length;
-  var nRea = todos.filter(function(p){return p.periodo==='reactivacion';}).length;
-
-  var resumen =
-    '<div class="csi-resumen">'+
-      '<div class="csi-stat"><div class="csi-stat-v">'+todos.length+'</div><div class="csi-stat-l">Total sugeridos</div></div>'+
-      (nDia?'<div class="csi-stat" style="border-top:3px solid #4a148c"><div class="csi-stat-v" style="color:#4a148c">'+nDia+'</div><div class="csi-stat-l">🍞 Diario</div></div>':'')+
-      '<div class="csi-stat csi-sem"><div class="csi-stat-v">'+nSem+'</div><div class="csi-stat-l">🥛 Semanal</div></div>'+
-      '<div class="csi-stat csi-men"><div class="csi-stat-v">'+nMen+'</div><div class="csi-stat-l">📦 Mensual</div></div>'+
-      '<div class="csi-stat csi-esp"><div class="csi-stat-v">'+nEsp+'</div><div class="csi-stat-l">💻 Especial</div></div>'+
-      '<div class="csi-stat csi-rea"><div class="csi-stat-v">'+nRea+'</div><div class="csi-stat-l">⚡ Reactiv.</div></div>'+
+  var nDia=todos.filter(function(p){return p.periodo==='diario';}).length;
+  var nSem=todos.filter(function(p){return p.periodo==='semanal';}).length;
+  var nMen=todos.filter(function(p){return p.periodo==='mensual';}).length;
+  var nEsp=todos.filter(function(p){return p.periodo==='especial';}).length;
+  var nRea=todos.filter(function(p){return p.periodo==='reactivacion';}).length;
+  var resumen='<div class="csi-resumen">'+
+    '<div class="csi-stat"><div class="csi-stat-v">'+todos.length+'</div><div class="csi-stat-l">Total sugeridos</div></div>'+
+    (nDia?'<div class="csi-stat" style="border-top:3px solid #4a148c"><div class="csi-stat-v" style="color:#4a148c">'+nDia+'</div><div class="csi-stat-l">🍞 Diario</div></div>':'')+
+    '<div class="csi-stat csi-sem"><div class="csi-stat-v">'+nSem+'</div><div class="csi-stat-l">🥛 Semanal</div></div>'+
+    '<div class="csi-stat csi-men"><div class="csi-stat-v">'+nMen+'</div><div class="csi-stat-l">📦 Mensual</div></div>'+
+    '<div class="csi-stat csi-esp"><div class="csi-stat-v">'+nEsp+'</div><div class="csi-stat-l">💻 Especial</div></div>'+
+    '<div class="csi-stat csi-rea"><div class="csi-stat-v">'+nRea+'</div><div class="csi-stat-l">⚡ Reactiv.</div></div>'+
     '</div>'+
     '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px;font-size:.65rem;color:var(--gris)">'+
-      '<span>🚫 Omitidos sin ventas 90d: <strong>'+nMuertos+'</strong></span>'+
-      '<span>⏰ Omitidos por vencer próximo: <strong>'+nVencOmit+'</strong></span>'+
-      (nSinStock?'<span style="color:var(--naranja)">⚠️ Sin dato de stock: <strong>'+nSinStock+'</strong> (ver al final)</span>':'')+
+    '<span>🚫 Omitidos sin ventas 90d: <strong>'+nMuertos+'</strong></span>'+
+    '<span>⏰ Omitidos por vencer próximo: <strong>'+nVencOmit+'</strong></span>'+
+    (nSinStock?'<span style="color:var(--naranja)">⚠️ Sin dato de stock: <strong>'+nSinStock+'</strong></span>':'')+
     '</div>';
-
-  var filtros =
-    '<div class="chips-wrap" style="margin-bottom:10px">'+
+  var filtros='<div class="chips-wrap" style="margin-bottom:10px">'+
     ['todos','diario','semanal','mensual','especial','reactivacion'].map(function(f){
       var lbl={todos:'📋 Todos',diario:'🍞 Diario',semanal:'🥛 Semanal',mensual:'📦 Mensual',especial:'💻 Especial',reactivacion:'⚡ Reactiv.'}[f];
       var cnt={todos:todos.length,diario:nDia,semanal:nSem,mensual:nMen,especial:nEsp,reactivacion:nRea}[f];
-      if (cnt===0 && f!=='todos') return '';
+      if (cnt===0&&f!=='todos') return '';
       return '<button class="chip'+(csiFiltroPeriodo===f?' activo':'')+'" onclick="csiFiltroPeriodo=\''+f+'\';renderApp()">'+lbl+' ('+cnt+')</button>';
-    }).join('')+
-    '</div>';
-
-  var lista = csiFiltroPeriodo==='todos' ? todos : todos.filter(function(p){return p.periodo===csiFiltroPeriodo;});
+    }).join('')+'</div>';
+  var lista=csiFiltroPeriodo==='todos'?todos:todos.filter(function(p){return p.periodo===csiFiltroPeriodo;});
   if (!lista.length) return resumen+filtros+'<div class="empty">✅ Sin sugerencias para este filtro</div>';
-
-  var BADGE = {
-    diario:      {cls:'csi-badge-dia', lbl:'🍞 Diario',   color:'#4a148c'},
-    semanal:     {cls:'csi-badge-sem', lbl:'🥛 Semanal',  color:'#1565c0'},
-    mensual:     {cls:'csi-badge-men', lbl:'📦 Mensual',  color:'#2e7d32'},
-    especial:    {cls:'csi-badge-esp', lbl:'💻 Especial', color:'#e65100'},
-    reactivacion:{cls:'csi-badge-rea', lbl:'⚡ Reactiv.', color:'#f9a825'},
+  var BADGE={
+    diario:{cls:'csi-badge-dia',lbl:'🍞 Diario'},
+    semanal:{cls:'csi-badge-sem',lbl:'🥛 Semanal'},
+    mensual:{cls:'csi-badge-men',lbl:'📦 Mensual'},
+    especial:{cls:'csi-badge-esp',lbl:'💻 Especial'},
+    reactivacion:{cls:'csi-badge-rea',lbl:'⚡ Reactiv.'},
   };
-
-  var cards = lista.map(function(p, idx) {
-    var b = BADGE[p.periodo] || BADGE.mensual;
-    var stkColor = p.stock===-1 ? 'var(--gris)' : p.stock===0 ? 'var(--rojo)' : p.stock<=2 ? 'var(--naranja)' : 'var(--verde)';
-    var stkTxt   = p.stock===-1 ? 'S/D' : String(p.stock);
-    var vdTxt    = p.diasVenc!==null ? (p.diasVenc<=14?'<span style="color:var(--naranja);font-weight:700">'+p.diasVenc+'d</span>':p.diasVenc+'d') : '—';
-    var compraTxt = p.compraSugerida !== null
-      ? '<span class="csi-qty">'+p.compraSugerida+'</span>'
-      : '<span style="font-size:.7rem;color:var(--naranja);font-weight:700">S/D</span>';
-    var nomEnc = encodeURIComponent(p.nombre);
-    var detalle =
-      '<div id="csi-det-'+idx+'" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid #eee;">'+
-        '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px 12px;margin-bottom:6px;font-size:.72rem;color:var(--gris);">'+
-          '<span>V7d: <b style="color:#333">'+p.v7+'</b></span>'+
-          '<span>V30d: <b style="color:#333">'+p.v30+'</b></span>'+
-          '<span>V60d: <b style="color:#333">'+p.v60+'</b></span>'+
-          '<span>V90d: <b style="color:#333">'+p.v90+'</b></span>'+
-          '<span>P/día: <b style="color:#333">'+p.promDia+'</b></span>'+
-          '<span>Venc.: <b>'+vdTxt+'</b></span>'+
-        '</div>'+
-        '<div style="font-size:.7rem;color:var(--gris);font-style:italic;line-height:1.4;margin-bottom:8px;">'+p.motivo+'</div>'+
-        '<button onclick="csiTogglePausado(\''+nomEnc+'\',this)" '+
-        'style="width:100%;padding:7px;border-radius:8px;border:1.5px solid #ddd;background:#fafafa;font-size:.72rem;font-weight:700;cursor:pointer;color:#e53935;">'+
-        '⏸️ Desactivar de lista de compra'+
-        '</button>'+
+  var cards=lista.map(function(p,idx){
+    var b=BADGE[p.periodo]||BADGE.mensual;
+    var stkColor=p.stock===-1?'var(--gris)':p.stock===0?'var(--rojo)':p.stock<=2?'var(--naranja)':'var(--verde)';
+    var stkTxt=p.stock===-1?'S/D':String(p.stock);
+    var vdTxt=p.diasVenc!==null?(p.diasVenc<=14?'<span style="color:var(--naranja);font-weight:700">'+p.diasVenc+'d</span>':p.diasVenc+'d'):'—';
+    var compraTxt=p.compraSugerida!==null?'<span class="csi-qty">'+p.compraSugerida+'</span>':'<span style="font-size:.7rem;color:var(--naranja);font-weight:700">S/D</span>';
+    var nomEnc=encodeURIComponent(p.nombre);
+    var detalle='<div id="csi-det-'+idx+'" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid #eee;">'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px 12px;margin-bottom:6px;font-size:.72rem;color:var(--gris);">'+
+      '<span>V7d: <b style="color:#333">'+p.v7+'</b></span>'+
+      '<span>V30d: <b style="color:#333">'+p.v30+'</b></span>'+
+      '<span>V60d: <b style="color:#333">'+p.v60+'</b></span>'+
+      '<span>V90d: <b style="color:#333">'+p.v90+'</b></span>'+
+      '<span>P/día: <b style="color:#333">'+p.promDia+'</b></span>'+
+      '<span>Venc.: <b>'+vdTxt+'</b></span>'+
+      '</div>'+
+      '<div style="font-size:.7rem;color:var(--gris);font-style:italic;line-height:1.4;margin-bottom:8px;">'+p.motivo+'</div>'+
+      '<button onclick="csiTogglePausado(\''+nomEnc+'\',this)" '+
+      'style="width:100%;padding:7px;border-radius:8px;border:1.5px solid #ddd;background:#fafafa;font-size:.72rem;font-weight:700;cursor:pointer;color:#e53935;">'+
+      '⏸️ Desactivar de lista de compra</button>'+
       '</div>';
     return '<div onclick="csiToggleDetalle('+idx+',event)" style="background:white;border-radius:14px;border:1.5px solid #eee;padding:12px 14px;margin-bottom:8px;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.04);">'+
       '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'+
-        '<span class="badge '+b.cls+'" style="font-size:.62rem;flex-shrink:0;">'+b.lbl+'</span>'+
-        '<span style="font-weight:700;font-size:.88rem;flex:1;min-width:0;word-break:break-word;">'+p.nombre+'</span>'+
-        '<span style="color:'+stkColor+';font-weight:900;font-size:.9rem;flex-shrink:0;">'+stkTxt+'</span>'+
-        compraTxt+
+      '<span class="badge '+b.cls+'" style="font-size:.62rem;flex-shrink:0;">'+b.lbl+'</span>'+
+      '<span style="font-weight:700;font-size:.88rem;flex:1;min-width:0;word-break:break-word;">'+p.nombre+'</span>'+
+      '<span style="color:'+stkColor+';font-weight:900;font-size:.9rem;flex-shrink:0;">'+stkTxt+'</span>'+
+      compraTxt+
       '</div>'+
       '<div style="font-size:.68rem;color:var(--gris);margin-top:3px;">'+p.cat+' · tocá para ver detalle</div>'+
-      detalle+
-    '</div>';
+      detalle+'</div>';
   }).join('');
-
-  return resumen+filtros+
-    '<div style="margin-top:4px;">'+cards+'</div>'+
-    '<div style="font-size:.6rem;color:var(--gris);padding:6px 2px;line-height:1.6;margin-top:4px">'+
-      '📌 <b>S/D</b>: stock no disponible. Tocá cada producto para ver detalle y desactivarlo.'+
-    '</div>';
+  return resumen+filtros+'<div style="margin-top:4px;">'+cards+'</div>'+
+    '<div style="font-size:.6rem;color:var(--gris);padding:6px 2px;line-height:1.6;margin-top:4px">📌 <b>S/D</b>: stock no disponible. Tocá cada producto para detalle y desactivar.</div>';
 }
 
-function csiToggleDetalle(idx, e) {
-  if (e && e.target && e.target.tagName === 'BUTTON') return;
-  var el = document.getElementById('csi-det-' + idx);
-  if (!el) return;
-  el.style.display = el.style.display === 'block' ? 'none' : 'block';
+function csiToggleDetalle(idx,e){
+  if(e&&e.target&&e.target.tagName==='BUTTON') return;
+  var el=document.getElementById('csi-det-'+idx);
+  if(!el) return;
+  el.style.display=el.style.display==='block'?'none':'block';
 }
 
-async function csiTogglePausado(nombreEncoded, btn) {
-  var nombre = decodeURIComponent(nombreEncoded);
-  var esPausado = btn.textContent.includes('Reactivar');
-  var nuevo = !esPausado;
-  btn.disabled = true;
-  btn.textContent = '⏳ Guardando...';
-  try {
-    var r = await fetch(API_URL + '?action=setPausadoNombre&data=' +
-      encodeURIComponent(JSON.stringify({ nombre: nombre, pausado: nuevo ? 'SI' : '' })),
-      { redirect: 'follow', signal: AbortSignal.timeout(8000) });
-    var resp = await r.json();
-    if (resp.success) {
-      btn.textContent = nuevo ? '▶️ Reactivar en lista de compra' : '⏸️ Desactivar de lista de compra';
-      btn.style.color = nuevo ? '#2e7d32' : '#e53935';
-      btn.style.borderColor = nuevo ? '#a5d6a7' : '#ddd';
-    } else {
-      btn.textContent = '❌ ' + (resp.mensaje || 'Error — intentá de nuevo');
-    }
-  } catch(e) {
-    btn.textContent = '❌ Sin conexión';
-  }
-  btn.disabled = false;
+async function csiTogglePausado(nombreEncoded,btn){
+  var nombre=decodeURIComponent(nombreEncoded);
+  var esPausado=btn.textContent.includes('Reactivar');
+  var nuevo=!esPausado;
+  btn.disabled=true; btn.textContent='⏳ Guardando...';
+  try{
+    var r=await fetch(API_URL+'?action=setPausadoNombre&data='+encodeURIComponent(JSON.stringify({nombre:nombre,pausado:nuevo?'SI':''})),{redirect:'follow',signal:AbortSignal.timeout(8000)});
+    var resp=await r.json();
+    if(resp.success){
+      btn.textContent=nuevo?'▶️ Reactivar en lista de compra':'⏸️ Desactivar de lista de compra';
+      btn.style.color=nuevo?'#2e7d32':'#e53935';
+      btn.style.borderColor=nuevo?'#a5d6a7':'#ddd';
+    } else { btn.textContent='❌ '+(resp.mensaje||'Error'); }
+  }catch(e){ btn.textContent='❌ Sin conexión'; }
+  btn.disabled=false;
 }
 
 
 // ====== FIN COMPRA SUGERIDA INTELIGENTE ======
+
+// ====== RECIÉN LLEGADOS ======
+function renderRecienLlegados(rl) {
+  if (!rl || !rl.length) return '<div class="empty">Sin ingresos en los últimos 3 días</div>';
+
+  var OFERTAS_REL = {
+    1:  {lbl:'2x1',    tipo:'nxm'},
+    2:  {lbl:'3x2',    tipo:'nxm'},
+    3:  {lbl:'4x3',    tipo:'nxm'},
+    4:  {lbl:'5x4',    tipo:'nxm'},
+    5:  {lbl:'6x5',    tipo:'nxm'},
+    6:  {lbl:'7x6',    tipo:'nxm'},
+    10: {lbl:'2da 50%',tipo:'nxm'},
+    11: {lbl:'-10%',   tipo:'pct', pct:10},
+    12: {lbl:'-15%',   tipo:'pct', pct:15},
+    13: {lbl:'-20%',   tipo:'pct', pct:20},
+    14: {lbl:'-25%',   tipo:'pct', pct:25},
+  };
+
+  return rl.map(function(p) {
+    var precioDisplay = p.precio;
+    var badgeOferta = '';
+
+    if (p.relampago && OFERTAS_REL[p.relampago]) {
+      var cfg = OFERTAS_REL[p.relampago];
+      badgeOferta = '<span style="background:#fff3e0;color:#e65100;font-size:.65rem;font-weight:700;padding:2px 7px;border-radius:8px;border:1px solid #ffcc80;">⚡ '+cfg.lbl+'</span>';
+      if (cfg.tipo==='pct') precioDisplay = Math.round(p.precio * (1 - cfg.pct/100));
+    } else if (p.destacada > 0) {
+      badgeOferta = '<span style="background:#fff3e0;color:#ff6f00;font-size:.65rem;font-weight:700;padding:2px 7px;border-radius:8px;border:1px solid #ffcc80;">🔥 -'+p.destacada+'%</span>';
+      precioDisplay = Math.round(p.precio * (1 - p.destacada/100));
+    } else if (p.especial) {
+      badgeOferta = '<span style="background:#e1f5fe;color:#0277bd;font-size:.65rem;font-weight:700;padding:2px 7px;border-radius:8px;border:1px solid #81d4fa;">⭐ -10%</span>';
+      precioDisplay = Math.round(p.precio * 0.9);
+    }
+
+    var tieneOferta = precioDisplay !== p.precio;
+    var precioHTML = tieneOferta
+      ? '<span style="text-decoration:line-through;color:#bbb;font-size:.75rem;margin-right:4px;">$'+p.precio.toLocaleString('es-AR')+'</span>'+
+        '<span style="font-weight:900;color:#2e7d32;font-size:.95rem;">$'+precioDisplay.toLocaleString('es-AR')+'</span>'
+      : '<span style="font-weight:900;font-size:.95rem;color:#333;">$'+p.precio.toLocaleString('es-AR')+'</span>';
+
+    var stkColor = p.stock<=2?'var(--naranja)':'var(--verde)';
+
+    return '<div style="background:white;border-radius:12px;border:1.5px solid #b2dfdb;padding:11px 14px;margin-bottom:7px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'+
+      '<span style="font-size:1.1rem;flex-shrink:0;">🆕</span>'+
+      '<div style="flex:1;min-width:0;">'+
+        '<div style="font-weight:700;font-size:.88rem;word-break:break-word;">'+p.nombre+'</div>'+
+        '<div style="font-size:.68rem;color:var(--gris);margin-top:2px;">'+p.categoria+' · Stock: <span style="color:'+stkColor+';font-weight:700;">'+p.stock+'</span></div>'+
+      '</div>'+
+      '<div style="text-align:right;flex-shrink:0;">'+
+        (badgeOferta?'<div style="margin-bottom:3px;">'+badgeOferta+'</div>':'')+
+        precioHTML+
+      '</div>'+
+    '</div>';
+  }).join('');
+}
+// ====== FIN RECIÉN LLEGADOS ======
 
 // ====== EXPORTAR EXCEL ======
 function descargarExcel(){
