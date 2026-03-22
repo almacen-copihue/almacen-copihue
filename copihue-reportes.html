@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>ver.3 · Copihue · Reportes</title>
+<title>ver.4 · Copihue · Reportes</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
@@ -302,7 +302,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
 <div class="hdr">
   <div class="hdr-icon">🏪</div>
   <div><div class="hdr-t">Copihue</div><div class="hdr-s">Reportes</div></div>
-  <a href="herramientas.html" class="btn-back">← Volver</a>
+  <a href="seba21.html" class="btn-back">← Volver</a>
 </div>
 
 <div id="app"><div class="ldg"><div class="spin"></div>Cargando reportes...</div></div>
@@ -1465,13 +1465,24 @@ function renderCompraSugerida() {
   var res = calcularMotorCSI();
   var todos = res.filas, nMuertos = res.nMuertos, nVencOmit = res.nVencOmit, nSinStock = res.nSinStock;
 
+  // Orden por urgencia: diario > reactivacion > semanal > mensual > especial
+  var ORDEN_PERIODO = { diario:0, reactivacion:1, semanal:2, mensual:3, especial:4 };
+  todos.sort(function(a,b){
+    var oa = ORDEN_PERIODO[a.periodo] !== undefined ? ORDEN_PERIODO[a.periodo] : 9;
+    var ob = ORDEN_PERIODO[b.periodo] !== undefined ? ORDEN_PERIODO[b.periodo] : 9;
+    if (oa !== ob) return oa - ob;
+    // Secundario: más urgente = menos stock (o S/D primero)
+    var sa = a.stock === -1 ? -1 : a.stock;
+    var sb = b.stock === -1 ? -1 : b.stock;
+    return sa - sb;
+  });
+
   var nDia = todos.filter(function(p){return p.periodo==='diario';}).length;
   var nSem = todos.filter(function(p){return p.periodo==='semanal';}).length;
   var nMen = todos.filter(function(p){return p.periodo==='mensual';}).length;
   var nEsp = todos.filter(function(p){return p.periodo==='especial';}).length;
   var nRea = todos.filter(function(p){return p.periodo==='reactivacion';}).length;
 
-  // Resumen superior con contadores
   var resumen =
     '<div class="csi-resumen">'+
       '<div class="csi-stat"><div class="csi-stat-v">'+todos.length+'</div><div class="csi-stat-l">Total sugeridos</div></div>'+
@@ -1487,74 +1498,110 @@ function renderCompraSugerida() {
       (nSinStock?'<span style="color:var(--naranja)">⚠️ Sin dato de stock: <strong>'+nSinStock+'</strong> (ver al final)</span>':'')+
     '</div>';
 
-  // Filtros de período
   var filtros =
     '<div class="chips-wrap" style="margin-bottom:10px">'+
     ['todos','diario','semanal','mensual','especial','reactivacion'].map(function(f){
       var lbl={todos:'📋 Todos',diario:'🍞 Diario',semanal:'🥛 Semanal',mensual:'📦 Mensual',especial:'💻 Especial',reactivacion:'⚡ Reactiv.'}[f];
       var cnt={todos:todos.length,diario:nDia,semanal:nSem,mensual:nMen,especial:nEsp,reactivacion:nRea}[f];
       if (cnt===0 && f!=='todos') return '';
-      return '<button class="chip'+(csiFiltroPeriodo===f?' activo':'')+'" onclick="csiFiltroPeriodo=\''+f+'\';renderApp()">'+lbl+' ('+cnt+')</button>';
+      return '<button class="chip'+(csiFiltroPeriodo===f?' activo':'')+(f==='todos'?' chip-urgencia':'')+'" onclick="csiFiltroPeriodo=\''+f+'\';renderApp()">'+lbl+' ('+cnt+')</button>';
     }).join('')+
     '</div>';
 
   var lista = csiFiltroPeriodo==='todos' ? todos : todos.filter(function(p){return p.periodo===csiFiltroPeriodo;});
   if (!lista.length) return resumen+filtros+'<div class="empty">✅ Sin sugerencias para este filtro</div>';
 
-  // Filas de la tabla
-  var filaHTML = lista.map(function(p) {
-    var stk = p.stock===-1
-      ? '<span style="color:var(--gris);font-size:.6rem">S/D</span>'
-      : p.stock===0 ? '<span style="color:var(--rojo);font-weight:700">0</span>'
-      : p.stock<=2  ? '<span style="color:var(--naranja);font-weight:700">'+p.stock+'</span>'
-      : '<span style="color:var(--verde)">'+p.stock+'</span>';
-    var vd = p.diasVenc!==null
-      ? (p.diasVenc<=14 ? '<span style="color:var(--naranja);font-weight:700">'+p.diasVenc+'d</span>' : p.diasVenc+'d')
-      : '<span style="color:#ddd">—</span>';
-    var pcls = {diario:'csi-badge-dia',semanal:'csi-badge-sem',mensual:'csi-badge-men',especial:'csi-badge-esp',reactivacion:'csi-badge-rea'}[p.periodo]||'csi-badge-men';
-    var plbl = {diario:'Diario',semanal:'Semanal',mensual:'Mensual',especial:'Especial',reactivacion:'Reactiv.'}[p.periodo]||'Mensual';
-    return '<tr>'+
-      '<td class="csi-col-prod" title="'+p.nombre+'">'+p.nombre.substring(0,26)+'</td>'+
-      '<td style="font-size:.6rem;color:var(--gris);text-align:center">'+p.cat.substring(0,11)+'</td>'+
-      '<td style="text-align:center">'+stk+'</td>'+
-      '<td style="text-align:center">'+p.v7+'</td>'+
-      '<td style="text-align:center">'+p.v30+'</td>'+
-      '<td style="text-align:center">'+p.v60+'</td>'+
-      '<td style="text-align:center">'+p.v90+'</td>'+
-      '<td style="text-align:center;font-size:.65rem">'+p.promDia+'</td>'+
-      '<td style="text-align:center">'+vd+'</td>'+
-      '<td style="text-align:center"><span class="badge '+pcls+'">'+plbl+'</span></td>'+
-      '<td style="text-align:center;font-weight:700;color:var(--gris)">'+p.ventaProyectada+'</td>'+
-      '<td style="text-align:center">'+
-        (p.compraSugerida !== null
-          ? '<span class="csi-qty">'+p.compraSugerida+'</span>'
-          : '<span style="font-size:.65rem;color:var(--naranja);font-weight:700;padding:2px 6px;background:var(--nl);border-radius:6px">S/D</span>')+
-      '</td>'+
-      '<td style="font-size:.6rem;color:var(--gris);max-width:80px;white-space:normal;line-height:1.3">'+p.motivo+'</td>'+
-    '</tr>';
+  // BADGE colores por período
+  var BADGE = {
+    diario:      {cls:'csi-badge-dia', lbl:'🍞 Diario',    color:'#4a148c'},
+    semanal:     {cls:'csi-badge-sem', lbl:'🥛 Semanal',   color:'#1565c0'},
+    mensual:     {cls:'csi-badge-men', lbl:'📦 Mensual',   color:'#2e7d32'},
+    especial:    {cls:'csi-badge-esp', lbl:'💻 Especial',  color:'#e65100'},
+    reactivacion:{cls:'csi-badge-rea', lbl:'⚡ Reactiv.', color:'#f9a825'},
+  };
+
+  var cards = lista.map(function(p, idx) {
+    var b = BADGE[p.periodo] || BADGE.mensual;
+    var stkColor = p.stock===-1 ? 'var(--gris)' : p.stock===0 ? 'var(--rojo)' : p.stock<=2 ? 'var(--naranja)' : 'var(--verde)';
+    var stkTxt   = p.stock===-1 ? 'S/D' : String(p.stock);
+    var vdTxt    = p.diasVenc!==null ? (p.diasVenc<=14?'<span style="color:var(--naranja);font-weight:700">'+p.diasVenc+'d</span>':p.diasVenc+'d') : '—';
+    var compraTxt = p.compraSugerida !== null
+      ? '<span class="csi-qty">'+p.compraSugerida+'</span>'
+      : '<span style="font-size:.7rem;color:var(--naranja);font-weight:700">S/D</span>';
+
+    // Datos expandidos (ocultos por defecto)
+    var detalle =
+      '<div id="csi-det-'+idx+'" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid #eee;font-size:.72rem;color:var(--gris);display:none;">'+
+        '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px 12px;margin-bottom:6px;">'+
+          '<span>V7d: <b style="color:#333">'+p.v7+'</b></span>'+
+          '<span>V30d: <b style="color:#333">'+p.v30+'</b></span>'+
+          '<span>V60d: <b style="color:#333">'+p.v60+'</b></span>'+
+          '<span>V90d: <b style="color:#333">'+p.v90+'</b></span>'+
+          '<span>P/día: <b style="color:#333">'+p.promDia+'</b></span>'+
+          '<span>Venc.: <b>'+vdTxt+'</b></span>'+
+        '</div>'+
+        '<div style="color:var(--gris);font-style:italic;line-height:1.4">'+p.motivo+'</div>'+
+        '<div style="margin-top:8px;">'+
+          '<button onclick="csiTogglePausado(\''+encodeURIComponent(p.nombre)+'\','+p.id+',this)" '+
+          'style="width:100%;padding:7px;border-radius:8px;border:1.5px solid #ddd;background:#fafafa;font-size:.72rem;font-weight:700;cursor:pointer;color:#e53935;">'+
+          '⏸️ Desactivar de lista de compra'+
+          '</button>'+
+        '</div>'+
+      '</div>';
+
+    return '<div onclick="csiToggleDetalle('+idx+',event)" style="background:white;border-radius:14px;border:1.5px solid #eee;padding:12px 14px;margin-bottom:8px;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.04);">'+
+      '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'+
+        '<span class="badge '+b.cls+'" style="font-size:.62rem;flex-shrink:0">'+b.lbl+'</span>'+
+        '<span style="font-weight:700;font-size:.88rem;flex:1;min-width:0;">'+p.nombre+'</span>'+
+        '<span style="color:'+stkColor+';font-weight:900;font-size:.9rem;flex-shrink:0;">'+stkTxt+'</span>'+
+        compraTxt+
+      '</div>'+
+      '<div style="font-size:.68rem;color:var(--gris);margin-top:3px;">'+p.cat+' · tocá para ver detalle</div>'+
+      detalle+
+    '</div>';
   }).join('');
 
-  var tabla =
-    '<div class="csi-tabla-wrap">'+
-      '<table class="csi-tabla">'+
-        '<thead><tr>'+
-          '<th class="csi-col-prod">Producto</th>'+
-          '<th>Cat.</th><th>Stock</th>'+
-          '<th>V7d</th><th>V30d</th><th>V60d</th><th>V90d</th>'+
-          '<th>P/d</th><th>Venc.</th><th>Período</th>'+
-          '<th>Proyec.</th><th>Comprar</th><th>Motivo</th>'+
-        '</tr></thead>'+
-        '<tbody>'+filaHTML+'</tbody>'+
-      '</table>'+
-    '</div>'+
+  return resumen+filtros+
+    '<div style="margin-top:4px;">'+cards+'</div>'+
     '<div style="font-size:.6rem;color:var(--gris);padding:6px 2px;line-height:1.6;margin-top:4px">'+
-      '📌 <strong>S/D</strong>: stock no disponible en inventario (producto sin registro de stock real); CompraSugerida no calculada para estos ítems. '+
-      'Categorías detectadas por heurística sobre el nombre del producto cuando el campo no está disponible en la API.'+
+      '📌 <strong>S/D</strong>: stock no disponible. Tocá cada producto para ver detalle y desactivarlo de la lista de compra.'+
     '</div>';
-
-  return resumen+filtros+tabla;
 }
 // ====== FIN COMPRA SUGERIDA INTELIGENTE ======
+
+function csiToggleDetalle(idx, e) {
+  if (e && e.target && e.target.tagName === 'BUTTON') return; // no colapsar al tocar botón
+  var el = document.getElementById('csi-det-' + idx);
+  if (!el) return;
+  var visible = el.style.display === 'block';
+  el.style.display = visible ? 'none' : 'block';
+}
+
+async function csiTogglePausado(nombreEncoded, id, btn) {
+  var nombre = decodeURIComponent(nombreEncoded);
+  var esPausado = btn.textContent.includes('Reactivar');
+  var nuevo = !esPausado;
+  btn.disabled = true;
+  btn.textContent = '⏳ Guardando...';
+  try {
+    var r = await fetch(API_URL + '?action=setPausadoListaCompra&data=' +
+      encodeURIComponent(JSON.stringify({ id: id, pausado: nuevo ? 'SI' : '' })),
+      { redirect: 'follow', signal: AbortSignal.timeout(8000) });
+    var resp = await r.json();
+    if (resp.success) {
+      btn.textContent = nuevo ? '▶️ Reactivar en lista de compra' : '⏸️ Desactivar de lista de compra';
+      btn.style.color = nuevo ? '#2e7d32' : '#e53935';
+      btn.style.borderColor = nuevo ? '#a5d6a7' : '#ddd';
+    } else {
+      btn.textContent = '❌ Error — intentá de nuevo';
+    }
+  } catch(e) {
+    btn.textContent = '❌ Sin conexión';
+  }
+  btn.disabled = false;
+}
+
+
 
 // ====== EXPORTAR EXCEL ======
 function descargarExcel(){
