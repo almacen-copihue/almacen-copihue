@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Almacén Copihue v101</title>
+    <title>Almacén Copihue v102</title>
     
     <!-- META TAGS PARA PWA -->
     <meta name="theme-color" content="#2e7d32">
@@ -38,7 +38,7 @@
 
     <style>
         :root {
-            --primary: #2e7d32;
+            --primary: #2e7d32; /* sobreescrito dinámicamente desde planilla */
             --primary-dark: #1b5e20;
             --primary-light: #4caf50;
             --secondary: #ff6f00;
@@ -2424,11 +2424,11 @@ async function cargarConfigSistema() {
             const val = row[diaIdx];
             // 1=forzado ON | 0=auto horario | vacío/null=forzado OFF
             if (val === 1 || val === '1' || val === true) {
-                OFERTA_ACTIVA[tipo] = true;
-            } else if (val === '' || val === 'OFF') {
-                OFERTA_ACTIVA[tipo] = false;
+                OFERTA_ACTIVA[tipo] = true;         // 1 = forzado ON
+            } else if (val === 0 || val === '0') {
+                OFERTA_ACTIVA[tipo] = false;        // 0 = forzado OFF
             } else {
-                // 0, null, undefined → auto horario
+                // 'A', null, undefined → auto horario
                 OFERTA_ACTIVA[tipo] = _dentroDeHorarioIndex(cfg, tipo, diaIdx);
             }
             console.log('🔘 ' + tipo + ': ' + (OFERTA_ACTIVA[tipo] ? '🟢 ACTIVA' : '🔴 inactiva') + ' (val=' + val + ')');
@@ -2471,6 +2471,33 @@ async function cargarConfigSistema() {
         HORA_CIERRE_MODAL = _horaCierreLocal;
         _aplicarHorarioUI();
         actualizarMensajesOfertas();
+
+        // ── DATOS DE EMPRESA ──
+        const _get = (clave) => {
+            const row = cfg['general|' + clave] || cfg[clave];
+            return row ? String(row[0] || '').trim() : '';
+        };
+        const _emp = {
+            nombre:    _get('nombre de la empresa')          || 'Almacén Copihue',
+            slogan:    _get('slogan')                        || 'Productos de calidad con la confianza de siempre',
+            telefono:  _get('telefono')                      || '5492944907380',
+            direccion: _get('direccion')                     || 'Copihue 457',
+            logo:      _get('nombre del archivo del logo')   || 'logo-copihue.png',
+            horario:   _get('horario texto')                 || '11:00 a 22:00 hs',
+            color:     _get('color primario')                || '#2e7d32'
+        };
+        window._EMPRESA = _emp;
+        document.querySelectorAll('[data-empresa-nombre]').forEach(el => el.textContent = _emp.nombre);
+        document.querySelectorAll('[data-empresa-slogan]').forEach(el => el.textContent = _emp.slogan);
+        document.querySelectorAll('[data-empresa-telefono]').forEach(el => el.textContent = '+' + _emp.telefono);
+        document.querySelectorAll('[data-empresa-direccion]').forEach(el => el.textContent = _emp.direccion);
+        document.querySelectorAll('[data-empresa-horario]').forEach(el => el.textContent = _emp.horario);
+        document.querySelectorAll('[data-empresa-logo]').forEach(el => { el.src = _emp.logo; el.alt = _emp.nombre; });
+        const ati = document.getElementById('apple-touch-icon-tag');
+        if (ati) ati.href = _emp.logo;
+        // Color primario dinámico
+        if (_emp.color) document.documentElement.style.setProperty('--primary', _emp.color);
+
     } catch(e) {
         console.warn('⚠️ Error cargando config_sistema:', e.message);
     }
@@ -3455,28 +3482,24 @@ function actualizarTodasLasVistas() {
     iniciarMotorAutoCheck();
     
     renderizarContenedorOfertas('relampago', productosRelampago);
-    // Últimas unidades — siempre respetar el toggle de la planilla
-    if (!validarHorario('ultimas') && !(esAdmin && modoMostrarTodasOfertas)) {
-        // Toggle OFF en planilla → nunca mostrar, ni selección manual ni auto
-        productosUltimas = [];
-        console.log('🏷️ Últimas: toggle OFF en planilla → oculto');
-    } else if (_ultimasSeleccionBackend.length > 0) {
-        // Toggle ON + selección manual — aplicar límite de planilla
+    // Últimas unidades
+    if (_ultimasSeleccionBackend.length > 0) {
+        // Selección manual del día — siempre mostrar, ignorar horario y límite
         productosUltimas = _ultimasSeleccionBackend
             .map(id => products.find(p => p.id === id))
-            .filter(p => p && p.stockNumber > 0)
-            .slice(0, _limiteUltimas);
-        console.log(`🏷️ Últimas selección manual: ${productosUltimas.length} productos (límite: ${_limiteUltimas})`);
+            .filter(p => p && p.stockNumber > 0);
+        console.log(`🏷️ Últimas selección manual: ${productosUltimas.length} productos`);
     } else if (_ultimasAutoBackend.length > 0) {
-        // Toggle ON + pool automático — aplicar límite de planilla
+        // Pool automático del backend — ya calculado por code.gs, sin límite local
         productosUltimas = _ultimasAutoBackend
             .map(id => products.find(p => p.id === id))
-            .filter(p => p && p.stockNumber > 0)
-            .slice(0, _limiteUltimas);
-        console.log(`🏷️ Últimas auto backend: ${productosUltimas.length} productos (límite: ${_limiteUltimas})`);
-    } else {
-        // Último recurso — pool local con límite
+            .filter(p => p && p.stockNumber > 0);
+        console.log(`🏷️ Últimas auto backend: ${productosUltimas.length} productos`);
+    } else if (validarHorario('ultimas') || (esAdmin && modoMostrarTodasOfertas)) {
+        // Último recurso — pool local
         productosUltimas = poolUltimas.filter(p => !idsEnOfertas.has(p.id)).slice(0, _limiteUltimas);
+    } else {
+        productosUltimas = [];
     }
     renderizarContenedorOfertas('ultimas', productosUltimas);
     renderizarContenedorOfertas('destacadas', productosDestacadas);
@@ -5073,7 +5096,8 @@ function compartirProducto(productId, event) {
                    `💰 NORMAL: $${precioNormal}\n` +
                    `🎯 OFERTA: $${precioConDescuento}\n` +
                    `✅ Ahorrás: $${ahorro}\n\n` +
-                   `⏰ Válida hoy hasta las ${String(_horaCierreLocal).padStart(2,'0')}:00 hs\n\n` +
+                   `📅 Válida: Viernes y Sábados\n` +
+                   `⏰ Horario: ${String(_horaCierreLocal - 2).padStart(2,'0')}:00 a ${String(_horaCierreLocal).padStart(2,'0')}:00 hs\n\n` +
                    `📍 Almacén Copihue\n` +
                    `🌐 ${urlProducto}`;
         }
@@ -5087,7 +5111,8 @@ function compartirProducto(productId, event) {
                    `💰 NORMAL: $${precioNormal}\n` +
                    `🔥 OFERTA: $${precioConDescuento}\n` +
                    `✅ Ahorrás: $${ahorro}\n\n` +
-                   `⏰ Válida hoy hasta las ${String(_horaCierreLocal).padStart(2,'0')}:00 hs\n\n` +
+                   `📅 Válida: Lunes a Jueves\n` +
+                   `⏰ Válida hasta las ${String(_horaCierreLocal).padStart(2,'0')}:00 hs de hoy\n\n` +
                    `📍 Almacén Copihue\n` +
                    `🌐 ${urlProducto}`;
         }

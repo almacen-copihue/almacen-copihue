@@ -1095,8 +1095,9 @@ function setConfig(datos) {
     const seccion  = String(datos.seccion || '').toLowerCase();
     const clave    = String(datos.clave   || '').trim();
     const diaIdx   = parseInt(datos.dia);
-    const valor = datos.valor === null || datos.valor === '' ? '' :
-                  (datos.valor === 1 || datos.valor === '1' ? 1 : 0);
+    // A = auto horario | 1 = forzado ON | 0 = forzado OFF
+    const valor = (datos.valor === 'A' || datos.valor === null || datos.valor === undefined) ? 'A' :
+                  (datos.valor === 1 || datos.valor === '1') ? 1 : 0;
 
     if (isNaN(diaIdx) || diaIdx < 0 || diaIdx > 6) return { success: false, mensaje: 'Día inválido' };
 
@@ -1794,7 +1795,66 @@ function getReportes() {
       .sort((a, b) => b.ganancia - a.ganancia)
       .slice(0, 20);
 
-    return { items, totales, vencProximos, stockInfo, topGanancia };
+// Recién llegados — ingresos del Historial en los últimos 3 días
+var recienLlegados = [];
+try {
+  var hoy3 = new Date();
+  hoy3.setHours(0, 0, 0, 0);
+  var hace3 = new Date(hoy3.getTime() - 3 * 86400000);
+
+  var nomIngresados = {}; // nombre → fechaIngreso (la más reciente)
+  if (sheetHist2) {
+    var histRL = sheetHist2.getDataRange().getValues();
+    for (var hi = 1; hi < histRL.length; hi++) {
+      var hFecha = histRL[hi][0];
+      var hNom   = String(histRL[hi][1] || '').trim().toUpperCase();
+      if (!hNom) continue;
+      // Convertir correctamente — el Historial guarda Date objects en Apps Script
+      var hFechaD;
+      if (hFecha instanceof Date) {
+        hFechaD = hFecha;
+      } else {
+        // Intentar parsear string "dd/mm/yyyy hh:mm:ss"
+        var partes = String(hFecha).match(/(\d+)\/(\d+)\/(\d+)/);
+        if (!partes) continue;
+        hFechaD = new Date(parseInt(partes[3]), parseInt(partes[2])-1, parseInt(partes[1]));
+      }
+      if (isNaN(hFechaD.getTime())) continue;
+      var dNorm = new Date(hFechaD); dNorm.setHours(0,0,0,0);
+      if (dNorm < hace3) continue; // más viejo que 3 días → ignorar
+      // Guardar la fecha más reciente por producto
+      if (!nomIngresados[hNom] || hFechaD > nomIngresados[hNom]) {
+        nomIngresados[hNom] = hFechaD;
+      }
+    }
+  }
+
+  if (sheetInv) {
+    var invRL = sheetInv.getDataRange().getValues();
+    for (var ri = 1; ri < invRL.length; ri++) {
+      var rNom = String(invRL[ri][0] || '').trim().toUpperCase();
+      if (!rNom || !nomIngresados[rNom]) continue;
+      var rStock = parseInt(invRL[ri][5]) || 0;
+      if (rStock <= 0) continue;
+      recienLlegados.push({
+        nombre:       String(invRL[ri][0]).trim(),
+        precio:       parseInt(invRL[ri][1]) || 0,
+        categoria:    String(invRL[ri][2] || '').trim(),
+        stock:        rStock,
+        relampago:    parseInt(invRL[ri][6]) || 0,
+        destacada:    parseInt(invRL[ri][7]) || 0,
+        especial:     parseInt(invRL[ri][8]) || 0,
+        fechaIngreso: Utilities.formatDate(nomIngresados[rNom], tz, 'dd/MM/yyyy')
+      });
+    }
+  }
+  // Ordenar por fecha de ingreso descendente (más reciente primero)
+  recienLlegados.sort(function(a, b) {
+    return b.fechaIngreso.localeCompare(a.fechaIngreso);
+  });
+} catch(eRL) { Logger.log('Error recienLlegados: ' + eRL); }
+
+return { items, totales, vencProximos, stockInfo, topGanancia, recienLlegados };
   } catch(e) {
     return { error: e.toString() };
   }
@@ -2302,6 +2362,25 @@ function cobrarFiado(datos) {
 // Columna AI = índice 34 (base 0)
 var COL_PAUSADO_LC = 35; // columna 35 en Sheets (1-based) = AI
 
+function setPausadoNombre(datos) {
+  try {
+    var ss  = SpreadsheetApp.openById(SS_ID);
+    var sh  = ss.getSheetByName(HOJA_INVENTARIO);
+    if (!sh) return { success: false, mensaje: 'Hoja inventario no encontrada' };
+    var rows = sh.getDataRange().getValues();
+    var nom = String(datos.nombre || '').trim().toUpperCase();
+    for (var i = 1; i < rows.length; i++) {
+      if (String(rows[i][0] || '').trim().toUpperCase() === nom) {
+        sh.getRange(i + 1, COL_PAUSADO_LC).setValue(datos.pausado || '');
+        return { success: true };
+      }
+    }
+    return { success: false, mensaje: 'Producto no encontrado: ' + datos.nombre };
+  } catch(e) {
+    return { success: false, mensaje: e.toString() };
+  }
+}
+
 function setPausadoListaCompra(datos) {
   try {
     var ss  = SpreadsheetApp.openById(SS_ID);
@@ -2353,7 +2432,7 @@ function registrarSalidaInterna(datos) {
     shInv.getRange(filaIdx + 1, 6).setValue(nuevoStock);
 
     // Registrar en SALIDAS
-    var tz    = Session.getScriptTimeZone();
+   
     var now   = new Date();
     var fecha = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
     var hora  = Utilities.formatDate(now, tz, 'HH:mm');
