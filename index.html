@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Almacén Copihue v102</title>
+    <title>Almacén Copihue v103</title>
     
     <!-- META TAGS PARA PWA -->
     <meta name="theme-color" content="#2e7d32">
@@ -300,7 +300,11 @@
         }
 
         /* ========== ÚLTIMAS UNIDADES ========== */
-        .ofertas-container.ultimas {
+        .ofertas-container.recien-llegados {
+    border-top: 4px solid #00897b;
+    background: linear-gradient(135deg, rgba(0,137,123,0.06) 0%, rgba(255,255,255,1) 100%);
+}
+.ofertas-container.ultimas {
             border: 2px solid #e53935;
             background: linear-gradient(135deg, #fff5f5 0%, #ffebee 100%);
         }
@@ -1933,6 +1937,22 @@
         </div>
     </div>
 
+    <!-- ========== RECIÉN LLEGADOS ========== -->
+    <div class="ofertas-container recien-llegados" id="ofertasRecienLlegados" style="display:none;">
+        <div class="ofertas-header">
+            <h2>
+                🆕 RECIÉN LLEGADOS
+                <span class="ofertas-badge" style="background:#00897b;">NUEVO</span>
+            </h2>
+        </div>
+        <div class="ofertas-stock-warning" id="msg-recien"
+             style="background:rgba(0,137,123,0.12);color:#00695c;border-left:4px solid #00897b;">
+            🆕 <strong>¡RECIÉN LLEGADOS AL STOCK!</strong> Productos que ingresaron en los últimos días.
+        </div>
+        <div class="ofertas-products-grid" id="recien-grid">
+        </div>
+    </div>
+
     <!-- ========== JUEVES CERVECERO ========== -->
     <div class="ofertas-container cervecero" id="ofertasCervecero" style="display:none;">
         <div class="ofertas-header">
@@ -2223,6 +2243,7 @@ let esAdmin = false;
 // Pools de ofertas
 let poolRelampago = [];
 let _relampagoActivoBackend = []; // Los 3 del día según code.gs
+let _poolRecienLlegados = []; // Recién llegados desde Historial
 let _ultimasSeleccionBackend = []; // IDs seleccionados manualmente en seba21
 let _ultimasAutoBackend = [];      // Pool automático por vencimiento (del JSON, sin límite local)
 let _destacadasBackend = []; // IDs de destacadas rotadas del día según code.gs
@@ -3503,6 +3524,7 @@ function actualizarTodasLasVistas() {
     }
     renderizarContenedorOfertas('ultimas', productosUltimas);
     renderizarContenedorOfertas('destacadas', productosDestacadas);
+    renderizarRecienLlegados();
     renderizarContenedorOfertas('especiales', productosEspeciales);
     
     renderizarProductosNormales();
@@ -3549,6 +3571,7 @@ async function loadProductsFromAPI() {
                 _ultimasSeleccionBackend = (dOfertas.ultimasSeleccionadas && dOfertas.ultimasSeleccionadas.length > 0)
                     ? dOfertas.ultimasSeleccionadas.map(p => Number(p.id))
                     : [];
+                if (dOfertas.poolRecienLlegados) _poolRecienLlegados = dOfertas.poolRecienLlegados;
             }
         } catch(e) {
             console.warn('⚠️ getOfertas fallback:', e.message);
@@ -3676,14 +3699,70 @@ function actualizarSoloOfertas() {
             if (d.destacadasActivas) _destacadasBackend = d.destacadasActivas.map(p => Number(p.id));
             if (d.ultimasUnidades)   _ultimasAutoBackend = d.ultimasUnidades.map(p => Number(p.id));
             _ultimasSeleccionBackend = (d.ultimasSeleccionadas || []).map(p => Number(p.id));
+            if (d.poolRecienLlegados) _poolRecienLlegados = d.poolRecienLlegados;
             // Re-seleccionar y re-renderizar sin tocar los pools base
             seleccionarProductosOfertas();
             renderizarContenedorOfertas('relampago',  productosRelampago);
             renderizarContenedorOfertas('destacadas', productosDestacadas);
             renderizarContenedorOfertas('especiales', productosEspeciales);
             renderizarContenedorOfertas('ultimas',    productosUltimas);
+            renderizarRecienLlegados();
         })
         .catch(() => {}); // silencioso — siguiente ciclo lo reintenta
+}
+
+function renderizarRecienLlegados() {
+    const container = document.getElementById('ofertasRecienLlegados');
+    const grid      = document.getElementById('recien-grid');
+    if (!container || !grid) return;
+
+    // Obtener IDs ya en otros contenedores activos
+    const idsOcupados = new Set([
+        ...productosRelampago.map(p => p.id),
+        ...productosDestacadas.map(p => p.id),
+        ...productosEspeciales.map(p => p.id),
+        ...productosUltimas.map(p => p.id)
+    ]);
+
+    const lista = (_poolRecienLlegados || []).filter(p => !idsOcupados.has(p.id));
+
+    if (!lista.length) { container.style.display = 'none'; return; }
+    container.style.display = 'block';
+
+    grid.innerHTML = lista.map(p => {
+        const prod = products.find(pr => pr.id === p.id);
+        const precio = prod ? prod.price : p.precio;
+        const stock  = prod ? prod.stockNumber : p.stock;
+        const cat    = p.categoria || '';
+        const foto   = (p.nombre || '').toLowerCase()
+            .replace(/[áàä]/g,'a').replace(/[éèë]/g,'e').replace(/[íìï]/g,'i')
+            .replace(/[óòö]/g,'o').replace(/[úùü]/g,'u').replace(/ñ/g,'n')
+            .replace(/[^a-z0-9\s-]/g,'').replace(/\s+/g,'-').trim();
+
+        return \`<div class="product-card" onclick="abrirModalProducto(\${p.id})" style="cursor:pointer;">
+            <div style="position:relative;">
+                <img src="imagenes-productos/\${foto}.jpg"
+                     onerror="this.style.display='none'"
+                     style="width:100%;height:140px;object-fit:contain;background:#f9f9f9;border-radius:10px 10px 0 0;">
+                <span style="position:absolute;top:8px;left:8px;background:#00897b;color:white;
+                             font-size:0.65rem;font-weight:900;padding:3px 8px;border-radius:12px;">
+                    🆕 NUEVO
+                </span>
+            </div>
+            <div class="product-info" style="padding:10px;">
+                <div class="product-name" style="font-size:0.85rem;font-weight:700;line-height:1.2;margin-bottom:6px;">
+                    \${p.nombre}
+                </div>
+                <div style="font-size:0.72rem;color:#888;margin-bottom:6px;">\${cat}</div>
+                <div style="font-size:1.1rem;font-weight:900;color:#00695c;">
+                    $\${precio.toLocaleString('es-AR')}
+                </div>
+                <div style="font-size:0.72rem;color:#888;margin-top:4px;">
+                    📅 Ingresó el \${p.fechaIngreso || ''}
+                </div>
+            </div>
+        </div>\`;
+    }).join('');
 }
 
 function simplificarNombre(nombre) {

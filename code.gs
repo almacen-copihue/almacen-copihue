@@ -940,6 +940,69 @@ function calcularOfertas() {
     }
   } catch(eU) { /* sin selección guardada */ }
 
+  // ── RECIÉN LLEGADOS ──────────────────────────────────────────────
+  var poolRecienLlegados = [];
+  try {
+    var ssRL = SpreadsheetApp.openById(SS_ID);
+    var shHistRL = ssRL.getSheetByName(HOJA_HISTORIAL);
+    var shInvRL  = ssRL.getSheetByName(HOJA_INVENTARIO);
+    if (shHistRL && shInvRL) {
+      var hoyRL = new Date(); hoyRL.setHours(0,0,0,0);
+      var hace2 = new Date(hoyRL.getTime() - 2 * 86400000);
+      var tzRL = Session.getScriptTimeZone();
+
+      // Última fecha de ingreso por nombre (normalizado)
+      var ultimaFechaMap = {};
+      var histRowsRL = shHistRL.getDataRange().getValues();
+      for (var hi = 1; hi < histRowsRL.length; hi++) {
+        var hfecha = histRowsRL[hi][0];
+        var hnom   = String(histRowsRL[hi][1] || '').trim().toUpperCase();
+        if (!hnom) continue;
+        var hfechaD = hfecha instanceof Date ? hfecha : new Date(String(hfecha));
+        if (isNaN(hfechaD.getTime())) continue;
+        var dNorm = new Date(hfechaD); dNorm.setHours(0,0,0,0);
+        if (dNorm < hace2) continue;
+        if (!ultimaFechaMap[hnom] || hfechaD > ultimaFechaMap[hnom]) {
+          ultimaFechaMap[hnom] = hfechaD;
+        }
+      }
+
+      // IDs de productos ya en otros pools activos (para exclusión)
+      var idsOtrosPools = {};
+      relampagoActivo.forEach(function(p){ idsOtrosPools[p.id] = true; });
+      ultimasUnidades.forEach(function(p){ idsOtrosPools[p.id] = true; });
+      destacadasRotadas.forEach(function(p){ idsOtrosPools[p.id] = true; });
+      especialesActivas.forEach(function(p){ idsOtrosPools[p.id] = true; });
+
+      // Cruzar con inventario
+      var invRowsRL = shInvRL.getDataRange().getValues();
+      var candidatosRL = [];
+      for (var ri = 1; ri < invRowsRL.length; ri++) {
+        var rNom = String(invRowsRL[ri][0] || '').trim().toUpperCase();
+        if (!rNom || !ultimaFechaMap[rNom]) continue;
+        var rStock = parseInt(invRowsRL[ri][5]) || 0;
+        if (rStock <= 0) continue;
+        if (idsOtrosPools[ri]) continue; // ya en otro pool
+        candidatosRL.push({
+          id:           ri,
+          nombre:       String(invRowsRL[ri][0]).trim(),
+          precio:       parseInt(invRowsRL[ri][1]) || 0,
+          categoria:    String(invRowsRL[ri][2] || '').trim(),
+          stock:        rStock,
+          fechaIngreso: Utilities.formatDate(ultimaFechaMap[rNom], tzRL, 'dd/MM/yyyy'),
+          _ts:          ultimaFechaMap[rNom].getTime()
+        });
+      }
+
+      // Ordenar por más reciente primero, limitar a 5
+      candidatosRL.sort(function(a, b){ return b._ts - a._ts; });
+      poolRecienLlegados = candidatosRL.slice(0, 5).map(function(p){
+        return { id: p.id, nombre: p.nombre, precio: p.precio,
+                 categoria: p.categoria, stock: p.stock, fechaIngreso: p.fechaIngreso };
+      });
+    }
+  } catch(eRL) { Logger.log('Error poolRecienLlegados: ' + eRL); }
+
   return {
     success: true,
     relampagoActivo:      relampagoActivo,
@@ -949,6 +1012,7 @@ function calcularOfertas() {
     destacadasActivas:    destacadasRotadas,    // ya rotadas — mismas que verán index y seba21
     destacadasPool:       destacadasPool,        // pool completo (para stats)
     especialesActivas:    especialesActivas,
+    poolRecienLlegados: poolRecienLlegados,
     limites: limites,
     fecha: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm'),
     stats: {
