@@ -8,6 +8,11 @@
 //  ⚠️ NO hay actualizarTodo() aquí — está en Code.gs
 // ============================================================
 
+// Helper: alert solo si hay UI (falla silencioso en triggers automáticos)
+function _uiAlert_(msg) {
+  try { SpreadsheetApp.getUi().alert(msg); } catch(e) { Logger.log(msg); }
+}
+
 /**
  * COLUMNAS QUE ESCRIBE:
  *  V  (22) Ventas7d
@@ -32,7 +37,7 @@ function actualizarMotorInventario() {
   var shVent = ss.getSheetByName('Ventas');
 
   if (!shInv || !shVent) {
-    SpreadsheetApp.getUi().alert('❌ No se encontró la hoja "inventario" o "Ventas".');
+    _uiAlert_('❌ No se encontró la hoja "inventario" o "Ventas".');
     return;
   }
 
@@ -208,7 +213,7 @@ function actualizarMotorInventario() {
   var compras = outVtoAH.filter(function(r){ return r[6]  >   0;           }).length;
   var pisosYa = outVtoAH.filter(function(r){ return r[12] === 'PEDIR YA'; }).length;
 
-  SpreadsheetApp.getUi().alert(
+  _uiAlert_(
     '✅ Motor actualizado\n\n' +
     '📦 Productos procesados: ' + numRows + '\n' +
     '🛒 Con compra sugerida: '  + compras + '\n' +
@@ -227,7 +232,7 @@ function actualizarListaCompra() {
   var shLista = ss.getSheetByName('Lista de compra');
 
   if (!shInv || !shLista) {
-    SpreadsheetApp.getUi().alert('❌ No se encontró "inventario" o "Lista de compra".');
+    _uiAlert_('❌ No se encontró "inventario" o "Lista de compra".');
     return;
   }
 
@@ -284,7 +289,7 @@ function actualizarListaCompra() {
   if (lastRow > 1) shLista.getRange(2, 1, lastRow - 1, 7).clearContent();
 
   if (items.length === 0) {
-    SpreadsheetApp.getUi().alert('✅ No hay productos para comprar hoy.');
+    _uiAlert_('✅ No hay productos para comprar hoy.');
     return;
   }
 
@@ -301,7 +306,7 @@ function actualizarListaCompra() {
 
   SpreadsheetApp.flush();
 
-  SpreadsheetApp.getUi().alert(
+  _uiAlert_(
     '🛒 Lista de compra actualizada\n\n' +
     '📋 Productos a comprar: ' + items.length + '\n' +
     '💰 Total estimado: $' + totalPesos.toLocaleString('es-AR') + '\n\n' +

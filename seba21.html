@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v234</title>
+    <title>Copihue — POS v236</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -886,8 +886,6 @@
     </style>
     <!-- QR Code generator -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-  <meta name="copihue-build" content="20260322-210040-seba21html">
-  <script>window.COPIHUE_BUILD="20260322-210040-seba21html";</script>
 </head>
 <body>
 
@@ -2241,10 +2239,10 @@ function renderResultados(results, term = '') {
         const conStock = resto.filter(p => p.stock > 0);
         const sinStock = resto.filter(p => p.stock === 0);
 
-        const grRelampago  = conStock.filter(p => _poolIdsRelampago.has(p.id)  && _toggleEstado.relampago  !== false);
+        const grRelampago  = conStock.filter(p => _poolIdsRelampago.has(p.id)  && _tipoActivo('relampago'));
         const grUltimas    = conStock.filter(p => _poolIdsUltimas.has(p.id)    && _tipoActivo('ultimas')    && !grRelampago.includes(p));
-        const grDestacadas = conStock.filter(p => _destacadasFiltradas.has(p.id) && _toggleEstado.destacadas !== false && !grRelampago.includes(p) && !grUltimas.includes(p));
-        const grEspeciales = conStock.filter(p => _poolIdsEspeciales.has(p.id) && _toggleEstado.especiales !== false && !grRelampago.includes(p) && !grUltimas.includes(p) && !grDestacadas.includes(p));
+        const grDestacadas = conStock.filter(p => _destacadasFiltradas.has(p.id) && _tipoActivo('destacadas') && !grRelampago.includes(p) && !grUltimas.includes(p));
+        const grEspeciales = conStock.filter(p => _poolIdsEspeciales.has(p.id) && _tipoActivo('especiales') && !grRelampago.includes(p) && !grUltimas.includes(p) && !grDestacadas.includes(p));
         const idsOferta    = new Set([...grRelampago, ...grUltimas, ...grDestacadas, ...grEspeciales].map(p => p.id));
         const grNormal     = conStock.filter(p => !idsOferta.has(p.id));
 
@@ -3333,10 +3331,10 @@ function aplicarLimiteDestacadas() {
 
 function _tieneOfertaActiva(p) {
     if (_esCerveceroActivo() && _poolCervecero && _poolCervecero.has(p.id)) return true;
-    if (p.relampago && _toggleEstado.relampago !== false && _poolIdsRelampago.has(p.id)) return true;
+    if (p.relampago && _tipoActivo('relampago') && _poolIdsRelampago.has(p.id)) return true;
     if (_tipoActivo('ultimas') && _poolIdsUltimas.has(p.id)) return true;
-    if (p.destacada > 0 && _toggleEstado.destacadas !== false && _destacadasFiltradas.has(p.id)) return true;
-    if (p.especial  > 0 && _toggleEstado.especiales !== false && _poolIdsEspeciales.has(p.id)) return true;
+    if (p.destacada > 0 && _tipoActivo('destacadas') && _destacadasFiltradas.has(p.id)) return true;
+    if (p.especial  > 0 && _tipoActivo('especiales') && _poolIdsEspeciales.has(p.id)) return true;
     return false;
 }
 
@@ -4821,12 +4819,35 @@ function alertarVencidosHoy() {
         return;
     }
 
-    const vencidosHoy = productos.filter(p => {
-        if (!p.vencimiento || p.stock <= 0) return false;
-        const partes = p.vencimiento.split('-');
+    // Calcular días restantes correctamente en timezone Argentina
+    const calcDiasVenc = (vencStr) => {
+        const partes = vencStr.split('-');
         const vence = new Date(parseInt(partes[0]), parseInt(partes[1])-1, parseInt(partes[2]));
         vence.setHours(0,0,0,0);
-        return vence < hoy;
+        const hoyMed = new Date(hoyKey + 'T00:00:00');
+        return Math.round((vence - hoyMed) / 86400000);
+    };
+
+    // VENCIDO = dias < 0 (ya pasó la fecha)
+    const vencidosHoy = productos.filter(p => {
+        if (!p.vencimiento || p.stock <= 0) return false;
+        return calcDiasVenc(p.vencimiento) < 0;
+    });
+
+    // PRÓXIMOS A VENCER = dias 0, 1, 2 → alerta suave (no modal)
+    const proxVencer = productos.filter(p => {
+        if (!p.vencimiento || p.stock <= 0) return false;
+        const d = calcDiasVenc(p.vencimiento);
+        return d >= 0 && d <= 2;
+    });
+
+    // Mostrar alerta suave para próximos a vencer (no modal, solo notificación)
+    proxVencer.forEach(p => {
+        const d = calcDiasVenc(p.vencimiento);
+        const msg = d === 0
+            ? `⚠️ ${p.name.substring(0,30)} — Último día de venta, retirá al finalizar la jornada`
+            : `⏰ ${p.name.substring(0,30)} — Vence en ${d} día${d>1?'s':''}, retirá al finalizar la jornada`;
+        agregarNotifPos(d === 0 ? '⚠️' : '⏰', d === 0 ? 'Último día de venta' : 'Vence pronto', msg, d === 0 ? '#e65100' : '#f57f17');
     });
 
     if (vencidosHoy.length === 0) return;
@@ -5729,7 +5750,7 @@ function calcularOfertaPOS(producto, qty) {
     }
 
     // 1. RELÁMPAGO — toggle activo Y producto en el pool del día
-    if (producto.relampago && _toggleEstado.relampago !== false && _poolIdsRelampago.has(producto.id)) {
+    if (producto.relampago && _tipoActivo('relampago') && _poolIdsRelampago.has(producto.id)) {
         const key = String(producto.relampago);
         const cfg = OFERTAS_RELAMPAGO_SISTEMA[key];
         if (cfg && cfg.tipo === 'pct') {
@@ -5779,14 +5800,14 @@ function calcularOfertaPOS(producto, qty) {
         r.tipoOferta     = 'ultimas';
     }
     // 2. DESTACADAS — toggle activo Y en pool
-    else if (producto.destacada > 0 && _toggleEstado.destacadas !== false && _destacadasFiltradas.has(producto.id)) {
+    else if (producto.destacada > 0 && _tipoActivo('destacadas') && _destacadasFiltradas.has(producto.id)) {
         r.precioUnitario = Math.round(producto.price * (1 - producto.destacada / 100));
         r.precioTotal    = r.precioUnitario * qty;
         r.etiqueta       = `🔥 -${producto.destacada}% OFF`;
         r.tieneOferta = true; r.tipoOferta = 'destacadas';
     }
     // 3. ESPECIALES — toggle activo Y en pool
-    else if (producto.especial > 0 && _toggleEstado.especiales !== false && _poolIdsEspeciales.has(producto.id)) {
+    else if (producto.especial > 0 && _tipoActivo('especiales') && _poolIdsEspeciales.has(producto.id)) {
         r.precioUnitario = Math.round(producto.price * 0.9);
         r.precioTotal    = r.precioUnitario * qty;
         r.etiqueta       = `⭐ -10% OFF`;
@@ -5807,7 +5828,7 @@ function badgeOfertaPOS(producto) {
         const jc = _poolCervecero.get(producto.id);
         return `<span style="background:#1565c0;color:#f9a825;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">🍺 PRECIO ESPECIAL</span>`;
     }
-    if (producto.relampago && _toggleEstado.relampago !== false && _poolIdsRelampago.has(producto.id)) {
+    if (producto.relampago && _tipoActivo('relampago') && _poolIdsRelampago.has(producto.id)) {
         const key = String(producto.relampago);
         const cfg = OFERTAS_RELAMPAGO_SISTEMA[key];
         if (cfg) return `<span style="background:#f9a825;color:#000;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">⚡ ${cfg.nombre.toUpperCase()}</span>`;
@@ -5816,9 +5837,9 @@ function badgeOfertaPOS(producto) {
     }
     if (_tipoActivo('ultimas') && _poolIdsUltimas.has(producto.id))
         return `<span style="background:#b71c1c;color:#fff;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">🏷️ ÚLTIMAS</span>`;
-    if (producto.destacada > 0 && _toggleEstado.destacadas !== false && _destacadasFiltradas.has(producto.id))
+    if (producto.destacada > 0 && _tipoActivo('destacadas') && _destacadasFiltradas.has(producto.id))
         return `<span style="background:#ff6f00;color:#fff;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">🔥 -${producto.destacada}%</span>`;
-    if (producto.especial > 0 && _toggleEstado.especiales !== false && _poolIdsEspeciales.has(producto.id))
+    if (producto.especial > 0 && _tipoActivo('especiales') && _poolIdsEspeciales.has(producto.id))
         return `<span style="background:#00bcd4;color:#fff;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">⭐ -10%</span>`;
     return '';
 }
