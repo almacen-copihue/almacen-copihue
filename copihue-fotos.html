@@ -1350,6 +1350,29 @@ function _dibujarEnCanvas(img, canvas) {
   ctx.restore();
 }
 
+// Verifica que el canvas tenga contenido real (no negro ni vacío)
+function _canvasEsValido(canvas) {
+  try {
+    const ctx = canvas.getContext('2d');
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    let sumR = 0, sumG = 0, sumB = 0;
+    const step = 4 * 20; // muestrear cada 20 píxeles
+    let count = 0;
+    for (let i = 0; i < data.length; i += step) {
+      sumR += data[i]; sumG += data[i+1]; sumB += data[i+2];
+      count++;
+    }
+    const avgR = sumR/count, avgG = sumG/count, avgB = sumB/count;
+    // Si el promedio es muy oscuro (negro) o muy bajo → inválido
+    // Un canvas blanco tiene avg ~255, negro ~0
+    if (avgR < 10 && avgG < 10 && avgB < 10) return { ok: false, motivo: 'La imagen quedó negra. Volvé a cargar el archivo.' };
+    if (avgR > 250 && avgG > 250 && avgB > 250) return { ok: false, motivo: 'La imagen quedó en blanco. Volvé a cargar el archivo.' };
+    return { ok: true };
+  } catch(e) {
+    return { ok: false, motivo: 'No se pudo leer el canvas: ' + e.message };
+  }
+}
+
 function _previsualizar(src, cardEl) {
   document.querySelectorAll('#fotosGridItems > div').forEach(c => c.classList.remove('selected'));
   if (cardEl) cardEl.classList.add('selected');
@@ -1513,14 +1536,48 @@ async function publicarEnGitHub() {
   const slug  = productoActual.slug;
   const fname = slug + '.jpg';
   const path  = 'imagenes-productos/' + fname;
-  const base64 = (document.getElementById('fotosOffscreen').toDataURL('image/jpeg', 0.93)
-               || document.getElementById('fotosCanvas').toDataURL('image/jpeg', 0.93)).split(',')[1];
   const btn = document.getElementById('btnPublicarGH'); btn.disabled = true;
 
   _showPublishChecks();
   _resetPublishChecks();
-  _setCheck('checkGitHub', 'running', 'Subiendo archivo…');
+  _setCheck('checkGitHub', 'running', 'Preparando imagen…');
   document.getElementById('publishCheckActions').style.display = 'none';
+  _setGHStatus('<div style="display:flex;align-items:center;gap:8px;"><div class="spin"></div> Preparando imagen…</div>', 'loading');
+
+  // Validar que el canvas tenga imagen real antes de subir
+  const canvas = document.getElementById('fotosOffscreen');
+  const validacion = _canvasEsValido(canvas);
+  if (!validacion.ok) {
+    _setCheck('checkGitHub', 'error', validacion.motivo);
+    _setGHStatus('❌ ' + validacion.motivo, 'error');
+    document.getElementById('publishCheckActions').style.display = 'flex';
+    btn.disabled = false;
+    toast('❌ ' + validacion.motivo, 'error');
+    return;
+  }
+
+  // Usar toBlob para evitar SecurityError en canvas contaminado por CORS
+  let base64;
+  try {
+    const blob = await new Promise((resolve, reject) => {
+      canvas.toBlob(b => b ? resolve(b) : reject(new Error('Canvas vacío')), 'image/jpeg', 0.93);
+    });
+    if (!blob || blob.size < 500) throw new Error('La imagen está vacía. Volvé a cargar el archivo.');
+    base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = () => reject(new Error('Error leyendo imagen'));
+      reader.readAsDataURL(blob);
+    });
+  } catch(e) {
+    _setCheck('checkGitHub', 'error', e.message);
+    _setGHStatus('❌ ' + e.message, 'error');
+    document.getElementById('publishCheckActions').style.display = 'flex';
+    btn.disabled = false;
+    return;
+  }
+
+  _setCheck('checkGitHub', 'running', 'Subiendo archivo…');
   _setGHStatus('<div style="display:flex;align-items:center;gap:8px;"><div class="spin"></div> Subiendo a GitHub…</div>', 'loading');
 
   try {
