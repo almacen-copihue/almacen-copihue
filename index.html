@@ -5747,28 +5747,31 @@ function init() {
     
     if ('serviceWorker' in navigator) {
         navigator.serviceWorker.getRegistrations().then(function(registrations) {
-            for(let registration of registrations) {
-                registration.unregister();
-                console.log('🗑️ Service Worker antiguo eliminado');
-            }
-            
-            navigator.serviceWorker.register('./sw.js?v=' + APP_VERSION)
-                .then(registration => {
-                    console.log('✅ Service Worker registrado - Versión: ' + APP_VERSION);
-                    
-                    registration.addEventListener('updatefound', () => {
-                        const newWorker = registration.installing;
-                        newWorker.addEventListener('statechange', () => {
-                            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                                console.log('🔄 Nueva versión disponible - Recargando...');
-                                window.location.reload(true);
-                            }
-                        });
-                    });
-                })
-                .catch(error => {
-                    console.error('❌ Error Service Worker:', error);
+            const unregPromises = registrations.map(r => {
+                console.log('🗑️ SW eliminado: ' + (r.scope || ''));
+                return r.unregister();
+            });
+            return Promise.all(unregPromises);
+        }).then(function() {
+            if ('caches' in window) {
+                caches.keys().then(keys => {
+                    keys.forEach(k => { caches.delete(k); console.log('🗑️ Caché SW limpiado: ' + k); });
                 });
+            }
+            return navigator.serviceWorker.register('./sw.js?v=' + APP_VERSION);
+        }).then(registration => {
+            console.log('✅ Service Worker registrado - Versión: ' + APP_VERSION);
+            registration.addEventListener('updatefound', () => {
+                const newWorker = registration.installing;
+                newWorker.addEventListener('statechange', () => {
+                    if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                        console.log('🔄 Nueva versión disponible - Recargando...');
+                        window.location.reload(true);
+                    }
+                });
+            });
+        }).catch(error => {
+            console.error('❌ Error Service Worker:', error);
         });
     }
 }
