@@ -1425,10 +1425,14 @@ function _setCheck(id, state, text) {
   txt.textContent = text;
 }
 
-async function _esperarImagenPublica(slug, maxIntentos=12, pausaMs=2500) {
+async function _esperarImagenPublica(slug, maxIntentos=24, pausaMs=5000) {
   const base = 'imagenes-productos/' + slug + '.jpg';
   for (let i=0; i<maxIntentos; i++) {
-    await new Promise(r => setTimeout(r, i===0?1000:pausaMs));
+    // Primera espera: 3s para que GitHub procese; luego 5s entre intentos
+    await new Promise(r => setTimeout(r, i===0 ? 3000 : pausaMs));
+    // Mostrar contador en el check de CDN
+    const seg = Math.round((i * pausaMs + 3000) / 1000);
+    _setCheck('checkCDN', 'running', `Esperando deploy de Vercel… (${seg}s)`);
     try {
       const r = await fetch(base + '?t=' + Date.now(), { cache:'no-store' });
       if (r.ok) return { ok: true, url: base + '?t=' + Date.now() };
@@ -1443,7 +1447,7 @@ async function revalidarPublicacion() {
   _setCheck('checkCDN','running','Revalidando disponibilidad…');
   _setCheck('checkPreview','pending','Esperando…');
   document.getElementById('publishCheckActions').style.display = 'none';
-  const res = await _esperarImagenPublica(productoActual.slug, 6, 2000);
+  const res = await _esperarImagenPublica(productoActual.slug, 18, 5000);
   if (res.ok) {
     _setCheck('checkCDN','ok','URL pública OK');
     _setCheck('checkPreview','ok','Vista previa recargada');
@@ -1532,7 +1536,7 @@ async function publicarEnGitHub() {
     const commitUrl = res.commit?.html_url || '#';
     _setCheck('checkGitHub', 'ok', 'Archivo confirmado en GitHub');
     _setCheck('checkCDN', 'running', 'Esperando propagación…');
-    _setGHStatus('<div style="display:flex;align-items:center;gap:8px;"><div class="spin"></div> Validando URL pública…</div>', 'loading');
+    _setGHStatus('<div style="display:flex;align-items:center;gap:8px;"><div class="spin"></div> Esperando deploy de Vercel (puede tardar 1–2 min)…</div>', 'loading');
 
     const publicado = await _esperarImagenPublica(slug, 12, 2500);
 
