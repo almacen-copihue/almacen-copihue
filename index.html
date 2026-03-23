@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Almacén Copihue v118</title>
+    <title>Almacén Copihue v119</title>
     
     <!-- META TAGS PARA PWA -->
     <meta name="theme-color" content="#2e7d32">
@@ -334,13 +334,15 @@
             opacity: 0;
             visibility: hidden;
             pointer-events: none;
-            min-height: 0 !important;
-            max-height: 0 !important;
-            margin-bottom: 0 !important;
-            padding: 0 !important;
-            overflow: hidden !important;
-            border: none !important;
+            min-height: 200px !important;
+            margin-bottom: 2rem !important;
+            border: 3px solid transparent !important;
+            background: transparent !important;
             box-shadow: none !important;
+            transition: opacity 0.2s ease;
+        }
+        #ofertasRecienLlegados.cls-oculto {
+            min-height: 280px !important;
         }
 
         /* ⚡ RELÁMPAGO — amarillo eléctrico */
@@ -434,13 +436,14 @@
             background: linear-gradient(135deg, #1a237e 0%, #283593 50%, #1565c0 100%);
             position: relative;
             overflow: hidden;
-            /* Sin min-height global — se controla por modo teaser/activo */
+            min-height: 280px;
+            transition: min-height 0.2s ease;
         }
-        /* Modo teaser: compacto */
+        /* Modo teaser: compacto pero fijo */
         .ofertas-container.cervecero.cervecero-teaser {
-            min-height: 0;
+            min-height: 280px;
         }
-        /* Modo activo: reservar espacio para productos */
+        /* Modo activo: más espacio para productos */
         .ofertas-container.cervecero.cervecero-activo {
             min-height: 380px;
         }
@@ -3737,21 +3740,19 @@ async function loadProductsFromAPI() {
         
         const TU_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
         
-        const urlConCache = TU_APPS_SCRIPT_URL + '?cache=' + Date.now();
-        
-        const respuesta = await fetch(urlConCache, {
-            method: 'GET',
-            headers: {
-                'Accept': 'application/json'
-            }
-        });
-        
-        if (!respuesta.ok) {
-            throw new Error(`Error ${respuesta.status}`);
-        }
-        
-        const datos = await respuesta.json();
-        
+        // Paralelizar ambos fetch — elimina el segundo render tardío que causaba CLS
+        const [respuestaProductos, respuestaOfertas] = await Promise.all([
+            fetch(TU_APPS_SCRIPT_URL + '?cache=' + Date.now(), {
+                method: 'GET',
+                headers: { 'Accept': 'application/json' }
+            }),
+            fetch(TU_APPS_SCRIPT_URL + '?action=getOfertas&t=' + Date.now(), { redirect: 'follow' })
+        ]);
+
+        if (!respuestaProductos.ok) throw new Error(`Error ${respuestaProductos.status}`);
+
+        const datos = await respuestaProductos.json();
+
         if (datos.productos && Array.isArray(datos.productos)) {
             processAPIData(datos);
         } else if (Array.isArray(datos)) {
@@ -3760,10 +3761,9 @@ async function loadProductsFromAPI() {
             throw new Error('Formato de datos no reconocido');
         }
 
-        // Fetch getOfertas con await antes del primer render — sin flash
+        // Procesar ofertas (ya disponibles en paralelo)
         try {
-            const rOfertas = await fetch(TU_APPS_SCRIPT_URL + '?action=getOfertas&t=' + Date.now(), { redirect: 'follow' });
-            const dOfertas = await rOfertas.json();
+            const dOfertas = await respuestaOfertas.json();
             if (dOfertas.success) {
                 if (dOfertas.relampagoActivo) _relampagoActivoBackend = dOfertas.relampagoActivo.map(p => Number(p.id));
                 if (dOfertas.destacadasActivas) _destacadasBackend = dOfertas.destacadasActivas.map(p => Number(p.id));
@@ -3777,6 +3777,7 @@ async function loadProductsFromAPI() {
             console.warn('⚠️ getOfertas fallback:', e.message);
         }
 
+        // Un único render con todos los datos disponibles
         renderCategories();
         actualizarTodasLasVistas();
 
