@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v2.6-c0001a';
+const CACHE_VERSION = 'v2.7';
 const CACHE_NAME = `almacen-copihue-${CACHE_VERSION}`;
 
 // Archivos esenciales para cachear
@@ -61,7 +61,7 @@ self.addEventListener('fetch', (event) => {
     
     // 🚫 IGNORAR métodos que no sean GET
     if (method !== 'GET') {
-        return; // No hacer nada, pasar directo
+        return;
     }
     
     // 🚫 NUNCA cachear la API de Google Sheets
@@ -77,7 +77,6 @@ self.addEventListener('fetch', (event) => {
         event.respondWith(
             fetch(event.request)
                 .then(response => {
-                    // Actualizar caché con nueva versión
                     if (response && response.status === 200) {
                         const responseClone = response.clone();
                         caches.open(CACHE_NAME)
@@ -86,10 +85,7 @@ self.addEventListener('fetch', (event) => {
                     }
                     return response;
                 })
-                .catch(() => {
-                    // Si falla, usar caché
-                    return caches.match(event.request);
-                })
+                .catch(() => caches.match(event.request))
         );
         return;
     }
@@ -114,28 +110,26 @@ self.addEventListener('fetch', (event) => {
         return;
     }
     
-    // 🖼️ Para imágenes de productos: Network First
+    // 🖼️ Para imágenes de productos: Network First, cachear SOLO sin query string
     if (url.includes('/imagenes-productos/')) {
+        // Normalizar URL sin query string para evitar cachear 404s con ?t=
+        const cleanUrl = url.split('?')[0];
+        const cleanRequest = new Request(cleanUrl, { cache: 'no-store' });
         event.respondWith(
-            fetch(event.request)
+            fetch(cleanRequest)
                 .then(response => {
-                    // Cachear la imagen si se carga bien
                     if (response && response.ok) {
                         const responseClone = response.clone();
                         caches.open(CACHE_NAME)
-                            .then(cache => cache.put(event.request, responseClone))
+                            .then(cache => cache.put(cleanUrl, responseClone))
                             .catch(err => console.warn('No se pudo cachear imagen:', err));
                     }
                     return response;
                 })
                 .catch(() => {
-                    // Si falla, buscar en caché
-                    return caches.match(event.request)
+                    return caches.match(cleanUrl)
                         .then(cachedResponse => {
-                            if (cachedResponse) {
-                                return cachedResponse;
-                            }
-                            // Si no está en caché, placeholder SVG
+                            if (cachedResponse) return cachedResponse;
                             return new Response(
                                 `<svg width="200" height="200" xmlns="http://www.w3.org/2000/svg">
                                     <rect width="200" height="200" fill="#e8f5e9"/>
@@ -157,5 +151,4 @@ self.addEventListener('fetch', (event) => {
     );
 });
 
-// Mensaje de consola inicial
 console.log('✅ Service Worker cargado - Versión:', CACHE_VERSION);
