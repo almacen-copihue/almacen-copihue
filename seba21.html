@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v233</title>
+    <title>Copihue — POS v234</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -886,8 +886,8 @@
     </style>
     <!-- QR Code generator -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-  <meta name="copihue-build" content="20260322-205522-seba21html">
-  <script>window.COPIHUE_BUILD="20260322-205522-seba21html";</script>
+  <meta name="copihue-build" content="20260322-210040-seba21html">
+  <script>window.COPIHUE_BUILD="20260322-210040-seba21html";</script>
 </head>
 <body>
 
@@ -2242,7 +2242,7 @@ function renderResultados(results, term = '') {
         const sinStock = resto.filter(p => p.stock === 0);
 
         const grRelampago  = conStock.filter(p => _poolIdsRelampago.has(p.id)  && _toggleEstado.relampago  !== false);
-        const grUltimas    = conStock.filter(p => _poolIdsUltimas.has(p.id)    && _toggleEstado.ultimas    !== false && !grRelampago.includes(p));
+        const grUltimas    = conStock.filter(p => _poolIdsUltimas.has(p.id)    && _tipoActivo('ultimas')    && !grRelampago.includes(p));
         const grDestacadas = conStock.filter(p => _destacadasFiltradas.has(p.id) && _toggleEstado.destacadas !== false && !grRelampago.includes(p) && !grUltimas.includes(p));
         const grEspeciales = conStock.filter(p => _poolIdsEspeciales.has(p.id) && _toggleEstado.especiales !== false && !grRelampago.includes(p) && !grUltimas.includes(p) && !grDestacadas.includes(p));
         const idsOferta    = new Set([...grRelampago, ...grUltimas, ...grDestacadas, ...grEspeciales].map(p => p.id));
@@ -3334,7 +3334,7 @@ function aplicarLimiteDestacadas() {
 function _tieneOfertaActiva(p) {
     if (_esCerveceroActivo() && _poolCervecero && _poolCervecero.has(p.id)) return true;
     if (p.relampago && _toggleEstado.relampago !== false && _poolIdsRelampago.has(p.id)) return true;
-    if (_toggleEstado.ultimas !== false && _poolIdsUltimas.has(p.id)) return true;
+    if (_tipoActivo('ultimas') && _poolIdsUltimas.has(p.id)) return true;
     if (p.destacada > 0 && _toggleEstado.destacadas !== false && _destacadasFiltradas.has(p.id)) return true;
     if (p.especial  > 0 && _toggleEstado.especiales !== false && _poolIdsEspeciales.has(p.id)) return true;
     return false;
@@ -5757,7 +5757,7 @@ function calcularOfertaPOS(producto, qty) {
         }
     }
     // 1b. ÚLTIMAS UNIDADES — toggle activo (null = default on) Y producto en el pool
-    else if (_toggleEstado.ultimas !== false && _poolIdsUltimas.has(producto.id)) {
+    else if (_tipoActivo('ultimas') && _poolIdsUltimas.has(producto.id)) {
         // PUNTOS 3,4,5: calcularOfertaPOS — usa calcularDescuentoUltimas (fuente única)
         let diasVenc = null;
         if (producto.vencimiento) {
@@ -5814,7 +5814,7 @@ function badgeOfertaPOS(producto) {
         const match = key.match(/(\d+)x(\d+)/i);
         if (match) return `<span style="background:#f9a825;color:#000;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">⚡ ${match[1]}X${match[2]}</span>`;
     }
-    if (_toggleEstado.ultimas !== false && _poolIdsUltimas.has(producto.id))
+    if (_tipoActivo('ultimas') && _poolIdsUltimas.has(producto.id))
         return `<span style="background:#b71c1c;color:#fff;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">🏷️ ÚLTIMAS</span>`;
     if (producto.destacada > 0 && _toggleEstado.destacadas !== false && _destacadasFiltradas.has(producto.id))
         return `<span style="background:#ff6f00;color:#fff;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">🔥 -${producto.destacada}%</span>`;
@@ -6021,6 +6021,16 @@ async function toggleOferta(tipo) {
         mostrarToast('❌ Sin conexión', 'rojo');
     }
     if (btn) { btn.disabled = false; btn.style.opacity = _toggleEstado[tipo] ? '1' : '0.65'; }
+}
+
+// Resuelve si un tipo de oferta está activo en seba21
+// true=forzado ON, false=forzado OFF, null=auto (respetar horario del sistema)
+function _tipoActivo(tipo) {
+    const estado = _toggleEstado[tipo];
+    if (estado === true)  return true;
+    if (estado === false) return false;
+    // null = auto → usar _dentroDeHorario si está disponible, sino mostrar
+    return true; // seba21 es panel vendedor, en auto siempre muestra
 }
 
 function iniciarToggleOfertas() {
