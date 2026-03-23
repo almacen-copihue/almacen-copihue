@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Almacén Copihue v120</title>
+    <title>Almacén Copihue v121</title>
     
     <!-- META TAGS PARA PWA -->
     <meta name="theme-color" content="#2e7d32">
@@ -3728,19 +3728,15 @@ async function loadProductsFromAPI() {
         console.log('🚀 Cargando productos desde API...');
         
         const TU_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-        
-        // Paralelizar ambos fetch — elimina el segundo render tardío que causaba CLS
-        const [respuestaProductos, respuestaOfertas] = await Promise.all([
-            fetch(TU_APPS_SCRIPT_URL + '?cache=' + Date.now(), {
-                method: 'GET',
-                headers: { 'Accept': 'application/json' }
-            }),
-            fetch(TU_APPS_SCRIPT_URL + '?action=getOfertas&t=' + Date.now(), { redirect: 'follow' })
-        ]);
 
-        if (!respuestaProductos.ok) throw new Error(`Error ${respuestaProductos.status}`);
+        const respuesta = await fetch(TU_APPS_SCRIPT_URL + '?cache=' + Date.now(), {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' }
+        });
 
-        const datos = await respuestaProductos.json();
+        if (!respuesta.ok) throw new Error(`Error ${respuesta.status}`);
+
+        const datos = await respuesta.json();
 
         if (datos.productos && Array.isArray(datos.productos)) {
             processAPIData(datos);
@@ -3750,9 +3746,10 @@ async function loadProductsFromAPI() {
             throw new Error('Formato de datos no reconocido');
         }
 
-        // Procesar ofertas (ya disponibles en paralelo)
+        // Fetch getOfertas secuencial — GAS no tolera dos requests paralelos al mismo endpoint
         try {
-            const dOfertas = await respuestaOfertas.json();
+            const rOfertas = await fetch(TU_APPS_SCRIPT_URL + '?action=getOfertas&t=' + Date.now(), { redirect: 'follow' });
+            const dOfertas = await rOfertas.json();
             if (dOfertas.success) {
                 if (dOfertas.relampagoActivo) _relampagoActivoBackend = dOfertas.relampagoActivo.map(p => Number(p.id));
                 if (dOfertas.destacadasActivas) _destacadasBackend = dOfertas.destacadasActivas.map(p => Number(p.id));
@@ -3766,7 +3763,6 @@ async function loadProductsFromAPI() {
             console.warn('⚠️ getOfertas fallback:', e.message);
         }
 
-        // Un único render con todos los datos disponibles
         renderCategories();
         actualizarTodasLasVistas();
 
