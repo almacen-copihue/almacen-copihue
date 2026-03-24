@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v2.7';
+const CACHE_VERSION = 'v2.8';
 const CACHE_NAME = `almacen-copihue-${CACHE_VERSION}`;
 
 // Archivos esenciales para cachear

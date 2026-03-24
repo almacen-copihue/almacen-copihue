@@ -1,7 +1,8 @@
 // ========== SERVICE WORKER — COPIHUE PUNTO DE VENTA ==========
-const VERSION = 'copihue-venta-v58';
+const VERSION = 'copihue-venta-v59';
 const CACHE_ESTATICO = [
     '/venta.html',
+    '/seba21.html',
     '/manifest-venta.json'
 ];
 
