@@ -1495,6 +1495,14 @@ function doGet(e) {
     if (e && e.parameter && e.parameter.action === 'consultarFiado') {
       return respuestaJSON(consultarFiado(e.parameter.telefono));
     }
+    if (e && e.parameter && e.parameter.action === 'setPausadoNombre') {
+      var datosPN = JSON.parse(decodeURIComponent(e.parameter.data));
+      return respuestaJSON(setPausadoNombre(datosPN));
+    }
+    if (e && e.parameter && e.parameter.action === 'registrarMovimientoCaja') {
+      var datosCaja = JSON.parse(decodeURIComponent(e.parameter.data));
+      return respuestaJSON(registrarMovimientoCaja(datosCaja));
+    }
 
     // ── GET PRODUCTOS (carga la tienda) ──
     const ss = SpreadsheetApp.openById(SS_ID);
@@ -1584,6 +1592,19 @@ function procesarVenta(dataStr) {
     const ventaPayload = Array.isArray(payload) ? {} : payload; // para acceder a campos extra
 
     if (!items || !Array.isArray(items) || items.length === 0) return respuestaJSON({ success: false, mensaje: 'Sin items' });
+
+    // Deduplicación: evitar procesar dos veces el mismo idVenta
+    if (payload.idVenta) {
+      var props = PropertiesService.getScriptProperties();
+      var procesados2 = props.getProperty('ventas_procesadas') || '';
+      if (procesados2.indexOf(payload.idVenta) !== -1) {
+        return respuestaJSON({ success: true, duplicate: true });
+      }
+      var lista2 = procesados2 ? procesados2.split(',') : [];
+      lista2.push(payload.idVenta);
+      if (lista2.length > 100) lista2 = lista2.slice(-100);
+      props.setProperty('ventas_procesadas', lista2.join(','));
+    }
 
     const ss = SpreadsheetApp.openById(SS_ID);
     const sheetInventario = ss.getSheetByName(HOJA_INVENTARIO);
@@ -1751,21 +1772,104 @@ function getReportes() {
 
     if (sheetInv) {
       const inv = sheetInv.getDataRange().getValues();
+      // ── Aliases específicos: nombre viejo en Ventas → nombre actual en Inventario ──
+      // Generados por comparación de inventario nuevo vs viejo (semana del 17/3/2026)
+      const _aliasEspecificos = {};
+          _aliasEspecificos["AZUCAR LEDESMA 1KG"] = "AZUCAR LEDESMA CLASICA 1KG";
+          _aliasEspecificos["ENCENDEDOR BIC MAXI J6LISO"] = "ENCENDEDOR GRANDE BIC MAXI J6LISO";
+          _aliasEspecificos["ENCENDEDOR BIC MINI J5LISO"] = "ENCENDEDOR CHICO BIC MINI J5LISO";
+          _aliasEspecificos["FIDEOS MATARAZZO 500GR (CODITOS RAYADOS) 500 GR"] = "FIDEOS MATARAZZO 500GR (CODITO RAYADO) 500 GR";
+          _aliasEspecificos["FIDEOS MATARAZZO 500GR (TALLARINES N5) 500 GR"] = "FIDEOS MATARAZZO 500GR (TALLARIN N5) 500 GR";
+          _aliasEspecificos["JUGO EN POLVO NARANJA BANANA ARCOR X 15GR"] = "JUGO EN POLVO NARANJA BANANA ARCOR X 15GR";
+          _aliasEspecificos["JUGO EN POLVO NARANJA DULCE TANG X 15GR"] = "JUGO EN POLVO NARANJA TANG X 15GR";
+          _aliasEspecificos["JUGO EN POLVO SABOR A MULTIFRUTA ARCOR 15G 1L"] = "JUGO EN POLVO MULTIFRUTA ARCOR 15GR";
+          _aliasEspecificos["LAMPARA 9W E27"] = "LAMPARA 9W E27 FOCO";
+          _aliasEspecificos["LENTEJAS SECAS REMOJADAS INALPA LATA"] = "LENTEJAS SECAS REMOJADAS INALPA LATA 300GR";
+          _aliasEspecificos["LEVADURA 10GR"] = "LEVADURA MI PAN 10GR";
+          _aliasEspecificos["PAN RALLADO 500GR"] = "PAN RALLADO PREFERIDO  500GR";
+          _aliasEspecificos["PURE DE TOMATE NOEL 530GR"] = "PURE DE TOMATE NOEL 520GR";
+          _aliasEspecificos["RAZA COMIDA DE GATO 1KG"] = "RAZA GATO CARNE PESCADO ARROZ 1KG";
+          _aliasEspecificos["RAZA COMIDA DE GATO 500GR"] = "RAZA GATO CARNE PESCADO ARROZ 500GR";
+          _aliasEspecificos["REBOSADOR 500GR"] = "REBOSADOR PREFERIDO 500GR";
+          _aliasEspecificos["SAL DOS ESTRELLAS ENTREFINA 1KG"] = "SAL  ENTREFINA DOS ESTRELLAS  1KG";
+          _aliasEspecificos["SAL FINA 500GR"] = "SAL FINA DOS ESTRELLAS 500GR";
+          _aliasEspecificos["TOMATE PERITAS EN LATA ARCOR 400GR"] = "TOMATE PELADO PERITA ARCOR LATA 400GR";
+
+          _aliasEspecificos["JUGO BAGGIO CAJA 1,5 LITROS NARANJA"] = "JUGO BAGGIO FRESH CAJA 1,5 LITROS NARANJA";
+          _aliasEspecificos["NARANJAS KG"] = "NARANJA X KG";
+          _aliasEspecificos["QUESO LA PAULINA BARRA SANDWICH 1KG"] = "QUESO LA PAULINA BARRA SANDWICH X KG";
+          _aliasEspecificos["PAPELILLO"] = "PAPELILLO OCB SEDA";
+          _aliasEspecificos["JUGO EN POLVO ARCOR SABOR A MULTIFRUTA 15G 1L"] = "JUGO EN POLVO MULTIFRUTA ARCOR 15GR";
+          _aliasEspecificos["ARROZ 1 KG PRIMOR"] = "ARROZ 1KG PRIMOR";
+          _aliasEspecificos["PROCENEX"] = "PROCENEX LIMPIADOR PISOS 900ML";
+          _aliasEspecificos["MISTER TRAPO PISO 62X48"] = "MISTER TRAPO PISO 62X48 MR";
+          _aliasEspecificos["ALFAJOR PEPITOS X3 57GR"] = "ALFAJOR TRIPLE PEPITOS 57GR";
+
+      // ── Mapa de aliases → nombre original para detectar colisiones ──
+      const _aliasOrigen = {};
+
       for (let i = 1; i < inv.length; i++) {
         const nom = String(inv[i][0]||'').trim().toUpperCase();
         const sto = parseInt(inv[i][5]) || 0;
         const cos = parseFloat(inv[i][18]) || 0;
-        if (nom) {
-          stockInfo[nom] = sto;
-          if (cos > 0) costos[nom] = cos;
-          // Alias para productos por peso: "ZANAHORIA X KG" → también indexa "ZANAHORIA KG"
-          // Cubre el caso en que Ventas registra el nombre sin el " X " intermedio
-          const nomAlias = nom.replace(/ X KG$/, ' KG').replace(/ X KG /, ' KG ');
-          if (nomAlias !== nom) {
-            if (stockInfo[nomAlias] === undefined) stockInfo[nomAlias] = sto;
-            if (cos > 0 && !costos[nomAlias]) costos[nomAlias] = cos;
-          }
+        if (!nom) continue;
+
+        // 1. Clave exacta — siempre prioritaria
+        stockInfo[nom] = sto;
+        if (cos > 0) costos[nom] = cos;
+        // Pausado en lista de compra (col AI = índice 34)
+        if (String(inv[i][34] || '').trim().toUpperCase() === 'SI') {
+          stockInfo['__pausado__' + nom] = true;
         }
+
+        // 1b. Alias específico: si este nombre nuevo tiene un nombre viejo conocido,
+        //     indexar también con el nombre viejo para que matchee con Ventas históricas
+        Object.keys(_aliasEspecificos).forEach(function(viejo) {
+          if (_aliasEspecificos[viejo] === nom && stockInfo[viejo] === undefined) {
+            stockInfo[viejo] = sto;
+            if (cos > 0 && !costos[viejo]) costos[viejo] = cos;
+            Logger.log('⚠️ Alias específico: "' + viejo + '" → "' + nom + '"');
+          }
+        });
+
+        // 2. Generar aliases conservadores
+        // Función normalizadora base: trim + colapsar espacios + coma decimal → punto
+        function _normBase(s) {
+          return s.replace(/\s+/g, ' ').replace(/,/g, '.').trim();
+        }
+
+        var base = _normBase(nom);
+        var candidatos = new Set();
+
+        // Alias existente: X KG → KG
+        candidatos.add(base.replace(/ X KG$/, ' KG').replace(/ X KG /, ' KG ').trim());
+        // Quitar FRESH
+        candidatos.add(base.replace(/\bFRESH\b/g, '').replace(/\s+/g, ' ').trim());
+        // Quitar CON FRUTA / CON FRUTAS
+        candidatos.add(base.replace(/\bCON FRUTAS?\b/gi, '').replace(/\s+/g, ' ').trim());
+        // Quitar DOBLE CREMA
+        candidatos.add(base.replace(/\bDOBLE CREMA\b/gi, '').replace(/\s+/g, ' ').trim());
+        // Normalizar "X 250GR" → "250GR" (quita el "X " delante de peso)
+        candidatos.add(base.replace(/\bX (\d+GR)\b/g, '$1').replace(/\s+/g, ' ').trim());
+        // Combinado: X KG + FRESH
+        candidatos.add(base.replace(/ X KG$/, ' KG').replace(/ X KG /, ' KG ').replace(/\bFRESH\b/g, '').replace(/\s+/g, ' ').trim());
+
+        // 3. Registrar cada alias (nunca sobrescribir clave existente)
+        candidatos.forEach(function(alias) {
+          if (!alias || alias === nom) return; // igual al original → saltar
+          if (stockInfo[alias] !== undefined) {
+            // Ya existe — verificar si es colisión real (otro producto)
+            if (_aliasOrigen[alias] && _aliasOrigen[alias] !== nom) {
+              Logger.log('⚠️ Colisión de alias: "' + alias + '" entre "' + _aliasOrigen[alias] + '" y "' + nom + '"');
+            }
+            // No sobrescribir — clave exacta o primer alias gana
+            return;
+          }
+          stockInfo[alias] = sto;
+          if (cos > 0 && !costos[alias]) costos[alias] = cos;
+          _aliasOrigen[alias] = nom;
+          Logger.log('⚠️ Alias usado para stockInfo: "' + alias + '" -> "' + nom + '"');
+        });
       }
     }
     if (sheetHist2) {
@@ -2496,7 +2600,7 @@ function registrarSalidaInterna(datos) {
     shInv.getRange(filaIdx + 1, 6).setValue(nuevoStock);
 
     // Registrar en SALIDAS
-   
+    var tz    = Session.getScriptTimeZone();
     var now   = new Date();
     var fecha = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
     var hora  = Utilities.formatDate(now, tz, 'HH:mm');
@@ -2579,6 +2683,33 @@ function abonoFiado(datos) {
     }
 
     return { success: true, cancelados: cancelados, restante: restante };
+  } catch(e) {
+    return { success: false, mensaje: e.toString() };
+  }
+}
+
+// ========== CAJA MOVIMIENTOS ==========
+function registrarMovimientoCaja(datos) {
+  try {
+    var ss = SpreadsheetApp.openById(SS_ID);
+    var HOJA_CAJA = 'CAJA_MOVIMIENTOS';
+    var sh = ss.getSheetByName(HOJA_CAJA);
+    if (!sh) {
+      sh = ss.insertSheet(HOJA_CAJA);
+      sh.getRange(1, 1, 1, 8).setValues([['FECHA', 'HORA', 'TIPO', 'MOTIVO', 'MONTO', 'MEDIO', 'CATEGORIA', 'OBSERVACION']]);
+      sh.getRange(1, 1, 1, 8).setBackground('#37474f').setFontColor('white').setFontWeight('bold');
+    }
+    sh.appendRow([
+      datos.fecha       || '',
+      datos.hora        || '',
+      datos.tipo        || 'EGRESO',
+      datos.motivo      || '',
+      datos.monto       || 0,
+      datos.medio       || 'EFECTIVO',
+      datos.categoria   || '',
+      datos.observacion || ''
+    ]);
+    return { success: true };
   } catch(e) {
     return { success: false, mensaje: e.toString() };
   }
