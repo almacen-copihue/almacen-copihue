@@ -956,6 +956,10 @@
                     style="background:rgba(96,125,139,0.3);border-color:rgba(96,125,139,0.6);flex:1;text-align:center;position:relative;display:flex;align-items:center;justify-content:center;">
                 🏠
             </button>
+            <button class="btn-resumen" onclick="abrirRetiroCaja()" title="Retiro de caja"
+                    style="background:rgba(220,38,38,0.3);border-color:rgba(220,38,38,0.6);flex:1;text-align:center;display:flex;align-items:center;justify-content:center;">
+                💸
+            </button>
             <button class="btn-resumen" onclick="abrirSelectorUltimas()" title="Seleccionar Últimas Unidades" id="btnUltimas"
                     style="background:rgba(183,28,28,0.3);border-color:rgba(183,28,28,0.6);flex:1;text-align:center;position:relative;display:flex;align-items:center;justify-content:center;">
                 🏷️<span id="badgeUltimas" style="display:none;position:absolute;top:-4px;right:-4px;background:#b71c1c;color:white;border-radius:50%;min-width:16px;height:16px;font-size:0.6rem;font-weight:900;align-items:center;justify-content:center;line-height:1;padding:0 2px;"></span>
@@ -8493,9 +8497,167 @@ function _enviarFiadoWhatsApp(datosFiado, total) {
 
     window.open(`https://wa.me/${numWA}?text=${encodeURIComponent(msg)}`, '_blank');
 }
+
+// ========== RETIRO DE CAJA ==========
+let _rcCategoriaSeleccionada = '';
+
+function abrirRetiroCaja() {
+    document.getElementById('rcMonto').value = '';
+    document.getElementById('rcMotivo').value = '';
+    document.getElementById('rcCategoria').value = '';
+    document.getElementById('rcObservacion').value = '';
+    document.getElementById('rcError').style.display = 'none';
+    _rcCategoriaSeleccionada = '';
+    ['PERSONAL','NEGOCIO','PROVEEDORES'].forEach(c => {
+        const btn = document.getElementById('rcCat' + c);
+        if (btn) btn.classList.remove('activo');
+    });
+    document.getElementById('modalRetiroCaja').classList.add('open');
+    setTimeout(() => document.getElementById('rcMonto').focus(), 300);
+}
+
+function cerrarRetiroCaja() {
+    document.getElementById('modalRetiroCaja').classList.remove('open');
+}
+
+function selRcCategoria(cat) {
+    _rcCategoriaSeleccionada = cat;
+    document.getElementById('rcCategoria').value = cat;
+    ['PERSONAL','NEGOCIO','PROVEEDORES'].forEach(c => {
+        const btn = document.getElementById('rcCat' + c);
+        if (btn) btn.classList.toggle('activo', c === cat);
+    });
+}
+
+async function confirmarRetiroCaja() {
+    const monto = parseFloat(document.getElementById('rcMonto').value);
+    const motivo = document.getElementById('rcMotivo').value.trim();
+    const categoria = _rcCategoriaSeleccionada;
+    const observacion = document.getElementById('rcObservacion').value.trim();
+    const errDiv = document.getElementById('rcError');
+
+    if (!monto || monto <= 0) {
+        errDiv.textContent = '⚠️ Ingresá un monto mayor a 0';
+        errDiv.style.display = 'block';
+        document.getElementById('rcMonto').focus();
+        return;
+    }
+    if (!motivo) {
+        errDiv.textContent = '⚠️ Seleccioná un motivo';
+        errDiv.style.display = 'block';
+        return;
+    }
+    if (!categoria) {
+        errDiv.textContent = '⚠️ Seleccioná una categoría';
+        errDiv.style.display = 'block';
+        return;
+    }
+    errDiv.style.display = 'none';
+
+    const btn = document.getElementById('rcBtnGuardar');
+    btn.disabled = true;
+    btn.textContent = '⏳ Registrando...';
+
+    try {
+        const now = new Date();
+        const d = now.getDate().toString().padStart(2,'0');
+        const m = (now.getMonth()+1).toString().padStart(2,'0');
+        const y = now.getFullYear();
+        const fecha = d + '/' + m + '/' + y;
+        const hora = now.toTimeString().slice(0,8);
+        const vendedor = (typeof vendedorActual !== 'undefined' && vendedorActual) ? vendedorActual : 'Victor';
+
+        const payload = {
+            fecha, hora,
+            tipo: 'EGRESO',
+            motivo,
+            monto: Math.round(monto),
+            medio: 'EFECTIVO',
+            categoria,
+            observacion: observacion || '',
+            vendedor
+        };
+
+        const url = API_URL + '?action=registrarMovimientoCaja&data=' + encodeURIComponent(JSON.stringify(payload));
+        const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
+        const resp = await r.json();
+
+        if (resp.success) {
+            cerrarRetiroCaja();
+            mostrarToast('✅ Retiro registrado — $' + Math.round(monto).toLocaleString('es-AR'), 'naranja');
+        } else {
+            errDiv.textContent = '❌ Error: ' + (resp.mensaje || resp.error || 'Error desconocido');
+            errDiv.style.display = 'block';
+        }
+    } catch(e) {
+        errDiv.textContent = '❌ Sin conexión. Intentá de nuevo.';
+        errDiv.style.display = 'block';
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '💸 Registrar retiro';
+    }
+}
 </script>
 
 
+
+<!-- MODAL RETIRO DE CAJA -->
+<div class="modal-bg" id="modalRetiroCaja" onclick="if(event.target===this)cerrarRetiroCaja()" style="z-index:4500;">
+    <div class="modal-sheet" style="padding-bottom:20px;">
+        <div class="modal-handle"></div>
+        <div class="modal-header">
+            <span class="modal-titulo">💸 Retiro de caja</span>
+            <button class="modal-cerrar" onclick="cerrarRetiroCaja()">✕</button>
+        </div>
+        <div style="padding:16px 20px 0;overflow-y:auto;max-height:75vh;">
+
+            <div class="form-grupo">
+                <label class="form-label">Monto *</label>
+                <input type="number" class="form-input" id="rcMonto"
+                       placeholder="$0" min="1" step="1" inputmode="numeric"
+                       style="font-size:1.3rem;font-weight:700;">
+            </div>
+
+            <div class="form-grupo">
+                <label class="form-label">Motivo *</label>
+                <select class="form-input" id="rcMotivo" style="font-size:1rem;">
+                    <option value="">— Seleccioná un motivo —</option>
+                    <option value="GASTO PERSONAL">GASTO PERSONAL</option>
+                    <option value="RETIRO DUEÑO">RETIRO DUEÑO</option>
+                    <option value="PAGO PROVEEDOR">PAGO PROVEEDOR</option>
+                    <option value="PAGO SERVICIOS">PAGO SERVICIOS</option>
+                    <option value="AJUSTE CAJA">AJUSTE CAJA</option>
+                </select>
+            </div>
+
+            <div class="form-grupo">
+                <label class="form-label">Categoría *</label>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <button type="button" class="cat-btn" id="rcCatPERSONAL"
+                            onclick="selRcCategoria('PERSONAL')" style="flex:1;">PERSONAL</button>
+                    <button type="button" class="cat-btn" id="rcCatNEGOCIO"
+                            onclick="selRcCategoria('NEGOCIO')" style="flex:1;">NEGOCIO</button>
+                    <button type="button" class="cat-btn" id="rcCatPROVEEDORES"
+                            onclick="selRcCategoria('PROVEEDORES')" style="flex:1;">PROVEEDORES</button>
+                </div>
+                <input type="hidden" id="rcCategoria">
+            </div>
+
+            <div class="form-grupo">
+                <label class="form-label">Observación (opcional)</label>
+                <input type="text" class="form-input" id="rcObservacion"
+                       placeholder="Ej: Pago boleta de luz" autocomplete="off">
+            </div>
+
+            <div id="rcError" style="color:#d32f2f;font-size:0.85rem;margin-bottom:10px;display:none;"></div>
+
+            <button class="btn-guardar-producto" id="rcBtnGuardar" onclick="confirmarRetiroCaja()"
+                    style="background:linear-gradient(135deg,#c62828,#b71c1c);">
+                💸 Registrar retiro
+            </button>
+        </div>
+    </div>
+</div>
 
 </body>
 </html>
