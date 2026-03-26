@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v243</title>
+    <title>Copihue — POS v244</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -1884,46 +1884,23 @@ window.addEventListener('popstate', function() {
     // Reinsertar estado para seguir capturando futuros "atrás"
     history.pushState({ pos: true }, '');
 
-    // En Android Chrome, el teclado virtual al cerrarse puede disparar un popstate
-    // Si hay un input activo (teclado abierto), ignorar este popstate — no cerrar modales
-    const activeTag = document.activeElement && document.activeElement.tagName;
-    if (activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT') return;
-
-    // Cerrar modalQty (usa display, no classList)
-    const mqty = document.getElementById('modalQty');
-    if (mqty && mqty.style.display === 'flex') {
-        cerrarSelectorQty();
-        return;
-    }
-
-    // Cerrar modales usando sus funciones oficiales (preservan estado interno)
-    if (document.getElementById('modalConfirm')?.classList.contains('open')) { cerrarConfirm(); return; }
-    if (document.getElementById('modalIngreso')?.classList.contains('open')) { cerrarIngreso(); return; }
-    if (document.getElementById('modalAjuste')?.classList.contains('open')) { cerrarAjuste(); return; }
-    if (document.getElementById('modalNuevoProducto')?.classList.contains('open')) {
-        document.getElementById('modalNuevoProducto').classList.remove('open'); return;
-    }
-    if (document.getElementById('modalResumen')?.classList.contains('open')) {
-        document.getElementById('modalResumen').classList.remove('open'); return;
-    }
-    if (document.getElementById('modalVendedor')?.classList.contains('open')) {
-        document.getElementById('modalVendedor').classList.remove('open'); return;
-    }
-    if (document.getElementById('modalPeso')?.classList.contains('open')) {
-        document.getElementById('modalPeso').classList.remove('open'); return;
-    }
-    // Modales con display (no classList)
-    const displayModales = ['modalNotifPos', 'modalInfoProd', 'modalCerrarSesion', 'modalWifiQR'];
-    for (const id of displayModales) {
+    // Cerrar cualquier modal abierto, en orden de prioridad
+    const modales = [
+        'modalConfirm', 'modalAjuste', 'modalIngreso', 'modalNuevoProducto',
+        'modalResumen', 'modalVendedor', 'modalPeso', 'modalNotifPos',
+        'modalInfoProd', 'modalCerrarSesion', 'modalWifiQR', 'flyerOverlayAdmin'
+    ];
+    for (const id of modales) {
         const el = document.getElementById(id);
-        if (el && (el.style.display === 'flex' || el.style.display === 'block')) {
-            el.style.display = 'none'; return;
+        if (!el) continue;
+        const visible = el.classList.contains('open') ||
+                        el.style.display === 'flex' ||
+                        el.style.display === 'block';
+        if (visible) {
+            el.classList.remove('open');
+            el.style.display = 'none';
+            return;
         }
-    }
-    // flyerOverlayAdmin
-    const flyer = document.getElementById('flyerOverlayAdmin');
-    if (flyer && flyer.style.display !== 'none' && flyer.style.display !== '') {
-        flyer.style.display = 'none'; return;
     }
     // Sin modal abierto → no hacer nada (quedarse en la página)
 });
@@ -3294,12 +3271,8 @@ function enviarTicketWA() {
 
 function cerrarConfirm() {
     document.getElementById('modalConfirm').classList.remove('open');
-    // Restaurar FABs según estado real del carrito:
-    // - Si canceló la confirmación → carrito sigue lleno → mostrar FABs
-    // - Si confirmó la venta → carrito ya fue vaciado antes → ocultar FABs
-    if (MOBILE) {
-        document.getElementById('fabStack').style.display = ventaActual.length > 0 ? 'flex' : 'none';
-    }
+    // Restaurar FABs si hay items en el carrito
+    if (MOBILE && ventaActual.length > 0) document.getElementById('fabStack').style.display = 'flex';
     // Desactivar atajos de teclado
     document.removeEventListener('keydown', _keyHandlerConfirm);
     const btnTicket = document.getElementById('btnTicketWA');
@@ -3386,7 +3359,7 @@ function contarVentasLocal(dias = 30) {
 // Cache del ranking — se recalcula al cargar y después de cada venta
 let _rankingVentas = {};
 function actualizarRanking() {
-    _rankingVentas = contarVentasLocal(10); // últimos 10 días
+    _rankingVentas = contarVentasLocal(15); // últimos 15 días
 }
 function rankScore(id) {
     return _rankingVentas[String(id)] || 0;
