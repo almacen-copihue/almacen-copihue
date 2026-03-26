@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>ver.5 · Copihue · Reportes</title>
+<title>ver.6 · Copihue · Reportes</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
@@ -330,6 +330,13 @@ let prodSelIdx=-1; // índice del producto seleccionado en el top (-1 = ninguno)
 let showCSI=false, csiFiltroPeriodo='todos';
 let showRecienLlegados=false;
 
+// safeEnc: encodeURIComponent seguro — evita URIError si el nombre tiene
+// caracteres Unicode inválidos (surrogates desparejados) cargados desde Sheets
+function safeEnc(s){
+  try{ return encodeURIComponent(s); }
+  catch(e){ return encodeURIComponent(String(s).replace(/[\uD800-\uDFFF]/g,'?')); }
+}
+
 const fmt=n=>'$'+Math.round(n).toLocaleString('es-AR');
 const hoyStr=()=>{const h=new Date();return h.getFullYear()+'-'+String(h.getMonth()+1).padStart(2,'0')+'-'+String(h.getDate()).padStart(2,'0');};
 
@@ -343,9 +350,13 @@ async function init(){
     // Seleccionar hoy solo si el mes visible es el mes actual
     const hoy=new Date();
     if(mes===hoy.getMonth()&&anio===hoy.getFullYear()) diasSel.add(hoyStr());
-    renderApp();
   }catch(e){
     document.getElementById('app').innerHTML='<div class="ldg" style="color:#c62828">❌ '+e.message+'</div>';
+    return;
+  }
+  // renderApp separado: si hay un error de render no mata el mensaje de error de red
+  try{ renderApp(); }catch(e){
+    document.getElementById('app').innerHTML='<div class="ldg" style="color:#c62828">❌ Error al mostrar datos: '+e.message+'</div>';
   }
 }
 
@@ -778,7 +789,7 @@ function renderApp(){
     const DNOM2=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
     const tksH=td.length?td.map(t=>{
       const prods=id.filter(i=>i.ticket===t.ticket);
-      const waTxt=encodeURIComponent(
+      const waTxt=safeEnc(
         '🛒 *Almacén Copihue* · #'+t.ticket+'\n'+
         '📅 '+fLabel+' · '+t.hora+'hs\n\n'+
         prods.map(p=>p.qty+'× '+p.nombre.substring(0,22)+'  '+fmt(p.subtotal)).join('\n')+
@@ -1526,7 +1537,7 @@ function renderCompraSugerida() {
     var stkTxt=p.stock===-1?'S/D':String(p.stock);
     var vdTxt=p.diasVenc!==null?(p.diasVenc<=14?'<span style="color:var(--naranja);font-weight:700">'+p.diasVenc+'d</span>':p.diasVenc+'d'):'—';
     var compraTxt=p.compraSugerida!==null?'<span class="csi-qty">'+p.compraSugerida+'</span>':'<span style="font-size:.7rem;color:var(--naranja);font-weight:700">S/D</span>';
-    var nomEnc=encodeURIComponent(p.nombre);
+    var nomEnc=safeEnc(p.nombre);
     var detalle='<div id="csi-det-'+idx+'" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid #eee;">'+
       '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px 12px;margin-bottom:6px;font-size:.72rem;color:var(--gris);">'+
       '<span>V7d: <b style="color:#333">'+p.v7+'</b></span><span>V30d: <b style="color:#333">'+p.v30+'</b></span><span>V60d: <b style="color:#333">'+p.v60+'</b></span>'+
