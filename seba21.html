@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v240</title>
+    <title>Copihue — POS v242</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -1237,8 +1237,8 @@
                 <label class="form-label">Producto *</label>
                 <input type="text" class="form-input" id="ingProducto"
                        placeholder="Buscar producto..."
-                       autocomplete="off" autocorrect="off"
-                       oninput="buscarProductoIngreso()"
+                       autocomplete="off" autocorrect="off" autocapitalize="characters"
+                       oninput="this.value=this.value.toUpperCase();buscarProductoIngreso()"
                        style="text-transform:uppercase;">
                 <div id="ingResultados" style="background:white;border:1px solid #ddd;border-radius:8px;margin-top:4px;max-height:150px;overflow-y:auto;display:none;"></div>
                 <div id="ingInfo" style="background:#e8f5e9;border-left:3px solid #4caf50;padding:8px 10px;border-radius:6px;font-size:0.85rem;margin-top:6px;display:none;"></div>
@@ -1248,16 +1248,51 @@
                 <label class="form-label">Cantidad a ingresar *</label>
                 <input type="number" class="form-input" id="ingCantidad"
                        placeholder="1" min="1" max="9999" step="1" value="1"
-                       oninput="validarCantidadIngreso(this)"
+                       oninput="validarCantidadIngreso(this);actualizarResumenIngreso()"
                        style="font-size:1.1rem;font-weight:700;">
                 <div id="ingCantidadWarn" style="color:#e65100;font-size:0.78rem;margin-top:3px;display:none;"></div>
+                <!-- Panel resumen: costo + venta + margen + stock actual + stock final -->
+                <div id="ingResumen" style="display:none;margin-top:8px;background:#f3f8ff;
+                     border:1.5px solid #90caf9;border-radius:10px;padding:10px 14px;">
+                    <!-- Fila 1: costo / venta / margen -->
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:8px;">
+                        <div style="text-align:center;flex:1;">
+                            <div style="font-size:0.65rem;color:#888;text-transform:uppercase;font-weight:700;letter-spacing:0.5px;">Costo</div>
+                            <div id="ingResumenCosto" style="font-size:1rem;font-weight:900;color:#555;">—</div>
+                        </div>
+                        <div style="color:#bbb;font-size:0.9rem;">→</div>
+                        <div style="text-align:center;flex:1;">
+                            <div style="font-size:0.65rem;color:#888;text-transform:uppercase;font-weight:700;letter-spacing:0.5px;">Venta</div>
+                            <div id="ingResumenPrecio" style="font-size:1rem;font-weight:900;color:#1565c0;">—</div>
+                        </div>
+                        <div style="color:#bbb;font-size:0.9rem;">=</div>
+                        <div style="text-align:center;flex:1;background:#e8f5e9;border-radius:8px;padding:4px 6px;">
+                            <div style="font-size:0.65rem;color:#2e7d32;text-transform:uppercase;font-weight:700;letter-spacing:0.5px;">Margen</div>
+                            <div id="ingResumenMargen" style="font-size:1rem;font-weight:900;color:#1b5e20;">—</div>
+                        </div>
+                    </div>
+                    <!-- Separador -->
+                    <div style="border-top:1px solid #d0e4f7;margin-bottom:8px;"></div>
+                    <!-- Fila 2: stock actual / quedará -->
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
+                        <div style="text-align:center;flex:1;">
+                            <div style="font-size:0.65rem;color:#888;text-transform:uppercase;font-weight:700;letter-spacing:0.5px;">Stock actual</div>
+                            <div id="ingResumenActual" style="font-size:1.1rem;font-weight:900;color:#555;">—</div>
+                        </div>
+                        <div style="color:#bbb;font-size:1rem;">+<span id="ingResumenMas" style="color:#1565c0;font-weight:900;">0</span></div>
+                        <div style="text-align:center;flex:1;background:#e8f5e9;border-radius:8px;padding:4px 8px;">
+                            <div style="font-size:0.65rem;color:#2e7d32;text-transform:uppercase;font-weight:700;letter-spacing:0.5px;">Quedará</div>
+                            <div id="ingResumenFinal" style="font-size:1.2rem;font-weight:900;color:#1b5e20;">—</div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div class="form-grupo">
                 <label class="form-label">Precio de COSTO unitario</label>
                 <input type="number" class="form-input" id="ingCosto"
                        placeholder="Opcional" min="0"
-                       oninput="calcularSugeridoIngreso()">
+                       oninput="calcularSugeridoIngreso();actualizarResumenIngreso()">
                 <div id="ingSugerido" style="background:#fff3e0;border-left:3px solid #ff9800;padding:8px 10px;border-radius:6px;font-size:0.85rem;margin-top:6px;display:none;">
                     💡 Precio sugerido (+50%): <strong id="ingSugeridoMonto">$0</strong>
                 </div>
@@ -4079,6 +4114,7 @@ function abrirIngreso(productoPresel) {
     document.getElementById('ingSugerido').style.display = 'none';
     document.getElementById('ingResultados').style.display = 'none';
     document.getElementById('ingError').style.display = 'none';
+    document.getElementById('ingResumen').style.display = 'none';
     document.getElementById('ingCategoria').value = '';
     poblarCategoriasIngreso('');
     document.getElementById('modalIngreso').classList.add('open');
@@ -4202,6 +4238,57 @@ function seleccionarProductoIngreso(id) {
     if (!document.getElementById('ingVenta').value) {
         document.getElementById('ingVenta').value = p.price;
     }
+    actualizarResumenIngreso();
+}
+
+function actualizarResumenIngreso() {
+    const p = productoIngresoSeleccionado;
+    const panel = document.getElementById('ingResumen');
+    if (!p) { if (panel) panel.style.display = 'none'; return; }
+
+    const cantidad = parseInt(document.getElementById('ingCantidad').value) || 0;
+    const stockActual = p.stock || 0;
+    const stockFinal = stockActual + cantidad;
+
+    // Costo: preferir lo que tipea el usuario, sino el del producto
+    const costoInput = parseFloat(document.getElementById('ingCosto').value) || 0;
+    const costoMostrar = costoInput > 0 ? costoInput : (p.precioCosto || 0);
+    const venta = p.price || 0;
+
+    // Costo
+    const elCosto = document.getElementById('ingResumenCosto');
+    if (costoMostrar > 0) {
+        elCosto.textContent = '$' + costoMostrar.toLocaleString('es-AR');
+        elCosto.style.color = '#555';
+    } else {
+        elCosto.textContent = 'Sin dato';
+        elCosto.style.color = '#bbb';
+    }
+
+    // Precio venta
+    document.getElementById('ingResumenPrecio').textContent = '$' + venta.toLocaleString('es-AR');
+
+    // Margen
+    const elMargen = document.getElementById('ingResumenMargen');
+    if (costoMostrar > 0 && venta > 0) {
+        const margenPct = Math.round(((venta - costoMostrar) / venta) * 100);
+        const ganancia = venta - costoMostrar;
+        elMargen.textContent = margenPct + '% (+$' + ganancia.toLocaleString('es-AR') + ')';
+        elMargen.style.color = margenPct >= 30 ? '#1b5e20' : margenPct >= 15 ? '#e65100' : '#c62828';
+    } else {
+        elMargen.textContent = '—';
+        elMargen.style.color = '#bbb';
+    }
+
+    // Stock
+    document.getElementById('ingResumenActual').textContent = stockActual + ' u.';
+    document.getElementById('ingResumenMas').textContent = cantidad > 0 ? cantidad : '0';
+
+    const elFinal = document.getElementById('ingResumenFinal');
+    elFinal.textContent = stockFinal + ' u.';
+    elFinal.style.color = stockFinal > 5 ? '#1b5e20' : stockFinal > 0 ? '#e65100' : '#c62828';
+
+    panel.style.display = 'block';
 }
 
 function calcularSugeridoIngreso() {
