@@ -2885,39 +2885,73 @@ function construirPools() {
         p.stockNumber > 0
     );
 
-    // POOL ÚLTIMAS UNIDADES — REGLA DE ORO:
-    // Solo productos CON fecha de vencimiento donde diasStock > diasVencimiento
-    // (el algoritmo detecta que van a sobrar unidades al vencer)
-    // El sistema puede "mentir" en el badge — es intencional para empujar ventas
-    const hoyUlt = new Date(); hoyUlt.setHours(0,0,0,0);
+    // POOL ÚLTIMAS UNIDADES — usa campos del motor si están disponibles
+    // Criterio: ALERTA o EMPUJAR YA/EMPUJAR, con vencimiento real
+    const hoyUlt = new Date();
+    hoyUlt.setHours(0,0,0,0);
+
     poolUltimas = products.filter(p => {
         if (p.categoria === 'CERVEZAS') return false;
-        if (!p.vencimiento) return false;        // SIN vencimiento → nunca entra
-        if (p.stockNumber <= 0) return false;
+        if (p.stockNumber <= 2) return false;
 
-        // Calcular días hasta vencimiento
+        // Prioridad 1: señal explícita del motor
+        const riesgo = (p.riesgoVencimiento || '').toUpperCase();
+        const prioridad = (p.prioridad || p.prioridadEmpuje || '').toUpperCase();
+        const tieneSenal =
+            riesgo === 'ALERTA' ||
+            prioridad === 'EMPUJAR YA' ||
+            prioridad === 'EMPUJAR';
+
+        if (tieneSenal) {
+            return p.stockNumber > 0;
+        }
+
+        // Prioridad 2: fallback si el motor no corrió
+        if (!p.vencimiento) return false;
+
         const partes = String(p.vencimiento).split('-');
         if (partes.length !== 3) return false;
-        const vD = new Date(parseInt(partes[0]), parseInt(partes[1])-1, parseInt(partes[2]));
-        vD.setHours(0,0,0,0);
-        const diasVenc = Math.round((vD - hoyUlt) / 86400000);
-        if (diasVenc <= 0) return false;         // ya vencido
 
-        // Calcular días de stock disponibles según rotación/ventas
-        const rotacion = p.rotacion || 1;
-        const promDia = rotacion > 0 ? rotacion / 30 : 0;
+        const vD = new Date(parseInt(partes[0]), parseInt(partes[1]) - 1, parseInt(partes[2]));
+        vD.setHours(0,0,0,0);
+
+        const diasVenc = Math.round((vD - hoyUlt) / 86400000);
+        if (diasVenc <= 0 || diasVenc > 30) return false;
+
+        const promDia = p.promDia > 0 ? p.promDia : (p.rotacion > 0 ? p.rotacion / 30 : 0);
         const diasStock = promDia > 0 ? p.stockNumber / promDia : 999;
 
-        // Entra si no se va a vender todo antes de vencer
-        // O si vence en ≤15 días (urgencia automática aunque la rotación alcance)
-        return diasStock > diasVenc || diasVenc <= 15;
+        return diasStock > diasVenc;
     }).map(p => {
-        const partes = String(p.vencimiento).split('-');
-        const vD = new Date(parseInt(partes[0]), parseInt(partes[1])-1, parseInt(partes[2]));
-        const diasVenc = Math.round((vD - hoyUlt) / 86400000);
-        return { ...p, _diasVenc: diasVenc, _puntaje: 100 - diasVenc };
+        const riesgo = (p.riesgoVencimiento || '').toUpperCase();
+        const prioridad = (p.prioridad || p.prioridadEmpuje || '').toUpperCase();
+
+        let _diasVenc = 9999;
+        if (p.vencimiento) {
+            const partes = String(p.vencimiento).split('-');
+            if (partes.length === 3) {
+                const vD = new Date(parseInt(partes[0]), parseInt(partes[1]) - 1, parseInt(partes[2]));
+                vD.setHours(0,0,0,0);
+                _diasVenc = Math.round((vD - hoyUlt) / 86400000);
+            }
+        }
+
+        const urgencia =
+            (riesgo === 'ALERTA' || prioridad === 'EMPUJAR YA') ? 2 :
+            (prioridad === 'EMPUJAR') ? 1 : 0;
+
+        return {
+            ...p,
+            _diasVenc,
+            _puntaje: urgencia * 10000 + (1000 - _diasVenc)
+        };
     });
+
+    // Ordenar: urgencia primero, luego menor diasVenc
     poolUltimas.sort((a, b) => b._puntaje - a._puntaje);
+
+    // Limitar pool local a 6 candidatos razonables
+    poolUltimas = poolUltimas.slice(0, 6);
 
     console.log(`⚡ Pool Relámpago: ${poolRelampago.length} | 🔥 Destacadas: ${poolDestacadas.length} | 🏷️ Últimas: ${poolUltimas.length}`);
 }

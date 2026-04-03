@@ -297,13 +297,52 @@ function ingresarMercaderia(datos) {
       sheetInventario.getRange(ultimaFila, 4).setValue(nuevoId);
       if (proveedor) sheetInventario.getRange(ultimaFila, 5).setValue(proveedor);
       sheetInventario.getRange(ultimaFila, 6).setValue(nuevoStock);
-      if (fechaVencimiento) sheetInventario.getRange(ultimaFila, 16).setValue(fechaVencimiento);
+
+      // Rellenar columnas automáticas con 0 y fórmulas
+      var f = ultimaFila; // alias corto
+      sheetInventario.getRange(f, 7).setValue(0);   // G: Relampago
+      sheetInventario.getRange(f, 8).setValue(0);   // H: Destacada
+      sheetInventario.getRange(f, 9).setValue(0);   // I: Especial
+      sheetInventario.getRange(f, 12).setValue(0);  // L: promos/antojo_popup
+
+      // ── J: categoriaOferta — fórmula en INGLÉS ──────────────────
+      sheetInventario.getRange(f, 10).setFormula(
+        '=IF(A'+f+'="","",IF(F'+f+'<=0,"sin stock",IF(NOT(OR(I'+f+'=0,I'+f+'=1)),"ERROR ESPECIAL",' +
+        'IF(NOT(ISNUMBER(MATCH(G'+f+',{0,1,2,3,4,5,6,10,11,12,13,14},0))),"ERROR RELAMPAGO",' +
+        'IF(OR(H'+f+'>70,AND(H'+f+'>0,H'+f+'<15)),"ERROR DESTACADA",' +
+        'IF((I'+f+'=1)+(H'+f+'>0)+(G'+f+'>0)>1,"ERROR DOBLE OFERTA",' +
+        'IF(I'+f+'=1,"especial",' +
+        'IF(H'+f+'>0,"destacada",' +
+        'IF(G'+f+'>0,' +
+          'IF(OR(AND(G'+f+'<=6,F'+f+'<(G'+f+'+1)),AND(G'+f+'=10,F'+f+'<2),AND(G'+f+'>=11,F'+f+'<1)),' +
+            '"REPONER "&IF(G'+f+'<=6,G'+f+'+1-F'+f+',IF(G'+f+'=10,2-F'+f+',1-F'+f+'))&" PARA PROMO",' +
+            'IF(G'+f+'<=6,"relampago "&(G'+f+'+1)&"x"&G'+f+',' +
+            'IF(G'+f+'=10,"2da50off",' +
+            'IF(G'+f+'>=11,"relampago "&CHOOSE(G'+f+'-10,10,15,20,25)&"%","relampago")))),' +
+        '"sin oferta"))))))))))'
+      );
+
+      // ── K: PT (Precio Técnico) — fórmula en INGLÉS ──────────────
+      sheetInventario.getRange(f, 11).setFormula(
+        '=IF(AND(C'+f+'="PROMOS",F'+f+'>=1),"COMBO ACTIVADO EN CAT. PROMOS",' +
+        'IF(OR(F'+f+'<=0,B'+f+'<=0),"SIN STOCK / CARGAR STOCK",' +
+        'IF(B'+f+'="","CARGAR PRECIO",' +
+        'IF(AND(ISNUMBER(G'+f+'),G'+f+'>0),' +
+          'B'+f+'*VLOOKUP(G'+f+',{1,0.5;2,0.6667;3,0.75;4,0.8;5,0.8333;6,0.8571;10,0.75},2,FALSE),' +
+        'IF(AND(ISNUMBER(H'+f+'),H'+f+'>0),' +
+          'B'+f+'*(1-H'+f+'/100),' +
+        'IF(I'+f+'=1,B'+f+'*0.9,"NORMAL / SIN OFERTA"))))))'
+      );
+
+      if (fechaVencimiento) sheetInventario.getRange(f, 16).setValue(fechaVencimiento);
 
       const fechaNuevo = new Date();
-      sheetHistorial.appendRow([
-        fechaNuevo, producto, cantidad, nuevoStock, nuevoId,
-        proveedor || '', precioCosto || '', precioVenta || '', fechaVencimiento || ''
-      ]);
+      if (cantidad > 0 || precioCosto || precioVenta) {
+        sheetHistorial.appendRow([
+          fechaNuevo, producto, cantidad, nuevoStock, nuevoId,
+          proveedor || '', precioCosto || '', precioVenta || '', fechaVencimiento || ''
+        ]);
+      }
 
       let mensajeNuevo = '✅ Producto NUEVO creado!\n📦 ' + producto + '\n🆔 ' + nuevoId + '\n📊 Stock inicial: ' + nuevoStock;
       if (precioVenta) mensajeNuevo += '\n💰 Precio venta: $' + precioVenta;
@@ -327,10 +366,39 @@ function ingresarMercaderia(datos) {
     if (datos.categoria && datos.categoria.trim()) sheetInventario.getRange(filaProducto, 3).setValue(datos.categoria.trim().toUpperCase());
 
     const fecha = new Date();
-    sheetHistorial.appendRow([
-      fecha, producto, cantidad, nuevoStock, '',
-      proveedor || '', precioCosto || '', precioVenta || '', fechaVencimiento || ''
-    ]);
+    const tz   = Session.getScriptTimeZone();
+    const fechaStr = Utilities.formatDate(fecha, tz, 'yyyy-MM-dd');
+    const horaStr  = Utilities.formatDate(fecha, tz, 'HH:mm');
+
+    // ── REGISTRAR EN SALIDAS si es retiro por vencimiento (stockDirecto=0 y cantidad=0) ──
+    const esRetiroVencido = esAjusteDirecto && Number(datos.stockDirecto) === 0 && cantidad === 0 && stockActual > 0;
+    if (esRetiroVencido) {
+      var shSal = ss.getSheetByName('SALIDAS');
+      if (!shSal) {
+        shSal = ss.insertSheet('SALIDAS');
+        shSal.getRange(1, 1, 1, 10).setValues([['Fecha','Hora','Producto','ID','Cantidad','Costo Unit.','Precio Venta','Motivo','Observación','Vendedor']]);
+        shSal.getRange(1, 1, 1, 10).setFontWeight('bold');
+      }
+      // Obtener ID del producto
+      var idProd = datosInventario[filaProducto - 1][3] || '';
+      var costoProd = datosInventario[filaProducto - 1][18] || 0; // col S = costo
+      var precioProd = datosInventario[filaProducto - 1][1] || 0; // col B = precio venta
+      shSal.appendRow([
+        fechaStr, horaStr,
+        producto, idProd,
+        stockActual, costoProd, precioProd,
+        'VENCIDO', 'Auto-retiro por vencimiento', datos.vendedor || ''
+      ]);
+    }
+
+    // Solo escribir en Historial si es un ingreso real (cantidad > 0) o si trae precio/costo
+    const esIngresoReal = cantidad > 0 || precioCosto || precioVenta;
+    if (esIngresoReal) {
+      sheetHistorial.appendRow([
+        fecha, producto, cantidad, nuevoStock, '',
+        proveedor || '', precioCosto || '', precioVenta || '', fechaVencimiento || ''
+      ]);
+    }
 
     let mensaje = '✅ Ingreso exitoso!\n📦 ' + producto + '\n➕ Cantidad: ' + cantidad + '\n📊 Stock: ' + stockActual + ' → ' + nuevoStock;
     if (precioVenta) mensaje += '\n💰 Precio venta actualizado: $' + precioVenta;
@@ -644,19 +712,27 @@ function _ofertaBuildProducto_(fila, i) {
       venc = v instanceof Date ? Utilities.formatDate(v, tz, 'yyyy-MM-dd') : String(v).trim();
     }
   } catch(e) {}
+  var dpv = _ofertaDiasVencer_(fila);
+  var estadoVencimiento = 'ok';
+  if (dpv !== null) {
+    if (dpv <= 0)  estadoVencimiento = 'vencido';
+    else if (dpv <= 3)  estadoVencimiento = 'urgente';
+    else if (dpv <= 15) estadoVencimiento = 'proximo';
+  }
   return {
-    id:           i,
-    name:         String(fila[0] || '').trim(),
-    price:        parseInt(fila[1]) || 0,
-    category:     String(fila[2] || 'ALMACEN').trim().toUpperCase(),
-    stock:        parseInt(fila[5]) || 0,
-    relampago:    parseInt(fila[6]) || 0,
-    destacada:    parseInt(fila[7]) || 0,   // ← incluido para que el index lo use
-    especial:     parseInt(fila[8]) || 0,   // ← incluido para que el index lo use
-    rotacion:     fila.length > 14 ? (parseInt(fila[14]) || 0) : 0,
-    vencimiento:  venc,
-    diasParaVencer: _ofertaDiasVencer_(fila),
-    puntaje:      _ofertaPuntaje_(fila)
+    id:                i,
+    name:              String(fila[0] || '').trim(),
+    price:             parseInt(fila[1]) || 0,
+    category:          String(fila[2] || 'ALMACEN').trim().toUpperCase(),
+    stock:             parseInt(fila[5]) || 0,
+    relampago:         parseInt(fila[6]) || 0,
+    destacada:         parseInt(fila[7]) || 0,
+    especial:          parseInt(fila[8]) || 0,
+    rotacion:          fila.length > 14 ? (parseInt(fila[14]) || 0) : 0,
+    vencimiento:       venc,
+    diasParaVencer:    dpv,
+    estadoVencimiento: estadoVencimiento,
+    puntaje:           _ofertaPuntaje_(fila)
   };
 }
 
@@ -665,7 +741,6 @@ function calcularOfertas() {
   var sheet = ss.getSheetByName(HOJA_INVENTARIO);
   var datos = sheet.getDataRange().getValues();
 
-  // ── Límites de visualización (hardcoded + puede sobreescribirse desde config) ──
   var limites = { relampago: 3, ultimas: 3, especiales: 2, destacadas: 9 };
 
   var relampagoActivo = [];
@@ -673,43 +748,70 @@ function calcularOfertas() {
   var idsUsados = {};
   var candidatosUltimas = [];
 
-  // Candidatos últimas unidades (por vencimiento próximo)
+  var hoyUlt = new Date();
+  hoyUlt.setHours(0,0,0,0);
+
   for (var i = 1; i < datos.length; i++) {
     var fila = datos[i];
     if (!fila[0]) continue;
+
     var stock = parseInt(fila[5]) || 0;
-    if (stock <= 0) continue;
-    var dv = _ofertaDiasVencer_(fila);
-    if (dv === null || dv > 3) continue;
-    candidatosUltimas.push({ fila: fila, i: i, p: _ofertaPuntaje_(fila) + 10 });
+    if (stock <= 2) continue;
+
+    var catUlt = String(fila[2] || '').trim().toUpperCase();
+    if (catUlt === 'CERVEZAS') continue;
+
+    // Campos del motor
+    var riesgoUlt    = String(fila[30] || '').trim().toUpperCase(); // AE
+    var prioridadUlt = String(fila[31] || '').trim().toUpperCase(); // AF
+
+    // Solo productos con señal real del motor
+    var esAlerta  = riesgoUlt === 'ALERTA';
+    var esEmpujar = prioridadUlt === 'EMPUJAR YA' || prioridadUlt === 'EMPUJAR';
+    if (!esAlerta && !esEmpujar) continue;
+
+    var vencUlt = fila[15];
+    var diasVencUlt = null;
+    if (vencUlt instanceof Date) {
+      var vNorm = new Date(vencUlt);
+      vNorm.setHours(0,0,0,0);
+      diasVencUlt = Math.round((vNorm - hoyUlt) / 86400000);
+      if (diasVencUlt <= 0) continue;
+    }
+
+    var promDiaUlt   = parseFloat(fila[23]) || 0;
+    var diasStockUlt = promDiaUlt > 0 ? stock / promDiaUlt : 999;
+
+    // Puntaje: ALERTA/EMPUJAR YA primero, luego menor diasVenc, luego descalce
+    var pUrgencia = (esAlerta || prioridadUlt === 'EMPUJAR YA') ? 10000 : 5000;
+    var pVenc     = diasVencUlt !== null ? (1000 - diasVencUlt) : 0;
+    var pDescalce = (diasVencUlt !== null && diasStockUlt > diasVencUlt)
+      ? Math.round((diasStockUlt / diasVencUlt - 1) * 100)
+      : 0;
+
+    var puntajeUlt = pUrgencia + pVenc + pDescalce;
+
+    candidatosUltimas.push({
+      fila: fila,
+      i: i,
+      p: puntajeUlt,
+      diasVenc: diasVencUlt
+    });
   }
 
-  // Candidatos relámpago que también entran a últimas
-  for (var i2 = 1; i2 < datos.length; i2++) {
-    var fila2 = datos[i2];
-    if (!fila2[0]) continue;
-    var stock2 = parseInt(fila2[5]) || 0;
-    var relampago2 = parseInt(fila2[6]) || 0;
-    if (stock2 <= 0 || relampago2 <= 0) continue;
-    var dv2 = _ofertaDiasVencer_(fila2);
-    if (dv2 !== null && dv2 <= 3) continue;
-    var p2 = _ofertaPuntaje_(fila2);
-    if (p2 <= -99) continue;
-    candidatosUltimas.push({ fila: fila2, i: i2, p: p2 });
-  }
+  var totalCandidatosUltimas = candidatosUltimas.length;
 
   candidatosUltimas
     .sort(function(a, b) { return b.p - a.p; })
-    .slice(0, 20)
+    .slice(0, 3)
     .forEach(function(c) {
-      ultimasUnidades.push(_ofertaBuildProducto_(c.fila, c.i));
+      var prod = _ofertaBuildProducto_(c.fila, c.i);
+      prod.diasParaVencer = c.diasVenc;
+      ultimasUnidades.push(prod);
       idsUsados[c.i] = true;
     });
 
-  // ── ¿Está activo Jueves Cervecero hoy? ────────────────────
-  // Si está activo, cervezas tienen su propia oferta y no deben
-  // aparecer en relámpago / destacadas / especiales.
-  var diaIdxJC = [1,2,3,4,5,6,0].indexOf(new Date().getDay()); // 0=Lun…6=Dom
+  var diaIdxJC = [1,2,3,4,5,6,0].indexOf(new Date().getDay());
   var cerveceroActivoHoy = false;
   try {
     var ssCfgJC = SpreadsheetApp.openById(SS_ID);
@@ -725,9 +827,8 @@ function calcularOfertas() {
         }
       }
     }
-  } catch(eCJ) { /* si falla, no excluir */ }
+  } catch(eCJ) {}
 
-  // Helper: ¿es cerveza? (misma lógica que getJuevesCervecero)
   function _esCerveza_(fila) {
     var nom = String(fila[0] || '').trim().toUpperCase();
     var cat = String(fila[2] || '').trim().toUpperCase();
@@ -735,8 +836,6 @@ function calcularOfertas() {
            nom.includes('BIRRA') || nom.includes(' IPA') || nom.includes(' STOUT') || nom.includes(' PORTER');
   }
 
-  // Candidatos relámpago — incluye TODO con relampago>0 y stock>0
-  // Sin filtro de puntaje: el puntaje es para sugerencias automáticas, no para bloquear ofertas manuales
   var candidatosRelampago = [];
   for (var i3 = 1; i3 < datos.length; i3++) {
     var fila3 = datos[i3];
@@ -745,18 +844,40 @@ function calcularOfertas() {
     var stock3 = parseInt(fila3[5]) || 0;
     var relampago3 = parseInt(fila3[6]) || 0;
     if (stock3 <= 0 || relampago3 <= 0) continue;
-    if (cerveceroActivoHoy && _esCerveza_(fila3)) continue; // JC tiene prioridad
+    var cat3 = String(fila3[2] || '').trim().toUpperCase();
+    if (cat3 === 'CERVEZAS') continue;
+    if (cerveceroActivoHoy && _esCerveza_(fila3)) continue;
     candidatosRelampago.push({ fila: fila3, i: i3, p: _ofertaPuntaje_(fila3) });
   }
 
-  candidatosRelampago
-    .sort(function(a, b) { return b.p - a.p; })
-    .slice(0, limites.relampago)
-    .forEach(function(c) {
-      relampagoActivo.push(_ofertaBuildProducto_(c.fila, c.i));
-    });
+  candidatosRelampago.sort(function(a, b) { return b.p - a.p; });
 
-  // Destacadas y Especiales — excluir cervezas si JC activo
+  var relampagoCandidatosParaRotar = candidatosRelampago;
+  if (relampagoCandidatosParaRotar.length > limites.relampago) {
+    var tzDateR   = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+    var dateKeyR  = tzDateR.getFullYear() + '-' +
+                    String(tzDateR.getMonth() + 1).padStart(2, '0') + '-' +
+                    String(tzDateR.getDate()).padStart(2, '0');
+    var argDateR  = new Date(dateKeyR);
+    var dayOfYearR = Math.floor((argDateR - new Date(argDateR.getFullYear(), 0, 0)) / 86400000);
+    var totalSetsR = Math.ceil(relampagoCandidatosParaRotar.length / limites.relampago);
+    var setNumberR = dayOfYearR % totalSetsR;
+    var startIdxR  = (setNumberR * limites.relampago) % relampagoCandidatosParaRotar.length;
+    var rotadosR   = [];
+    for (var rri = 0; rri < limites.relampago; rri++) {
+      rotadosR.push(relampagoCandidatosParaRotar[(startIdxR + rri) % relampagoCandidatosParaRotar.length]);
+    }
+    relampagoCandidatosParaRotar = rotadosR;
+  }
+
+  var relampagoPoolCompleto = candidatosRelampago.map(function(c) {
+    return _ofertaBuildProducto_(c.fila, c.i);
+  });
+
+  relampagoCandidatosParaRotar.forEach(function(c) {
+    relampagoActivo.push(_ofertaBuildProducto_(c.fila, c.i));
+  });
+
   var destacadasActivas = [];
   var especialesActivas = [];
   for (var idx = 1; idx < datos.length; idx++) {
@@ -764,12 +885,11 @@ function calcularOfertas() {
     if (!fd[0]) continue;
     var stockD = parseInt(fd[5]) || 0;
     if (stockD <= 0) continue;
-    if (cerveceroActivoHoy && _esCerveza_(fd)) continue; // JC tiene prioridad
+    if (cerveceroActivoHoy && _esCerveza_(fd)) continue;
     if ((parseInt(fd[7]) || 0) > 0) destacadasActivas.push(_ofertaBuildProducto_(fd, idx));
     if ((parseInt(fd[8]) || 0) > 0) especialesActivas.push(_ofertaBuildProducto_(fd, idx));
   }
 
-  // ── Sobreescribir límite de destacadas desde config_sistema si existe ──
   try {
     var ssCfg = SpreadsheetApp.openById(SS_ID);
     var shCfg = ssCfg.getSheetByName(HOJA_CONFIG);
@@ -786,11 +906,9 @@ function calcularOfertas() {
         }
       }
     }
-  } catch(eCfg) { /* usa el default 9 */ }
+  } catch(eCfg) {}
 
-  // ── Rotación diaria de especiales ──────────────────────────
-  // Mismo algoritmo que ROTACION_SISTEMA en index.html (misma seed = mismo resultado para todos)
-  var especialesPool = especialesActivas; // pool completo (para stats)
+  var especialesPool = especialesActivas;
   if (especialesActivas.length > limites.especiales) {
     var tzDate    = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
     var dateKey   = tzDate.getFullYear() + '-' +
@@ -808,20 +926,145 @@ function calcularOfertas() {
     especialesActivas = rotados;
   }
 
+  var destacadasPool = destacadasActivas.slice();
+  var destacadasRotadas = destacadasActivas.slice();
+  if (destacadasActivas.length > limites.destacadas) {
+    var tzDateD   = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+    var dateKeyD  = tzDateD.getFullYear() + '-' +
+                    String(tzDateD.getMonth() + 1).padStart(2, '0') + '-' +
+                    String(tzDateD.getDate()).padStart(2, '0');
+    var argDateD  = new Date(dateKeyD);
+    var dayOfYearD = Math.floor((argDateD - new Date(argDateD.getFullYear(), 0, 0)) / 86400000);
+    var totalSetsD = Math.ceil(destacadasActivas.length / limites.destacadas);
+    var setNumberD = dayOfYearD % totalSetsD;
+    var startIdxD  = (setNumberD * limites.destacadas) % destacadasActivas.length;
+    destacadasRotadas = [];
+    for (var rdi = 0; rdi < limites.destacadas; rdi++) {
+      destacadasRotadas.push(destacadasActivas[(startIdxD + rdi) % destacadasActivas.length]);
+    }
+  }
+
+  var ultimasSeleccionadas = [];
+  try {
+    var ssCfgU = SpreadsheetApp.openById(SS_ID);
+    var shCfgU = ssCfgU.getSheetByName(HOJA_CONFIG);
+    if (shCfgU) {
+      var cfgRowsU = shCfgU.getDataRange().getValues();
+      for (var ui = 0; ui < cfgRowsU.length; ui++) {
+        if (String(cfgRowsU[ui][0]).trim() === 'ultimas_seleccion') {
+          var rawU = cfgRowsU[ui][1];
+          var tsU  = cfgRowsU[ui][2];
+          if (rawU && tsU) {
+            var fechaU = new Date(tsU);
+            var hoyU   = new Date();
+            var mismoDiaU = fechaU.getFullYear() === hoyU.getFullYear()
+                         && fechaU.getMonth()    === hoyU.getMonth()
+                         && fechaU.getDate()     === hoyU.getDate();
+            if (mismoDiaU) {
+              var idsU = JSON.parse(rawU);
+              for (var uj = 0; uj < idsU.length; uj++) {
+                var idxU = parseInt(idsU[uj]);
+                if (idxU > 0 && idxU < datos.length) {
+                  var filaU = datos[idxU];
+                  if (filaU && filaU[0]) {
+                    var prodU = _ofertaBuildProducto_(filaU, idxU);
+                    var vencU = filaU[15];
+                    if (vencU) {
+                      var fechaVencU = vencU instanceof Date ? vencU : new Date(String(vencU).trim());
+                      if (!isNaN(fechaVencU.getTime())) {
+                        var hoyU2 = new Date(); hoyU2.setHours(0,0,0,0);
+                        prodU.diasParaVencer = Math.round((fechaVencU - hoyU2) / 86400000);
+                      }
+                    }
+                    ultimasSeleccionadas.push(prodU);
+                  }
+                }
+              }
+            }
+          }
+          break;
+        }
+      }
+    }
+  } catch(eU) {}
+
+  var poolRecienLlegados = [];
+  try {
+    var ssRL = SpreadsheetApp.openById(SS_ID);
+    var shHistRL = ssRL.getSheetByName(HOJA_HISTORIAL);
+    var shInvRL  = ssRL.getSheetByName(HOJA_INVENTARIO);
+    if (shHistRL && shInvRL) {
+      var hoyRL = new Date(); hoyRL.setHours(0,0,0,0);
+      var hace2 = new Date(hoyRL.getTime() - 2 * 86400000);
+      var tzRL = Session.getScriptTimeZone();
+
+      var ultimaFechaMap = {};
+      var histRowsRL = shHistRL.getDataRange().getValues();
+      for (var hi = 1; hi < histRowsRL.length; hi++) {
+        var hfecha = histRowsRL[hi][0];
+        var hnom   = String(histRowsRL[hi][1] || '').trim().toUpperCase();
+        if (!hnom) continue;
+        var hfechaD = hfecha instanceof Date ? hfecha : new Date(String(hfecha));
+        if (isNaN(hfechaD.getTime())) continue;
+        var dNorm = new Date(hfechaD); dNorm.setHours(0,0,0,0);
+        if (dNorm < hace2) continue;
+        if (!ultimaFechaMap[hnom] || hfechaD > ultimaFechaMap[hnom]) {
+          ultimaFechaMap[hnom] = hfechaD;
+        }
+      }
+
+      var idsOtrosPools = {};
+      relampagoActivo.forEach(function(p){ idsOtrosPools[p.id] = true; });
+      ultimasUnidades.forEach(function(p){ idsOtrosPools[p.id] = true; });
+      destacadasRotadas.forEach(function(p){ idsOtrosPools[p.id] = true; });
+      especialesActivas.forEach(function(p){ idsOtrosPools[p.id] = true; });
+
+      var invRowsRL = shInvRL.getDataRange().getValues();
+      var candidatosRL = [];
+      for (var ri = 1; ri < invRowsRL.length; ri++) {
+        var rNom = String(invRowsRL[ri][0] || '').trim().toUpperCase();
+        if (!rNom || !ultimaFechaMap[rNom]) continue;
+        var rStock = parseInt(invRowsRL[ri][5]) || 0;
+        if (rStock <= 0) continue;
+        if (idsOtrosPools[ri]) continue;
+        candidatosRL.push({
+          id:           ri,
+          nombre:       String(invRowsRL[ri][0]).trim(),
+          precio:       parseInt(invRowsRL[ri][1]) || 0,
+          categoria:    String(invRowsRL[ri][2] || '').trim(),
+          stock:        rStock,
+          fechaIngreso: Utilities.formatDate(ultimaFechaMap[rNom], tzRL, 'dd/MM/yyyy'),
+          _ts:          ultimaFechaMap[rNom].getTime()
+        });
+      }
+
+      candidatosRL.sort(function(a, b){ return b._ts - a._ts; });
+      poolRecienLlegados = candidatosRL.slice(0, 5).map(function(p){
+        return { id: p.id, nombre: p.nombre, precio: p.precio,
+                 categoria: p.categoria, stock: p.stock, fechaIngreso: p.fechaIngreso };
+      });
+    }
+  } catch(eRL) { Logger.log('Error poolRecienLlegados: ' + eRL); }
+
   return {
     success: true,
-    relampagoActivo:   relampagoActivo,
-    ultimasUnidades:   ultimasUnidades,
-    destacadasActivas: destacadasActivas,
-    especialesActivas: especialesActivas,   // ya filtradas y rotadas (máx limites.especiales)
+    relampagoActivo:      relampagoActivo,
+    relampagoPool:        relampagoPoolCompleto,
+    ultimasUnidades:      ultimasUnidades,
+    ultimasSeleccionadas: ultimasSeleccionadas,
+    destacadasActivas:    destacadasRotadas,
+    destacadasPool:       destacadasPool,
+    especialesActivas:    especialesActivas,
+    poolRecienLlegados:   poolRecienLlegados,
     limites: limites,
     fecha: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm'),
     stats: {
-      totalRelampago:   relampagoActivo.length,
-      totalUltimas:     ultimasUnidades.length,
-      totalDestacadas:  destacadasActivas.length,
-      totalEspeciales:  especialesPool.length,   // total real del pool
-      especialesMostradas: especialesActivas.length
+      totalRelampago:          relampagoActivo.length,
+      totalUltimas:            ultimasUnidades.length,
+      totalUltimasCandidatos:  totalCandidatosUltimas,
+      totalDestacadas:         destacadasActivas.length,
+      totalEspeciales:         especialesPool.length,
+      especialesMostradas:     especialesActivas.length
     }
   };
 }
@@ -959,18 +1202,22 @@ function setConfig(datos) {
     const seccion  = String(datos.seccion || '').toLowerCase();
     const clave    = String(datos.clave   || '').trim();
     const diaIdx   = parseInt(datos.dia);
-    const valor    = datos.valor === 1 || datos.valor === '1' ? 1 : 0;
+    const valor = (datos.valor === 'A' || datos.valor === null || datos.valor === undefined) ? 'A' :
+                  (datos.valor === 1 || datos.valor === '1') ? 1 : 0;
 
     if (isNaN(diaIdx) || diaIdx < 0 || diaIdx > 6) return { success: false, mensaje: 'Día inválido' };
 
     const hojaData = sheet.getDataRange().getValues();
     let seccionActual = 'general';
     let filaObjetivo = -1;
+    let filaFallback = -1;
+
+    const claveNorm = clave.toLowerCase();
 
     for (let i = 1; i < hojaData.length; i++) {
       const celda = String(hojaData[i][0] || '').trim();
       if (!celda) continue;
-      if (celda.startsWith('──') || celda.startsWith('─') || celda.startsWith('📌')) {
+      if (celda.startsWith('──') || celda.startsWith('─') || celda.startsWith('📌') || celda.startsWith('—')) {
         const c = celda.toLowerCase();
         if (c.includes('relámpago') || c.includes('relampago')) seccionActual = 'relampago';
         else if (c.includes('destacada')) seccionActual = 'destacadas';
@@ -979,12 +1226,17 @@ function setConfig(datos) {
         else if (c.includes('horario')) seccionActual = 'horario';
         continue;
       }
-      if (seccionActual === seccion && celda === clave) {
+      const celdaNorm = celda.toLowerCase();
+      if (seccionActual === seccion && celdaNorm === claveNorm) {
         filaObjetivo = i + 1;
         break;
       }
+      if (filaFallback === -1 && celdaNorm === claveNorm) {
+        filaFallback = i + 1;
+      }
     }
 
+    if (filaObjetivo === -1) filaObjetivo = filaFallback;
     if (filaObjetivo === -1) return { success: false, mensaje: 'No se encontró: ' + seccion + '|' + clave };
 
     const columna = diaIdx + 2;
@@ -1093,10 +1345,12 @@ function getJuevesCervecero() {
 
     const top6Final = top6.map((c, idx) => {
       let descuento = idx === idxGancho ? 20 : (c.margen > 0.30 ? 15 : 10);
-      const precioPromo = Math.max(
+      const precioBase = Math.max(
         Math.round(c.precio * (1 - descuento / 100)),
         c.costo > 0 ? Math.ceil(c.costo * 1.05) : 0
       );
+      const precioPromo99 = Math.round((precioBase - 99) / 100) * 100 + 99;
+      const precioPromo = Math.min(precioPromo99, c.precio - 1);
       return { ...c, descuento, precioPromo, esGancho: idx === idxGancho };
     });
 
@@ -1167,6 +1421,17 @@ function doGet(e) {
       const datos = JSON.parse(decodeURIComponent(e.parameter.data));
       return respuestaJSON(ingresarMercaderia(datos));
     }
+    if (e && e.parameter && e.parameter.action === 'getInfoProducto') {
+      return respuestaJSON(obtenerInfoProducto(e.parameter.nombre || ''));
+    }
+    if (e && e.parameter && e.parameter.action === 'salidaInterna') {
+      var datosSalida = JSON.parse(decodeURIComponent(e.parameter.data));
+      return respuestaJSON(registrarSalidaInterna(datosSalida));
+    }
+    if (e && e.parameter && e.parameter.action === 'setPausadoListaCompra') {
+      var datosPausa = JSON.parse(decodeURIComponent(e.parameter.data));
+      return respuestaJSON(setPausadoListaCompra(datosPausa));
+    }
     if (e && e.parameter && e.parameter.action === 'ajusteRapido') {
       const datos = JSON.parse(decodeURIComponent(e.parameter.data));
       return respuestaJSON(ajustarProducto(datos));
@@ -1232,6 +1497,49 @@ function doGet(e) {
     if (e && e.parameter && e.parameter.action === 'getCarritoTemp') {
       return respuestaJSON(getCarritoTemp());
     }
+    if (e && e.parameter && e.parameter.action === 'getListaCompra') {
+      return respuestaJSON(getListaCompraJSON());
+    }
+    if (e && e.parameter && e.parameter.action === 'getCandidatosUltimas') {
+      return respuestaJSON(getCandidatosUltimas());
+    }
+    if (e && e.parameter && e.parameter.action === 'guardarUltimasSeleccion') {
+      const datos = JSON.parse(decodeURIComponent(e.parameter.data));
+      return respuestaJSON(guardarUltimasSeleccion(datos));
+    }
+    if (e && e.parameter && e.parameter.action === 'getUltimasSeleccion') {
+      return respuestaJSON(getUltimasSeleccion());
+    }
+    if (e && e.parameter && e.parameter.action === 'listarFiados') {
+      return respuestaJSON(listarFiados());
+    }
+    if (e && e.parameter && e.parameter.action === 'cobrarFiado') {
+      var datosCobro = e.parameter.data ? JSON.parse(decodeURIComponent(e.parameter.data)) : {};
+      return respuestaJSON(cobrarFiado(datosCobro));
+    }
+    if (e && e.parameter && e.parameter.action === 'abonarFiado') {
+      var datosAbono = e.parameter.data ? JSON.parse(decodeURIComponent(e.parameter.data)) : {};
+      return respuestaJSON(abonarFiado(datosAbono));
+    }
+    if (e && e.parameter && e.parameter.action === 'abonoFiado') {
+      var datosAbono = JSON.parse(decodeURIComponent(e.parameter.data));
+      return respuestaJSON(abonoFiado(datosAbono));
+    }
+    if (e && e.parameter && e.parameter.action === 'guardarFiado') {
+      var datosFiado = JSON.parse(decodeURIComponent(e.parameter.data));
+      return respuestaJSON(guardarFiado(datosFiado));
+    }
+    if (e && e.parameter && e.parameter.action === 'consultarFiado') {
+      return respuestaJSON(consultarFiado(e.parameter.telefono));
+    }
+    if (e && e.parameter && e.parameter.action === 'setPausadoNombre') {
+      var datosPN = JSON.parse(decodeURIComponent(e.parameter.data));
+      return respuestaJSON(setPausadoNombre(datosPN));
+    }
+    if (e && e.parameter && e.parameter.action === 'registrarMovimientoCaja') {
+      var datosCaja = JSON.parse(decodeURIComponent(e.parameter.data));
+      return respuestaJSON(registrarMovimientoCaja(datosCaja));
+    }
 
     // ── GET PRODUCTOS (carga la tienda) ──
     const ss = SpreadsheetApp.openById(SS_ID);
@@ -1271,6 +1579,8 @@ function doGet(e) {
         costo: fila.length > 18 ? (parseFloat(fila[18]) || 0) : 0,
         diaCritico: fila.length > 16 ? String(fila[16] || '').trim().toLowerCase() : '',
         stockMin: parseInt(fila[13]) || 0,
+        prioridad: fila.length > 31 ? String(fila[31] || '').trim().toUpperCase() : 'NORMAL',
+        pausadoListaCompra: fila.length > 34 ? String(fila[34] || '').trim().toUpperCase() : '',
         ultimaPromo: ''
       };
 
@@ -1316,8 +1626,21 @@ function procesarVenta(dataStr) {
     const items = Array.isArray(payload) ? payload : (payload.items || []);
     const metodoPago = Array.isArray(payload) ? 'efectivo' : (payload.metodoPago || 'efectivo');
     const vendedor = Array.isArray(payload) ? '' : (payload.vendedor || '');
+    const ventaPayload = Array.isArray(payload) ? {} : payload;
 
     if (!items || !Array.isArray(items) || items.length === 0) return respuestaJSON({ success: false, mensaje: 'Sin items' });
+
+    if (payload.idVenta) {
+      var props = PropertiesService.getScriptProperties();
+      var procesados2 = props.getProperty('ventas_procesadas') || '';
+      if (procesados2.indexOf(payload.idVenta) !== -1) {
+        return respuestaJSON({ success: true, duplicate: true });
+      }
+      var lista2 = procesados2 ? procesados2.split(',') : [];
+      lista2.push(payload.idVenta);
+      if (lista2.length > 100) lista2 = lista2.slice(-100);
+      props.setProperty('ventas_procesadas', lista2.join(','));
+    }
 
     const ss = SpreadsheetApp.openById(SS_ID);
     const sheetInventario = ss.getSheetByName(HOJA_INVENTARIO);
@@ -1391,8 +1714,11 @@ function procesarVenta(dataStr) {
         }
 
         const totalUnidades = procesados.reduce((s, p) => s + (p.esPeso ? 1 : p.qty), 0);
-        const metodoPagoEmoji = metodoPago === 'posnet' ? '💳' : metodoPago === 'transferencia' ? '📱' : '💵';
-        sheetVentas.appendRow(['', fecha, hora, '─── TOTAL TICKET N° ' + ticketStr + ' ───', totalUnidades, metodoPagoEmoji + ' ' + metodoPago.toUpperCase(), vendedor, totalVenta]);
+        const metodoPagoEmoji = metodoPago === 'posnet' ? '💳' : metodoPago === 'transferencia' ? '📱' : metodoPago === 'FIADO' ? '🧾' : '💵';
+        const clienteInfo = (metodoPago === 'FIADO' && ventaPayload.clienteFiado)
+          ? ' | 👤 ' + ventaPayload.clienteFiado + (ventaPayload.telefonoFiado ? ' · ' + ventaPayload.telefonoFiado : '')
+          : '';
+        sheetVentas.appendRow(['', fecha, hora, '─── TOTAL TICKET N° ' + ticketStr + ' ───', totalUnidades, metodoPagoEmoji + ' ' + metodoPago.toUpperCase() + clienteInfo, vendedor, totalVenta]);
       }
     } catch (e) {
       console.warn('No se pudo registrar en hoja Ventas:', e);
@@ -1482,11 +1808,85 @@ function getReportes() {
 
     if (sheetInv) {
       const inv = sheetInv.getDataRange().getValues();
+      const _aliasEspecificos = {};
+          _aliasEspecificos["AZUCAR LEDESMA 1KG"] = "AZUCAR LEDESMA CLASICA 1KG";
+          _aliasEspecificos["ENCENDEDOR BIC MAXI J6LISO"] = "ENCENDEDOR GRANDE BIC MAXI J6LISO";
+          _aliasEspecificos["ENCENDEDOR BIC MINI J5LISO"] = "ENCENDEDOR CHICO BIC MINI J5LISO";
+          _aliasEspecificos["FIDEOS MATARAZZO 500GR (CODITOS RAYADOS) 500 GR"] = "FIDEOS MATARAZZO 500GR (CODITO RAYADO) 500 GR";
+          _aliasEspecificos["FIDEOS MATARAZZO 500GR (TALLARINES N5) 500 GR"] = "FIDEOS MATARAZZO 500GR (TALLARIN N5) 500 GR";
+          _aliasEspecificos["JUGO EN POLVO NARANJA BANANA ARCOR X 15GR"] = "JUGO EN POLVO NARANJA BANANA ARCOR X 15GR";
+          _aliasEspecificos["JUGO EN POLVO NARANJA DULCE TANG X 15GR"] = "JUGO EN POLVO NARANJA TANG X 15GR";
+          _aliasEspecificos["JUGO EN POLVO SABOR A MULTIFRUTA ARCOR 15G 1L"] = "JUGO EN POLVO MULTIFRUTA ARCOR 15GR";
+          _aliasEspecificos["LAMPARA 9W E27"] = "LAMPARA 9W E27 FOCO";
+          _aliasEspecificos["LENTEJAS SECAS REMOJADAS INALPA LATA"] = "LENTEJAS SECAS REMOJADAS INALPA LATA 300GR";
+          _aliasEspecificos["LEVADURA 10GR"] = "LEVADURA MI PAN 10GR";
+          _aliasEspecificos["PAN RALLADO 500GR"] = "PAN RALLADO PREFERIDO  500GR";
+          _aliasEspecificos["PURE DE TOMATE NOEL 530GR"] = "PURE DE TOMATE NOEL 520GR";
+          _aliasEspecificos["RAZA COMIDA DE GATO 1KG"] = "RAZA GATO CARNE PESCADO ARROZ 1KG";
+          _aliasEspecificos["RAZA COMIDA DE GATO 500GR"] = "RAZA GATO CARNE PESCADO ARROZ 500GR";
+          _aliasEspecificos["REBOSADOR 500GR"] = "REBOSADOR PREFERIDO 500GR";
+          _aliasEspecificos["SAL DOS ESTRELLAS ENTREFINA 1KG"] = "SAL  ENTREFINA DOS ESTRELLAS  1KG";
+          _aliasEspecificos["SAL FINA 500GR"] = "SAL FINA DOS ESTRELLAS 500GR";
+          _aliasEspecificos["TOMATE PERITAS EN LATA ARCOR 400GR"] = "TOMATE PELADO PERITA ARCOR LATA 400GR";
+          _aliasEspecificos["JUGO BAGGIO CAJA 1,5 LITROS NARANJA"] = "JUGO BAGGIO FRESH CAJA 1,5 LITROS NARANJA";
+          _aliasEspecificos["NARANJAS KG"] = "NARANJA X KG";
+          _aliasEspecificos["QUESO LA PAULINA BARRA SANDWICH 1KG"] = "QUESO LA PAULINA BARRA SANDWICH X KG";
+          _aliasEspecificos["PAPELILLO"] = "PAPELILLO OCB SEDA";
+          _aliasEspecificos["JUGO EN POLVO ARCOR SABOR A MULTIFRUTA 15G 1L"] = "JUGO EN POLVO MULTIFRUTA ARCOR 15GR";
+          _aliasEspecificos["ARROZ 1 KG PRIMOR"] = "ARROZ 1KG PRIMOR";
+          _aliasEspecificos["PROCENEX"] = "PROCENEX LIMPIADOR PISOS 900ML";
+          _aliasEspecificos["MISTER TRAPO PISO 62X48"] = "MISTER TRAPO PISO 62X48 MR";
+          _aliasEspecificos["ALFAJOR PEPITOS X3 57GR"] = "ALFAJOR TRIPLE PEPITOS 57GR";
+
+      const _aliasOrigen = {};
+
       for (let i = 1; i < inv.length; i++) {
         const nom = String(inv[i][0]||'').trim().toUpperCase();
         const sto = parseInt(inv[i][5]) || 0;
         const cos = parseFloat(inv[i][18]) || 0;
-        if (nom) { stockInfo[nom] = sto; if (cos > 0) costos[nom] = cos; }
+        if (!nom) continue;
+
+        stockInfo[nom] = sto;
+        if (cos > 0) costos[nom] = cos;
+        if (String(inv[i][34] || '').trim().toUpperCase() === 'SI') {
+          stockInfo['__pausado__' + nom] = true;
+        }
+
+        Object.keys(_aliasEspecificos).forEach(function(viejo) {
+          if (_aliasEspecificos[viejo] === nom && stockInfo[viejo] === undefined) {
+            stockInfo[viejo] = sto;
+            if (cos > 0 && !costos[viejo]) costos[viejo] = cos;
+            Logger.log('⚠️ Alias específico: "' + viejo + '" → "' + nom + '"');
+          }
+        });
+
+        function _normBase(s) {
+          return s.replace(/\s+/g, ' ').replace(/,/g, '.').trim();
+        }
+
+        var base = _normBase(nom);
+        var candidatos = new Set();
+
+        candidatos.add(base.replace(/ X KG$/, ' KG').replace(/ X KG /, ' KG ').trim());
+        candidatos.add(base.replace(/\bFRESH\b/g, '').replace(/\s+/g, ' ').trim());
+        candidatos.add(base.replace(/\bCON FRUTAS?\b/gi, '').replace(/\s+/g, ' ').trim());
+        candidatos.add(base.replace(/\bDOBLE CREMA\b/gi, '').replace(/\s+/g, ' ').trim());
+        candidatos.add(base.replace(/\bX (\d+GR)\b/g, '$1').replace(/\s+/g, ' ').trim());
+        candidatos.add(base.replace(/ X KG$/, ' KG').replace(/ X KG /, ' KG ').replace(/\bFRESH\b/g, '').replace(/\s+/g, ' ').trim());
+
+        candidatos.forEach(function(alias) {
+          if (!alias || alias === nom) return;
+          if (stockInfo[alias] !== undefined) {
+            if (_aliasOrigen[alias] && _aliasOrigen[alias] !== nom) {
+              Logger.log('⚠️ Colisión de alias: "' + alias + '" entre "' + _aliasOrigen[alias] + '" y "' + nom + '"');
+            }
+            return;
+          }
+          stockInfo[alias] = sto;
+          if (cos > 0 && !costos[alias]) costos[alias] = cos;
+          _aliasOrigen[alias] = nom;
+          Logger.log('⚠️ Alias usado para stockInfo: "' + alias + '" -> "' + nom + '"');
+        });
       }
     }
     if (sheetHist2) {
@@ -1580,7 +1980,61 @@ function getReportes() {
       .sort((a, b) => b.ganancia - a.ganancia)
       .slice(0, 20);
 
-    return { items, totales, vencProximos, stockInfo, topGanancia };
+    var recienLlegados = [];
+    try {
+      var hoy3 = new Date();
+      hoy3.setHours(0, 0, 0, 0);
+      var hace3 = new Date(hoy3.getTime() - 3 * 86400000);
+
+      var nomIngresados = {};
+      if (sheetHist2) {
+        var histRL = sheetHist2.getDataRange().getValues();
+        for (var hi = 1; hi < histRL.length; hi++) {
+          var hFecha = histRL[hi][0];
+          var hNom   = String(histRL[hi][1] || '').trim().toUpperCase();
+          if (!hNom) continue;
+          var hFechaD;
+          if (hFecha instanceof Date) {
+            hFechaD = hFecha;
+          } else {
+            var partes = String(hFecha).match(/(\d+)\/(\d+)\/(\d+)/);
+            if (!partes) continue;
+            hFechaD = new Date(parseInt(partes[3]), parseInt(partes[2])-1, parseInt(partes[1]));
+          }
+          if (isNaN(hFechaD.getTime())) continue;
+          var dNorm = new Date(hFechaD); dNorm.setHours(0,0,0,0);
+          if (dNorm < hace3) continue;
+          if (!nomIngresados[hNom] || hFechaD > nomIngresados[hNom]) {
+            nomIngresados[hNom] = hFechaD;
+          }
+        }
+      }
+
+      if (sheetInv) {
+        var invRL = sheetInv.getDataRange().getValues();
+        for (var ri = 1; ri < invRL.length; ri++) {
+          var rNom = String(invRL[ri][0] || '').trim().toUpperCase();
+          if (!rNom || !nomIngresados[rNom]) continue;
+          var rStock = parseInt(invRL[ri][5]) || 0;
+          if (rStock <= 0) continue;
+          recienLlegados.push({
+            nombre:       String(invRL[ri][0]).trim(),
+            precio:       parseInt(invRL[ri][1]) || 0,
+            categoria:    String(invRL[ri][2] || '').trim(),
+            stock:        rStock,
+            relampago:    parseInt(invRL[ri][6]) || 0,
+            destacada:    parseInt(invRL[ri][7]) || 0,
+            especial:     parseInt(invRL[ri][8]) || 0,
+            fechaIngreso: Utilities.formatDate(nomIngresados[rNom], tz, 'dd/MM/yyyy')
+          });
+        }
+      }
+      recienLlegados.sort(function(a, b) {
+        return b.fechaIngreso.localeCompare(a.fechaIngreso);
+      });
+    } catch(eRL) { Logger.log('Error recienLlegados: ' + eRL); }
+
+    return { items, totales, vencProximos, stockInfo, topGanancia, recienLlegados };
   } catch(e) {
     return { error: e.toString() };
   }
@@ -1648,5 +2102,668 @@ function getCarritoTemp() {
     return { success: true, items, vendedor: row[1] || '', ts: ts ? new Date(ts).toISOString() : '' };
   } catch(e) {
     return { success: false, error: e.toString(), items: [] };
+  }
+}
+
+// ========== LISTA DE COMPRA JSON ==========
+function getListaCompraJSON() {
+  try {
+    var ss = SpreadsheetApp.openById(SS_ID);
+
+    var shLista = ss.getSheetByName('Lista de compra');
+    if (!shLista) return { ok: false, error: 'Hoja "Lista de compra" no encontrada.' };
+    var listaData = shLista.getDataRange().getValues();
+    if (listaData.length <= 1) return { ok: false, error: 'Lista vacía.' };
+
+    var shInv = ss.getSheetByName('inventario');
+    var invMap = {};
+    if (shInv) {
+      var invData = shInv.getDataRange().getValues();
+      for (var i = 1; i < invData.length; i++) {
+        var row = invData[i];
+        var nombre = String(row[0] || '').trim();
+        if (!nombre) continue;
+        var nombreKey = nombre.toUpperCase().replace(/\s+/g,' ');
+        invMap[nombreKey] = {
+          categoria: String(row[2] || '').trim().toUpperCase(),
+          v7:        parseFloat(row[21]) || 0,
+          v30:       parseFloat(row[22]) || 0,
+          diasStock: row[24] !== '' && row[24] !== null ? (parseFloat(row[24]) || 0) : null,
+          riesgo:    String(row[30] || '').trim().toUpperCase(),
+          prioridad: String(row[31] || '').trim().toUpperCase(),
+          pisoManu:  row[32] !== '' && row[32] !== null ? parseFloat(row[32]) : null,
+          alertaPiso: String(row[33] || '').trim().toUpperCase(),
+          pausado:   String(row[34] || '').trim().toUpperCase() === 'SI'
+        };
+      }
+    }
+
+    var costoMap = {};
+    var shHist = ss.getSheetByName(HOJA_HISTORIAL);
+    if (shHist) {
+      var histData = shHist.getDataRange().getValues();
+      for (var h = histData.length - 1; h >= 1; h--) {
+        var nomHist = String(histData[h][1] || '').trim().toUpperCase();
+        var costoHist = parseFloat(histData[h][6]) || 0;
+        if (nomHist && costoHist > 0 && !costoMap[nomHist]) {
+          costoMap[nomHist] = costoHist;
+        }
+      }
+    }
+
+    var items = [];
+    var totalPesos = 0;
+    var urgentes = 0;
+
+    for (var j = 1; j < listaData.length; j++) {
+      var lr = listaData[j];
+      var nombre = String(lr[0] || '').trim();
+      if (!nombre || nombre.startsWith('──')) continue;
+
+      var stock     = parseFloat(lr[1]) || 0;
+      var minimo    = parseFloat(lr[2]) || 0;
+      var cantidad  = parseFloat(lr[3]) || 0;
+      var precio    = parseFloat(lr[4]) || 0;
+      var total     = parseFloat(lr[5]) || 0;
+      var proveedor = String(lr[6] || '').trim();
+
+      var inv = invMap[nombre.toUpperCase().replace(/\s+/g,' ')] || {};
+
+      var catInv = inv.categoria || '';
+      if (catInv === 'COMPUTACION' || catInv === 'ELECTRONICA' || catInv === 'TECNOLOGIA') continue;
+
+      var diasStock = inv.diasStock !== undefined ? inv.diasStock : null;
+      var v7  = inv.v7  || 0;
+      var v30 = inv.v30 || 0;
+      var riesgo    = inv.riesgo    || '';
+      var prioridad = inv.prioridad || '';
+      var alertaPiso = inv.alertaPiso || '';
+      var pausado   = inv.pausado   || false;
+
+      if (pausado) {
+        items.push({
+          nombre, stock, minimo, cantidad, precio, costo: costoMap[nombre.trim().toUpperCase()] || 0,
+          total, totalVenta: total, proveedor, diasStock, urgencia: 99,
+          prioridad: 'PAUSADO', pausado: true
+        });
+        continue;
+      }
+
+      var urgencia;
+      var altaRotacion = v30 > 15;
+
+      if (alertaPiso === 'PEDIR YA') {
+        urgencia = 0;
+      } else if ((altaRotacion && stock === 0) || prioridad === 'EMPUJAR YA') {
+        urgencia = 1;
+      } else if (riesgo === 'ALERTA') {
+        urgencia = 2;
+      } else if (diasStock !== null && diasStock <= 3) {
+        urgencia = 3;
+      } else if (diasStock !== null && diasStock <= 7) {
+        urgencia = 4;
+      } else if (v7 >= 2 && stock === 0) {
+        urgencia = 5;
+      } else {
+        urgencia = 7;
+      }
+
+      if (urgencia <= 2) urgentes++;
+      var nomKey = nombre.trim().toUpperCase();
+      var costo = costoMap[nomKey] || 0;
+      var totalCosto = costo > 0 ? Math.round(costo * cantidad) : 0;
+      totalPesos += totalCosto > 0 ? totalCosto : total;
+
+      items.push({
+        nombre, stock, minimo, cantidad,
+        precio, costo,
+        total:      totalCosto > 0 ? totalCosto : total,
+        totalVenta: total,
+        proveedor, diasStock, urgencia,
+        prioridad: prioridad || (urgencia <= 2 ? 'URGENTE' : 'OK')
+      });
+    }
+
+    items.sort(function(a, b) { return a.urgencia - b.urgencia; });
+
+    return { ok: true, items, urgentes, totalPesos, generadoEn: new Date().toISOString() };
+  } catch(e) {
+    return { ok: false, error: e.toString() };
+  }
+}
+
+// ========== ÚLTIMAS UNIDADES ==========
+function getCandidatosUltimas() {
+  try {
+    var ss    = SpreadsheetApp.openById(SS_ID);
+    var shInv = ss.getSheetByName(HOJA_INVENTARIO);
+    if (!shInv) return { ok: false, error: 'Hoja inventario no encontrada' };
+
+    var datos = shInv.getDataRange().getValues();
+    var hoy   = new Date(); hoy.setHours(0,0,0,0);
+    var candidatos = [];
+
+    for (var i = 1; i < datos.length; i++) {
+      var row      = datos[i];
+      var nombre   = String(row[0] || '').trim();
+      if (!nombre) continue;
+
+      var precio    = parseFloat(row[1])  || 0;
+      var categoria = String(row[2] || '').trim().toUpperCase();
+      var stock     = parseFloat(row[5])  || 0;
+      var relampago = parseInt(row[6])    || 0;
+      var venc      = row[15];
+      var v7        = parseFloat(row[21]) || 0;
+      var v30       = parseFloat(row[22]) || 0;
+      var promDia   = parseFloat(row[23]) || 0;
+      var diasStock = row[24] !== '' && row[24] !== null ? parseFloat(row[24]) : null;
+
+      // Campos del motor
+      var riesgo    = String(row[30] || '').trim().toUpperCase(); // AE
+      var prioridad = String(row[31] || '').trim().toUpperCase(); // AF
+
+      // Exclusiones
+      if (stock <= 2) continue;
+      if (categoria === 'CERVEZAS') continue;
+
+      var diasVenc = null;
+      if (venc) {
+        var fechaVenc = venc instanceof Date ? venc : new Date(String(venc).trim());
+        if (!isNaN(fechaVenc.getTime())) {
+          var vNorm = new Date(fechaVenc);
+          vNorm.setHours(0,0,0,0);
+          diasVenc = Math.round((vNorm - hoy) / 86400000);
+          if (diasVenc <= 0) continue; // ya vencido
+        }
+      }
+
+      var score = null;
+      var motivo = '';
+
+      // Prioridad 1: ALERTA o EMPUJAR YA
+      if (riesgo === 'ALERTA' || prioridad === 'EMPUJAR YA') {
+        var baseScore = 200;
+        if (diasVenc !== null && diasStock !== null && diasStock > diasVenc) {
+          var sobran = Math.round(stock - (promDia * diasVenc));
+          var pctRiesgo = Math.round((diasStock / diasVenc - 1) * 100);
+          score = baseScore + pctRiesgo;
+          motivo = '🔴 Vence en ' + diasVenc + 'd · stock para ' + Math.round(diasStock) + 'd · sobran ~' + Math.max(sobran, 0) + ' u.';
+        } else {
+          score = baseScore;
+          motivo = (prioridad === 'EMPUJAR YA') ? '🔴 Motor: EMPUJAR YA' : '🔴 Riesgo vencimiento detectado';
+        }
+      }
+
+      // Prioridad 2: EMPUJAR
+      if (score === null && prioridad === 'EMPUJAR') {
+        if (diasVenc !== null && diasStock !== null && diasStock > diasVenc) {
+          var sobran2 = Math.round(stock - (promDia * diasVenc));
+          var pct2    = Math.round((diasStock / diasVenc - 1) * 100);
+          score  = 100 + pct2;
+          motivo = '🟡 Vence en ' + diasVenc + 'd · stock para ' + Math.round(diasStock) + 'd · sobran ~' + Math.max(sobran2, 0) + ' u.';
+        } else {
+          score  = 80;
+          motivo = '🟡 Motor: sobrestock — empujar';
+        }
+      }
+
+      // Prioridad 3: fallback por vencimiento + riesgo real
+      if (score === null && diasVenc !== null && diasVenc > 0 && diasStock !== null && diasStock > diasVenc) {
+        var sobran3 = Math.round(stock - (promDia * diasVenc));
+        var pctRsg3 = Math.round((diasStock / diasVenc - 1) * 100);
+        score  = pctRsg3;
+        motivo = 'Vence en ' + diasVenc + 'd · stock para ' + Math.round(diasStock) + 'd · sobran ~' + Math.max(sobran3, 0) + ' u.';
+      }
+
+      if (score === null) continue;
+
+      var ofertaKey  = String(relampago || '');
+      var ofertaDesc = '';
+      if (ofertaKey === '10') ofertaDesc = '2da 50%';
+      else if (ofertaKey === '11') ofertaDesc = '-10%';
+      else if (ofertaKey === '12') ofertaDesc = '-15%';
+      else if (ofertaKey === '13') ofertaDesc = '-20%';
+      else if (ofertaKey === '14') ofertaDesc = '-25%';
+      else if (['1','2','3','4','5','6'].indexOf(ofertaKey) !== -1) {
+        var nxm = {1:'2x1',2:'3x2',3:'4x3',4:'5x4',5:'6x5',6:'7x6'};
+        ofertaDesc = nxm[ofertaKey] || '';
+      }
+
+      candidatos.push({
+        id: i,
+        nombre: nombre,
+        precio: precio,
+        categoria: categoria,
+        stock: stock,
+        relampago: relampago,
+        ofertaDesc: ofertaDesc,
+        diasVenc: diasVenc,
+        diasStock: diasStock !== null ? Math.round(diasStock) : null,
+        promDia: promDia,
+        v7: v7,
+        v30: v30,
+        score: score,
+        motivo: motivo,
+        riesgo: riesgo,
+        prioridad: prioridad
+      });
+    }
+
+    candidatos.sort(function(a, b) {
+      if (b.score !== a.score) return b.score - a.score;
+      var dvA = (a.diasVenc !== null) ? a.diasVenc : 9999;
+      var dvB = (b.diasVenc !== null) ? b.diasVenc : 9999;
+      if (dvA !== dvB) return dvA - dvB;
+      return b.stock - a.stock;
+    });
+
+    candidatos = candidatos.slice(0, 6);
+
+    return { ok: true, candidatos: candidatos, total: candidatos.length };
+  } catch(e) {
+    return { ok: false, error: e.toString() };
+  }
+}
+
+function guardarUltimasSeleccion(datos) {
+  try {
+    var ss = SpreadsheetApp.openById(SS_ID);
+    var sh = ss.getSheetByName('config_sistema');
+    if (!sh) return { ok: false, error: 'config_sistema no encontrada' };
+
+    var filas = sh.getDataRange().getValues();
+    var filaObj = -1;
+    for (var i = 0; i < filas.length; i++) {
+      if (String(filas[i][0]).trim() === 'ultimas_seleccion') { filaObj = i + 1; break; }
+    }
+    if (filaObj === -1) {
+      filaObj = filas.length + 1;
+      sh.getRange(filaObj, 1).setValue('ultimas_seleccion');
+    }
+    sh.getRange(filaObj, 2).setValue(JSON.stringify(datos));
+    sh.getRange(filaObj, 3).setValue(new Date().toISOString());
+    return { ok: true };
+  } catch(e) {
+    return { ok: false, error: e.toString() };
+  }
+}
+
+function getUltimasSeleccion() {
+  try {
+    var ss = SpreadsheetApp.openById(SS_ID);
+    var sh = ss.getSheetByName('config_sistema');
+    if (!sh) return { ok: true, seleccion: [] };
+
+    var filas = sh.getDataRange().getValues();
+    for (var i = 0; i < filas.length; i++) {
+      if (String(filas[i][0]).trim() === 'ultimas_seleccion') {
+        var raw = filas[i][1];
+        var ts  = filas[i][2];
+        if (!raw) return { ok: true, seleccion: [] };
+
+        var fecha = new Date(ts);
+        var hoy   = new Date();
+        var mismodia = fecha.getFullYear() === hoy.getFullYear()
+                    && fecha.getMonth()    === hoy.getMonth()
+                    && fecha.getDate()     === hoy.getDate();
+
+        if (!mismodia) return { ok: true, seleccion: [], expirada: true };
+        return { ok: true, seleccion: JSON.parse(raw) };
+      }
+    }
+    return { ok: true, seleccion: [] };
+  } catch(e) {
+    return { ok: true, seleccion: [] };
+  }
+}
+
+// ========== FIADOS ==========
+var HOJA_FIADOS = 'FIADOS';
+
+function listarFiados() {
+  try {
+    var ss = SpreadsheetApp.openById(SS_ID);
+    var sh = ss.getSheetByName(HOJA_FIADOS);
+    if (!sh) return { ok: false, error: 'Hoja FIADOS no encontrada' };
+    var datos = sh.getDataRange().getValues();
+    var hoy = new Date(); hoy.setHours(0,0,0,0);
+    var fiados = [];
+    for (var i = 1; i < datos.length; i++) {
+      var fila = datos[i];
+      if (!fila[0]) continue;
+      var estado = String(fila[10] || '').toUpperCase();
+      if (estado === 'PAGADO') continue;
+      var vencFecha = fila[9] ? new Date(String(fila[9]).split('T')[0] + 'T12:00:00') : null;
+      if (vencFecha && vencFecha < hoy && estado !== 'PAGADO') estado = 'VENCIDO';
+      fiados.push({
+        fila:            i + 1,
+        idFiado:         String(fila[0] || ''),
+        fecha:           String(fila[1] || ''),
+        ticket:          String(fila[2] || ''),
+        cliente:         String(fila[3] || ''),
+        telefono:        String(fila[4] || ''),
+        descripcion:     String(fila[5] || ''),
+        cantItems:       fila[6] || 0,
+        total:           parseFloat(fila[8]) || 0,
+        fechaVencimiento: fila[9] ? String(fila[9]).split('T')[0] : '',
+        estado:          estado
+      });
+    }
+    fiados.sort(function(a, b) {
+      if (a.estado === 'VENCIDO' && b.estado !== 'VENCIDO') return -1;
+      if (b.estado === 'VENCIDO' && a.estado !== 'VENCIDO') return 1;
+      return (a.fechaVencimiento || '').localeCompare(b.fechaVencimiento || '');
+    });
+    return { ok: true, fiados };
+  } catch(e) {
+    return { ok: false, error: e.toString() };
+  }
+}
+
+function abonarFiado(datos) {
+  try {
+    if (!datos.idFiado) return { success: false, mensaje: 'Falta ID del fiado' };
+    var ss = SpreadsheetApp.openById(SS_ID);
+    var sh = ss.getSheetByName(HOJA_FIADOS);
+    if (!sh) return { success: false, mensaje: 'Hoja FIADOS no encontrada' };
+    var rows = sh.getDataRange().getValues();
+    for (var i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) !== String(datos.idFiado)) continue;
+      var totalActual = parseFloat(rows[i][8]) || 0;
+      var abono = parseFloat(datos.abono) || 0;
+      if (abono <= 0) return { success: false, mensaje: 'Monto inválido' };
+      var nuevoTotal = Math.max(0, totalActual - abono);
+      sh.getRange(i + 1, 9).setValue(nuevoTotal);
+      var obsActual = String(rows[i][13] || '');
+      var tz = Session.getScriptTimeZone();
+      var fecha = Utilities.formatDate(new Date(), tz, 'dd/MM/yyyy');
+      var nuevaObs = (obsActual ? obsActual + ' | ' : '') +
+        'Abono $' + abono + ' (' + (datos.metodoPago||'EFECTIVO') + ') ' + fecha;
+      sh.getRange(i + 1, 14).setValue(nuevaObs);
+      if (nuevoTotal === 0) {
+        sh.getRange(i + 1, 11).setValue('PAGADO');
+        sh.getRange(i + 1, 12).setValue(fecha);
+        sh.getRange(i + 1, 13).setValue(datos.metodoPago || 'EFECTIVO');
+      }
+      return { success: true, nuevoTotal };
+    }
+    return { success: false, mensaje: 'Fiado no encontrado' };
+  } catch(e) {
+    return { success: false, mensaje: e.toString() };
+  }
+}
+
+function cobrarFiado(datos) {
+  try {
+    if (!datos.idFiado) return { success: false, mensaje: 'Falta ID del fiado' };
+    var ss = SpreadsheetApp.openById(SS_ID);
+    var sh = ss.getSheetByName(HOJA_FIADOS);
+    if (!sh) return { success: false, mensaje: 'Hoja FIADOS no encontrada' };
+    var rows = sh.getDataRange().getValues();
+    for (var i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) === String(datos.idFiado)) {
+        var fechaPago = datos.fechaPago || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+        if (datos.esAbonoParcial) {
+          var obsActual = String(rows[i][13] || '');
+          var nuevaObs = obsActual ? obsActual + ' | ' + (datos.obs||'') : (datos.obs||'');
+          sh.getRange(i + 1, 14).setValue(nuevaObs);
+        } else {
+          sh.getRange(i + 1, 11).setValue('PAGADO');
+          sh.getRange(i + 1, 12).setValue(fechaPago);
+          sh.getRange(i + 1, 13).setValue(datos.metodoPago || 'EFECTIVO');
+          if (datos.obs) {
+            var obsAct = String(rows[i][13] || '');
+            sh.getRange(i + 1, 14).setValue(obsAct ? obsAct + ' | ' + datos.obs : datos.obs);
+          }
+        }
+        return { success: true };
+      }
+    }
+    return { success: false, mensaje: 'Fiado no encontrado: ' + datos.idFiado };
+  } catch(e) {
+    return { success: false, mensaje: e.toString() };
+  }
+}
+
+var COL_PAUSADO_LC = 35;
+
+function setPausadoNombre(datos) {
+  try {
+    var ss  = SpreadsheetApp.openById(SS_ID);
+    var sh  = ss.getSheetByName(HOJA_INVENTARIO);
+    if (!sh) return { success: false, mensaje: 'Hoja inventario no encontrada' };
+    var rows = sh.getDataRange().getValues();
+    var nom = String(datos.nombre || '').trim().toUpperCase();
+    for (var i = 1; i < rows.length; i++) {
+      if (String(rows[i][0] || '').trim().toUpperCase() === nom) {
+        sh.getRange(i + 1, COL_PAUSADO_LC).setValue(datos.pausado || '');
+        return { success: true };
+      }
+    }
+    return { success: false, mensaje: 'Producto no encontrado: ' + datos.nombre };
+  } catch(e) {
+    return { success: false, mensaje: e.toString() };
+  }
+}
+
+function setPausadoListaCompra(datos) {
+  try {
+    var ss  = SpreadsheetApp.openById(SS_ID);
+    var sh  = ss.getSheetByName(HOJA_INVENTARIO);
+    if (!sh) return { success: false, mensaje: 'Hoja inventario no encontrada' };
+    var filaIdx = parseInt(datos.id);
+    if (!filaIdx || filaIdx < 1) return { success: false, mensaje: 'ID inválido' };
+    sh.getRange(filaIdx + 1, COL_PAUSADO_LC).setValue(datos.pausado || '');
+    return { success: true };
+  } catch(e) {
+    return { success: false, mensaje: e.toString() };
+  }
+}
+
+function registrarSalidaInterna(datos) {
+  try {
+    var ss = SpreadsheetApp.openById(SS_ID);
+    var shInv  = ss.getSheetByName(HOJA_INVENTARIO);
+    var shSal  = ss.getSheetByName('SALIDAS');
+
+    if (!shInv) return { success: false, mensaje: 'Hoja inventario no encontrada' };
+
+    if (!shSal) {
+      shSal = ss.insertSheet('SALIDAS');
+      shSal.getRange(1, 1, 1, 10).setValues([[
+        'Fecha', 'Hora', 'Producto', 'ID', 'Cantidad', 'Costo Unit.', 'Precio Venta', 'Motivo', 'Observación', 'Vendedor'
+      ]]);
+      shSal.getRange(1, 1, 1, 10).setFontWeight('bold');
+    }
+
+    var invData = shInv.getDataRange().getValues();
+    var filaIdx = datos.id;
+    if (!filaIdx || filaIdx < 1 || filaIdx >= invData.length) {
+      return { success: false, mensaje: 'Producto no encontrado' };
+    }
+
+    var stockActual = parseFloat(invData[filaIdx][5]) || 0;
+    var cantidad    = parseFloat(datos.cantidad) || 0;
+
+    if (cantidad <= 0) return { success: false, mensaje: 'Cantidad inválida' };
+    if (cantidad > stockActual) return { success: false, mensaje: 'Stock insuficiente (hay ' + stockActual + ')' };
+
+    var nuevoStock = Math.max(0, stockActual - cantidad);
+    shInv.getRange(filaIdx + 1, 6).setValue(nuevoStock);
+
+    var tz    = Session.getScriptTimeZone();
+    var now   = new Date();
+    var fecha = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+    var hora  = Utilities.formatDate(now, tz, 'HH:mm');
+
+    shSal.appendRow([
+      fecha, hora,
+      datos.nombre || '', 'ID' + filaIdx,
+      cantidad, datos.costo || 0, datos.precio || 0,
+      datos.motivo || '', datos.obs || '', datos.vendedor || ''
+    ]);
+
+    return { success: true, nuevoStock };
+  } catch(e) {
+    return { success: false, mensaje: e.toString() };
+  }
+}
+
+function abonoFiado(datos) {
+  try {
+    var ss = SpreadsheetApp.openById(SS_ID);
+    var sh = ss.getSheetByName(HOJA_FIADOS);
+    if (!sh) return { success: false, mensaje: 'Hoja FIADOS no encontrada' };
+
+    var rows = sh.getDataRange().getValues();
+    var tz   = Session.getScriptTimeZone();
+    var hoy  = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+    var metodo   = datos.metodoPago || 'EFECTIVO';
+    var restante = parseFloat(datos.monto) || 0;
+    var cancelados = 0;
+
+    if (restante <= 0) return { success: false, mensaje: 'Monto inválido' };
+
+    var fiados = [];
+    for (var i = 1; i < rows.length; i++) {
+      var tel = String(rows[i][4] || '').replace(/\D/g,'');
+      var cli = String(rows[i][3] || '').trim().toLowerCase();
+      var est = String(rows[i][10] || '').toUpperCase();
+      if (est === 'PAGADO') continue;
+      var telBuscar = String(datos.telefono || '').replace(/\D/g,'');
+      var cliBuscar = String(datos.cliente || '').trim().toLowerCase();
+      if ((telBuscar && tel === telBuscar) || (!telBuscar && cli === cliBuscar)) {
+        fiados.push({ fila: i + 1, total: parseFloat(rows[i][8]) || 0, fecha: String(rows[i][1] || '') });
+      }
+    }
+
+    fiados.sort(function(a,b){ return a.fecha.localeCompare(b.fecha); });
+
+    for (var j = 0; j < fiados.length; j++) {
+      if (restante <= 0) break;
+      var f = fiados[j];
+      if (restante >= f.total) {
+        sh.getRange(f.fila, 11).setValue('PAGADO');
+        sh.getRange(f.fila, 12).setValue(hoy);
+        sh.getRange(f.fila, 13).setValue(metodo);
+        restante = Math.round((restante - f.total) * 100) / 100;
+        cancelados++;
+      } else {
+        var nuevoTotal = Math.round((f.total - restante) * 100) / 100;
+        sh.getRange(f.fila, 9).setValue(nuevoTotal);
+        sh.getRange(f.fila, 8).setValue(nuevoTotal);
+        var obsActual = String(sh.getRange(f.fila, 14).getValue() || '');
+        var nuevaObs = (obsActual ? obsActual + ' | ' : '') +
+          'Abono $' + datos.monto + ' (' + metodo + ') ' + hoy + ' — queda $' + nuevoTotal;
+        sh.getRange(f.fila, 14).setValue(nuevaObs);
+        restante = 0;
+      }
+    }
+
+    return { success: true, cancelados, restante };
+  } catch(e) {
+    return { success: false, mensaje: e.toString() };
+  }
+}
+
+function registrarMovimientoCaja(datos) {
+  try {
+    var ss = SpreadsheetApp.openById(SS_ID);
+    var HOJA_CAJA = 'CAJA_MOVIMIENTOS';
+    var sh = ss.getSheetByName(HOJA_CAJA);
+    if (!sh) {
+      sh = ss.insertSheet(HOJA_CAJA);
+      sh.getRange(1, 1, 1, 8).setValues([['FECHA', 'HORA', 'TIPO', 'MOTIVO', 'MONTO', 'MEDIO', 'CATEGORIA', 'OBSERVACION']]);
+      sh.getRange(1, 1, 1, 8).setBackground('#37474f').setFontColor('white').setFontWeight('bold');
+    }
+    sh.appendRow([
+      datos.fecha       || '',
+      datos.hora        || '',
+      datos.tipo        || 'EGRESO',
+      datos.motivo      || '',
+      datos.monto       || 0,
+      datos.medio       || 'EFECTIVO',
+      datos.categoria   || '',
+      datos.observacion || ''
+    ]);
+    return { success: true };
+  } catch(e) {
+    return { success: false, mensaje: e.toString() };
+  }
+}
+
+function guardarFiado(datos) {
+  try {
+    var ss = SpreadsheetApp.openById(SS_ID);
+    var sh = ss.getSheetByName(HOJA_FIADOS);
+    if (!sh) return { success: false, mensaje: 'Hoja FIADOS no encontrada' };
+
+    var now = new Date();
+    var tz  = Session.getScriptTimeZone();
+    var fechaStr = Utilities.formatDate(now, tz, 'yyyy-MM-dd HH:mm');
+
+    var ultimaFila = sh.getLastRow();
+    var numFiado = ultimaFila;
+    var idFiado = datos.idFiado || ('FIADO-' + String(numFiado).padStart(4, '0'));
+
+    sh.appendRow([
+      idFiado, fechaStr,
+      datos.ticket || '', datos.cliente || '', datos.telefono || '',
+      datos.descripcion || 'TICKET COMPLETO',
+      datos.cantItems || 1, datos.total || 0, datos.total || 0,
+      datos.vencimiento || '',
+      '', '', '',
+      datos.obs || ''
+    ]);
+
+    var nuevaFila = sh.getLastRow();
+    sh.getRange(nuevaFila, 11).setFormula(
+      '=IF(D'+nuevaFila+'="","",IF(L'+nuevaFila+'<>"","PAGADO",IF(AND(J'+nuevaFila+'<>"",TODAY()>DATEVALUE(J'+nuevaFila+')),"VENCIDO","PENDIENTE")))'
+    );
+
+    return { success: true, idFiado };
+  } catch(e) {
+    return { success: false, mensaje: e.toString() };
+  }
+}
+
+function consultarFiado(telefono) {
+  try {
+    if (!telefono) return { ok: true, deuda: null };
+    var ss = SpreadsheetApp.openById(SS_ID);
+    var sh = ss.getSheetByName(HOJA_FIADOS);
+    if (!sh) return { ok: true, deuda: null };
+
+    var datos = sh.getDataRange().getValues();
+    var telBuscar = String(telefono).replace(/\D/g, '');
+
+    var totalDeuda = 0;
+    var pendientes = 0;
+    var vencidos = 0;
+    var nombreCliente = '';
+    var hoy = new Date(); hoy.setHours(0,0,0,0);
+
+    for (var i = 1; i < datos.length; i++) {
+      var fila = datos[i];
+      var telFila = String(fila[4] || '').replace(/\D/g, '');
+      if (telFila !== telBuscar) continue;
+
+      var estado = String(fila[10] || '').toUpperCase();
+      if (estado === 'PAGADO') continue;
+
+      var fechaVenc = fila[9] ? new Date(fila[9]) : null;
+      if (fechaVenc && fechaVenc < hoy && estado !== 'PAGADO') estado = 'VENCIDO';
+
+      var total = parseFloat(fila[8]) || 0;
+      totalDeuda += total;
+      pendientes++;
+      if (estado === 'VENCIDO') vencidos++;
+      if (!nombreCliente && fila[3]) nombreCliente = String(fila[3]);
+    }
+
+    if (pendientes === 0) return { ok: true, deuda: null };
+    return { ok: true, deuda: { nombre: nombreCliente, total: totalDeuda, pendientes, vencidos } };
+  } catch(e) {
+    return { ok: true, deuda: null };
   }
 }
