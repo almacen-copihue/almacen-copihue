@@ -8015,6 +8015,7 @@ function cerrarPanelFiados() {
 function _renderPanelFiados() {
     const hoy = new Date(); hoy.setHours(0,0,0,0);
     const pendientes = _fiadosPendientes.filter(f => f.estado !== 'PAGADO');
+    const pagados    = _fiadosPendientes.filter(f => f.estado === 'PAGADO');
     const total = pendientes.reduce((s, f) => s + (parseFloat(f.total) || 0), 0);
 
     document.getElementById('fiadoPanelSubtitulo').textContent =
@@ -8034,37 +8035,31 @@ function _renderPanelFiados() {
         }
     }
 
-    if (!pendientes.length) {
-        document.getElementById('fiadoPanelCuerpo').innerHTML =
-            '<div style="text-align:center;padding:40px;color:#aaa;">✅ No hay fiados pendientes</div>';
-        return;
+    // Formatea fecha del servidor a DD/MM/YYYY
+    function _fmtFecha(fechaStr) {
+        if (!fechaStr) return '—';
+        const d = new Date(fechaStr);
+        if (isNaN(d)) return fechaStr; // si ya viene como string legible lo deja
+        return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
     }
 
-    document.getElementById('fiadoPanelCuerpo').innerHTML = pendientes.map((f, i) => {
+    function _renderTarjeta(f, i, esPendiente) {
         const vencido = f.estado === 'VENCIDO';
         const vencFecha = f.fechaVencimiento ? new Date(f.fechaVencimiento + 'T12:00:00') : null;
-        const diasRest = vencFecha ? Math.round((vencFecha - hoy) / 86400000) : null;
-        const colorBorde = vencido ? '#ef9a9a' : '#ffe082';
-        const colorFondo = vencido ? '#fff5f5' : '#fffde7';
-        const estadoBadge = vencido
-            ? '<span style="background:#b71c1c;color:white;font-size:0.65rem;font-weight:700;padding:2px 7px;border-radius:8px;">🔴 VENCIDO</span>'
-            : (diasRest !== null
-                ? '<span style="background:#f57f17;color:white;font-size:0.65rem;font-weight:700;padding:2px 7px;border-radius:8px;">⏰ ' + (diasRest === 0 ? 'Vence HOY' : diasRest < 0 ? 'Venció' : 'Vence en ' + diasRest + 'd') + '</span>'
-                : '<span style="background:#888;color:white;font-size:0.65rem;padding:2px 7px;border-radius:8px;">PENDIENTE</span>');
-        return `
-        <div style="border:2px solid ${colorBorde};background:${colorFondo};border-radius:12px;padding:12px 14px;margin-bottom:10px;">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
-                <div>
-                    <div style="font-weight:900;font-size:0.95rem;color:#1a1a1a;">${f.cliente}</div>
-                    <div style="font-size:0.72rem;color:#666;margin-top:1px;">📞 ${f.telefono || '—'} &nbsp;·&nbsp; ${f.fecha || ''}</div>
-                </div>
-                <div style="text-align:right;">
-                    <div style="font-size:1.1rem;font-weight:900;color:#c62828;">$${parseFloat(f.total||0).toLocaleString('es-AR')}</div>
-                    ${estadoBadge}
-                </div>
-            </div>
-            <div style="font-size:0.75rem;color:#555;margin-bottom:10px;border-top:1px solid rgba(0,0,0,0.07);padding-top:6px;">${f.descripcion || '—'}</div>
-            <div style="display:flex;gap:8px;">
+        const diasRest = vencFecha && !isNaN(vencFecha) ? Math.round((vencFecha - hoy) / 86400000) : null;
+        const colorBorde = esPendiente ? (vencido ? '#ef9a9a' : '#ffe082') : '#c8e6c9';
+        const colorFondo = esPendiente ? (vencido ? '#fff5f5' : '#fffde7') : '#f1f8e9';
+
+        const estadoBadge = !esPendiente
+            ? `<span style="background:#2e7d32;color:white;font-size:0.65rem;font-weight:700;padding:2px 7px;border-radius:8px;">✅ PAGADO</span>`
+            : vencido
+                ? `<span style="background:#b71c1c;color:white;font-size:0.65rem;font-weight:700;padding:2px 7px;border-radius:8px;">🔴 VENCIDO</span>`
+                : (diasRest !== null
+                    ? `<span style="background:#f57f17;color:white;font-size:0.65rem;font-weight:700;padding:2px 7px;border-radius:8px;">⏰ ${diasRest === 0 ? 'Vence HOY' : diasRest < 0 ? 'Venció hace ' + Math.abs(diasRest) + 'd' : 'Vence en ' + diasRest + 'd'}</span>`
+                    : `<span style="background:#888;color:white;font-size:0.65rem;padding:2px 7px;border-radius:8px;">PENDIENTE</span>`);
+
+        const botonesHtml = esPendiente ? `
+            <div style="display:flex;gap:8px;margin-top:8px;">
                 <button onclick="_abrirCobrarFiado(${i})"
                     style="flex:2;padding:8px;border:none;border-radius:10px;background:#2e7d32;color:white;font-weight:700;font-size:0.85rem;cursor:pointer;">
                     ✅ Cobrar
@@ -8073,9 +8068,48 @@ function _renderPanelFiados() {
                     style="flex:1;padding:8px;border:2px solid #25d366;border-radius:10px;background:white;color:#25d366;font-weight:700;font-size:0.85rem;cursor:pointer;">
                     📲 WA
                 </button>
+            </div>` : `
+            <div style="font-size:0.72rem;color:#388e3c;margin-top:4px;">
+                Pagado el ${_fmtFecha(f.fechaPago || '')}${f.metodoPago ? ' · ' + f.metodoPago : ''}
+            </div>`;
+
+        return `
+        <div style="border:2px solid ${colorBorde};background:${colorFondo};border-radius:12px;padding:12px 14px;margin-bottom:10px;">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
+                <div>
+                    <div style="font-weight:900;font-size:0.95rem;color:#1a1a1a;">${f.cliente}</div>
+                    <div style="font-size:0.72rem;color:#666;margin-top:1px;">📞 ${f.telefono || '—'} &nbsp;·&nbsp; ${_fmtFecha(f.fecha)}</div>
+                </div>
+                <div style="text-align:right;">
+                    <div style="font-size:1.1rem;font-weight:900;color:${esPendiente ? '#c62828' : '#2e7d32'};">$${parseFloat(f.total||0).toLocaleString('es-AR')}</div>
+                    ${estadoBadge}
+                </div>
             </div>
+            <div style="font-size:0.75rem;color:#555;border-top:1px solid rgba(0,0,0,0.07);padding-top:6px;">${f.descripcion || '—'}</div>
+            ${botonesHtml}
         </div>`;
-    }).join('');
+    }
+
+    let html = '';
+
+    if (!pendientes.length && !pagados.length) {
+        html = '<div style="text-align:center;padding:40px;color:#aaa;">✅ No hay fiados</div>';
+    } else {
+        if (pendientes.length) {
+            html += pendientes.map((f, i) => _renderTarjeta(f, i, true)).join('');
+        } else {
+            html += '<div style="text-align:center;padding:16px;color:#aaa;font-size:0.85rem;">✅ Sin pendientes</div>';
+        }
+
+        if (pagados.length) {
+            html += `<div style="font-size:0.75rem;font-weight:700;color:#888;letter-spacing:1px;text-transform:uppercase;padding:12px 4px 6px;">
+                        ── Cobrados (${pagados.length}) ──
+                     </div>`;
+            html += pagados.map((f, i) => _renderTarjeta(f, i, false)).join('');
+        }
+    }
+
+    document.getElementById('fiadoPanelCuerpo').innerHTML = html;
 }
 
 function _abrirCobrarFiado(idx) {
@@ -8461,10 +8495,9 @@ async function confirmarFiado() {
     const datosFiado = {
         idFiado, cliente, telefono,
         descripcion, cantItems,
-        items: ventaActual.map(i => ({ name: i.name, qty: i.qty, price: i.price, esPeso: i.esPeso || false, gramos: i.gramos || 0 })),
         total: Math.round(total),
         vencimiento, obs,
-        ticket: null
+        ticket: null // se llenará después de guardar la venta
     };
 
     try {
@@ -8556,39 +8589,31 @@ async function _procesarVentaFiado(datosFiado) {
 
 function _enviarFiadoWhatsApp(datosFiado, total) {
     const tel = datosFiado.telefono.replace(/\D/g, '');
-    if (!tel || tel.length < 6) return;
+    if (!tel || tel.length < 6) return; // sin teléfono válido no abre WA
 
     const fecha = new Date().toLocaleDateString('es-AR');
     const venc  = datosFiado.vencimiento
         ? new Date(datosFiado.vencimiento + 'T12:00:00').toLocaleDateString('es-AR')
         : '—';
 
-    // Detalle línea por línea igual que el ticket de venta
-    const lineasDetalle = (datosFiado.items || []).map(i => {
-        const cant  = i.esPeso ? i.gramos + 'gr' : i.qty + 'x';
-        const precio = (i.price * (i.esPeso ? i.gramos / 1000 : i.qty));
-        return `  ${cant} ${i.name} — $${Math.round(precio).toLocaleString('es-AR')}`;
-    });
-
-    const ticketNum = datosFiado.ticket ? ` #${datosFiado.ticket}` : '';
-
     const msg = [
-        `🧾 *COMPROBANTE DE FIADO — Almacén Copihue*${ticketNum}`,
+        `🧾 *COMPROBANTE DE FIADO — Almacén Copihue*`,
         ``,
-        `📅 ${fecha}`,
-        `👤 Cliente: *${datosFiado.cliente}*`,
+        `📅 Fecha: ${fecha}`,
+        `👤 Cliente: ${datosFiado.cliente}`,
         ``,
         `🛒 *Detalle:*`,
-        ...lineasDetalle,
-        `─────────────────`,
+        datosFiado.descripcion,
+        ``,
         `💰 *Total fiado: $${Math.round(total).toLocaleString('es-AR')}*`,
-        `📆 Pago acordado: *${venc}*`,
+        `📆 Fecha de pago acordada: *${venc}*`,
         datosFiado.obs ? `📝 Nota: ${datosFiado.obs}` : '',
         ``,
         `✅ Este mensaje es su comprobante de fiado.`,
         `📍 Almacén Copihue — Copihue 457`
     ].filter(l => l !== '').join('\n');
 
+    // Número argentino — agregar 549 si no lo tiene
     let numWA = tel;
     if (!numWA.startsWith('549') && !numWA.startsWith('54')) {
         numWA = '549' + numWA;
