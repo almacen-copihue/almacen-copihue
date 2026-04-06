@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v249</title>
+    <title>Copihue — POS v250</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3307,10 +3307,13 @@ function cerrarConfirm() {
 // ⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️
 
 function fechaArgentina(offsetDias = 0) {
-    const now = new Date();
-    if (offsetDias !== 0) now.setDate(now.getDate() + offsetDias);
-    return new Date(now.toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }))
-        .toISOString().slice(0, 10);
+    // Obtener fecha actual en Argentina sin conversión UTC
+    const ar = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+    ar.setDate(ar.getDate() + offsetDias);
+    const yyyy = ar.getFullYear();
+    const mm   = String(ar.getMonth() + 1).padStart(2, '0');
+    const dd   = String(ar.getDate()).padStart(2, '0');
+    return yyyy + '-' + mm + '-' + dd;
 }
 // HOY_KEY como función para que siempre use la fecha correcta del momento
 function getHoyKey() { return 'copihue_ventas_' + fechaArgentina(); }
@@ -5650,10 +5653,10 @@ function abrirInfoProd(id) {
             `<div style="color:#555;font-size:.82rem;text-align:center;padding:8px 0;">Sin ventas hoy</div>`;
     }
 
-    // Ventas últimos 30 días desde localStorage (incluye hoy)
+    // Ventas últimos 60 días desde localStorage (incluye hoy)
     let totalSemana = 0;
     const diasSemana = [];
-    for (let d = 0; d <= 30; d++) {
+    for (let d = 0; d <= 60; d++) {
         const fechaStr = fechaArgentina(-d);
         const key = 'copihue_ventas_' + fechaStr;
         const ventas = JSON.parse(localStorage.getItem(key) || '[]');
@@ -5663,21 +5666,24 @@ function abrirInfoProd(id) {
         if (qty > 0) { diasSemana.push({ fecha: fechaStr, qty }); totalSemana += qty; }
     }
 
+    const MESES_INFO = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
     if (diasSemana.length > 0) {
         const filasSem = diasSemana.map(d => {
-            const [,, dia] = d.fecha.split('-');
+            const partes = d.fecha.split('-');
+            const mes = parseInt(partes[1]);
+            const dia = parseInt(partes[2]);
             const dw = new Date(d.fecha + 'T12:00:00').getDay();
             const dn = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][dw];
-            return `<div style="display:flex;justify-content:space-between;padding:4px 0;">` +
-                `<span style="color:#888;font-size:.8rem;">${dn} ${parseInt(dia)}</span>` +
-                `<span style="color:#ccc;font-size:.8rem;font-weight:700;">${d.qty} u</span></div>`;
+            return '<div style="display:flex;justify-content:space-between;padding:4px 0;">' +
+                '<span style="color:#888;font-size:.8rem;">' + dn + ' ' + dia + ' ' + MESES_INFO[mes-1] + '</span>' +
+                '<span style="color:#ccc;font-size:.8rem;font-weight:700;">' + d.qty + ' u</span></div>';
         }).join('');
         document.getElementById('infoProdSemana').innerHTML =
-            `<div style="font-size:.75rem;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">ÚLTIMOS 30 DÍAS — ${totalSemana} total</div>` +
+            '<div style="font-size:.75rem;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">ÚLTIMOS 60 DÍAS — ' + totalSemana + ' total</div>' +
             filasSem;
     } else {
         document.getElementById('infoProdSemana').innerHTML =
-            `<div style="color:#555;font-size:.78rem;text-align:center;padding:4px 0;">Sin ventas en 30 días</div>`;
+            '<div style="color:#555;font-size:.78rem;text-align:center;padding:4px 0;">Sin ventas en 60 días</div>';
     }
 
     const modal = document.getElementById('modalInfoProd');
