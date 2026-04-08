@@ -340,6 +340,70 @@
 
   /* Canvas oculto para render */
   #canvasShare { display: none; }
+
+  /* Countdown */
+  .countdown-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    margin: 12px auto 4px;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 50px;
+    padding: 6px 18px;
+    transition: background 0.5s, border-color 0.5s;
+  }
+  .countdown-icono {
+    font-size: 1rem;
+    line-height: 1;
+  }
+  .countdown-texto {
+    font-size: 0.92rem;
+    font-weight: 900;
+    color: rgba(255,255,255,0.85);
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+  }
+
+  /* Urgencia 4h */
+  .tarjeta-estado.urgencia-4 .countdown-wrap {
+    background: rgba(255,152,0,0.15);
+    border-color: rgba(255,152,0,0.4);
+  }
+  .tarjeta-estado.urgencia-4 .countdown-texto { color: #ffb74d; }
+  .tarjeta-estado.urgencia-4 .countdown-icono { animation: parpadear 1.5s ease-in-out infinite; }
+
+  /* Urgencia 2h */
+  .tarjeta-estado.urgencia-2 .countdown-wrap {
+    background: rgba(230,81,0,0.2);
+    border-color: rgba(230,81,0,0.5);
+  }
+  .tarjeta-estado.urgencia-2 .countdown-texto { color: #ff8a65; }
+
+  /* Urgencia 1h */
+  .tarjeta-estado.urgencia-1 .countdown-wrap {
+    background: rgba(183,28,28,0.25);
+    border-color: rgba(239,83,80,0.6);
+    animation: pulsar-urgente 1.2s ease-in-out infinite;
+  }
+  .tarjeta-estado.urgencia-1 .countdown-texto { color: #ef9a9a; font-size: 1rem; }
+  @keyframes pulsar-urgente {
+    0%, 100% { box-shadow: none; }
+    50% { box-shadow: 0 0 0 4px rgba(239,83,80,0.15); }
+  }
+
+  /* Apertura */
+  .apertura-texto {
+    font-size: 0.8rem;
+    color: rgba(255,255,255,0.45);
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    margin-top: 6px;
+    margin-bottom: 2px;
+  }
+
+  /* Countdown oculto cuando cerrado */
+  .countdown-wrap.oculto { display: none; }
 </style>
 </head>
 <body>
@@ -362,15 +426,22 @@
 
   <div class="divisor"></div>
 
-  <div class="tarjeta-estado">
-    <div class="estado-badge">
-      <div class="punto-verde"></div>
-      <span>Abierto ahora</span>
+  <div class="tarjeta-estado" id="tarjetaEstado">
+    <div class="estado-badge" id="estadoBadge">
+      <div class="punto-verde" id="puntoBadge"></div>
+      <span id="estadoTexto">Abierto ahora</span>
     </div>
 
-    <div class="horario-texto">Horario de cierre</div>
-    <div class="horario-hora">22:00</div>
+    <div class="horario-texto" id="horarioTextoLabel">Horario de cierre</div>
+    <div class="horario-hora" id="horarioHora">--:--</div>
     <div class="horario-hs">hs</div>
+
+    <div class="countdown-wrap" id="countdownWrap">
+      <span class="countdown-icono">⏳</span>
+      <span class="countdown-texto" id="countdownTexto">Cerramos en --h --m</span>
+    </div>
+
+    <div class="apertura-texto" id="aperturaTexto">Abrimos a las --:-- hs</div>
 
     <div class="dias" id="dias"></div>
   </div>
@@ -488,10 +559,13 @@
       if (!abierto) chip.style.opacity = '0.35';
       diasDiv.appendChild(chip);
     });
-    // Mostrar hora de cierre dinámica
-    const hCierre = String(CFG.cierreH).padStart(2,'0') + ':' + String(CFG.cierreM).padStart(2,'0');
-    const el = document.querySelector('.horario-hora');
-    if (el) el.textContent = hCierre;
+    // Hora de cierre y apertura — desde CFG (sin hardcodear)
+    const hCierre   = String(CFG.cierreH).padStart(2,'0') + ':' + String(CFG.cierreM).padStart(2,'0');
+    const hApertura = String(CFG.aperturaH).padStart(2,'0') + ':' + String(CFG.aperturaM).padStart(2,'0');
+    const elHora = document.getElementById('horarioHora');
+    if (elHora) elHora.textContent = hCierre;
+    const elAp = document.getElementById('aperturaTexto');
+    if (elAp) elAp.textContent = 'Abrimos a las ' + hApertura + ' hs';
     // Arrancar reloj
     actualizarReloj();
     setInterval(actualizarReloj, 1000);
@@ -505,26 +579,92 @@
     const s = String(ahora.getSeconds()).padStart(2,'0');
     document.getElementById('relojHora').textContent = `${h}:${m}:${s}`;
 
-    // Mostrar botón si faltan menos de 60 min para cerrar
+    // minutosParaCerrar() es la fuente de verdad — no se duplica lógica
     const mins = minutosParaCerrar();
-    const badge = document.querySelector('.estado-badge');
+    const badge    = document.getElementById('estadoBadge');
+    const estadoTxt = document.getElementById('estadoTexto');
+    const puntoBadge = document.getElementById('puntoBadge');
     const btnLlego = document.getElementById('btnAunLlego');
+    const tarjeta  = document.getElementById('tarjetaEstado');
+    const cdWrap   = document.getElementById('countdownWrap');
+    const cdTexto  = document.getElementById('countdownTexto');
+    const apTexto  = document.getElementById('aperturaTexto');
+
+    // Limpiar clases de urgencia
+    if (tarjeta) tarjeta.classList.remove('urgencia-4','urgencia-2','urgencia-1');
 
     if (mins <= 0) {
-      // Cerrado
-      if (badge) { badge.classList.add('cerrado'); badge.innerHTML = '<div class="punto-verde"></div><span>Cerrado</span>'; }
-      if (btnLlego) btnLlego.classList.remove('visible');
-    } else if (mins <= MINUTOS_AVISO) {
-      // Por cerrar — mostrar botón
-      if (badge) badge.classList.remove('cerrado');
-      if (btnLlego) {
-        btnLlego.classList.add('visible');
-        btnLlego.textContent = `🏃 ¡Aún llego! (cierra en ${mins} min)`;
-      }
+      // ── CERRADO ──
+      if (badge)     { badge.classList.add('cerrado'); }
+      if (estadoTxt) estadoTxt.textContent = '🔴 Cerrado';
+      if (puntoBadge) { puntoBadge.style.background='#ef9a9a'; puntoBadge.style.boxShadow='none'; }
+      if (cdWrap)    cdWrap.classList.add('oculto');
+      if (btnLlego)  btnLlego.classList.remove('visible');
+      // Mostrar hora apertura más prominente cuando cerrado
+      const hApertura = String(CFG.aperturaH).padStart(2,'0') + ':' + String(CFG.aperturaM).padStart(2,'0');
+      if (apTexto) apTexto.textContent = 'Abrimos mañana a las ' + hApertura + ' hs';
+
     } else {
-      // Abierto normal
-      if (badge) badge.classList.remove('cerrado');
-      if (btnLlego) btnLlego.classList.remove('visible');
+      // ── ABIERTO ──
+      if (badge)     badge.classList.remove('cerrado');
+      if (puntoBadge) { puntoBadge.style.background='#69f0ae'; puntoBadge.style.boxShadow='0 0 8px #69f0ae'; }
+      if (cdWrap)    cdWrap.classList.remove('oculto');
+
+      // Countdown: convertir mins totales a Xh Ym o solo Xm
+      const horas = Math.floor(mins / 60);
+      const minRest = mins % 60;
+      let cdStr;
+      if (horas > 0) {
+        cdStr = 'Cerramos en ' + horas + 'h ' + String(minRest).padStart(2,'0') + 'm';
+      } else {
+        cdStr = 'Cerramos en ' + mins + ' min';
+      }
+
+      // Modo urgencia (usa mins de minutosParaCerrar, sin hardcodear hora)
+      if (mins <= 60) {
+        if (tarjeta) tarjeta.classList.add('urgencia-1');
+        if (estadoTxt) estadoTxt.textContent = '⚠️ Últimas horas';
+        cdStr = '⏰ Cerramos en ' + mins + ' min';
+      } else if (mins <= 120) {
+        if (tarjeta) tarjeta.classList.add('urgencia-2');
+        if (estadoTxt) estadoTxt.textContent = '⚠️ Últimas horas';
+      } else if (mins <= 240) {
+        if (tarjeta) tarjeta.classList.add('urgencia-4');
+        if (estadoTxt) estadoTxt.textContent = 'Abierto ahora';
+      } else {
+        if (estadoTxt) estadoTxt.textContent = 'Abierto ahora';
+      }
+
+      if (cdTexto) cdTexto.textContent = cdStr;
+
+      // Botón "aún llego" — lógica existente preservada
+      if (btnLlego) {
+        if (mins <= MINUTOS_AVISO) {
+          btnLlego.classList.add('visible');
+          btnLlego.textContent = `🏃 ¡Aún llego! (cierra en ${mins} min)`;
+        } else {
+          btnLlego.classList.remove('visible');
+        }
+      }
+
+      // Hora apertura normal
+      const hApertura = String(CFG.aperturaH).padStart(2,'0') + ':' + String(CFG.aperturaM).padStart(2,'0');
+      if (apTexto) apTexto.textContent = 'Abrimos a las ' + hApertura + ' hs';
+    }
+
+    // Notificar al padre (cuando se usa como iframe)
+    const hCierre   = String(CFG.cierreH).padStart(2,'0') + ':' + String(CFG.cierreM).padStart(2,'0');
+    const hApertura = String(CFG.aperturaH).padStart(2,'0') + ':' + String(CFG.aperturaM).padStart(2,'0');
+    let estadoMsg;
+    if (mins <= 0) {
+      estadoMsg = `🔴 Cerrado. Abrimos a las ${hApertura} hs`;
+    } else if (mins <= MINUTOS_AVISO) {
+      estadoMsg = `⚠️ Cerramos en ${mins} min (${hCierre} hs)`;
+    } else {
+      estadoMsg = `✅ Abierto. Cerramos a las ${hCierre} hs`;
+    }
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ tipo: 'horario_estado', texto: estadoMsg }, '*');
     }
   }
 
