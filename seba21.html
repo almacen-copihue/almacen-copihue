@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v251</title>
+    <title>Copihue — POS v252</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -1711,7 +1711,7 @@ function probarWAProveedor(idx) {
     const p = configProveedores[idx]; if (!p) return;
     const tel = (p.telefono || '').replace(/\D/g, '');
     const msg = (p.mensaje || 'Hola {nombre}! 🛒 Te hago el pedido.').replace('{nombre}', p.nombre).replace('{cantidad}', '2').replace('{productos}', '- Pan: 2 kg');
-    window.open(tel ? 'https://wa.me/' + tel + '?text=' + encodeURIComponent(msg) : 'https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
+    _waB(msg, tel || '');
 }
 
 async function guardarConfigProveedores() {
@@ -1778,7 +1778,7 @@ function enviarPedidoPanadero() {
     const tel = (cfg.telefono || '').replace(/\D/g, '');
     localStorage.setItem('pedido_panadero_sugerido_' + fechaArgentina(), '1');
     const n = document.getElementById('sugerenciaPanadero'); if (n) n.remove();
-    window.open(tel ? 'https://wa.me/'+tel+'?text='+encodeURIComponent(msg) : 'https://wa.me/?text='+encodeURIComponent(msg), '_blank');
+    _waB(msg, tel || '');
     if (!tel) mostrarToast('⚠️ Agregá el teléfono en ⚙️ Configuración', 'naranja');
 }
 
@@ -3214,17 +3214,32 @@ function cerrarModalConfirm(e) {
 }
 
 function abrirWABusiness(texto) {
-    // Intent directo a WhatsApp Business (chip del local)
-    const encoded = encodeURIComponent(texto);
-    if (/android/i.test(navigator.userAgent)) {
-        const fallbackUrl = encodeURIComponent('https://wa.me/?text=' + encoded);
-        window.location.href = 'intent://send?text=' + encoded +
-            '#Intent;package=com.whatsapp.w4b;scheme=whatsapp;end;' +
-            'S.browser_fallback_url=' + fallbackUrl;
-    } else {
-        window.open('https://wa.me/?text=' + encoded, '_blank');
+    // ── WhatsApp Business unificado — siempre usa com.whatsapp.w4b ──
+    // _waB(texto)        → abre WA Business sin número (mensaje propio del local)
+    // _waB(texto, tel)   → abre WA Business hacia un número destino
+    function _waB(texto, tel) {
+        const encoded = encodeURIComponent(texto);
+        if (/android/i.test(navigator.userAgent)) {
+            const intentBase = tel
+                ? 'intent://send?phone=' + tel + '&text=' + encoded
+                : 'intent://send?text=' + encoded;
+            const fallback = tel
+                ? encodeURIComponent('https://wa.me/' + tel + '?text=' + encoded)
+                : encodeURIComponent('https://wa.me/?text=' + encoded);
+            window.location.href = intentBase +
+                '#Intent;package=com.whatsapp.w4b;scheme=whatsapp;end;' +
+                'S.browser_fallback_url=' + fallback;
+        } else {
+            const url = tel
+                ? 'https://wa.me/' + tel + '?text=' + encoded
+                : 'https://wa.me/?text=' + encoded;
+            window.open(url, '_blank');
+        }
     }
+    // Alias para compatibilidad con código existente
+    window._waB = _waB;
 }
+function abrirWABusiness(texto) { _waB(texto); }
 
 function enviarTicketWA() {
     var v = window._ultimaVenta;
@@ -3251,17 +3266,11 @@ function enviarTicketWA() {
         '*💰 Total: $' + v.total.toLocaleString('es-AR') + '*\n' +
         metodoLabel + saludo;
 
-    // Si hay cliente seleccionado → abrir WA con su número directo
+    // Si hay cliente seleccionado → abrir WA Business con su número directo
     if (_clienteActual && _clienteActual.telefono) {
         actualizarEstadisticaCliente(_clienteActual.telefono, v);
-        const encoded = encodeURIComponent(mensaje);
         const tel = '549' + _clienteActual.telefono.replace(/\D/g,'');
-        if (/android/i.test(navigator.userAgent)) {
-            window.location.href = 'intent://send?phone=' + tel + '&text=' + encoded +
-                '#Intent;package=com.whatsapp;scheme=whatsapp;end;';
-        } else {
-            window.open('https://wa.me/' + tel + '?text=' + encoded, '_blank');
-        }
+        _waB(mensaje, tel);
     } else {
         abrirWABusiness(mensaje);
     }
@@ -5653,15 +5662,9 @@ function abrirInfoProd(id) {
             `<div style="color:#555;font-size:.82rem;text-align:center;padding:8px 0;">Sin ventas hoy</div>`;
     }
 
-    // Ventas últimos 60 días desde el servidor
-    const infoProdSemana = document.getElementById('infoProdSemana');
-    infoProdSemana.innerHTML = '<div style="color:#555;font-size:.78rem;text-align:center;padding:8px 0;">⏳ Consultando planilla...</div>';
-
-    const MESES_INFO = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
-
-    // También contar local para comparar/complementar
-    let totalLocal = 0;
-    const diasLocal = {};
+    // Ventas últimos 60 días desde localStorage (incluye hoy)
+    let totalSemana = 0;
+    const diasSemana = [];
     for (let d = 0; d <= 60; d++) {
         const fechaStr = fechaArgentina(-d);
         const key = 'copihue_ventas_' + fechaStr;
@@ -5669,72 +5672,28 @@ function abrirInfoProd(id) {
         const qty = ventas.flatMap(v => (v.items || []))
             .filter(i => String(i.esPeso ? i.idOriginal : i.id) === String(id))
             .reduce((s, i) => s + (i.qty || 1), 0);
-        if (qty > 0) { diasLocal[fechaStr] = (diasLocal[fechaStr] || 0) + qty; totalLocal += qty; }
+        if (qty > 0) { diasSemana.push({ fecha: fechaStr, qty }); totalSemana += qty; }
     }
 
-    // Consultar servidor
-    (async () => {
-        try {
-            const nombreProducto = p.name;
-            const url = API_URL + '?action=ventasProducto&data=' + encodeURIComponent(JSON.stringify({ nombre: nombreProducto, dias: 60 }));
-            const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(12000) });
-            const resp = await r.json();
-
-            if (!resp.success) throw new Error(resp.mensaje || 'Error');
-
-            // Fusionar servidor + local (local puede tener ventas más recientes aún no subidas)
-            const mapaFusion = {};
-            (resp.dias || []).forEach(d => { mapaFusion[d.fecha] = d.qty; });
-            Object.keys(diasLocal).forEach(f => {
-                mapaFusion[f] = Math.max(mapaFusion[f] || 0, diasLocal[f]);
-            });
-
-            const diasFusion = Object.keys(mapaFusion).sort().reverse()
-                .map(f => ({ fecha: f, qty: mapaFusion[f] }));
-            const totalFusion = diasFusion.reduce((s, d) => s + d.qty, 0);
-
-            if (!diasFusion.length) {
-                infoProdSemana.innerHTML = '<div style="color:#555;font-size:.78rem;text-align:center;padding:4px 0;">Sin ventas en 60 días</div>';
-                return;
-            }
-
-            const filasSem = diasFusion.map(d => {
-                const partes = d.fecha.split('-');
-                const mes = parseInt(partes[1]);
-                const dia = parseInt(partes[2]);
-                const dw = new Date(d.fecha + 'T12:00:00').getDay();
-                const dn = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][dw];
-                return '<div style="display:flex;justify-content:space-between;padding:4px 0;">' +
-                    '<span style="color:#888;font-size:.8rem;">' + dn + ' ' + dia + ' ' + MESES_INFO[mes-1] + '</span>' +
-                    '<span style="color:#ccc;font-size:.8rem;font-weight:700;">' + d.qty + ' u</span></div>';
-            }).join('');
-
-            infoProdSemana.innerHTML =
-                '<div style="font-size:.75rem;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">ÚLTIMOS 60 DÍAS — ' + totalFusion + ' total</div>' +
-                filasSem;
-
-        } catch(e) {
-            // Fallback a datos locales si el servidor falla
-            if (totalLocal > 0) {
-                const diasArr = Object.keys(diasLocal).sort().reverse().map(f => ({ fecha: f, qty: diasLocal[f] }));
-                const filasSem = diasArr.map(d => {
-                    const partes = d.fecha.split('-');
-                    const mes = parseInt(partes[1]);
-                    const dia = parseInt(partes[2]);
-                    const dw = new Date(d.fecha + 'T12:00:00').getDay();
-                    const dn = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][dw];
-                    return '<div style="display:flex;justify-content:space-between;padding:4px 0;">' +
-                        '<span style="color:#888;font-size:.8rem;">' + dn + ' ' + dia + ' ' + MESES_INFO[mes-1] + '</span>' +
-                        '<span style="color:#ccc;font-size:.8rem;font-weight:700;">' + d.qty + ' u</span></div>';
-                }).join('');
-                infoProdSemana.innerHTML =
-                    '<div style="font-size:.75rem;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">ÚLTIMOS 60 DÍAS — ' + totalLocal + ' total <span style="color:#666;font-weight:400;">(local)</span></div>' +
-                    filasSem;
-            } else {
-                infoProdSemana.innerHTML = '<div style="color:#555;font-size:.78rem;text-align:center;padding:4px 0;">Sin ventas en 60 días</div>';
-            }
-        }
-    })();
+    const MESES_INFO = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+    if (diasSemana.length > 0) {
+        const filasSem = diasSemana.map(d => {
+            const partes = d.fecha.split('-');
+            const mes = parseInt(partes[1]);
+            const dia = parseInt(partes[2]);
+            const dw = new Date(d.fecha + 'T12:00:00').getDay();
+            const dn = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][dw];
+            return '<div style="display:flex;justify-content:space-between;padding:4px 0;">' +
+                '<span style="color:#888;font-size:.8rem;">' + dn + ' ' + dia + ' ' + MESES_INFO[mes-1] + '</span>' +
+                '<span style="color:#ccc;font-size:.8rem;font-weight:700;">' + d.qty + ' u</span></div>';
+        }).join('');
+        document.getElementById('infoProdSemana').innerHTML =
+            '<div style="font-size:.75rem;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">ÚLTIMOS 60 DÍAS — ' + totalSemana + ' total</div>' +
+            filasSem;
+    } else {
+        document.getElementById('infoProdSemana').innerHTML =
+            '<div style="color:#555;font-size:.78rem;text-align:center;padding:4px 0;">Sin ventas en 60 días</div>';
+    }
 
     const modal = document.getElementById('modalInfoProd');
     modal.style.display = 'flex';
@@ -6838,7 +6797,7 @@ async function compartirFlyerAdminWA() {
                 .catch(()=>{});
         } else {
             descargarFlyerAdmin();
-            setTimeout(() => window.open('https://wa.me/?text='+encodeURIComponent('🍺 ¡JUEVES CERVECERO en Almacén Copihue!\nOfertas en cervezas solo esta noche 🕙\n🛒 https://almacen-copihue.vercel.app'),'_blank'), 800);
+            setTimeout(() => _waB('🍺 ¡JUEVES CERVECERO en Almacén Copihue!\nOfertas en cervezas solo esta noche 🕙\n🛒 https://almacen-copihue.vercel.app'), 800);
         }
     },'image/png');
 }
@@ -7299,7 +7258,7 @@ function lcCompartirWA() {
   texto += '💰 *Total estimado: $' + Math.round(totalCosto).toLocaleString('es-AR') + '*';
   if (sinCosto > 0) texto += ' _(' + sinCosto + ' sin precio costo)_';
 
-  window.open('https://wa.me/?text=' + encodeURIComponent(texto), '_blank');
+  _waB(texto);
 }
 </script>
 
@@ -8291,7 +8250,7 @@ function _enviarWACobranzaFiado(f) {
     ].filter(l => l !== '').join('\n');
     let num = tel;
     if (!num.startsWith('549') && !num.startsWith('54')) num = '549' + num;
-    window.open(`https://wa.me/${num}?text=${encodeURIComponent(msg)}`, '_blank');
+    window._waB(msg, num);
 }
 
 // Cargar badge al iniciar
@@ -8724,7 +8683,7 @@ function _enviarFiadoWhatsApp(datosFiado, total) {
         numWA = '549' + numWA;
     }
 
-    window.open(`https://wa.me/${numWA}?text=${encodeURIComponent(msg)}`, '_blank');
+    window._waB(msg, numWA);
 }
 
 // ========== RETIRO DE CAJA ==========
