@@ -773,27 +773,59 @@
       ctx.fill(); ctx.stroke();
       ctx.restore();
 
-      // Badge estado
-      const mins = minutosParaCerrar();
-      const estaAbierto = mins > 0;
-      const badgeGrad = ctx.createLinearGradient(W/2-100, 340, W/2+100, 360);
-      badgeGrad.addColorStop(0, estaAbierto ? '#e65100' : '#7f0000');
-      badgeGrad.addColorStop(1, estaAbierto ? '#ff6f00' : '#b71c1c');
-      ctx.save();
-      ctx.fillStyle = badgeGrad;
-      ctx.beginPath();
-      ctx.roundRect(W/2-110, 330, 220, 52, 26);
-      ctx.fill();
-      ctx.restore();
+// Badge estado
+const mins = minutosParaCerrar();
+const estaAbierto = mins > 0;
+const badgeTexto = estaAbierto ? 'Abierto ahora' : 'Cerrado';
 
-      // Punto estado
-      ctx.fillStyle = estaAbierto ? '#69f0ae' : '#ef9a9a';
-      ctx.beginPath(); ctx.arc(W/2 - 72, 356, 8, 0, Math.PI*2); ctx.fill();
+ctx.save();
+ctx.font = 'bold 26px Nunito, Arial, sans-serif';
+ctx.textAlign = 'left';
+ctx.textBaseline = 'middle';
 
-      ctx.fillStyle = 'white';
-      ctx.font = 'bold 26px Nunito, Arial, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(estaAbierto ? 'Abierto ahora' : 'Cerrado', W/2 + 14, 362);
+const puntoRadio = 8;
+const gapIconoTexto = 14;
+const padX = 26;
+const badgeH = 56;
+const badgeY = 330;
+
+const textMetrics = ctx.measureText(badgeTexto);
+const textW = Math.ceil(textMetrics.width);
+const badgeW = padX + (puntoRadio * 2) + gapIconoTexto + textW + padX;
+const badgeX = Math.round((W - badgeW) / 2);
+const badgeCy = badgeY + badgeH / 2;
+
+const badgeGrad = ctx.createLinearGradient(badgeX, badgeY, badgeX + badgeW, badgeY);
+badgeGrad.addColorStop(0, estaAbierto ? '#e65100' : '#7f0000');
+badgeGrad.addColorStop(1, estaAbierto ? '#ff6f00' : '#b71c1c');
+
+ctx.fillStyle = badgeGrad;
+ctx.beginPath();
+ctx.roundRect(badgeX, badgeY, badgeW, badgeH, badgeH / 2);
+ctx.fill();
+
+// brillo suave
+ctx.shadowColor = estaAbierto ? 'rgba(255,152,0,0.45)' : 'rgba(183,28,28,0.35)';
+ctx.shadowBlur = 18;
+ctx.beginPath();
+ctx.roundRect(badgeX, badgeY, badgeW, badgeH, badgeH / 2);
+ctx.fillStyle = 'rgba(0,0,0,0)';
+ctx.fill();
+ctx.shadowBlur = 0;
+
+// punto
+const puntoCx = badgeX + padX + puntoRadio;
+ctx.fillStyle = estaAbierto ? '#69f0ae' : '#ef9a9a';
+ctx.beginPath();
+ctx.arc(puntoCx, badgeCy, puntoRadio, 0, Math.PI * 2);
+ctx.fill();
+
+// texto
+const textoX = puntoCx + puntoRadio + gapIconoTexto;
+ctx.fillStyle = 'white';
+ctx.fillText(badgeTexto, textoX, badgeCy + 1);
+
+ctx.restore();
 
       // Horario cierre
       const hCierre = String(CFG.cierreH).padStart(2,'0') + ':' + String(CFG.cierreM).padStart(2,'0');
@@ -853,34 +885,34 @@
       ctx.textAlign = 'center';
       ctx.fillText('almacen-copihue.vercel.app', W/2, H - 40);
 
-      // Convertir a blob y compartir
-      canvas.toBlob(async (blob) => {
-        const file = new File([blob], 'horario-copihue.png', { type: 'image/png' });
-        if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-          try {
-            await navigator.share({
-              files: [file],
-              title: 'Almacén Copihue — Horario',
-              text: `🏪 Almacén Copihue • Bariloche\nCerramos a las ${hCierre} hs`
-            });
-          } catch(e) {
-            if (e.name !== 'AbortError') descargarImagen(canvas);
-          }
-        } else {
-          // Fallback: descargar
-          descargarImagen(canvas);
-        }
-        btn.innerHTML = originalText;
-        btn.style.pointerEvents = '';
-      }, 'image/png');
+// Convertir a blob y compartir
+const blob = await new Promise((resolve, reject) => {
+  canvas.toBlob((b) => {
+    if (b) resolve(b);
+    else reject(new Error('No se pudo crear el blob del canvas'));
+  }, 'image/png');
+});
 
-    } catch(e) {
-      console.error(e);
-      btn.innerHTML = originalText;
-      btn.style.pointerEvents = '';
-      alert('No se pudo generar la imagen.');
-    }
+const nombreArchivo = `horario-copihue-${Date.now()}.png`;
+const file = new File([blob], nombreArchivo, { type: 'image/png' });
+
+if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+  try {
+    await navigator.share({
+      files: [file],
+      title: 'Almacén Copihue — Horario',
+      text: `🏪 Almacén Copihue • Bariloche\nCerramos a las ${hCierre} hs`
+    });
+  } catch(e) {
+    if (e.name !== 'AbortError') descargarImagen(canvas);
   }
+} else {
+  // Fallback: descargar
+  descargarImagen(canvas);
+}
+
+btn.innerHTML = originalText;
+btn.style.pointerEvents = '';
 
   function descargarImagen(canvas) {
     const a = document.createElement('a');
