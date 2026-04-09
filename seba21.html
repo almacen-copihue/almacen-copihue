@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v252</title>
+    <title>Copihue — POS v253</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -1639,6 +1639,91 @@ function badgeStock(stock) {
 // ========== CONFIG ==========
 const API_URL = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
 
+// Timeout unificado para todas las llamadas a Apps Script
+const API_TIMEOUT_MS = 25000;
+
+// ── Helper centralizado para fetch a GAS ─────────────────────────────────────
+// Uso: const data = await _apiFetch('accion', payload_opcional)
+// - Agrega timeout unificado + redirect:follow
+// - Loguea tiempo por endpoint en consola
+// - Lanza errores descriptivos (timeout, red, JSON inválido, respuesta vacía)
+async function _apiFetch(action, data = null, extraParams = '') {
+    const t0 = performance.now();
+    const url = data
+        ? API_URL + '?action=' + action + '&data=' + encodeURIComponent(JSON.stringify(data)) + '&t=' + Date.now() + extraParams
+        : API_URL + '?action=' + action + '&t=' + Date.now() + extraParams;
+    let resp;
+    try {
+        resp = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(API_TIMEOUT_MS) });
+    } catch(e) {
+        const ms = Math.round(performance.now() - t0);
+        if (e.name === 'TimeoutError' || e.message?.includes('timeout') || e.message?.includes('timed out')) {
+            console.warn(`⏱️ GAS [${action}] timeout después de ${ms}ms`);
+            throw new Error('⏱️ La planilla tardó demasiado. Intentá de nuevo en unos segundos.');
+        }
+        console.warn(`🔌 GAS [${action}] error de red (${ms}ms):`, e.message);
+        throw new Error('🔌 Sin conexión con la planilla. Verificá tu red.');
+    }
+    const ms = Math.round(performance.now() - t0);
+    if (!resp.ok) {
+        console.warn(`❌ GAS [${action}] HTTP ${resp.status} (${ms}ms)`);
+        throw new Error(`❌ Error del servidor (${resp.status}). Intentá de nuevo.`);
+    }
+    let json;
+    try {
+        const text = await resp.text();
+        if (!text || text.trim() === '') {
+            console.warn(`⚠️ GAS [${action}] respuesta vacía (${ms}ms)`);
+            throw new Error('⚠️ La planilla devolvió una respuesta vacía.');
+        }
+        json = JSON.parse(text);
+    } catch(e) {
+        if (e.message.startsWith('⚠️')) throw e;
+        console.warn(`⚠️ GAS [${action}] JSON inválido (${ms}ms)`);
+        throw new Error('⚠️ Respuesta inesperada de la planilla. Intentá de nuevo.');
+    }
+    console.log(`✅ GAS [${action}] OK (${ms}ms)`);
+    return json;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+// Variante para URLs ya construidas (parámetros especiales como monto=, telefono=)
+async function _apiFetchUrl(action, url) {
+    const t0 = performance.now();
+    let resp;
+    try {
+        resp = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(API_TIMEOUT_MS) });
+    } catch(e) {
+        const ms = Math.round(performance.now() - t0);
+        if (e.name === 'TimeoutError' || e.message?.includes('timeout') || e.message?.includes('timed out')) {
+            console.warn(`⏱️ GAS [${action}] timeout después de ${ms}ms`);
+            throw new Error('⏱️ La planilla tardó demasiado. Intentá de nuevo en unos segundos.');
+        }
+        console.warn(`🔌 GAS [${action}] error de red (${ms}ms):`, e.message);
+        throw new Error('🔌 Sin conexión con la planilla. Verificá tu red.');
+    }
+    const ms = Math.round(performance.now() - t0);
+    if (!resp.ok) {
+        console.warn(`❌ GAS [${action}] HTTP ${resp.status} (${ms}ms)`);
+        throw new Error(`❌ Error del servidor (${resp.status}). Intentá de nuevo.`);
+    }
+    let json;
+    try {
+        const text = await resp.text();
+        if (!text || text.trim() === '') {
+            console.warn(`⚠️ GAS [${action}] respuesta vacía (${ms}ms)`);
+            throw new Error('⚠️ La planilla devolvió una respuesta vacía.');
+        }
+        json = JSON.parse(text);
+    } catch(e) {
+        if (e.message.startsWith('⚠️') || e.message.startsWith('⏱️') || e.message.startsWith('🔌') || e.message.startsWith('❌')) throw e;
+        console.warn(`⚠️ GAS [${action}] JSON inválido (${ms}ms)`);
+        throw new Error('⚠️ Respuesta inesperada de la planilla. Intentá de nuevo.');
+    }
+    console.log(`✅ GAS [${action}] OK (${ms}ms)`);
+    return json;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 // ========== CONFIG PROVEEDORES ==========
 let configProveedores = [];
 const CONFIG_KEY = 'copihue_config_proveedores';
@@ -1647,7 +1732,7 @@ async function cargarConfig() {
     const guardado = localStorage.getItem(CONFIG_KEY);
     if (guardado) { try { configProveedores = JSON.parse(guardado); } catch(e) { configProveedores = []; } }
     try {
-        const r = await fetch(API_URL + '?action=getProveedores', { signal: AbortSignal.timeout(8000) });
+        const r = await _apiFetch('getProveedores');
         const data = await r.json();
         if (data.success && Array.isArray(data.proveedores)) {
             const localArr = JSON.parse(guardado || '[]');
@@ -1711,7 +1796,7 @@ function probarWAProveedor(idx) {
     const p = configProveedores[idx]; if (!p) return;
     const tel = (p.telefono || '').replace(/\D/g, '');
     const msg = (p.mensaje || 'Hola {nombre}! 🛒 Te hago el pedido.').replace('{nombre}', p.nombre).replace('{cantidad}', '2').replace('{productos}', '- Pan: 2 kg');
-    _waB(msg, tel || '');
+    window.open(tel ? 'https://wa.me/' + tel + '?text=' + encodeURIComponent(msg) : 'https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
 }
 
 async function guardarConfigProveedores() {
@@ -1719,7 +1804,7 @@ async function guardarConfigProveedores() {
     let errores = 0;
     for (const p of configProveedores) {
         try {
-            const r = await fetch(API_URL + '?action=guardarProveedor&data=' + encodeURIComponent(JSON.stringify(p)), { signal: AbortSignal.timeout(8000) });
+            const r = await _apiFetch('guardarProveedor', p);
             const resp = await r.json();
             if (!resp.success) errores++;
         } catch(e) { errores++; }
@@ -1778,7 +1863,7 @@ function enviarPedidoPanadero() {
     const tel = (cfg.telefono || '').replace(/\D/g, '');
     localStorage.setItem('pedido_panadero_sugerido_' + fechaArgentina(), '1');
     const n = document.getElementById('sugerenciaPanadero'); if (n) n.remove();
-    _waB(msg, tel || '');
+    window.open(tel ? 'https://wa.me/'+tel+'?text='+encodeURIComponent(msg) : 'https://wa.me/?text='+encodeURIComponent(msg), '_blank');
     if (!tel) mostrarToast('⚠️ Agregá el teléfono en ⚙️ Configuración', 'naranja');
 }
 
@@ -1942,7 +2027,7 @@ async function _recargaSilenciosa() {
     if (typeof productos === 'undefined' || productos.length === 0) return;
     _ultimaCargaTs = ahora;
     try {
-        const r = await fetch(API_URL + '?cache=' + ahora, { signal: AbortSignal.timeout(10000) });
+        const r = await fetch(API_URL + '?cache=' + ahora, { redirect: 'follow', signal: AbortSignal.timeout(API_TIMEOUT_MS) });
         const data = await r.json();
         const arr = data.productos || data;
         if (!arr || arr.length === 0) return;
@@ -1958,7 +2043,7 @@ async function cargarProductos() {
     const ind = document.getElementById('indicadorCarga');
     if (ind) { ind.classList.remove('ok'); ind.classList.add('cargando'); ind.title = 'Cargando...'; }
     try {
-        const r = await fetch(API_URL + '?cache=' + Date.now());
+        const r = await fetch(API_URL + '?cache=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(API_TIMEOUT_MS) });
         const data = await r.json();
         const arr = data.productos || data;
         productos = arr
@@ -3128,8 +3213,7 @@ async function confirmarVenta() {
         const ventaPayload = { items: ventaData, metodoPago: metodoPagoFinal, vendedor: vendedorActual };
         const dataEncoded = encodeURIComponent(JSON.stringify(ventaPayload));
         const url = API_URL + '?action=vender&data=' + dataEncoded;
-        const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
-        const resp = await r.json();
+        const resp = await _apiFetchUrl('vender', url);
         stockOk = resp.success === true;
         if (resp.errores && resp.errores.length > 0) {
             console.warn('⚠️ Errores de stock:', resp.errores);
@@ -3214,32 +3298,17 @@ function cerrarModalConfirm(e) {
 }
 
 function abrirWABusiness(texto) {
-    // ── WhatsApp Business unificado — siempre usa com.whatsapp.w4b ──
-    // _waB(texto)        → abre WA Business sin número (mensaje propio del local)
-    // _waB(texto, tel)   → abre WA Business hacia un número destino
-    function _waB(texto, tel) {
-        const encoded = encodeURIComponent(texto);
-        if (/android/i.test(navigator.userAgent)) {
-            const intentBase = tel
-                ? 'intent://send?phone=' + tel + '&text=' + encoded
-                : 'intent://send?text=' + encoded;
-            const fallback = tel
-                ? encodeURIComponent('https://wa.me/' + tel + '?text=' + encoded)
-                : encodeURIComponent('https://wa.me/?text=' + encoded);
-            window.location.href = intentBase +
-                '#Intent;package=com.whatsapp.w4b;scheme=whatsapp;end;' +
-                'S.browser_fallback_url=' + fallback;
-        } else {
-            const url = tel
-                ? 'https://wa.me/' + tel + '?text=' + encoded
-                : 'https://wa.me/?text=' + encoded;
-            window.open(url, '_blank');
-        }
+    // Intent directo a WhatsApp Business (chip del local)
+    const encoded = encodeURIComponent(texto);
+    if (/android/i.test(navigator.userAgent)) {
+        const fallbackUrl = encodeURIComponent('https://wa.me/?text=' + encoded);
+        window.location.href = 'intent://send?text=' + encoded +
+            '#Intent;package=com.whatsapp.w4b;scheme=whatsapp;end;' +
+            'S.browser_fallback_url=' + fallbackUrl;
+    } else {
+        window.open('https://wa.me/?text=' + encoded, '_blank');
     }
-    // Alias para compatibilidad con código existente
-    window._waB = _waB;
 }
-function abrirWABusiness(texto) { _waB(texto); }
 
 function enviarTicketWA() {
     var v = window._ultimaVenta;
@@ -3266,11 +3335,17 @@ function enviarTicketWA() {
         '*💰 Total: $' + v.total.toLocaleString('es-AR') + '*\n' +
         metodoLabel + saludo;
 
-    // Si hay cliente seleccionado → abrir WA Business con su número directo
+    // Si hay cliente seleccionado → abrir WA con su número directo
     if (_clienteActual && _clienteActual.telefono) {
         actualizarEstadisticaCliente(_clienteActual.telefono, v);
+        const encoded = encodeURIComponent(mensaje);
         const tel = '549' + _clienteActual.telefono.replace(/\D/g,'');
-        _waB(mensaje, tel);
+        if (/android/i.test(navigator.userAgent)) {
+            window.location.href = 'intent://send?phone=' + tel + '&text=' + encoded +
+                '#Intent;package=com.whatsapp;scheme=whatsapp;end;';
+        } else {
+            window.open('https://wa.me/' + tel + '?text=' + encoded, '_blank');
+        }
     } else {
         abrirWABusiness(mensaje);
     }
@@ -3511,8 +3586,7 @@ async function _reenviarVentasPendientes() {
         try {
             const payload = { items: venta.items, metodoPago: venta.metodoPago, vendedor: venta.vendedor };
             const url = API_URL + '?action=vender&data=' + encodeURIComponent(JSON.stringify(payload));
-            const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
-            const resp = await r.json();
+            const resp = await _apiFetchUrl('vender', url);
             if (resp.success) {
                 console.log('✅ Venta pendiente enviada correctamente:', venta.ts);
                 // Marcar como rebajada en el historial local
@@ -3731,8 +3805,7 @@ async function guardarNuevoProducto() {
         const costo = parseInt(document.getElementById('npCosto').value) || 0;
         const datos = { name: nombre, price: precio, stock, category: categoria, proveedor, vencimiento, precioCosto: costo };
         const url = API_URL + '?action=agregar&data=' + encodeURIComponent(JSON.stringify(datos));
-        const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
-        const resp = await r.json();
+        const resp = await _apiFetchUrl('agregar', url);
 
         if (resp.success) {
             // Agregar al array local para poder venderlo en seguida
@@ -4031,8 +4104,7 @@ async function generarQRDinamico(monto) {
 
     try {
         const url = API_URL + '?action=crearOrdenMP&monto=' + Math.round(monto);
-        const resp = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
-        const data = await resp.json();
+        const data = await _apiFetchUrl('crearOrdenMP', url);
 
         if (data.ok && data.url) {
             qrMP.innerHTML = '';
@@ -4333,8 +4405,7 @@ async function guardarIngreso() {
         const catIng = ingCategoriaSeleccionada || null;
         const datos = { producto: nombre, cantidad, precioCosto: costo, precioVenta: venta, proveedor, fechaVencimiento: vencimiento, categoria: catIng };
         const url = API_URL + '?action=ingresar&data=' + encodeURIComponent(JSON.stringify(datos));
-        const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
-        const resp = await r.json();
+        const resp = await _apiFetchUrl('ingresar', url);
 
         if (resp.success) {
             mostrarToast(resp.esNuevo ? '🆕 Producto nuevo creado' : '📦 Ingreso guardado', 'verde');
@@ -4440,8 +4511,7 @@ async function bajarStockRapido(id) {
             nombreNuevo: null
         };
         const url = API_URL + '?action=ajusteRapido&data=' + encodeURIComponent(JSON.stringify(datos));
-        const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(10000) });
-        const resp = await r.json();
+        const resp = await _apiFetchUrl('ajusteRapido', url);
         if (resp.success) {
             p.stock = nuevoStock;
             mostrarToast(`✅ Stock ${p.name.substring(0,20)} → ${nuevoStock}`, 'verde');
@@ -4574,8 +4644,7 @@ async function guardarAjuste() {
             categoriaDespues: catAjuste !== ajusteProducto.category ? catAjuste : null
         };
         const url = API_URL + '?action=ajusteRapido&data=' + encodeURIComponent(JSON.stringify(datos));
-        const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
-        const resp = await r.json();
+        const resp = await _apiFetchUrl('registrarMovimientoCaja', url);
         if (resp.success) {
             ajusteProducto.stock = ajusteValor;
             const nombreNuevoLocal = document.getElementById('ajusteNombreNuevo').value.trim().toUpperCase();
@@ -4879,8 +4948,7 @@ async function ponerStockEnCero(p) {
         const datos = { producto: p.name, cantidad: 0, stockDirecto: 0,
                         precioVenta: null, precioCosto: null, proveedor: null, fechaVencimiento: null };
         const url = API_URL + '?action=ingresar&data=' + encodeURIComponent(JSON.stringify(datos));
-        const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
-        const resp = await r.json();
+        const resp = await _apiFetchUrl('ingresar', url);
         if (resp.success) { p.stock = 0; return true; }
         console.warn('⚠️ ponerStockEnCero falló:', resp.mensaje, '| producto:', p.name);
     } catch(e) {
@@ -5264,8 +5332,7 @@ function sugerirRelampago() {
             // Solo escribir código Relámpago en columna G — el descuento lo calcula el algoritmo
             const datos = { productoId: id, tipo: tipoUU, limpiarOfertas: false };
             const url = API_URL + '?action=relampago&data=' + encodeURIComponent(JSON.stringify(datos));
-            const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
-            const res = await r.json();
+            const res = await _apiFetchUrl('relampago', url);
 
             if (res.success) {
                 localStorage.setItem('relampago_activado_' + hoyKey, nombre);
@@ -5414,8 +5481,7 @@ async function verificarOfertasAutomaticas() {
         if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
         try {
             const url = API_URL + '?action=relampago&data=' + encodeURIComponent(JSON.stringify({ productoId: id, tipo, limpiarOfertas: true }));
-            const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
-            const res = await r.json();
+            const res = await _apiFetchUrl('relampago', url);
             if (res.success) {
                 const p = productos.find(x => x.id === id);
                 if (p) p.relampago = tipo;
@@ -5604,8 +5670,7 @@ function actualizarEstadisticaCliente(telefono, venta) {
     // Backup en planilla GAS (fire and forget)
     try {
         const datos = { accion: 'upsertCliente', cliente: c };
-        fetch(API_URL + '?action=cliente&data=' + encodeURIComponent(JSON.stringify(datos)), { redirect: 'follow' })
-            .catch(() => {});
+        _apiFetch('cliente', datos).catch(() => {});
     } catch(e) {}
 }
 
@@ -5748,7 +5813,7 @@ function _construirPoolsLocalFallback() {
 
 async function cargarPoolsOfertas() {
     try {
-        const r = await fetch(API_URL + '?action=getOfertas&t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(8000) });
+        const r = await _apiFetch('getOfertas');
         const data = await r.json();
         if (!data.success) { _construirPoolsLocalFallback(); reporteOfertasPOS('post-pools'); _refreshResultadosBadges(); return; }
         _poolIdsRelampago.clear(); _poolIdsDestacadas.clear(); _poolIdsEspeciales.clear(); _poolIdsUltimas.clear();
@@ -5773,7 +5838,7 @@ async function cargarPoolsOfertas() {
     }
     // Cargar pool Jueves Cervecero
     try {
-        const r2 = await fetch(API_URL + '?action=getJuevesCervecero&t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(8000) });
+        const r2 = await _apiFetch('getJuevesCervecero');
         const d2 = await r2.json();
         _poolCervecero.clear();
         if (d2.success && d2.productos && d2.productos.length > 0) {
@@ -6062,7 +6127,7 @@ let _horaCierreSistema = 22; // fallback mientras carga
 // ── Cargar horario desde config_sistema ──
 async function _cargarHorarioSistema() {
     try {
-        const r = await fetch(API_URL + '?action=getConfig&t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(8000) });
+        const r = await _apiFetch('getConfig');
         const data = await r.json();
         if (!data.success || !data.config) return;
         const cfg = data.config;
@@ -6102,8 +6167,7 @@ function _dentroDeHorario(cfg, tipo, diaIdx) {
 
 async function cargarEstadoToggles() {
     try {
-        const r = await fetch(API_URL + '?action=getConfig&t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(8000) });
-        const data = await r.json();
+        const data = await _apiFetch('getConfig');
         if (!data.success) return;
         const cfg = data.config;
         const diaIdx = _diaActualIdx();
@@ -6157,14 +6221,13 @@ async function toggleOferta(tipo) {
     try {
         const datos = { seccion: tipo, clave: cfg.clave, dia: diaIdx, valor: nuevoValor };
         const url = API_URL + '?action=setConfig&data=' + encodeURIComponent(JSON.stringify(datos));
-        const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(10000) });
-        const resp = await r.json();
+        const resp = await _apiFetchUrl('setConfig', url);
         if (resp.success) {
             _guardarTogglesPersistidos();
             const labels = { 'on': '🔒 Forzado ON', 'auto': '⏰ Automático (respeta horario)', 'off': '✗ Forzado OFF' };
             mostrarToast(cfg.emoji + ' ' + tipo + ' → ' + labels[nuevoModo], nuevoModo === 'off' ? 'rojo' : 'verde');
             const logDatos = { tipo, estado: nuevoValor, vendedor: vendedorActual || 'POS' };
-            fetch(API_URL + '?action=logInterruptor&data=' + encodeURIComponent(JSON.stringify(logDatos)), { redirect: 'follow' }).catch(() => {});
+            _apiFetch('logInterruptor', logDatos).catch(() => {});
             if (nuevoModo === 'auto') setTimeout(() => cargarEstadoToggles(), 500);
         } else {
             _toggleModo[tipo] = modoActual;
@@ -6591,7 +6654,7 @@ async function abrirFlyerAdmin() {
     mostrarToast('⏳ Cargando cervezas...', 'verde');
     try {
         const r = await fetch(GAS_URL_FLYER + '?action=getJuevesCervecero&t=' + Date.now(),
-                              { redirect: 'follow', signal: AbortSignal.timeout(12000) });
+                              { redirect: 'follow', signal: AbortSignal.timeout(API_TIMEOUT_MS) });
         const data = await r.json();
         if (!data.success || !data.productos.length) {
             mostrarToast('⚠️ Sin cervezas disponibles para flyer', 'rojo'); return;
@@ -6797,7 +6860,7 @@ async function compartirFlyerAdminWA() {
                 .catch(()=>{});
         } else {
             descargarFlyerAdmin();
-            setTimeout(() => _waB('🍺 ¡JUEVES CERVECERO en Almacén Copihue!\nOfertas en cervezas solo esta noche 🕙\n🛒 https://almacen-copihue.vercel.app'), 800);
+            setTimeout(() => window.open('https://wa.me/?text='+encodeURIComponent('🍺 ¡JUEVES CERVECERO en Almacén Copihue!\nOfertas en cervezas solo esta noche 🕙\n🛒 https://almacen-copihue.vercel.app'),'_blank'), 800);
         }
     },'image/png');
 }
@@ -7019,10 +7082,7 @@ async function abrirListaCompra() {
   document.getElementById('lcCuerpo').innerHTML = '<div style="text-align:center;padding:40px;color:#aaa;">⏳ Consultando inventario...</div>';
 
   try {
-    const r = await fetch(API_URL + '?action=getListaCompra&t=' + Date.now(), {
-      redirect: 'follow',
-      signal: AbortSignal.timeout(15000)
-    });
+    const r = await _apiFetch('getListaCompra');
     const data = await r.json();
 
     if (!data.ok || !data.items) {
@@ -7169,9 +7229,7 @@ async function lcTogglePausado(id, btn) {
   lcRenderizar('todos');
 
   // API en segundo plano
-  fetch(API_URL + '?action=setPausadoListaCompra&data=' + encodeURIComponent(JSON.stringify({ id: id, pausado: nuevoPausado ? 'SI' : '' })),
-    { redirect: 'follow' }
-  ).then(function(r){ return r.json(); }).then(function(resp){
+  _apiFetch('setPausadoListaCompra', { id: id, pausado: nuevoPausado ? 'SI' : '' }).then(function(r){ return r.json(); }).then(function(resp){
     if (!resp.success) {
       p.pausadoListaCompra = pausado ? 'SI' : '';
       if (lcItem) { lcItem.pausado = pausado; lcItem.urgencia = pausado ? 99 : 7; lcItem.prioridad = pausado ? 'PAUSADO' : 'OK'; }
@@ -7258,7 +7316,7 @@ function lcCompartirWA() {
   texto += '💰 *Total estimado: $' + Math.round(totalCosto).toLocaleString('es-AR') + '*';
   if (sinCosto > 0) texto += ' _(' + sinCosto + ' sin precio costo)_';
 
-  _waB(texto);
+  window.open('https://wa.me/?text=' + encodeURIComponent(texto), '_blank');
 }
 </script>
 
@@ -7873,23 +7931,23 @@ async function abrirSelectorUltimas() {
     document.getElementById('ultiCuerpo').innerHTML = '<div style="text-align:center;padding:40px;color:#aaa;">⏳ Analizando inventario...</div>';
 
     try {
-        const r = await fetch(API_URL + '?action=getCandidatosUltimas&t=' + Date.now(), {
-            redirect: 'follow', signal: AbortSignal.timeout(12000)
-        });
-        const data = await r.json();
+        const data = await _apiFetch('getCandidatosUltimas');
         if (!data.ok) throw new Error(data.error || 'Error');
-
         _candidatosUltimas = data.candidatos || [];
 
         // Cargar selección vigente del día
-        const rs = await fetch(API_URL + '?action=getUltimasSeleccion&t=' + Date.now(), { redirect: 'follow' });
-        const ds = await rs.json();
+        const ds = await _apiFetch('getUltimasSeleccion');
         _ultimasSeleccionados = new Set((ds.seleccion || []).map(Number));
 
         ultiRenderizar();
 
     } catch(e) {
-        document.getElementById('ultiCuerpo').innerHTML = '<div style="text-align:center;padding:40px;color:#e53935;">❌ ' + e.message + '</div>';
+        const esTimeout = e.message?.startsWith('⏱️') || e.message?.startsWith('🔌');
+        document.getElementById('ultiCuerpo').innerHTML =
+            '<div style="text-align:center;padding:30px;color:#e53935;">' +
+            e.message +
+            '<br><br><button onclick="abrirSelectorUltimas()" style="padding:10px 20px;background:#c62828;color:white;border:none;border-radius:10px;font-weight:700;cursor:pointer;">🔄 Reintentar</button>' +
+            '</div>';
     }
 }
 
@@ -7956,8 +8014,7 @@ async function ultiGuardar() {
 
     const ids = Array.from(_ultimasSeleccionados);
     try {
-        const r = await fetch(API_URL + '?action=guardarUltimasSeleccion&data=' +
-            encodeURIComponent(JSON.stringify(ids)), { redirect: 'follow' });
+        const r = await _apiFetch('guardarUltimasSeleccion', ids);
         const d = await r.json();
         if (!d.ok) throw new Error(d.error);
 
@@ -8024,7 +8081,7 @@ async function abrirPanelFiados() {
     document.getElementById('fiadoPanelSubtitulo').textContent = 'Cargando...';
     document.getElementById('fiadoPanelCuerpo').innerHTML = '<div style="text-align:center;padding:40px;color:#aaa;">⏳ Consultando planilla...</div>';
     try {
-        const r = await fetch(API_URL + '?action=listarFiados&t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(10000) });
+        const r = await _apiFetch('listarFiados');
         const data = await r.json();
         if (!data.ok) throw new Error(data.error || 'Error al cargar');
         _fiadosPendientes = data.fiados || [];
@@ -8204,8 +8261,7 @@ async function confirmarCobroPendiente() {
         const fechaPago = new Date().toISOString().split('T')[0];
         for (const fiad of seleccionados) {
             const datos = { idFiado: fiad.idFiado, metodoPago: _metodoCobroPendiente, fechaPago };
-            const r = await fetch(API_URL + '?action=cobrarFiado&data=' + encodeURIComponent(JSON.stringify(datos)),
-                { redirect: 'follow', signal: AbortSignal.timeout(10000) });
+            const r = await _apiFetch('cobrarFiado', datos);
             const resp = await r.json();
             if (!resp.success) throw new Error('Error en ' + fiad.idFiado + ': ' + (resp.mensaje || 'Error'));
         }
@@ -8250,13 +8306,13 @@ function _enviarWACobranzaFiado(f) {
     ].filter(l => l !== '').join('\n');
     let num = tel;
     if (!num.startsWith('549') && !num.startsWith('54')) num = '549' + num;
-    window._waB(msg, num);
+    window.open(`https://wa.me/${num}?text=${encodeURIComponent(msg)}`, '_blank');
 }
 
 // Cargar badge al iniciar
 setTimeout(async () => {
     try {
-        const r = await fetch(API_URL + '?action=listarFiados&t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(8000) });
+        const r = await _apiFetch('listarFiados');
         const data = await r.json();
         if (data.ok && data.fiados) {
             _fiadosPendientes = data.fiados;
@@ -8282,8 +8338,7 @@ async function togglePausarListaCompra() {
 
     try {
         const datos = { id, pausado: nuevoPausado ? 'SI' : '' };
-        const r = await fetch(API_URL + '?action=setPausadoListaCompra&data=' + encodeURIComponent(JSON.stringify(datos)),
-            { redirect: 'follow', signal: AbortSignal.timeout(10000) });
+        const r = await _apiFetch('setPausadoListaCompra', datos);
         const resp = await r.json();
         if (resp.success) {
             p.pausadoListaCompra = nuevoPausado ? 'SI' : '';
@@ -8415,8 +8470,7 @@ async function confirmarSalidaInterna() {
             vendedor:  vendedorActual || ''
         };
         const url = API_URL + '?action=salidaInterna&data=' + encodeURIComponent(JSON.stringify(datos));
-        const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
-        const resp = await r.json();
+        const resp = await _apiFetchUrl('salidaInterna', url);
 
         if (resp.success) {
             // Actualizar stock local
@@ -8484,8 +8538,7 @@ function fiadoBuscarDeuda() {
 async function _consultarDeudaFiado(telefono) {
     try {
         const url = API_URL + '?action=consultarFiado&telefono=' + encodeURIComponent(telefono) + '&t=' + Date.now();
-        const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(8000) });
-        const data = await r.json();
+        const data = await _apiFetchUrl('consultarFiado', url);
         const alerta = document.getElementById('fiadoAlertaDeuda');
         if (data.ok && data.deuda && data.deuda.total > 0) {
             _fiadoDatosCliente = data.deuda;
@@ -8599,8 +8652,7 @@ async function _procesarVentaFiado(datosFiado) {
             clienteFiado: datosFiado.cliente || '',
             telefonoFiado: datosFiado.telefono || '' };
         const url = API_URL + '?action=vender&data=' + encodeURIComponent(JSON.stringify(ventaPayload));
-        const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
-        const resp = await r.json();
+        const resp = await _apiFetchUrl('vender', url);
         stockOk = resp.success === true;
         ticketNum = resp.ticket || resp.numeroTicket || null;
     } catch(e) { console.warn('⚠️ Error venta fiado:', e); }
@@ -8610,7 +8662,7 @@ async function _procesarVentaFiado(datosFiado) {
     // 2. Guardar en hoja FIADOS
     try {
         const url2 = API_URL + '?action=guardarFiado&data=' + encodeURIComponent(JSON.stringify(datosFiado));
-        await fetch(url2, { redirect: 'follow', signal: AbortSignal.timeout(10000) });
+        await _apiFetchUrl('guardarFiado', url2);
     } catch(e) { console.warn('⚠️ Error guardar fiado:', e); }
 
     // 3. Guardar historial local
@@ -8683,7 +8735,7 @@ function _enviarFiadoWhatsApp(datosFiado, total) {
         numWA = '549' + numWA;
     }
 
-    window._waB(msg, numWA);
+    window.open(`https://wa.me/${numWA}?text=${encodeURIComponent(msg)}`, '_blank');
 }
 
 // ========== RETIRO DE CAJA ==========
@@ -8767,8 +8819,7 @@ async function confirmarRetiroCaja() {
         };
 
         const url = API_URL + '?action=registrarMovimientoCaja&data=' + encodeURIComponent(JSON.stringify(payload));
-        const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
-        const resp = await r.json();
+        const resp = await _apiFetchUrl('registrarMovimientoCaja', url);
 
         if (resp.success) {
             cerrarRetiroCaja();
