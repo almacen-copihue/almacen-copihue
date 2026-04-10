@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v256</title>
+    <title>Copihue — POS v257</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -1582,16 +1582,6 @@
             <button class="btn-cancelar-confirm" onclick="cerrarConfirm()">Cancelar</button>
             <button class="btn-ok-confirm" id="btnOkConfirm" onclick="confirmarVenta()">
                 ✅ Confirmar cobro
-            </button>
-        </div>
-        <!-- Ticket WhatsApp fiado (aparece después de confirmar fiado) -->
-        <div id="btnFiadoWA" style="display:none;padding:0 20px 8px;">
-            <button onclick="(function(){ var d=window._ultimoFiadoWA; if(d) _enviarFiadoWhatsApp(d.datosFiado,d.total); })()"
-                    style="width:100%;padding:12px;border:none;border-radius:14px;
-                           background:linear-gradient(135deg,#25D366,#128C7E);
-                           color:white;font-size:0.95rem;font-weight:900;cursor:pointer;
-                           display:flex;align-items:center;justify-content:center;gap:8px;">
-                <span style="font-size:1.2rem;">📲</span> Enviar comprobante de fiado
             </button>
         </div>
         <!-- Ticket WhatsApp (aparece después de confirmar) -->
@@ -3369,8 +3359,6 @@ function cerrarConfirm() {
     document.removeEventListener('keydown', _keyHandlerConfirm);
     const btnTicket = document.getElementById('btnTicketWA');
     if (btnTicket) btnTicket.style.display = 'none';
-    const btnFiadoWAClose = document.getElementById('btnFiadoWA');
-    if (btnFiadoWAClose) { btnFiadoWAClose.style.display = 'none'; window._ultimoFiadoWA = null; }
     const btnOk = document.getElementById('btnOkConfirm');
     if (btnOk) { btnOk.textContent = '✅ Confirmar cobro'; btnOk.disabled = false; btnOk.onclick = confirmarVenta; }
     const btnCancelar = document.querySelector('.btn-cancelar-confirm');
@@ -8621,8 +8609,10 @@ async function confirmarFiado() {
     };
 
     try {
-        // 1. Procesar venta normal (descuenta stock, guarda en ventas con método FIADO)
+        // 1. Abrir WA ANTES del await — Android bloquea window.open dentro de async
         document.getElementById('modalFiado').style.display = 'none';
+        _enviarFiadoWhatsApp(datosFiado, Math.round(total));
+        // 2. Procesar venta (descuenta stock, guarda en ventas con método FIADO)
         await _procesarVentaFiado(datosFiado);
     } catch(e) {
         mostrarToast('❌ Error al registrar: ' + e.message, 'rojo');
@@ -8679,33 +8669,17 @@ async function _procesarVentaFiado(datosFiado) {
         else p.stock = Math.max(0, p.stock - item.qty);
     });
 
-    // 5. Cerrar modal de confirmación de venta
-    const modalConfirmar = document.getElementById('modalConfirmarVenta') || document.querySelector('.modal-confirmar');
-    if (modalConfirmar) modalConfirmar.style.display = 'none';
-    // También cerrar cualquier modal que esté abierto
-    document.querySelectorAll('[id^="modal"]').forEach(m => {
-        if (m.id !== 'modalFiado') m.style.display = 'none';
-    });
-
-    // 6. Toast y cierre de carrito
+    // 5. Toast y cierre de carrito
     mostrarToast(`✅ Fiado de ${datosFiado.cliente} registrado — $${Math.round(total).toLocaleString('es-AR')}`, 'naranja');
     seleccionarMetodo('efectivo');
     ventaActual = [];
     localStorage.removeItem(CARRITO_KEY);
     actualizarRanking();
     renderVenta();
-    // Cerrar modal de confirmación (desktop y mobile)
-    const modalConfirm = document.getElementById('modalConfirm');
-    if (modalConfirm) modalConfirm.classList.remove('open');
+    actualizarTotalConRedondeo();
     // Restaurar botón Cobrar
     const btnOk = document.getElementById('btnOkConfirm');
     if (btnOk) { btnOk.textContent = '✅ Confirmar cobro'; btnOk.disabled = false; btnOk.onclick = confirmarVenta; }
-    actualizarTotalConRedondeo();
-
-    // 7. WhatsApp — guardar datos y mostrar botón (window.open automático es bloqueado por Android)
-    window._ultimoFiadoWA = { datosFiado, total };
-    const btnFiadoWA = document.getElementById('btnFiadoWA');
-    if (btnFiadoWA) btnFiadoWA.style.display = 'block';
 }
 
 function _enviarFiadoWhatsApp(datosFiado, total) {
