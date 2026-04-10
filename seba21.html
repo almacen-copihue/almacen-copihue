@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v255</title>
+    <title>Copihue — POS v256</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -1582,6 +1582,16 @@
             <button class="btn-cancelar-confirm" onclick="cerrarConfirm()">Cancelar</button>
             <button class="btn-ok-confirm" id="btnOkConfirm" onclick="confirmarVenta()">
                 ✅ Confirmar cobro
+            </button>
+        </div>
+        <!-- Ticket WhatsApp fiado (aparece después de confirmar fiado) -->
+        <div id="btnFiadoWA" style="display:none;padding:0 20px 8px;">
+            <button onclick="(function(){ var d=window._ultimoFiadoWA; if(d) _enviarFiadoWhatsApp(d.datosFiado,d.total); })()"
+                    style="width:100%;padding:12px;border:none;border-radius:14px;
+                           background:linear-gradient(135deg,#25D366,#128C7E);
+                           color:white;font-size:0.95rem;font-weight:900;cursor:pointer;
+                           display:flex;align-items:center;justify-content:center;gap:8px;">
+                <span style="font-size:1.2rem;">📲</span> Enviar comprobante de fiado
             </button>
         </div>
         <!-- Ticket WhatsApp (aparece después de confirmar) -->
@@ -3208,7 +3218,8 @@ async function confirmarVenta() {
         }));
         // Agregar método de pago al request
         metodoPagoFinal = metodoPagoActual.toUpperCase();
-        const ventaPayload = { items: ventaData, metodoPago: metodoPagoFinal, vendedor: vendedorActual };
+        const idVenta = 'v_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+        const ventaPayload = { items: ventaData, metodoPago: metodoPagoFinal, vendedor: vendedorActual, idVenta };
         const dataEncoded = encodeURIComponent(JSON.stringify(ventaPayload));
         const url = API_URL + '?action=vender&data=' + dataEncoded;
         const resp = await _apiFetchUrl('vender', url);
@@ -3238,6 +3249,7 @@ async function confirmarVenta() {
             })),
             metodoPago: metodoPagoFinal || metodoPagoActual,
             vendedor: vendedorActual,
+            idVenta,
             ts: Date.now()
         };
         // Encolar en localStorage para reintento
@@ -3357,6 +3369,8 @@ function cerrarConfirm() {
     document.removeEventListener('keydown', _keyHandlerConfirm);
     const btnTicket = document.getElementById('btnTicketWA');
     if (btnTicket) btnTicket.style.display = 'none';
+    const btnFiadoWAClose = document.getElementById('btnFiadoWA');
+    if (btnFiadoWAClose) { btnFiadoWAClose.style.display = 'none'; window._ultimoFiadoWA = null; }
     const btnOk = document.getElementById('btnOkConfirm');
     if (btnOk) { btnOk.textContent = '✅ Confirmar cobro'; btnOk.disabled = false; btnOk.onclick = confirmarVenta; }
     const btnCancelar = document.querySelector('.btn-cancelar-confirm');
@@ -3582,7 +3596,7 @@ async function _reenviarVentasPendientes() {
     const restantes = [];
     for (const venta of pendientes) {
         try {
-            const payload = { items: venta.items, metodoPago: venta.metodoPago, vendedor: venta.vendedor };
+            const payload = { items: venta.items, metodoPago: venta.metodoPago, vendedor: venta.vendedor, idVenta: venta.idVenta };
             const url = API_URL + '?action=vender&data=' + encodeURIComponent(JSON.stringify(payload));
             const resp = await _apiFetchUrl('vender', url);
             if (resp.success) {
@@ -8688,8 +8702,10 @@ async function _procesarVentaFiado(datosFiado) {
     if (btnOk) { btnOk.textContent = '✅ Confirmar cobro'; btnOk.disabled = false; btnOk.onclick = confirmarVenta; }
     actualizarTotalConRedondeo();
 
-    // 7. WhatsApp — compromiso de pago al cliente
-    _enviarFiadoWhatsApp(datosFiado, total);
+    // 7. WhatsApp — guardar datos y mostrar botón (window.open automático es bloqueado por Android)
+    window._ultimoFiadoWA = { datosFiado, total };
+    const btnFiadoWA = document.getElementById('btnFiadoWA');
+    if (btnFiadoWA) btnFiadoWA.style.display = 'block';
 }
 
 function _enviarFiadoWhatsApp(datosFiado, total) {
