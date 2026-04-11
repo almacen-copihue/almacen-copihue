@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v258</title>
+    <title>Copihue — POS v259</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -5723,38 +5723,10 @@ function abrirInfoProd(id) {
             `<div style="color:#555;font-size:.82rem;text-align:center;padding:8px 0;">Sin ventas hoy</div>`;
     }
 
-    // Ventas últimos 60 días desde localStorage (incluye hoy)
-    let totalSemana = 0;
-    const diasSemana = [];
-    for (let d = 0; d <= 60; d++) {
-        const fechaStr = fechaArgentina(-d);
-        const key = 'copihue_ventas_' + fechaStr;
-        const ventas = JSON.parse(localStorage.getItem(key) || '[]');
-        const qty = ventas.flatMap(v => (v.items || []))
-            .filter(i => String(i.esPeso ? i.idOriginal : i.id) === String(id))
-            .reduce((s, i) => s + (i.qty || 1), 0);
-        if (qty > 0) { diasSemana.push({ fecha: fechaStr, qty }); totalSemana += qty; }
-    }
-
-    const MESES_INFO = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
-    if (diasSemana.length > 0) {
-        const filasSem = diasSemana.map(d => {
-            const partes = d.fecha.split('-');
-            const mes = parseInt(partes[1]);
-            const dia = parseInt(partes[2]);
-            const dw = new Date(d.fecha + 'T12:00:00').getDay();
-            const dn = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][dw];
-            return '<div style="display:flex;justify-content:space-between;padding:4px 0;">' +
-                '<span style="color:#888;font-size:.8rem;">' + dn + ' ' + dia + ' ' + MESES_INFO[mes-1] + '</span>' +
-                '<span style="color:#ccc;font-size:.8rem;font-weight:700;">' + d.qty + ' u</span></div>';
-        }).join('');
-        document.getElementById('infoProdSemana').innerHTML =
-            '<div style="font-size:.75rem;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">ÚLTIMOS 60 DÍAS — ' + totalSemana + ' total</div>' +
-            filasSem;
-    } else {
-        document.getElementById('infoProdSemana').innerHTML =
-            '<div style="color:#555;font-size:.78rem;text-align:center;padding:4px 0;">Sin ventas en 60 días</div>';
-    }
+    // Ventas últimos 60 días desde planilla (async, se carga después de mostrar el modal)
+    document.getElementById('infoProdSemana').innerHTML =
+        '<div style="color:#555;font-size:.78rem;text-align:center;padding:4px 0;">⏳ Cargando desde planilla...</div>';
+    _cargarVentas60Dias(p.name, id);
 
     const modal = document.getElementById('modalInfoProd');
     modal.style.display = 'flex';
@@ -5773,6 +5745,35 @@ function cerrarInfoProd(e) {
     // Soporta: cerrarInfoProd() sin args O cerrarInfoProd(event) desde fondo
     if (e && e.target && e.target !== document.getElementById('modalInfoProd')) return;
     document.getElementById('modalInfoProd').style.display = 'none';
+}
+
+async function _cargarVentas60Dias(nombre, id) {
+    const el = document.getElementById('infoProdSemana');
+    if (!el) return;
+    try {
+        const url = API_URL + '?action=getVentasProducto&data=' + encodeURIComponent(JSON.stringify({ nombre: nombre.trim().toUpperCase(), dias: 60 }));
+        const data = await _apiFetchUrl('getVentasProducto', url);
+        if (!data.success || !data.dias || data.dias.length === 0) {
+            el.innerHTML = '<div style="color:#555;font-size:.78rem;text-align:center;padding:4px 0;">Sin ventas en 60 días</div>';
+            return;
+        }
+        const MESES_INFO = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+        const filasSem = data.dias.map(d => {
+            const partes = d.fecha.split('-');
+            const mes = parseInt(partes[1]);
+            const dia = parseInt(partes[2]);
+            const dw = new Date(d.fecha + 'T12:00:00').getDay();
+            const dn = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][dw];
+            return '<div style="display:flex;justify-content:space-between;padding:4px 0;">' +
+                '<span style="color:#888;font-size:.8rem;">' + dn + ' ' + dia + ' ' + MESES_INFO[mes-1] + '</span>' +
+                '<span style="color:#ccc;font-size:.8rem;font-weight:700;">' + d.qty + ' u</span></div>';
+        }).join('');
+        el.innerHTML =
+            '<div style="font-size:.75rem;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">ÚLTIMOS 60 DÍAS — ' + data.total + ' total</div>' +
+            filasSem;
+    } catch(e) {
+        if (el) el.innerHTML = '<div style="color:#555;font-size:.78rem;text-align:center;padding:4px 0;">Sin conexión con planilla</div>';
+    }
 }
 
 
