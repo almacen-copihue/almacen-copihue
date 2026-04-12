@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v262</title>
+    <title>Copihue — POS v263</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3186,6 +3186,7 @@ async function confirmarVenta() {
     btn.disabled = true;
     btn.textContent = '⏳ Procesando...';
 
+    try {
     const totalOriginal = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
     const total = window._totalConRedondeo || totalOriginal;
     const descuentoRedondeo = window._descuentoRedondeo || 0;
@@ -3291,6 +3292,11 @@ async function confirmarVenta() {
 
     mostrarToast(stockOk ? '✅ Venta confirmada' : '✅ Venta registrada (stock manual)', 'verde');
     setTimeout(sugerirPedidoPanadero, 1200);
+    } catch(e) {
+        console.error('❌ confirmarVenta error:', e);
+        mostrarToast('❌ Error al procesar. Intentá de nuevo.', 'rojo');
+        if (btn) { btn.disabled = false; btn.textContent = '✅ Confirmar cobro'; }
+    }
 }
 
 function cerrarModalConfirm(e) {
@@ -3351,6 +3357,8 @@ function cerrarConfirm() {
     document.getElementById('modalConfirm').classList.remove('open');
     // Restaurar FABs si hay items en el carrito
     if (MOBILE && ventaActual.length > 0) document.getElementById('fabStack').style.display = 'flex';
+    // Safety: liberar cualquier guard de venta colgado
+    window._fiadoEnProceso = false;
     // Desactivar atajos de teclado
     document.removeEventListener('keydown', _keyHandlerConfirm);
     const btnTicket = document.getElementById('btnTicketWA');
@@ -8578,6 +8586,8 @@ async function confirmarFiado() {
     // Guard — evitar doble ejecución
     if (window._fiadoEnProceso) return;
     window._fiadoEnProceso = true;
+    // Safety timeout — libera el guard en caso de error inesperado
+    const _fiadoGuardTimeout = setTimeout(() => { window._fiadoEnProceso = false; }, 30000);
 
     const btn = document.querySelector('#modalFiado button[onclick="confirmarFiado()"]');
     if (btn) { btn.disabled = true; btn.textContent = '⏳ Registrando...'; }
@@ -8616,6 +8626,7 @@ async function confirmarFiado() {
         mostrarToast('❌ Error al registrar: ' + e.message, 'rojo');
         if (btn) { btn.disabled = false; btn.textContent = '🧾 Registrar fiado'; }
     } finally {
+        clearTimeout(_fiadoGuardTimeout);
         window._fiadoEnProceso = false;
     }
 }
