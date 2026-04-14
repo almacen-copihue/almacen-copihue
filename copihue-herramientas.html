@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-<title>v3 · Copihue · Herramientas</title>
+<title>v4 · Copihue · Herramientas</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;700&display=swap');
 
@@ -531,6 +531,49 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 #toast.ok { border-left: 3px solid var(--accent2); }
 #toast.err { border-left: 3px solid var(--danger); }
 
+/* ── FIADOS EXTRAS ──────────────────── */
+.fiados-sort-bar {
+  display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; align-items: center;
+}
+.fsort-btn {
+  padding: 5px 12px; border-radius: 20px;
+  border: 1px solid var(--border); background: transparent;
+  color: var(--muted); font-size: 0.75rem; cursor: pointer;
+  font-family: var(--font); transition: all 0.15s;
+}
+.fsort-btn.active { background: var(--accent); border-color: var(--accent); color: #000; font-weight: 700; }
+.fiado-card.selected { border-color: var(--accent2); background: rgba(16,185,129,0.05); }
+.fiado-check {
+  width: 20px; height: 20px; border-radius: 6px;
+  border: 2px solid var(--border); background: transparent;
+  cursor: pointer; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s; font-size: 0.7rem;
+}
+.fiado-check.checked { background: var(--accent2); border-color: var(--accent2); color: #000; }
+.fab-cobrar-sel {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px);
+  background: var(--accent2); color: #000; font-weight: 700; font-size: 0.88rem;
+  padding: 12px 24px; border-radius: 30px; border: none; cursor: pointer;
+  font-family: var(--font); z-index: 500; transition: transform 0.3s, box-shadow 0.2s;
+  box-shadow: 0 4px 20px rgba(16,185,129,0.4); white-space: nowrap;
+}
+.fab-cobrar-sel.show { transform: translateX(-50%) translateY(0); }
+.fab-cobrar-sel:hover { box-shadow: 0 6px 28px rgba(16,185,129,0.55); }
+.pagados-toggle {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px; background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; cursor: pointer; margin-bottom: 8px;
+  font-size: 0.82rem; color: var(--muted); transition: background 0.15s;
+}
+.pagados-toggle:hover { background: rgba(255,255,255,0.03); }
+.pagados-toggle .pt-label { font-weight: 600; color: var(--text); }
+.pagados-toggle .pt-arrow { transition: transform 0.2s; }
+.pagados-toggle.open .pt-arrow { transform: rotate(180deg); }
+.pagados-lista { display: none; }
+.pagados-lista.open { display: block; }
+.fiado-card.pagado { border-left: 3px solid var(--accent2); opacity: 0.7; }
+.fiado-card.pagado .fiado-monto { color: var(--accent2); }
+
 /* ── IFRAME SECTION ─────────────────── */
 .iframe-wrap {
   position: relative;
@@ -628,7 +671,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
       <div class="topbar-title" id="topbarTitle">Dashboard</div>
       <div class="topbar-subtitle" id="topbarSub">Almacén Copihue</div>
     </div>
-    <span style="font-family:var(--mono);font-size:0.7rem;color:var(--muted);margin-left:10px;">v2</span>
+    <span style="font-family:var(--mono);font-size:0.7rem;color:var(--muted);margin-left:10px;">v4</span>
     <a href="seba21.html" class="topbar-back">← Volver al POS</a>
   </div>
 
@@ -807,6 +850,8 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
   </div>
 </div>
 
+<button class="fab-cobrar-sel" id="fabCobrarSel" onclick="cobrarSeleccionados()">✅ Cobrar seleccionados (<span id="fabCobrarSelCount">0</span>) — $<span id="fabCobrarSelMonto">0</span></button>
+
 <div id="toast"></div>
 
 <script>
@@ -823,6 +868,9 @@ let _proveedores = [];
 let _lcItems = [];
 let _lcFiltro = 'todos';
 let _fiadosPendientes = [];
+let _fiadosPagados = [];
+let _fiadosOrden = 'cliente'; // 'cliente' | 'fecha' | 'monto'
+let _fiadosSeleccionados = new Set(); // keys de clientes seleccionados
 let _fiadoSeleccionado = null;
 let _metodoCobroPendiente = 'EFECTIVO';
 let _ingEsNuevo = false;
@@ -1206,19 +1254,107 @@ async function cargarFiados() {
     const r = await fetch(API_URL + '?action=listarFiados&t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(10000) });
     const data = await r.json();
     if (!data.ok) { document.getElementById('fiadosCuerpo').innerHTML = `<div style="color:var(--danger);padding:20px;">❌ ${data.error}</div>`; return; }
-    _fiadosPendientes = data.fiados || [];
+    const todos = data.fiados || [];
+    _fiadosPendientes = todos.filter(f => (f.estado || '').toUpperCase() !== 'PAGADO');
+    _fiadosPagados    = todos.filter(f => (f.estado || '').toUpperCase() === 'PAGADO');
+    _fiadosSeleccionados.clear();
     renderFiados();
   } catch(e) { document.getElementById('fiadosCuerpo').innerHTML = '<div style="color:var(--danger);padding:20px;">❌ Error de conexión</div>'; }
 }
 
+function fiadosSortLabel(o) {
+  return { cliente: '🔤 Cliente', fecha: '📅 Fecha', monto: '💰 Monto' }[o] || o;
+}
+
+function setFiadosOrden(o) {
+  _fiadosOrden = o;
+  renderFiados();
+}
+
+function toggleFiadoSel(key) {
+  if (_fiadosSeleccionados.has(key)) _fiadosSeleccionados.delete(key);
+  else _fiadosSeleccionados.add(key);
+  // Actualizar visual sin re-renderizar todo
+  const card = document.querySelector(`.fiado-card[data-key="${CSS.escape(key)}"]`);
+  const chk  = document.querySelector(`.fiado-check[data-key="${CSS.escape(key)}"]`);
+  if (card) card.classList.toggle('selected', _fiadosSeleccionados.has(key));
+  if (chk)  { chk.classList.toggle('checked', _fiadosSeleccionados.has(key)); chk.textContent = _fiadosSeleccionados.has(key) ? '✓' : ''; }
+  actualizarFAB();
+}
+
+function actualizarFAB() {
+  const grupos = agruparFiados();
+  let total = 0, cnt = 0;
+  _fiadosSeleccionados.forEach(key => {
+    const g = grupos[key];
+    if (g) { total += g.fiados.reduce((s,f) => s + (parseFloat(f.total)||0), 0); cnt += g.fiados.length; }
+  });
+  const fab = document.getElementById('fabCobrarSel');
+  fab.classList.toggle('show', _fiadosSeleccionados.size > 0);
+  document.getElementById('fabCobrarSelCount').textContent = cnt;
+  document.getElementById('fabCobrarSelMonto').textContent = Math.round(total).toLocaleString('es-AR');
+}
+
+async function cobrarSeleccionados() {
+  if (!_fiadosSeleccionados.size) return;
+  const grupos = agruparFiados();
+  const keys = [..._fiadosSeleccionados];
+  const nombres = keys.map(k => grupos[k]?.cliente || k).join(', ');
+  let total = 0;
+  keys.forEach(k => { const g = grupos[k]; if (g) total += g.fiados.reduce((s,f) => s+(parseFloat(f.total)||0),0); });
+  if (!confirm(`¿Cobrar a ${nombres}?\nTotal: $${Math.round(total).toLocaleString('es-AR')}`)) return;
+  _metodoCobroPendiente = 'EFECTIVO';
+  _cobrarTodoKey = '__MULTI__';
+  document.getElementById('cobrarFiadoInfo').innerHTML =
+    `${keys.length} cliente${keys.length>1?'s':''}: <strong>${nombres}</strong><br>💰 Total: <strong>$${Math.round(total).toLocaleString('es-AR')}</strong>`;
+  document.getElementById('btnConfCobro').textContent = '✅ Cobrar seleccionados';
+  document.getElementById('btnConfCobro').onclick = confirmarCobrarSeleccionados;
+  selMetodo('EFECTIVO');
+  document.getElementById('modalCobrarFiado').classList.add('open');
+}
+
+async function confirmarCobrarSeleccionados() {
+  const grupos = agruparFiados();
+  const keys = [..._fiadosSeleccionados];
+  const btn = document.getElementById('btnConfCobro');
+  btn.disabled = true; btn.textContent = '⏳ Procesando...';
+  let ok = 0, err = 0;
+  for (const key of keys) {
+    const g = grupos[key];
+    if (!g) continue;
+    for (const f of g.fiados) {
+      try {
+        const r = await fetch(API_URL + '?action=cobrarFiado&data=' + encodeURIComponent(JSON.stringify({
+          idFiado: f.idFiado, metodoPago: _metodoCobroPendiente, fechaPago: new Date().toISOString().split('T')[0]
+        })), { redirect: 'follow', signal: AbortSignal.timeout(10000) });
+        const resp = await r.json();
+        if (resp.success) ok++; else err++;
+      } catch(e) { err++; }
+    }
+  }
+  btn.disabled = false; btn.textContent = '✅ Confirmar pago';
+  btn.onclick = confirmarCobroPendiente;
+  document.getElementById('modalCobrarFiado').classList.remove('open');
+  toast(`✅ ${ok} fiado${ok>1?'s':''} cobrado${ok>1?'s':''}${err?` (${err} error${err>1?'s':''})` : ''}`, ok > 0 ? 'ok' : 'err');
+  cargarFiados();
+}
+
+function togglePagados() {
+  const toggle = document.getElementById('pagadosToggle');
+  const lista  = document.getElementById('pagadosLista');
+  toggle.classList.toggle('open');
+  lista.classList.toggle('open');
+}
+
 function renderFiados() {
   const hoy = new Date(); hoy.setHours(0,0,0,0);
-  if (!_fiadosPendientes.length) {
-    document.getElementById('fiadosCuerpo').innerHTML = '<div style="text-align:center;padding:60px;color:var(--muted);">✅ No hay fiados pendientes</div>';
+
+  if (!_fiadosPendientes.length && !_fiadosPagados.length) {
+    document.getElementById('fiadosCuerpo').innerHTML = '<div style="text-align:center;padding:60px;color:var(--muted);">✅ No hay fiados</div>';
     return;
   }
 
-  // Agrupar por teléfono (identificador único del cliente)
+  // Agrupar pendientes por cliente
   const grupos = {};
   _fiadosPendientes.forEach((f, i) => {
     const key = f.telefono || f.cliente;
@@ -1226,44 +1362,80 @@ function renderFiados() {
     grupos[key].fiados.push({ ...f, _idx: i });
   });
 
-  const total = _fiadosPendientes.reduce((s,f) => s + (parseFloat(f.total)||0), 0);
-  const clientes = Object.keys(grupos).length;
+  // Ordenar grupos
+  let keys = Object.keys(grupos);
+  if (_fiadosOrden === 'cliente') {
+    keys.sort((a,b) => (grupos[a].cliente||'').localeCompare(grupos[b].cliente||'', 'es'));
+  } else if (_fiadosOrden === 'fecha') {
+    keys.sort((a,b) => {
+      const fa = grupos[a].fiados.map(f=>f.fecha||'').sort().pop() || '';
+      const fb = grupos[b].fiados.map(f=>f.fecha||'').sort().pop() || '';
+      return fa.localeCompare(fb); // más viejos primero
+    });
+  } else if (_fiadosOrden === 'monto') {
+    keys.sort((a,b) => {
+      const ta = grupos[a].fiados.reduce((s,f)=>s+(parseFloat(f.total)||0),0);
+      const tb = grupos[b].fiados.reduce((s,f)=>s+(parseFloat(f.total)||0),0);
+      return tb - ta;
+    });
+  }
 
+  const totalPend = _fiadosPendientes.reduce((s,f) => s + (parseFloat(f.total)||0), 0);
+  const clientesCnt = keys.length;
+  const vencidosCnt = _fiadosPendientes.filter(f=>f.estado==='VENCIDO').length;
+
+  // Stats
   let html = `<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
-    <div class="lc-stat" style="flex:1;min-width:100px;"><div class="sv">${clientes}</div><div class="sl">Clientes</div></div>
-    <div class="lc-stat" style="flex:1;min-width:100px;"><div class="sv">${_fiadosPendientes.length}</div><div class="sl">Fiados</div></div>
-    <div class="lc-stat" style="flex:1;min-width:100px;"><div class="sv" style="color:var(--danger)">${_fiadosPendientes.filter(f=>f.estado==='VENCIDO').length}</div><div class="sl">Vencidos</div></div>
-    <div class="lc-stat" style="flex:1;min-width:100px;"><div class="sv">$${Math.round(total).toLocaleString('es-AR')}</div><div class="sl">Deuda total</div></div>
+    <div class="lc-stat" style="flex:1;min-width:80px;"><div class="sv">${clientesCnt}</div><div class="sl">Clientes</div></div>
+    <div class="lc-stat" style="flex:1;min-width:80px;"><div class="sv">${_fiadosPendientes.length}</div><div class="sl">Pendientes</div></div>
+    <div class="lc-stat" style="flex:1;min-width:80px;"><div class="sv" style="color:var(--danger)">${vencidosCnt}</div><div class="sl">Vencidos</div></div>
+    <div class="lc-stat" style="flex:1;min-width:80px;"><div class="sv" style="font-size:1rem;">$${Math.round(totalPend).toLocaleString('es-AR')}</div><div class="sl">Deuda total</div></div>
   </div>`;
 
-  Object.keys(grupos).forEach(key => {
+  // Sort bar
+  html += `<div class="fiados-sort-bar">
+    <span style="font-size:0.72rem;color:var(--muted);">Ordenar:</span>
+    ${['cliente','fecha','monto'].map(o =>
+      `<button class="fsort-btn${_fiadosOrden===o?' active':''}" onclick="setFiadosOrden('${o}')">${fiadosSortLabel(o)}</button>`
+    ).join('')}
+    ${_fiadosSeleccionados.size ? `<button class="fsort-btn" onclick="_fiadosSeleccionados.clear();renderFiados();" style="margin-left:auto;border-color:var(--danger);color:var(--danger);">✕ Deseleccionar todo</button>` : ''}
+  </div>`;
+
+  if (!keys.length) {
+    html += '<div style="text-align:center;padding:40px;color:var(--muted);">✅ No hay fiados pendientes</div>';
+  }
+
+  // Tarjetas pendientes
+  keys.forEach(key => {
     const g = grupos[key];
     const totalCliente = g.fiados.reduce((s,f) => s + (parseFloat(f.total)||0), 0);
     const tieneVencidos = g.fiados.some(f => f.estado === 'VENCIDO');
+    const isSel = _fiadosSeleccionados.has(key);
 
-    html += `<div class="fiado-card ${tieneVencidos ? 'vencido' : 'pendiente'}" style="margin-bottom:16px;">
-      <!-- Header cliente -->
+    html += `<div class="fiado-card ${tieneVencidos ? 'vencido' : 'pendiente'}${isSel?' selected':''}" data-key="${key.replace(/"/g,'&quot;')}" style="margin-bottom:16px;">
       <div class="fiado-header">
-        <div>
-          <div class="fiado-cliente" style="font-size:1rem;">${g.cliente}</div>
-          <div class="fiado-tel">📞 ${g.telefono || '—'} · ${g.fiados.length} fiado${g.fiados.length>1?'s':''}</div>
+        <div style="display:flex;align-items:flex-start;gap:10px;flex:1;">
+          <div class="fiado-check${isSel?' checked':''}" data-key="${key.replace(/"/g,'&quot;')}" onclick="toggleFiadoSel('${key.replace(/'/g,"\\'")}')">
+            ${isSel?'✓':''}
+          </div>
+          <div>
+            <div class="fiado-cliente" style="font-size:1rem;">${g.cliente}</div>
+            <div class="fiado-tel">📞 ${g.telefono || '—'} · ${g.fiados.length} fiado${g.fiados.length>1?'s':''}</div>
+          </div>
         </div>
         <div style="text-align:right;">
           <div class="fiado-monto" style="font-size:1.3rem;">$${Math.round(totalCliente).toLocaleString('es-AR')}</div>
-          ${tieneVencidos ? '<span class="fiado-badge vencido">🔴 Tiene vencidos</span>' : ''}
+          ${tieneVencidos ? '<span class="fiado-badge vencido">🔴 Vencidos</span>' : ''}
         </div>
       </div>
 
-      <!-- Detalle de fiados individuales -->
       <div style="margin:10px 0;border-top:1px solid var(--border);padding-top:10px;">
-        ${g.fiados.map((f,fi) => {
+        ${g.fiados.slice().sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||'')).map((f) => {
           let diasR = null;
           if (f.fechaVencimiento) {
             try {
-              const fvStr = String(f.fechaVencimiento);
-              // Extraer solo YYYY-MM-DD si viene con hora/timezone
-              const match = fvStr.match(/(\d{4}-\d{2}-\d{2})/);
-              const d = match ? new Date(match[1] + 'T12:00:00') : new Date(fvStr);
+              const match = String(f.fechaVencimiento).match(/(\d{4}-\d{2}-\d{2})/);
+              const d = match ? new Date(match[1]+'T12:00:00') : new Date(f.fechaVencimiento);
               if (!isNaN(d.getTime())) { d.setHours(0,0,0,0); diasR = Math.round((d - hoy) / 86400000); }
             } catch(e) {}
           }
@@ -1282,16 +1454,55 @@ function renderFiados() {
         }).join('')}
       </div>
 
-      <!-- Acciones del cliente -->
       <div class="fiado-acciones" style="margin-top:10px;">
-        <button class="btn btn-primary" onclick="cobrarTodoCliente('${key}')">✅ Cobrar todo — $${Math.round(totalCliente).toLocaleString('es-AR')}</button>
-        <button class="btn btn-secondary" onclick="abrirAbonoCliente('${key}')">💵 Abonar</button>
+        <button class="btn btn-primary" onclick="cobrarTodoCliente('${key.replace(/'/g,"\\'")}')">✅ Cobrar todo — $${Math.round(totalCliente).toLocaleString('es-AR')}</button>
+        <button class="btn btn-secondary" onclick="abrirAbonoCliente('${key.replace(/'/g,"\\'")}')">💵 Abonar</button>
         <button class="btn btn-secondary" style="flex:0.5;" onclick="reenviarWAFiado(${g.fiados[0]._idx})">📲</button>
       </div>
     </div>`;
   });
 
+  // Sección PAGADOS
+  if (_fiadosPagados.length) {
+    const totalPag = _fiadosPagados.reduce((s,f) => s+(parseFloat(f.total)||0), 0);
+    html += `<div class="pagados-toggle" id="pagadosToggle" onclick="togglePagados()">
+      <span><span class="pt-label">✅ Pagados</span> <span style="font-size:0.72rem;color:var(--muted);">${_fiadosPagados.length} registros · $${Math.round(totalPag).toLocaleString('es-AR')}</span></span>
+      <span class="pt-arrow">▼</span>
+    </div>
+    <div class="pagados-lista" id="pagadosLista">`;
+
+    // Agrupar pagados por cliente, ordenar por fecha desc
+    const gruposPag = {};
+    _fiadosPagados.forEach(f => {
+      const key = f.telefono || f.cliente;
+      if (!gruposPag[key]) gruposPag[key] = { cliente: f.cliente, telefono: f.telefono, fiados: [] };
+      gruposPag[key].fiados.push(f);
+    });
+    const keysPag = Object.keys(gruposPag).sort((a,b) => (gruposPag[a].cliente||'').localeCompare(gruposPag[b].cliente||'','es'));
+
+    keysPag.forEach(key => {
+      const g = gruposPag[key];
+      const tot = g.fiados.reduce((s,f)=>s+(parseFloat(f.total)||0),0);
+      html += `<div class="fiado-card pagado" style="margin-bottom:10px;">
+        <div class="fiado-header">
+          <div><div class="fiado-cliente">${g.cliente}</div><div class="fiado-tel">📞 ${g.telefono||'—'} · ${g.fiados.length} pagado${g.fiados.length>1?'s':''}</div></div>
+          <div style="text-align:right;"><div class="fiado-monto">$${Math.round(tot).toLocaleString('es-AR')}</div><span class="fiado-badge" style="background:rgba(16,185,129,0.15);color:#6ee7b7;">✅ PAGADO</span></div>
+        </div>
+        <div style="margin:8px 0 0;border-top:1px solid var(--border);padding-top:8px;">
+          ${g.fiados.slice().sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')).map(f =>
+            `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.03);font-size:0.75rem;">
+              <div style="color:var(--muted);">${f.fecha||''} — ${f.descripcion||'TICKET'}</div>
+              <div style="font-family:var(--mono);color:var(--accent2);">$${parseFloat(f.total||0).toLocaleString('es-AR')}</div>
+            </div>`
+          ).join('')}
+        </div>
+      </div>`;
+    });
+    html += `</div>`;
+  }
+
   document.getElementById('fiadosCuerpo').innerHTML = html;
+  actualizarFAB();
 }
 
 // Cobrar TODOS los fiados de un cliente
