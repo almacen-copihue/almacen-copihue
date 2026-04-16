@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v267</title>
+    <title>Copihue — POS v268</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -8647,6 +8647,13 @@ async function confirmarFiado() {
 }
 
 async function _procesarVentaFiado(datosFiado) {
+    // FIX: capturar snapshot de ventaActual ANTES de vaciarla
+    const itemsSnapshot = [...ventaActual];
+    const totalOriginal = itemsSnapshot.reduce((s,i) => s + i.price * i.qty, 0);
+    const total = window._totalConRedondeo || totalOriginal;
+    const _t = new Date();
+    const hora = _t.getHours().toString().padStart(2,'0') + ':' + _t.getMinutes().toString().padStart(2,'0');
+
     // Borrar carrito INMEDIATAMENTE — antes de cualquier await o setTimeout
     if (typeof _saveCartTimer !== 'undefined') clearTimeout(_saveCartTimer);
     ventaActual = [];
@@ -8654,15 +8661,10 @@ async function _procesarVentaFiado(datosFiado) {
     const btn = document.getElementById('btnOkConfirm');
     if (btn) { btn.disabled = true; btn.textContent = '⏳ Procesando...'; }
 
-    const totalOriginal = ventaActual.reduce((s,i) => s + i.price * i.qty, 0);
-    const total = window._totalConRedondeo || totalOriginal;
-    const _t = new Date();
-    const hora = _t.getHours().toString().padStart(2,'0') + ':' + _t.getMinutes().toString().padStart(2,'0');
-
     let stockOk = false;
     let ticketNum = null;
     try {
-        const ventaData = ventaActual.map(i => ({
+        const ventaData = itemsSnapshot.map(i => ({
             id: i.esPeso ? i.idOriginal : i.id,
             name: i.name, qty: i.qty,
             esPeso: i.esPeso || false, gramos: i.gramos || 0,
@@ -8686,26 +8688,26 @@ async function _procesarVentaFiado(datosFiado) {
         await _apiFetchUrl('guardarFiado', url2);
     } catch(e) { console.warn('⚠️ Error guardar fiado:', e); }
 
-    // 3. Guardar historial local
-    guardarVentaDia({ items: [...ventaActual], total, hora, stockRebajado: stockOk, metodoPago: 'FIADO' });
+    // 3. Guardar historial local (usando snapshot)
+    guardarVentaDia({ items: itemsSnapshot, total, hora, stockRebajado: stockOk, metodoPago: 'FIADO' });
 
-    // 4. Actualizar stock local
-    ventaActual.forEach(item => {
+    // 4. Actualizar stock local (usando snapshot)
+    itemsSnapshot.forEach(item => {
         const p = productos.find(pr => pr.id === (item.esPeso ? item.idOriginal : item.id));
         if (!p) return;
         if (item.esPeso) p.stock = Math.max(0, Math.round((p.stock - (item.gramos||0)/1000)*1000)/1000);
         else p.stock = Math.max(0, p.stock - item.qty);
     });
 
-    // 5. Toast y cierre de carrito
+    // 5. Toast, cierre de modales y limpieza
     mostrarToast(`✅ Fiado de ${datosFiado.cliente} registrado — $${Math.round(total).toLocaleString('es-AR')}`, 'naranja');
+    // FIX: cerrar el modal de confirmación que quedaba abierto
+    cerrarConfirm();
     seleccionarMetodo('efectivo');
-    // Cancelar cualquier timer de guardado diferido antes de vaciar
-    if (typeof _saveCartTimer !== 'undefined') clearTimeout(_saveCartTimer);
-    ventaActual = [];
     actualizarRanking();
     renderVenta();
     // Borrar DESPUÉS de renderVenta para pisar cualquier re-guardado que haya disparado
+    if (typeof _saveCartTimer !== 'undefined') clearTimeout(_saveCartTimer);
     localStorage.removeItem(CARRITO_KEY);
     actualizarTotalConRedondeo();
     // Restaurar botón Cobrar
