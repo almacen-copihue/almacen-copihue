@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>ver.7 · Copihue · Reportes</title>
+<title>ver.8 · Copihue · Reportes</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
@@ -335,6 +335,30 @@ let showRecienLlegados=false;
 function safeEnc(s){
   try{ return encodeURIComponent(s); }
   catch(e){ return encodeURIComponent(String(s).replace(/[\uD800-\uDFFF]/g,'?')); }
+}
+
+// extractFiadoPhone: extrae el teléfono del campo metodo para tickets de fiado
+// Ej: "FIADO | ◆ NICO · 2944123248" → "5492944123248"
+function extractFiadoPhone(metodo){
+  if(!(metodo||'').toUpperCase().includes('FIADO')) return '';
+  const m=(metodo||'').match(/(\d{6,})\s*$/);
+  if(!m) return '';
+  const d=m[1];
+  // Argentina: número de 10 dígitos → prefijo 549 (54 país + 9 móvil)
+  if(d.length===10) return '549'+d;
+  if(d.length>=11) return d; // ya tiene prefijo
+  return '';
+}
+
+// sanitizeMetodoWA: limpia el campo metodo para incluirlo en mensaje WA
+// Reemplaza caracteres Unicode decorativos que pueden corromper la URL en WA Business
+function sanitizeMetodoWA(metodo){
+  return (metodo||'')
+    .replace(/◆/g,'-')
+    .replace(/·/g,'-')
+    .replace(/[^\x20-\x7E\u00C0-\u024F\u00A0\n]/g,' ')
+    .replace(/\s{2,}/g,' ')
+    .trim();
 }
 
 const fmt=n=>'$'+Math.round(n).toLocaleString('es-AR');
@@ -789,20 +813,22 @@ function renderApp(){
     const DNOM2=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
     const tksH=td.length?td.map(t=>{
       const prods=id.filter(i=>i.ticket===t.ticket);
+      const fPhone=extractFiadoPhone(t.metodo);
       const waTxt=safeEnc(
         '🛒 *Almacén Copihue* · #'+t.ticket+'\n'+
         '📅 '+fLabel+' · '+t.hora+'hs\n\n'+
         prods.map(p=>p.qty+'× '+p.nombre.substring(0,22)+'  '+fmt(p.subtotal)).join('\n')+
         '\n─────────────────\n'+
         '*💰 Total: '+fmt(t.total)+'*\n'+
-        t.metodo+'\n\n'+
+        sanitizeMetodoWA(t.metodo)+'\n\n'+
         '¡Gracias por tu compra! 🙏'
       );
+      const waHref='https://wa.me/'+fPhone+'?text='+waTxt;
       return'<div class="tkt">'+
         '<div class="tkt-hdr"><span>🎫 #'+t.ticket+' <span class="vtag">'+t.vendedor+'</span></span><span>'+t.hora+' <span class="mtag">'+t.metodo+'</span></span></div>'+
         prods.map(p=>'<div class="vi"><span>'+p.qty+'× '+p.nombre.substring(0,24)+'</span><span>'+fmt(p.subtotal)+'</span></div>').join('')+
         '<div style="display:flex;justify-content:space-between;align-items:center;padding-top:5px;border-top:1px solid var(--borde);margin-top:3px">'+
-          '<button onclick="window.open(\'https://wa.me/?text='+waTxt+'\',\'_blank\')" style="background:#25D366;color:#fff;border:none;border-radius:8px;padding:4px 10px;font-size:.7rem;font-weight:700;cursor:pointer">📲 Enviar</button>'+
+          '<button onclick="window.open(\''+waHref+'\',\'_blank\')" style="background:#25D366;color:#fff;border:none;border-radius:8px;padding:4px 10px;font-size:.7rem;font-weight:700;cursor:pointer">📲 Enviar</button>'+
           '<span style="font-size:.82rem;font-weight:900;color:var(--vd)">'+fmt(t.total)+'</span>'+
         '</div>'+
       '</div>';
