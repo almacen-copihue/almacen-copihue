@@ -244,6 +244,14 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
 .pdias-qty.q3{background:#a5d6a7;color:#1b5e20}
 .pdias-qty.q4{background:#66bb6a;color:#fff}
 .pdias-qty.q5{background:#2e7d32;color:#fff}
+/* ganancia x dias — escala naranja */
+.gd-qty{display:inline-block;min-width:18px;padding:1px 3px;border-radius:4px;font-weight:700;font-size:.62rem}
+.gd-qty.q0{color:#ddd}
+.gd-qty.q1{background:#fff3e0;color:#e65100}
+.gd-qty.q2{background:#ffe0b2;color:#e65100}
+.gd-qty.q3{background:#ffb74d;color:#fff}
+.gd-qty.q4{background:#fb8c00;color:#fff}
+.gd-qty.q5{background:#e65100;color:#fff}
 .pdias-th-dia{text-align:center;padding:3px 4px !important}
 .dia-n{display:block;font-weight:900;font-size:.68rem;color:var(--texto)}
 .dia-dow{display:block;color:var(--gris);font-size:.55rem;line-height:1}
@@ -325,7 +333,7 @@ let aniosAbiertos=new Set(); // años anteriores expandidos en el selector
 let metActivos=new Set(['TODOS']);
 let vendActivos=new Set(['TODOS']);
 let topOrden='venta'; // 'venta' | 'ganancia'
-let showVenc=false, showDiaSem=false, showHoras=false, showPDias=false;
+let showVenc=false, showDiaSem=false, showHoras=false, showPDias=false, showGanDias=false;
 let prodSelIdx=-1; // índice del producto seleccionado en el top (-1 = ninguno)
 // ===== COMPRA SUGERIDA INTELIGENTE — estado =====
 let showCSI=false, csiFiltroPeriodo='todos';
@@ -1082,6 +1090,63 @@ function renderApp(){
           (showPDias?'▲':'▼')+' 📊 Detalle unidades por producto — últimos 30 días'+
         '</button>'+
         (showPDias?'<div class="tar" style="padding:8px;overflow:visible">'+tabla+'</div>':'');
+      })()+
+      // ===== TABLA GANANCIA x DÍAS =====
+      (()=>{
+        const todayStr=hoyStr();
+        const ultimos30=[];
+        for(let i=29;i>=0;i--){
+          const d=new Date(); d.setDate(d.getDate()-i);
+          ultimos30.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));
+        }
+        // Agrupar gananciaAprox por producto y día
+        const prodDiasG={};
+        if(raw) raw.items.forEach(it=>{
+          if(!ultimos30.includes(it.fechaStr)) return;
+          const gan=it.tieneCosto?(it.gananciaReal||0):(it.gananciaAprox||0);
+          if(!prodDiasG[it.nombre]) prodDiasG[it.nombre]={};
+          prodDiasG[it.nombre][it.fechaStr]=(prodDiasG[it.nombre][it.fechaStr]||0)+gan;
+        });
+        const prods=Object.entries(prodDiasG)
+          .map(([n,dias])=>({n, dias, tot:Object.values(dias).reduce((s,v)=>s+v,0)}))
+          .filter(p=>p.tot>0)
+          .sort((a,b)=>b.tot-a.tot);
+        if(!prods.length) return '';
+        const maxGan=Math.max(...prods.flatMap(p=>Object.values(p.dias)));
+        const DOW=['D','L','M','X','J','V','S'];
+        const thDias=ultimos30.map(ds=>{
+          const d=new Date(ds+'T12:00:00');
+          const esHoy=ds===todayStr;
+          return'<th class="pdias-th-dia'+(esHoy?' hoy-col':'')+'">'+
+            '<span class="dia-n">'+d.getDate()+'</span>'+
+            '<span class="dia-dow">'+DOW[d.getDay()]+'</span>'+
+          '</th>';
+        }).join('');
+        const fmtK=v=>v>=1000?'$'+(v/1000).toFixed(v%1000===0?0:1)+'k':'$'+Math.round(v);
+        const filas=prods.map(p=>{
+          const celdas=ultimos30.map(ds=>{
+            const g=p.dias[ds]||0;
+            const nivel=g===0?0:g<=maxGan*.15?1:g<=maxGan*.35?2:g<=maxGan*.55?3:g<=maxGan*.8?4:5;
+            return'<td><span class="gd-qty q'+nivel+'">'+(g===0?'·':fmtK(g))+'</span></td>';
+          }).join('');
+          return'<tr>'+
+            '<td class="col-prod" title="'+p.n+'">'+p.n.substring(0,20)+'</td>'+
+            celdas+
+            '<td class="col-tot" style="color:var(--naranja)">'+fmtK(p.tot)+'</td>'+
+          '</tr>';
+        }).join('');
+        const tabla='<div class="pdias-wrap">'+
+          '<table class="pdias-table">'+
+            '<thead><tr>'+
+              '<th class="col-prod">Producto</th>'+thDias+'<th class="col-tot">30d</th>'+
+            '</tr></thead>'+
+            '<tbody>'+filas+'</tbody>'+
+          '</table>'+
+        '</div>';
+        return '<button class="toggle-btn" onclick="showGanDias=!showGanDias;renderApp()" style="border-color:var(--naranja);color:var(--naranja);margin-top:4px">'+
+          (showGanDias?'▲':'▼')+' 💰 Ganancia por producto — últimos 30 días'+
+        '</button>'+
+        (showGanDias?'<div class="tar" style="padding:8px;overflow:visible">'+tabla+'</div>':'');
       })()+
       // ===== COMPRA SUGERIDA INTELIGENTE =====
       '<button class="toggle-btn" onclick="showCSI=!showCSI;renderApp()" style="border-color:#6a1b9a;color:#6a1b9a;margin-top:4px">'+
