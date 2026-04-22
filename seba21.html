@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v268</title>
+    <title>Copihue — POS v269</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -7571,13 +7571,18 @@ abrirNuevoProducto = function() {
       <span id="fiadoTotal" style="font-size:1.4rem;font-weight:900;color:#2e7d32;">$0</span>
     </div>
     <div id="fiadoAlertaDeuda" style="display:none;border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:0.85rem;line-height:1.4;"></div>
-    <div style="margin-bottom:12px;">
+    <div style="margin-bottom:12px;position:relative;">
       <label style="font-size:0.8rem;font-weight:700;color:#555;display:block;margin-bottom:4px;">Cliente *</label>
-      <input id="fiadoCliente" type="text" placeholder="Nombre del cliente" style="width:100%;padding:10px 12px;border:2px solid #ddd;border-radius:10px;font-size:1rem;box-sizing:border-box;">
+      <input id="fiadoCliente" type="text" placeholder="Escribí el nombre..." autocomplete="off"
+             oninput="fiadoFiltrarClientes(this.value)"
+             style="width:100%;padding:10px 12px;border:2px solid #ddd;border-radius:10px;font-size:1rem;box-sizing:border-box;">
+      <div id="fiadoClienteDropdown" style="display:none;position:absolute;left:0;right:0;top:100%;background:white;border:1.5px solid #ddd;border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,0.12);z-index:100;max-height:180px;overflow-y:auto;margin-top:2px;"></div>
     </div>
+    <!-- Teléfono: se autocompleta al elegir cliente, editable si hace falta -->
     <div style="margin-bottom:12px;">
-      <label style="font-size:0.8rem;font-weight:700;color:#555;display:block;margin-bottom:4px;">Teléfono * (para verificar deuda)</label>
-      <input id="fiadoTelefono" type="tel" placeholder="Ej: 2944123456" oninput="fiadoBuscarDeuda()" style="width:100%;padding:10px 12px;border:2px solid #ddd;border-radius:10px;font-size:1rem;box-sizing:border-box;">
+      <label style="font-size:0.8rem;font-weight:700;color:#555;display:block;margin-bottom:4px;">Teléfono <span id="fiadoTelLabel" style="font-weight:400;color:#aaa;">(se carga al elegir cliente)</span></label>
+      <input id="fiadoTelefono" type="tel" placeholder="Ej: 2994123456" readonly
+             style="width:100%;padding:10px 12px;border:2px solid #ddd;border-radius:10px;font-size:1rem;box-sizing:border-box;background:#f9f9f9;color:#555;">
     </div>
     <div style="margin-bottom:12px;">
       <label style="font-size:0.8rem;font-weight:700;color:#555;display:block;margin-bottom:4px;">Vence el</label>
@@ -8296,7 +8301,10 @@ async function confirmarCobroPendiente() {
 
 function _reenviarWAFiado(idx) {
     const f = _fiadosPendientes.filter(f => f.estado !== 'PAGADO')[idx];
-    _enviarFiadoWhatsApp({ cliente: f.cliente, telefono: f.telefono, descripcion: f.descripcion, vencimiento: f.fechaVencimiento, obs: '' }, parseFloat(f.total || 0));
+    _enviarFiadoWhatsApp(
+        { cliente: f.cliente, telefono: f.telefono, ticket: f.ticket || f.idFiado },
+        parseFloat(f.total || 0)
+    );
 }
 
 function _enviarWACobranzaFiado(f) {
@@ -8502,7 +8510,16 @@ async function confirmarSalidaInterna() {
 }
 // ============================================
 
-function abrirModalFiado() {
+function cerrarModalFiado() {
+    document.getElementById('modalFiado').style.display = 'none';
+    document.getElementById('fiadoClienteDropdown').style.display = 'none';
+    seleccionarMetodo('efectivo');
+}
+
+// ── Caché de clientes para el modal fiado ──
+var _fiadoClientesCache = null;
+
+async function abrirModalFiado() {
     const total = window._totalConRedondeo || ventaActual.reduce((s,i) => s + i.price * i.qty, 0);
     document.getElementById('fiadoTotal').textContent = '$' + Math.round(total).toLocaleString('es-AR');
     // Vencimiento default +7 días
@@ -8512,32 +8529,73 @@ function abrirModalFiado() {
     // Limpiar campos
     document.getElementById('fiadoCliente').value = '';
     document.getElementById('fiadoTelefono').value = '';
+    document.getElementById('fiadoTelefono').readOnly = true;
+    document.getElementById('fiadoTelefono').style.background = '#f9f9f9';
     document.getElementById('fiadoObs').value = '';
     document.getElementById('fiadoAlertaDeuda').style.display = 'none';
+    document.getElementById('fiadoClienteDropdown').style.display = 'none';
     _fiadoDatosCliente = null;
-    // Mostrar
+    // Mostrar modal
     const modal = document.getElementById('modalFiado');
     modal.style.display = 'flex';
     setTimeout(() => document.getElementById('fiadoCliente').focus(), 200);
+    // Cargar clientes si no están en caché
+    if (!_fiadoClientesCache) {
+        try {
+            const data = await _apiFetch('listarClientes');
+            if (data.ok && Array.isArray(data.clientes)) {
+                _fiadoClientesCache = data.clientes; // [{nombre, telefono}]
+            }
+        } catch(e) { /* sin conexión: igual funciona con nombre manual */ }
+    }
 }
 
-function cerrarModalFiado() {
-    document.getElementById('modalFiado').style.display = 'none';
-    // Volver a efectivo si se cierra sin confirmar
-    seleccionarMetodo('efectivo');
+function fiadoFiltrarClientes(q) {
+    const drop = document.getElementById('fiadoClienteDropdown');
+    const lista = _fiadoClientesCache || [];
+    if (!q.trim() || lista.length === 0) { drop.style.display = 'none'; return; }
+    const matches = lista.filter(c => c.nombre.toLowerCase().includes(q.toLowerCase())).slice(0, 8);
+    if (matches.length === 0) {
+        // Nombre libre — limpiar teléfono si había uno autocargado
+        document.getElementById('fiadoTelefono').value = '';
+        drop.style.display = 'none';
+        return;
+    }
+    drop.innerHTML = matches.map(c => `
+        <div onclick="fiadoSeleccionarCliente('${c.nombre.replace(/'/g,"\\'")}','${(c.telefono||'').replace(/'/g,"\\'")}') "
+             style="padding:10px 14px;cursor:pointer;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-weight:600;font-size:0.95rem;">${c.nombre}</span>
+          <span style="color:#888;font-size:0.78rem;">${c.telefono || '—'}</span>
+        </div>`).join('');
+    drop.style.display = 'block';
+}
+
+function fiadoSeleccionarCliente(nombre, telefono) {
+    document.getElementById('fiadoCliente').value = nombre;
+    document.getElementById('fiadoClienteDropdown').style.display = 'none';
+    if (telefono) {
+        document.getElementById('fiadoTelefono').value = telefono;
+        document.getElementById('fiadoTelefono').readOnly = true;
+        document.getElementById('fiadoTelefono').style.background = '#f9f9f9';
+        document.getElementById('fiadoTelLabel').textContent = '(del registro del cliente)';
+        // Consultar deuda con ese teléfono
+        fiadoBuscarDeuda(telefono);
+    } else {
+        // Cliente sin teléfono — habilitar edición manual
+        document.getElementById('fiadoTelefono').readOnly = false;
+        document.getElementById('fiadoTelefono').style.background = 'white';
+        document.getElementById('fiadoTelLabel').textContent = '(ingresá el número)';
+        document.getElementById('fiadoTelefono').focus();
+    }
 }
 
 // Busca deuda del cliente por teléfono (debounced)
 var _fiadoDeudaTimer = null;
-function fiadoBuscarDeuda() {
+function fiadoBuscarDeuda(telParam) {
     clearTimeout(_fiadoDeudaTimer);
-    const tel = document.getElementById('fiadoTelefono').value.trim();
+    const tel = telParam || document.getElementById('fiadoTelefono').value.trim();
     const alerta = document.getElementById('fiadoAlertaDeuda');
-    if (tel.length < 6) {
-        alerta.style.display = 'none';
-        return;
-    }
-    // Mostrar "consultando" inmediato
+    if (tel.length < 6) { alerta.style.display = 'none'; return; }
     alerta.style.display = 'block';
     alerta.style.background = '#f5f5f5';
     alerta.style.color = '#888';
@@ -8716,30 +8774,25 @@ async function _procesarVentaFiado(datosFiado) {
 }
 
 function _enviarFiadoWhatsApp(datosFiado, total) {
-    const tel = datosFiado.telefono.replace(/\D/g, '');
+    const tel = (datosFiado.telefono || '').replace(/\D/g, '');
     if (!tel || tel.length < 6) return; // sin teléfono válido no abre WA
 
-    const fecha = new Date().toLocaleDateString('es-AR');
-    const venc  = datosFiado.vencimiento
-        ? new Date(datosFiado.vencimiento + 'T12:00:00').toLocaleDateString('es-AR')
-        : '—';
+    const now   = new Date();
+    const fecha = now.toLocaleDateString('es-AR');
+    const hora  = now.toTimeString().slice(0, 5);
+    const ticket = datosFiado.ticket ? `#${datosFiado.ticket}` : '—';
 
     const msg = [
         `🧾 *COMPROBANTE DE FIADO — Almacén Copihue*`,
         ``,
-        `📅 Fecha: ${fecha}`,
+        `📅 Fecha: ${fecha}  🕐 ${hora}`,
         `👤 Cliente: ${datosFiado.cliente}`,
-        ``,
-        `🛒 *Detalle:*`,
-        datosFiado.descripcion,
-        ``,
+        `🎫 Ticket: ${ticket}`,
         `💰 *Total fiado: $${Math.round(total).toLocaleString('es-AR')}*`,
-        `📆 Fecha de pago acordada: *${venc}*`,
-        datosFiado.obs ? `📝 Nota: ${datosFiado.obs}` : '',
         ``,
         `✅ Este mensaje es su comprobante de fiado.`,
         `📍 Almacén Copihue — Copihue 457`
-    ].filter(l => l !== '').join('\n');
+    ].join('\n');
 
     // Número argentino — agregar 549 si no lo tiene
     let numWA = tel;
