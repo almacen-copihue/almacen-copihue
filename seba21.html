@@ -30,7 +30,7 @@
   • FIADOS: _fmtFecha() mejorada con mismo parser robusto (ISO, DD/MM/YYYY,
     string largo de GAS).
 
-  v274 — 23/04/2026
+  v275 — 23/04/2026
   -----------------
   • FIADOS: Fix crítico de desfase UTC en fechas de GAS.
     GAS serializa fechas como "Wed Apr 22 2026 00:00:00 GMT-0300". Al parsear
@@ -44,7 +44,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v274</title>
+    <title>Copihue — POS v275</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -8969,6 +8969,7 @@ function abrirRetiroCaja() {
     });
     document.getElementById('modalRetiroCaja').classList.add('open');
     setTimeout(() => document.getElementById('rcMonto').focus(), 300);
+    cargarHistorialRetiros();
 }
 
 function cerrarRetiroCaja() {
@@ -9039,6 +9040,7 @@ async function confirmarRetiroCaja() {
         if (resp.success) {
             cerrarRetiroCaja();
             mostrarToast('✅ Retiro registrado — $' + Math.round(monto).toLocaleString('es-AR'), 'naranja');
+            setTimeout(cargarHistorialRetiros, 500);
         } else {
             errDiv.textContent = '❌ Error: ' + (resp.mensaje || resp.error || 'Error desconocido');
             errDiv.style.display = 'block';
@@ -9051,9 +9053,38 @@ async function confirmarRetiroCaja() {
         btn.textContent = '💸 Registrar retiro';
     }
 }
+
+// ── Historial de retiros de caja ─────────────────────────────────────────────
+async function cargarHistorialRetiros() {
+    const el = document.getElementById('rcHistorial');
+    if (!el) return;
+    el.innerHTML = '<div style="text-align:center;color:#aaa;padding:12px;font-size:0.82rem;">⏳ Cargando...</div>';
+    try {
+        const url = API_URL + '?action=getMovimientosCaja&tipo=EGRESO&limite=15&t=' + Date.now();
+        const data = await _apiFetchUrl('getMovimientosCaja', url);
+        if (!data.success || !data.movimientos || data.movimientos.length === 0) {
+            el.innerHTML = '<div style="text-align:center;color:#aaa;padding:12px;font-size:0.82rem;">Sin retiros registrados</div>';
+            return;
+        }
+        el.innerHTML = data.movimientos.map(m => `
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;
+                        padding:10px 0;border-bottom:1px solid #f0f0f0;gap:8px;">
+                <div style="flex:1;min-width:0;">
+                    <div style="font-weight:700;font-size:0.85rem;color:#222;">${m.motivo || '—'}</div>
+                    <div style="font-size:0.72rem;color:#888;margin-top:2px;">
+                        ${m.fecha || ''} ${m.hora ? m.hora.slice(0,5) + 'hs' : ''} · ${m.categoria || ''} · ${m.vendedor || ''}
+                        ${m.observacion ? '<br><span style="color:#aaa;">📝 ' + m.observacion + '</span>' : ''}
+                    </div>
+                </div>
+                <div style="font-weight:900;font-size:0.95rem;color:#c62828;flex-shrink:0;">
+                    −$${parseFloat(m.monto||0).toLocaleString('es-AR')}
+                </div>
+            </div>`).join('');
+    } catch(e) {
+        el.innerHTML = '<div style="text-align:center;color:#e53935;padding:12px;font-size:0.82rem;">❌ No se pudo cargar</div>';
+    }
+}
 </script>
-
-
 
 <!-- MODAL RETIRO DE CAJA -->
 <div class="modal-bg" id="modalRetiroCaja" onclick="if(event.target===this)cerrarRetiroCaja()" style="z-index:4500;">
@@ -9109,6 +9140,18 @@ async function confirmarRetiroCaja() {
                     style="background:linear-gradient(135deg,#c62828,#b71c1c);">
                 💸 Registrar retiro
             </button>
+
+            <!-- Historial de retiros -->
+            <div style="margin-top:20px;">
+                <div style="font-size:0.72rem;font-weight:700;color:#888;text-transform:uppercase;
+                            letter-spacing:0.5px;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+                    📋 Últimos retiros
+                    <button onclick="cargarHistorialRetiros()" style="background:none;border:none;color:#888;cursor:pointer;font-size:0.8rem;padding:0 4px;">🔄</button>
+                </div>
+                <div id="rcHistorial" style="font-size:0.82rem;color:#555;">
+                    <div style="text-align:center;color:#ccc;padding:12px;">Abrí el modal para ver el historial</div>
+                </div>
+            </div>
         </div>
     </div>
 </div>
