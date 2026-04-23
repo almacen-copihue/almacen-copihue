@@ -7584,8 +7584,8 @@ abrirNuevoProducto = function() {
     <!-- Teléfono: se autocompleta al elegir cliente, editable si hace falta -->
     <div style="margin-bottom:12px;">
       <label style="font-size:0.8rem;font-weight:700;color:#555;display:block;margin-bottom:4px;">Teléfono <span id="fiadoTelLabel" style="font-weight:400;color:#aaa;">(se carga al elegir cliente)</span></label>
-      <input id="fiadoTelefono" type="tel" placeholder="Ej: 2994123456" readonly
-             style="width:100%;padding:10px 12px;border:2px solid #ddd;border-radius:10px;font-size:1rem;box-sizing:border-box;background:#f9f9f9;color:#555;">
+      <input id="fiadoTelefono" type="tel" placeholder="Ej: 2994123456" inputmode="numeric" oninput="fiadoBuscarDeuda()"
+             style="width:100%;padding:10px 12px;border:2px solid #ddd;border-radius:10px;font-size:1rem;box-sizing:border-box;background:white;color:#333;">
     </div>
     <div style="margin-bottom:12px;">
       <label style="font-size:0.8rem;font-weight:700;color:#555;display:block;margin-bottom:4px;">Vence el</label>
@@ -8532,8 +8532,9 @@ async function abrirModalFiado() {
     // Limpiar campos
     document.getElementById('fiadoCliente').value = '';
     document.getElementById('fiadoTelefono').value = '';
-    document.getElementById('fiadoTelefono').readOnly = true;
-    document.getElementById('fiadoTelefono').style.background = '#f9f9f9';
+    document.getElementById('fiadoTelefono').readOnly = false;
+    document.getElementById('fiadoTelefono').style.background = 'white';
+    document.getElementById('fiadoTelLabel').textContent = '(se carga al elegir cliente, o ingresalo manualmente)';
     document.getElementById('fiadoObs').value = '';
     document.getElementById('fiadoAlertaDeuda').style.display = 'none';
     document.getElementById('fiadoClienteDropdown').style.display = 'none';
@@ -8557,10 +8558,14 @@ function fiadoFiltrarClientes(q) {
     const drop = document.getElementById('fiadoClienteDropdown');
     const lista = _fiadoClientesCache || [];
     if (!q.trim() || lista.length === 0) { drop.style.display = 'none'; return; }
-    const matches = lista.filter(c => c.nombre.toLowerCase().includes(q.toLowerCase())).slice(0, 8);
+    const qL = q.toLowerCase().replace(/\D/g,'') || q.toLowerCase();
+    const matches = lista.filter(c => {
+        const porNombre = c.nombre.toLowerCase().includes(q.toLowerCase());
+        const telLimpio = (c.telefono || '').replace(/\D/g,'');
+        const porTel = telLimpio && telLimpio.includes(q.replace(/\D/g,''));
+        return porNombre || porTel;
+    }).slice(0, 8);
     if (matches.length === 0) {
-        // Nombre libre — limpiar teléfono si había uno autocargado
-        document.getElementById('fiadoTelefono').value = '';
         drop.style.display = 'none';
         return;
     }
@@ -8578,13 +8583,14 @@ function fiadoSeleccionarCliente(nombre, telefono) {
     document.getElementById('fiadoClienteDropdown').style.display = 'none';
     if (telefono) {
         document.getElementById('fiadoTelefono').value = telefono;
-        document.getElementById('fiadoTelefono').readOnly = true;
-        document.getElementById('fiadoTelefono').style.background = '#f9f9f9';
-        document.getElementById('fiadoTelLabel').textContent = '(del registro del cliente)';
+        document.getElementById('fiadoTelefono').readOnly = false;
+        document.getElementById('fiadoTelefono').style.background = '#f1f8e9';
+        document.getElementById('fiadoTelLabel').textContent = '(del registro del cliente — podés editarlo)';
         // Consultar deuda con ese teléfono
         fiadoBuscarDeuda(telefono);
     } else {
         // Cliente sin teléfono — habilitar edición manual
+        document.getElementById('fiadoTelefono').value = '';
         document.getElementById('fiadoTelefono').readOnly = false;
         document.getElementById('fiadoTelefono').style.background = 'white';
         document.getElementById('fiadoTelLabel').textContent = '(ingresá el número)';
@@ -8693,9 +8699,11 @@ async function confirmarFiado() {
 
     try {
         document.getElementById('modalFiado').style.display = 'none';
-        // 1. Procesar venta primero — el modal ya está cerrado, el botón no bloquea
+        // 1. Guardar cliente en hoja Clientes si es nuevo o actualizar teléfono
+        _guardarClienteFiado(cliente, telefono);
+        // 2. Procesar venta primero — el modal ya está cerrado, el botón no bloquea
         await _procesarVentaFiado(datosFiado);
-        // 2. WA en setTimeout — sale después del await sin interrumpir la ejecución
+        // 3. WA en setTimeout — sale después del await sin interrumpir la ejecución
         const _waDatos = datosFiado, _waTotal = Math.round(total);
         setTimeout(() => _enviarFiadoWhatsApp(_waDatos, _waTotal), 300);
     } catch(e) {
@@ -8776,6 +8784,47 @@ async function _procesarVentaFiado(datosFiado) {
     if (btnOk) { btnOk.textContent = '✅ Confirmar cobro'; btnOk.disabled = false; btnOk.onclick = confirmarVenta; }
 }
 
+// ── WhatsApp Business forzado — siempre usa com.whatsapp.w4b ─────────────────
+function _abrirWABusinessForzado(texto, telefono) {
+    const encoded = encodeURIComponent(texto);
+    if (/android/i.test(navigator.userAgent)) {
+        // Intent directo a WA Business con fallback a wa.me
+        const fallback = encodeURIComponent('https://wa.me/' + (telefono || '') + '?text=' + encoded);
+        const intent = 'intent://send/' + (telefono || '') +
+            '?text=' + encoded +
+            '#Intent;package=com.whatsapp.w4b;scheme=smsto;end;' +
+            'S.browser_fallback_url=' + fallback;
+        window.location.href = intent;
+    } else {
+        // iOS/Desktop: wa.me funciona igual para WA y WA Business
+        window.open('https://wa.me/' + (telefono || '') + '?text=' + encoded, '_blank');
+    }
+}
+
+// ── Guardar/actualizar cliente en hoja Clientes ──────────────────────────────
+// Fire-and-forget: no bloquea el flujo principal del fiado
+function _guardarClienteFiado(nombre, telefono) {
+    if (!nombre) return;
+    // Actualizar caché local
+    if (!_fiadoClientesCache) _fiadoClientesCache = [];
+    const existing = _fiadoClientesCache.find(c => c.nombre.toLowerCase() === nombre.toLowerCase());
+    if (existing) {
+        // Actualizar teléfono si cambió
+        if (telefono && existing.telefono !== telefono) existing.telefono = telefono;
+    } else {
+        _fiadoClientesCache.push({ nombre, telefono: telefono || '' });
+    }
+    // Persistir en hoja Clientes en segundo plano
+    try {
+        const payload = { nombre, telefono: telefono || '' };
+        const url = API_URL + '?action=guardarCliente&data=' + encodeURIComponent(JSON.stringify(payload));
+        fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) })
+            .then(r => r.json())
+            .then(d => { if (!d.ok) console.warn('⚠️ guardarCliente:', d); })
+            .catch(e => console.warn('⚠️ guardarCliente red:', e));
+    } catch(e) { /* ignorar — el fiado ya se registró */ }
+}
+
 function _enviarFiadoWhatsApp(datosFiado, total) {
     const tel = (datosFiado.telefono || '').replace(/\D/g, '');
     if (!tel || tel.length < 6) return; // sin teléfono válido no abre WA
@@ -8803,7 +8852,8 @@ function _enviarFiadoWhatsApp(datosFiado, total) {
         numWA = '549' + numWA;
     }
 
-    abrirWABusiness(msg, numWA);
+    // Siempre usar WhatsApp Business
+    _abrirWABusinessForzado(msg, numWA);
 }
 
 // ========== RETIRO DE CAJA ==========
