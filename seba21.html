@@ -30,7 +30,7 @@
   • FIADOS: _fmtFecha() mejorada con mismo parser robusto (ISO, DD/MM/YYYY,
     string largo de GAS).
 
-  v275 — 23/04/2026
+  v276 — 23/04/2026
   -----------------
   • FIADOS: Fix crítico de desfase UTC en fechas de GAS.
     GAS serializa fechas como "Wed Apr 22 2026 00:00:00 GMT-0300". Al parsear
@@ -44,7 +44,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v275</title>
+    <title>Copihue — POS v276</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3360,20 +3360,30 @@ function cerrarModalConfirm(e) {
 }
 
 function abrirWABusiness(texto, telefono) {
+    // Siempre WA Business (com.whatsapp.w4b) en Android
     const encoded = encodeURIComponent(texto);
-    if (telefono) {
-        // Con destinatario: wa.me abre directo al chat (funciona en Android e iOS)
-        window.open('https://wa.me/' + telefono + '?text=' + encoded, '_blank');
-    } else {
-        // Sin destinatario: intent a WA Business para elegir contacto
-        if (/android/i.test(navigator.userAgent)) {
-            const fallbackUrl = encodeURIComponent('https://wa.me/?text=' + encoded);
+    const isAndroid = /android/i.test(navigator.userAgent);
+    if (isAndroid) {
+        if (telefono) {
+            // Con número: intent directo al chat en WA Business
+            const fallback = encodeURIComponent('https://wa.me/' + telefono + '?text=' + encoded);
+            window.location.href = 'intent://send?phone=' + telefono +
+                '&text=' + encoded +
+                '#Intent;package=com.whatsapp.w4b;scheme=whatsapp;end;' +
+                'S.browser_fallback_url=' + fallback;
+        } else {
+            // Sin número: abrir WA Business para elegir contacto
+            const fallback = encodeURIComponent('https://wa.me/?text=' + encoded);
             window.location.href = 'intent://send?text=' + encoded +
                 '#Intent;package=com.whatsapp.w4b;scheme=whatsapp;end;' +
-                'S.browser_fallback_url=' + fallbackUrl;
-        } else {
-            window.open('https://wa.me/?text=' + encoded, '_blank');
+                'S.browser_fallback_url=' + fallback;
         }
+    } else {
+        // iOS / Desktop
+        const url = telefono
+            ? 'https://wa.me/' + telefono + '?text=' + encoded
+            : 'https://wa.me/?text=' + encoded;
+        window.open(url, '_blank');
     }
 }
 
@@ -8881,21 +8891,9 @@ async function _procesarVentaFiado(datosFiado) {
     if (btnOk) { btnOk.textContent = '✅ Confirmar cobro'; btnOk.disabled = false; btnOk.onclick = confirmarVenta; }
 }
 
-// ── WhatsApp Business forzado — siempre usa com.whatsapp.w4b ─────────────────
+// ── WhatsApp Business forzado — alias de abrirWABusiness ────────────────────
 function _abrirWABusinessForzado(texto, telefono) {
-    const encoded = encodeURIComponent(texto);
-    if (/android/i.test(navigator.userAgent)) {
-        // Intent directo a WA Business con fallback a wa.me
-        const fallback = encodeURIComponent('https://wa.me/' + (telefono || '') + '?text=' + encoded);
-        const intent = 'intent://send/' + (telefono || '') +
-            '?text=' + encoded +
-            '#Intent;package=com.whatsapp.w4b;scheme=smsto;end;' +
-            'S.browser_fallback_url=' + fallback;
-        window.location.href = intent;
-    } else {
-        // iOS/Desktop: wa.me funciona igual para WA y WA Business
-        window.open('https://wa.me/' + (telefono || '') + '?text=' + encoded, '_blank');
-    }
+    abrirWABusiness(texto, telefono);
 }
 
 // ── Guardar/actualizar cliente en hoja Clientes ──────────────────────────────
