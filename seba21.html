@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v272</title>
+    <title>Copihue — POS v273</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -8106,7 +8106,28 @@ async function abrirPanelFiados() {
     try {
         const data = await _apiFetch('listarFiados');
         if (!data.ok) throw new Error(data.error || 'Error al cargar');
-        _fiadosPendientes = data.fiados || [];
+        // Normalizar fechaPago a YYYY-MM-DD al recibir — GAS puede enviar objetos Date serializados de distintas formas
+        const _normFecha = s => {
+            if (!s) return '';
+            const str = String(s).trim();
+            if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str; // ya es ISO
+            if (/^\d{2}\/\d{2}\/\d{4}$/.test(str)) { const [d,m,y]=str.split('/'); return `${y}-${m}-${d}`; }
+            try {
+                const d = new Date(str);
+                if (!isNaN(d)) {
+                    // Usar fecha local para evitar desfase UTC
+                    const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), dd = String(d.getDate()).padStart(2,'0');
+                    return `${y}-${m}-${dd}`;
+                }
+            } catch(e) {}
+            return str;
+        };
+        _fiadosPendientes = (data.fiados || []).map(f => ({
+            ...f,
+            fechaPago: _normFecha(f.fechaPago),
+            fecha:     _normFecha(f.fecha),
+            fechaVencimiento: f.fechaVencimiento ? _normFecha(f.fechaVencimiento) : f.fechaVencimiento
+        }));
         _renderPanelFiados();
     } catch(e) {
         document.getElementById('fiadoPanelCuerpo').innerHTML = '<div style="text-align:center;padding:40px;color:#e53935;">❌ ' + e.message + '</div>';
