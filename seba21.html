@@ -30,7 +30,7 @@
   • FIADOS: _fmtFecha() mejorada con mismo parser robusto (ISO, DD/MM/YYYY,
     string largo de GAS).
 
-  v280 — 23/04/2026
+  v281 — 23/04/2026
   -----------------
   • FIADOS: Fix crítico de desfase UTC en fechas de GAS.
     GAS serializa fechas como "Wed Apr 22 2026 00:00:00 GMT-0300". Al parsear
@@ -44,7 +44,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v280</title>
+    <title>Copihue — POS v281</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -8417,67 +8417,60 @@ async function confirmarCobroPendiente() {
 }
 
 // ── Recordar deuda completa de un cliente por WA Business ──────────────────
-async function _recordarDeudaCliente(btn) {
+function _recordarDeudaCliente(btn) {
     const telefono = btn.dataset.tel || '';
     const nombre   = btn.dataset.nombre || '';
+
+    // Feedback visual inmediato en el botón
+    const txtOrig = btn.innerHTML;
+    btn.innerHTML = '⏳';
+    btn.disabled = true;
+    setTimeout(() => { btn.innerHTML = txtOrig; btn.disabled = false; }, 4000);
+
     const pendientes = _fiadosPendientes.filter(f =>
         f.estado !== 'PAGADO' &&
         (f.telefono === telefono || f.cliente === nombre)
     );
     if (pendientes.length === 0) {
         mostrarToast('✅ ' + nombre + ' no tiene deuda pendiente', 'verde');
+        btn.innerHTML = txtOrig; btn.disabled = false;
         return;
     }
-    mostrarToast('⏳ Buscando detalle de compras...', 'gris');
 
     const totalDeuda = pendientes.reduce((s, f) => s + parseFloat(f.total || 0), 0);
     const hoy = new Date().toLocaleDateString('es-AR');
 
-    // Buscar el detalle completo de cada fiado desde hoja Ventas por ticket
-    const bloques = await Promise.all(pendientes.map(async (f, i) => {
+    // Armar bloques con la info disponible en el cliente (sin llamadas a GAS)
+    const bloques = pendientes.map((f, i) => {
         const fecha = _fmtFecha(f.fecha);
-        const venc  = f.fechaVencimiento ? '\n   ⏰ Vence: ' + _fmtFecha(f.fechaVencimiento) : '';
         const monto = '$' + parseFloat(f.total||0).toLocaleString('es-AR');
-        let itemsTxt = '';
 
-        // Intentar buscar detalle en Ventas por número de ticket
-        const ticketNum = f.ticket || f.idFiado;
-        if (ticketNum) {
-            try {
-                const url = API_URL + '?action=getDetalleVenta&ticket=' + encodeURIComponent(ticketNum) + '&t=' + Date.now();
-                const resp = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(8000) });
-                const data = await resp.json();
-                if (data.success && data.items && data.items.length > 0) {
-                    itemsTxt = data.items.map(it =>
-                        '   • ' + (it.qty ? it.qty + 'x ' : '') + it.nombre +
-                        (it.precio ? ' — $' + parseFloat(it.precio).toLocaleString('es-AR') : '')
-                    ).join('\n');
-                }
-            } catch(e) { /* si falla, usar descripción de respaldo */ }
+        // Detalle de productos: formatear descripcion que viene del fiado
+        let itemsTxt = '';
+        if (f.descripcion) {
+            itemsTxt = f.descripcion.split('·').map(s => '   • ' + s.trim()).join('\n');
+        } else {
+            itemsTxt = '   • (sin detalle)';
         }
-        // Fallback: descripción corta que trae el fiado
-        if (!itemsTxt && f.descripcion) {
-            itemsTxt = '   ' + f.descripcion.split('·').map(s => '• ' + s.trim()).join('\n   ');
-        }
-        if (!itemsTxt) itemsTxt = '   (sin detalle)';
 
         // Estado de vencimiento
-        let estadoTxt = '';
+        let estadoTxt = '\n   🟡 Sin vencimiento';
         if (f.fechaVencimiento) {
             const hoyTs = new Date(); hoyTs.setHours(0,0,0,0);
             const vencTs = new Date(f.fechaVencimiento + 'T12:00:00');
             const dias = Math.round((vencTs - hoyTs) / 86400000);
-            if (dias < 0)        estadoTxt = '\n   🔴 VENCIDO hace ' + Math.abs(dias) + ' día' + (Math.abs(dias)>1?'s':'');
-            else if (dias === 0) estadoTxt = '\n   🟠 Vence HOY';
-            else                 estadoTxt = '\n   ⏰ Vence en ' + dias + ' día' + (dias>1?'s':'') + ' (' + _fmtFecha(f.fechaVencimiento) + ')';
-        } else {
-            estadoTxt = '\n   🟡 Sin fecha de vencimiento';
+            if (dias < 0)        estadoTxt = '\n   🔴 *VENCIDO hace ' + Math.abs(dias) + ' día' + (Math.abs(dias)>1?'s':'') + '*';
+            else if (dias === 0) estadoTxt = '\n   🟠 *Vence HOY*';
+            else if (dias <= 3)  estadoTxt = '\n   ⚠️ Vence en ' + dias + ' día' + (dias>1?'s':'') + ' (' + _fmtFecha(f.fechaVencimiento) + ')';
+            else                 estadoTxt = '\n   ⏰ Vence: ' + _fmtFecha(f.fechaVencimiento);
         }
-        return (i+1) + '. 📅 Compra del ' + fecha + estadoTxt + '\n' + itemsTxt + '\n   💰 *' + monto + '*';
-    }));
+
+        return (i+1) + '. 📅 ' + fecha + estadoTxt + '\n' + itemsTxt + '\n   💰 *' + monto + '*';
+    });
 
     const msg = [
-        '📋 *RESUMEN DE DEUDA — Almacén Copihue*',
+        '📋 *RESUMEN DE DEUDA*',
+        '*Almacén Copihue*',
         '',
         '👤 *' + nombre + '*',
         '🗓 Al ' + hoy,
@@ -8486,7 +8479,7 @@ async function _recordarDeudaCliente(btn) {
         bloques.join('\n\n'),
         '━━━━━━━━━━━━━━━━━━━━',
         '',
-        '💳 *TOTAL PENDIENTE: $' + Math.round(totalDeuda).toLocaleString('es-AR') + '*',
+        '💳 *TOTAL: $' + Math.round(totalDeuda).toLocaleString('es-AR') + '*',
         '(' + pendientes.length + ' compra' + (pendientes.length > 1 ? 's' : '') + ' sin pagar)',
         '',
         '¡Cuando puedas pasate o avisanos! 🙏',
