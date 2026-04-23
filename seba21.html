@@ -30,7 +30,7 @@
   • FIADOS: _fmtFecha() mejorada con mismo parser robusto (ISO, DD/MM/YYYY,
     string largo de GAS).
 
-  v277 — 23/04/2026
+  v279 — 23/04/2026
   -----------------
   • FIADOS: Fix crítico de desfase UTC en fechas de GAS.
     GAS serializa fechas como "Wed Apr 22 2026 00:00:00 GMT-0300". Al parsear
@@ -44,7 +44,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v277</title>
+    <title>Copihue — POS v279</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -8278,8 +8278,14 @@ function _renderPanelFiados() {
                     <span style="font-size:0.82rem;font-weight:700;color:#333;">Seleccionar <span style="color:#c62828;">$${parseFloat(f.total||0).toLocaleString('es-AR')}</span></span>
                 </label>
                 <button onclick="_reenviarWAFiado('${f.idFiado}')"
-                    style="padding:8px 12px;border:2px solid #25d366;border-radius:10px;background:white;color:#25d366;font-weight:700;font-size:0.85rem;cursor:pointer;">
+                    style="padding:8px 12px;border:2px solid #25d366;border-radius:10px;background:white;color:#25d366;font-weight:700;font-size:0.85rem;cursor:pointer;"
+                    title="Enviar comprobante de este fiado">
                     📲 WA
+                </button>
+                <button onclick="_recordarDeudaCliente('${f.telefono}', '${f.cliente.replace(/'/g,'\'')}')"
+                    style="padding:8px 10px;border:2px solid #ff8f00;border-radius:10px;background:white;color:#ff8f00;font-weight:700;font-size:0.82rem;cursor:pointer;"
+                    title="Enviar resumen de TODA la deuda pendiente del cliente">
+                    📋 Deuda
                 </button>
             </div>` : `
             <div style="font-size:0.72rem;color:#388e3c;margin-top:4px;">
@@ -8407,6 +8413,74 @@ async function confirmarCobroPendiente() {
         mostrarToast('❌ ' + e.message, 'rojo');
         if (btn) { btn.disabled = false; btn.textContent = '✅ Confirmar pago'; }
     }
+}
+
+// ── Recordar deuda completa de un cliente por WA Business ──────────────────
+async function _recordarDeudaCliente(telefono, nombre) {
+    const pendientes = _fiadosPendientes.filter(f =>
+        f.estado !== 'PAGADO' &&
+        (f.telefono === telefono || f.cliente === nombre)
+    );
+    if (pendientes.length === 0) {
+        mostrarToast('✅ ' + nombre + ' no tiene deuda pendiente', 'verde');
+        return;
+    }
+    mostrarToast('⏳ Buscando detalle de compras...', 'gris');
+
+    const totalDeuda = pendientes.reduce((s, f) => s + parseFloat(f.total || 0), 0);
+    const hoy = new Date().toLocaleDateString('es-AR');
+
+    // Buscar el detalle completo de cada fiado desde hoja Ventas por ticket
+    const bloques = await Promise.all(pendientes.map(async (f, i) => {
+        const fecha = _fmtFecha(f.fecha);
+        const venc  = f.fechaVencimiento ? '\n   ⏰ Vence: ' + _fmtFecha(f.fechaVencimiento) : '';
+        const monto = '$' + parseFloat(f.total||0).toLocaleString('es-AR');
+        let itemsTxt = '';
+
+        // Intentar buscar detalle en Ventas por número de ticket
+        const ticketNum = f.ticket || f.idFiado;
+        if (ticketNum) {
+            try {
+                const url = API_URL + '?action=getDetalleVenta&ticket=' + encodeURIComponent(ticketNum) + '&t=' + Date.now();
+                const resp = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(8000) });
+                const data = await resp.json();
+                if (data.success && data.items && data.items.length > 0) {
+                    itemsTxt = data.items.map(it =>
+                        '   • ' + (it.qty ? it.qty + 'x ' : '') + it.nombre +
+                        (it.precio ? ' — $' + parseFloat(it.precio).toLocaleString('es-AR') : '')
+                    ).join('\n');
+                }
+            } catch(e) { /* si falla, usar descripción de respaldo */ }
+        }
+        // Fallback: descripción corta que trae el fiado
+        if (!itemsTxt && f.descripcion) {
+            itemsTxt = '   ' + f.descripcion.split('·').map(s => '• ' + s.trim()).join('\n   ');
+        }
+        if (!itemsTxt) itemsTxt = '   (sin detalle)';
+
+        return (i+1) + '. 📅 ' + fecha + venc + '\n' + itemsTxt + '\n   💰 *' + monto + '*';
+    }));
+
+    const msg = [
+        '📋 *RESUMEN DE DEUDA — Almacén Copihue*',
+        '',
+        '👤 *' + nombre + '*',
+        '🗓 Al ' + hoy,
+        '',
+        '━━━━━━━━━━━━━━━━━━━━',
+        bloques.join('\n\n'),
+        '━━━━━━━━━━━━━━━━━━━━',
+        '',
+        '💳 *TOTAL PENDIENTE: $' + Math.round(totalDeuda).toLocaleString('es-AR') + '*',
+        '(' + pendientes.length + ' compra' + (pendientes.length > 1 ? 's' : '') + ' sin pagar)',
+        '',
+        '¡Cuando puedas pasate o avisanos! 🙏',
+        '📍 Almacén Copihue'
+    ].join('\n');
+
+    let num = (telefono || '').replace(/\D/g, '');
+    if (num && !num.startsWith('549') && !num.startsWith('54')) num = '549' + num;
+    abrirWABusiness(msg, num || '');
 }
 
 function _reenviarWAFiado(idFiado) {
