@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v271</title>
+    <title>Copihue — POS v272</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -8120,7 +8120,23 @@ function cerrarPanelFiados() {
 function _renderPanelFiados() {
     const hoy = new Date(); hoy.setHours(0,0,0,0);
     const pendientes = _fiadosPendientes.filter(f => f.estado !== 'PAGADO').sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
-    const _parseFechaPago = s => { try { const d = new Date(s); return isNaN(d) ? 0 : d.getTime(); } catch(e) { return 0; } };
+    // Parser robusto: maneja ISO "2026-03-28", "Sat Mar 28 2026 00:00:00 GMT...", y DD/MM/YYYY
+    const _parseFechaPago = s => {
+        if (!s) return 0;
+        const str = String(s).trim();
+        // ISO yyyy-mm-dd
+        if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+            const [y,m,d] = str.split('-').map(Number);
+            return new Date(y, m-1, d).getTime();
+        }
+        // DD/MM/YYYY
+        if (/^\d{2}\/\d{2}\/\d{4}$/.test(str)) {
+            const [d,m,y] = str.split('/').map(Number);
+            return new Date(y, m-1, d).getTime();
+        }
+        // Cualquier otro (ej: "Sat Mar 28 2026 00:00:00 GMT...")
+        try { const d = new Date(str); return isNaN(d) ? 0 : d.getTime(); } catch(e) { return 0; }
+    };
     const pagados    = _fiadosPendientes.filter(f => f.estado === 'PAGADO').sort((a, b) => _parseFechaPago(b.fechaPago || b.fecha) - _parseFechaPago(a.fechaPago || a.fecha));
     const total = pendientes.reduce((s, f) => s + (parseFloat(f.total) || 0), 0);
 
@@ -8141,12 +8157,23 @@ function _renderPanelFiados() {
         }
     }
 
-    // Formatea fecha del servidor a DD/MM/YYYY
+    // Formatea fecha del servidor a DD/MM/YYYY — parser robusto igual que el sort
     function _fmtFecha(fechaStr) {
         if (!fechaStr) return '—';
-        const d = new Date(fechaStr);
-        if (isNaN(d)) return fechaStr; // si ya viene como string legible lo deja
-        return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        const str = String(fechaStr).trim();
+        let ts = 0;
+        if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+            const [y,m,d] = str.split('-').map(Number);
+            ts = new Date(y, m-1, d).getTime();
+        } else if (/^\d{2}\/\d{2}\/\d{4}$/.test(str)) {
+            const [d,m,y] = str.split('/').map(Number);
+            ts = new Date(y, m-1, d).getTime();
+        } else {
+            const d = new Date(str);
+            ts = isNaN(d) ? 0 : d.getTime();
+        }
+        if (!ts) return str;
+        return new Date(ts).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
     }
 
     function _renderTarjeta(f, i, esPendiente) {
