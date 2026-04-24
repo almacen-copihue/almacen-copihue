@@ -30,7 +30,7 @@
   • FIADOS: _fmtFecha() mejorada con mismo parser robusto (ISO, DD/MM/YYYY,
     string largo de GAS).
 
-  v288 — 23/04/2026
+  v289 — 23/04/2026
   -----------------
   • FIADOS: Fix crítico de desfase UTC en fechas de GAS.
     GAS serializa fechas como "Wed Apr 22 2026 00:00:00 GMT-0300". Al parsear
@@ -44,7 +44,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v288</title>
+    <title>Copihue — POS v289</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3360,25 +3360,15 @@ function cerrarModalConfirm(e) {
 }
 
 // ── Normalizar número argentino para wa.me ────────────────────────────────────
-// wa.me requiere: 549 + 10 dígitos (ej: 5492944578657)
-// Casos: "2944578657" → "5492944578657"
-//        "2944578657" con 54 adelante → agrega 9
-//        "9 2944578657" → quita el 9 inicial y agrega 549
+// Replica exactamente el formato que usa enviarTicketWA (línea 3431) que funciona
 function _normNumWA(tel) {
-    let n = String(tel || '').replace(/\D/g, '');
+    const n = String(tel || '').replace(/\D/g, '');
     if (!n) return '';
-    // Si ya tiene 13 dígitos y empieza con 549 → ok
-    if (n.length === 13 && n.startsWith('549')) return n;
-    // Si empieza con 54 y tiene 12 dígitos → le falta el 9
-    if (n.startsWith('54') && n.length === 12) return '549' + n.slice(2);
-    // Si empieza con 54 y tiene 13 dígitos → ya correcto
-    if (n.startsWith('54') && n.length === 13) return n;
-    // Si tiene 11 dígitos y empieza con 9 → 54 + número
-    if (n.length === 11 && n.startsWith('9')) return '54' + n;
-    // Si tiene 10 dígitos (número local) → 549 + número
-    if (n.length === 10) return '549' + n;
-    // Cualquier otro caso: agregar 549
-    return '549' + n;
+    // Si ya empieza con 549 → ok
+    if (n.startsWith('549')) return n;
+    // Siempre: 549 + número limpio (sin 54 o 9 adelante si ya los tiene)
+    const base = n.startsWith('54') ? n.slice(2) : (n.startsWith('9') && n.length === 11 ? n.slice(1) : n);
+    return '549' + base;
 }
 
 function abrirWABusiness(texto, telefono) {
@@ -8697,7 +8687,12 @@ setTimeout(async () => {
     try {
         const data = await _apiFetch('listarFiados');
         if (data.ok && data.fiados) {
-            _fiadosPendientes = data.fiados;
+            _fiadosPendientes = data.fiados.map(f => ({
+                ...f,
+                fechaPago: _normFecha(f.fechaPago),
+                fecha:     _normFecha(f.fecha),
+                fechaVencimiento: f.fechaVencimiento ? _normFecha(f.fechaVencimiento) : f.fechaVencimiento
+            }));
             _renderPanelFiados(); // actualiza badge sin abrir el panel
         }
     } catch(e) {}
