@@ -30,7 +30,7 @@
   • FIADOS: _fmtFecha() mejorada con mismo parser robusto (ISO, DD/MM/YYYY,
     string largo de GAS).
 
-  v289 — 23/04/2026
+  v290 — 23/04/2026
   -----------------
   • FIADOS: Fix crítico de desfase UTC en fechas de GAS.
     GAS serializa fechas como "Wed Apr 22 2026 00:00:00 GMT-0300". Al parsear
@@ -44,7 +44,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v289</title>
+    <title>Copihue — POS v290</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3372,22 +3372,11 @@ function _normNumWA(tel) {
 }
 
 function abrirWABusiness(texto, telefono) {
+    // ✅ REGLA DE ORO WA: Siempre usar whatsapp:// scheme directo
+    // NO usar wa.me (abre navegador), NO usar intents (bloquea Chrome)
+    // Abre WA Business directamente con lista de contactos para elegir
     const encoded = encodeURIComponent(texto);
-    const num = _normNumWA(telefono);
-    let url;
-    if (num) {
-        url = 'https://wa.me/' + num + '?text=' + encoded;
-    } else {
-        url = 'https://wa.me/?text=' + encoded;
-    }
-    // Abrir en nueva pestaña — Android elige la app WA Business automáticamente
-    const a = document.createElement('a');
-    a.href = url;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => { if (a.parentNode) a.parentNode.removeChild(a); }, 1000);
+    window.location.href = 'whatsapp://send?text=' + encoded;
 }
 
 function enviarTicketWA() {
@@ -3418,8 +3407,7 @@ function enviarTicketWA() {
     // Si hay cliente seleccionado → abrir WA Business con su número
     if (_clienteActual && _clienteActual.telefono) {
         actualizarEstadisticaCliente(_clienteActual.telefono, v);
-        const tel = '549' + _clienteActual.telefono.replace(/\D/g,'');
-        abrirWABusiness(mensaje, tel);
+        abrirWABusiness(mensaje);
     } else {
         abrirWABusiness(mensaje);
     }
@@ -8339,23 +8327,12 @@ function _fiadoTouchEnd(e, idFiado)   { /* no usado */ }
 function _fiadoTouchCancel()           { /* no usado */ }
 
 // ── URL WA precalculada al seleccionar ───────────────────────────────────────
-let _waFlotanteUrl = '';
+let _waFlotanteMensaje = '';
 
 function _abrirWAFlotante() {
-    if (!_waFlotanteUrl) return;
-    // Crear link temporal en el body (fuera del panel) y clickear
-    const existing = document.getElementById('_tmpWALink');
-    if (existing) existing.remove();
-    const a = document.createElement('a');
-    a.id = '_tmpWALink';
-    a.href = _waFlotanteUrl;
-    // NO usar target=_blank — usar location directa
-    a.style.cssText = 'position:fixed;top:-100px;left:-100px;opacity:0;';
-    document.body.appendChild(a);
-    // Simular toque nativo
-    const touch = new MouseEvent('click', { bubbles: true, cancelable: true, view: window });
-    a.dispatchEvent(touch);
-    setTimeout(() => a.remove(), 2000);
+    if (!_waFlotanteMensaje) return;
+    // ✅ Mismo scheme que funciona en enviarTicketWA
+    window.location.href = 'whatsapp://send?text=' + encodeURIComponent(_waFlotanteMensaje);
 }
 
 function _toggleFiadoSelect(idFiado) {
@@ -8471,59 +8448,46 @@ function _actualizarBarraCobro() {
         seleccionados.length + ' fiado' + (seleccionados.length > 1 ? 's' : '') +
         ' · $' + total.toLocaleString('es-AR');
 
-    // Armar el mensaje WA y actualizar el href del link directamente
-    const btnWA = document.getElementById('btnWAFlotante');
-    if (btnWA) {
-        const hoy = new Date().toLocaleDateString('es-AR');
-        const mismoCliente = seleccionados.every(f => f.cliente === seleccionados[0].cliente);
-        const nombre = mismoCliente ? seleccionados[0].cliente : seleccionados.length + ' clientes';
-        const tel = (seleccionados[0].telefono || '').replace(/\D/g,'');
-        const num = _normNumWA(tel);
+    // Armar mensaje WA y guardarlo para cuando se toque el botón
+    const hoy = new Date().toLocaleDateString('es-AR');
+    const mismoCliente = seleccionados.every(f => f.cliente === seleccionados[0].cliente);
+    const nombre = mismoCliente ? seleccionados[0].cliente : seleccionados.length + ' clientes';
 
-        const bloques = seleccionados.map((f, i) => {
-            const fecha = _fmtFecha(f.fecha);
-            const monto = '$' + parseFloat(f.total||0).toLocaleString('es-AR');
-            let items = f.descripcion
-                ? f.descripcion.split('·').map(s => '• ' + s.trim()).join('\n')
-                : '(sin detalle)';
-            let estado = 'Sin vencimiento';
-            if (f.fechaVencimiento) {
-                const hoyTs = new Date(); hoyTs.setHours(0,0,0,0);
-                const vencTs = new Date(f.fechaVencimiento + 'T12:00:00');
-                const dias = Math.round((vencTs - hoyTs) / 86400000);
-                if (dias < 0)        estado = '🔴 VENCIDO hace ' + Math.abs(dias) + 'd';
-                else if (dias === 0) estado = '🟠 Vence HOY';
-                else if (dias <= 3)  estado = '⚠️ Vence en ' + dias + 'd';
-                else                 estado = '⏰ Vence: ' + _fmtFecha(f.fechaVencimiento);
-            }
-            return (i+1) + '. ' + fecha + ' — ' + estado + '\n' + items + '\n💰 *' + monto + '*';
-        }).join('\n\n');
+    const bloques = seleccionados.map((f, i) => {
+        const fecha = _fmtFecha(f.fecha);
+        const monto = '$' + parseFloat(f.total||0).toLocaleString('es-AR');
+        let items = f.descripcion
+            ? f.descripcion.split('·').map(s => '• ' + s.trim()).join('\n')
+            : '(sin detalle)';
+        let estado = 'Sin vencimiento';
+        if (f.fechaVencimiento) {
+            const hoyTs = new Date(); hoyTs.setHours(0,0,0,0);
+            const vencTs = new Date(f.fechaVencimiento + 'T12:00:00');
+            const dias = Math.round((vencTs - hoyTs) / 86400000);
+            if (dias < 0)        estado = '🔴 VENCIDO hace ' + Math.abs(dias) + 'd';
+            else if (dias === 0) estado = '🟠 Vence HOY';
+            else if (dias <= 3)  estado = '⚠️ Vence en ' + dias + 'd';
+            else                 estado = '⏰ Vence: ' + _fmtFecha(f.fechaVencimiento);
+        }
+        return (i+1) + '. ' + fecha + ' — ' + estado + '\n' + items + '\n💰 *' + monto + '*';
+    }).join('\n\n');
 
-        const msg = [
-            '📋 *RESUMEN DE DEUDA*',
-            '*Almacén Copihue*',
-            '',
-            '👤 *' + nombre + '*  |  🗓 ' + hoy,
-            '',
-            '━━━━━━━━━━━━━━━━━━━━',
-            bloques,
-            '━━━━━━━━━━━━━━━━━━━━',
-            '',
-            '💳 *TOTAL: $' + Math.round(total).toLocaleString('es-AR') + '*',
-            '(' + seleccionados.length + ' compra' + (seleccionados.length > 1 ? 's' : '') + ' pendiente' + (seleccionados.length > 1 ? 's' : '') + ')',
-            '',
-            '¡Cuando puedas pasate o avisanos! 🙏',
-            '📍 Almacén Copihue'
-        ].join('\n');
-
-        const waUrl = num
-            ? 'https://wa.me/' + _normNumWA(num) + '?text=' + encodeURIComponent(msg)
-            : 'https://wa.me/?text=' + encodeURIComponent(msg);
-        _waFlotanteUrl = waUrl;
-        // Actualizar el href del link <a> directamente — Chrome siempre permite tocar un <a> real
-        const btnEl = document.getElementById('btnWAFlotante');
-        if (btnEl) btnEl.href = waUrl;
-    }
+    _waFlotanteMensaje = [
+        '📋 *RESUMEN DE DEUDA*',
+        '*Almacén Copihue*',
+        '',
+        '👤 *' + nombre + '*  |  🗓 ' + hoy,
+        '',
+        '━━━━━━━━━━━━━━━━━━━━',
+        bloques,
+        '━━━━━━━━━━━━━━━━━━━━',
+        '',
+        '💳 *TOTAL: $' + Math.round(total).toLocaleString('es-AR') + '*',
+        '(' + seleccionados.length + ' compra' + (seleccionados.length > 1 ? 's' : '') + ' pendiente' + (seleccionados.length > 1 ? 's' : '') + ')',
+        '',
+        '¡Cuando puedas pasate o avisanos! 🙏',
+        '📍 Almacén Copihue'
+    ].join('\n');
 }
 
 function abrirCobrarSeleccionados() {
