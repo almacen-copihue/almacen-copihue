@@ -30,7 +30,7 @@
   • FIADOS: _fmtFecha() mejorada con mismo parser robusto (ISO, DD/MM/YYYY,
     string largo de GAS).
 
-  v283 — 23/04/2026
+  v284 — 23/04/2026
   -----------------
   • FIADOS: Fix crítico de desfase UTC en fechas de GAS.
     GAS serializa fechas como "Wed Apr 22 2026 00:00:00 GMT-0300". Al parsear
@@ -44,7 +44,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v283</title>
+    <title>Copihue — POS v284</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3360,39 +3360,24 @@ function cerrarModalConfirm(e) {
 }
 
 function abrirWABusiness(texto, telefono) {
-    // Siempre WA Business (com.whatsapp.w4b) en Android
     const encoded = encodeURIComponent(texto);
-    const isAndroid = /android/i.test(navigator.userAgent);
-    if (isAndroid) {
-        // Construir intent URL
-        let intentUrl;
-        if (telefono) {
-            const fallback = encodeURIComponent('https://wa.me/' + telefono + '?text=' + encoded);
-            intentUrl = 'intent://send?phone=' + telefono +
-                '&text=' + encoded +
-                '#Intent;package=com.whatsapp.w4b;scheme=whatsapp;end;' +
-                'S.browser_fallback_url=' + fallback;
-        } else {
-            const fallback = encodeURIComponent('https://wa.me/?text=' + encoded);
-            intentUrl = 'intent://send?text=' + encoded +
-                '#Intent;package=com.whatsapp.w4b;scheme=whatsapp;end;' +
-                'S.browser_fallback_url=' + fallback;
-        }
-        // Usar anchor click para preservar el gesto del usuario y evitar bloqueo del navegador
-        const a = document.createElement('a');
-        a.href = intentUrl;
-        a.target = '_blank';
-        a.rel = 'noopener';
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(() => document.body.removeChild(a), 500);
+    // wa.me con número abre directamente WA Business si está instalado
+    // whatsapp://send funciona en Android sin necesidad de intent
+    const num = (telefono || '').replace(/\D/g,'');
+    let url;
+    if (num) {
+        url = 'https://wa.me/' + num + '?text=' + encoded;
     } else {
-        // iOS / Desktop
-        const url = telefono
-            ? 'https://wa.me/' + telefono + '?text=' + encoded
-            : 'https://wa.me/?text=' + encoded;
-        window.open(url, '_blank');
+        url = 'https://wa.me/?text=' + encoded;
     }
+    // Abrir en nueva pestaña — Android elige la app WA Business automáticamente
+    const a = document.createElement('a');
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { if (a.parentNode) a.parentNode.removeChild(a); }, 1000);
 }
 
 function enviarTicketWA() {
@@ -8289,11 +8274,12 @@ function _renderPanelFiados() {
         const cardBorde = esPendiente && isSelected ? '3px solid #2e7d32' : '2px solid ' + colorBorde;
         const cardFondo = esPendiente && isSelected ? '#e8f5e9' : colorFondo;
         const selectIndicator = esPendiente && isSelected
-            ? `<div style="position:absolute;top:8px;right:8px;background:#2e7d32;color:white;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:900;">✓</div>`
-            : (esPendiente ? `<div style="position:absolute;top:8px;right:8px;background:rgba(0,0,0,0.06);color:#aaa;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:0.65rem;" title="Mantené presionado para seleccionar">☐</div>` : '');
+            ? `<div id="ind-${f.idFiado}" style="position:absolute;top:8px;right:8px;background:#2e7d32;color:white;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:0.8rem;font-weight:900;">✓</div>`
+            : (esPendiente ? `<div id="ind-${f.idFiado}" style="position:absolute;top:8px;right:8px;width:24px;height:24px;"></div>` : '');
 
         return `
         <div id="fcard-${f.idFiado}"
+             data-borde="2px solid ${colorBorde}" data-fondo="${colorFondo}"
              style="position:relative;border:${cardBorde};background:${cardFondo};border-radius:12px;padding:12px 14px;margin-bottom:10px;cursor:${esPendiente?'pointer':'default'};user-select:none;transition:border 0.15s,background 0.15s;"
              ${esPendiente ? `ontouchstart="_fiadoTouchStart(event,'${f.idFiado}')" ontouchend="_fiadoTouchEnd(event,'${f.idFiado}')" ontouchmove="_fiadoTouchCancel()" onmousedown="_fiadoTouchStart(event,'${f.idFiado}')" onmouseup="_fiadoTouchEnd(event,'${f.idFiado}')" onmouseleave="_fiadoTouchCancel()"` : ''}>
             ${selectIndicator}
@@ -8367,17 +8353,24 @@ function _toggleFiadoSelect(idFiado) {
     } else {
         _fiadosSeleccionados.add(idFiado);
     }
-    // Actualizar visual de la tarjeta sin re-renderizar todo
+    const sel = _fiadosSeleccionados.has(idFiado);
     const card = document.getElementById('fcard-' + idFiado);
     if (card) {
-        const sel = _fiadosSeleccionados.has(idFiado);
-        card.style.border = sel ? '3px solid #2e7d32' : card.dataset.bordeOrig || '2px solid #ffe082';
-        card.style.background = sel ? '#e8f5e9' : card.dataset.fondoOrig || '#fffde7';
-        const indicator = card.querySelector('div[style*="border-radius:50%"]');
-        if (indicator) {
-            indicator.style.background = sel ? '#2e7d32' : 'rgba(0,0,0,0.06)';
-            indicator.style.color = sel ? 'white' : '#aaa';
-            indicator.textContent = sel ? '✓' : '☐';
+        // Recuperar colores originales guardados en data-attributes
+        const bordeOrig = card.dataset.borde || '2px solid #ffe082';
+        const fondoOrig = card.dataset.fondo || '#fffde7';
+        card.style.border  = sel ? '3px solid #2e7d32' : bordeOrig;
+        card.style.background = sel ? '#e8f5e9' : fondoOrig;
+    }
+    // Actualizar indicador
+    const ind = document.getElementById('ind-' + idFiado);
+    if (ind) {
+        if (sel) {
+            ind.style.cssText = 'position:absolute;top:8px;right:8px;background:#2e7d32;color:white;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:0.8rem;font-weight:900;';
+            ind.textContent = '✓';
+        } else {
+            ind.style.cssText = 'position:absolute;top:8px;right:8px;width:24px;height:24px;';
+            ind.textContent = '';
         }
     }
     _actualizarBarraCobro();
