@@ -30,7 +30,7 @@
   • FIADOS: _fmtFecha() mejorada con mismo parser robusto (ISO, DD/MM/YYYY,
     string largo de GAS).
 
-  v287 — 23/04/2026
+  v288 — 23/04/2026
   -----------------
   • FIADOS: Fix crítico de desfase UTC en fechas de GAS.
     GAS serializa fechas como "Wed Apr 22 2026 00:00:00 GMT-0300". Al parsear
@@ -44,7 +44,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v287</title>
+    <title>Copihue — POS v288</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3359,11 +3359,31 @@ function cerrarModalConfirm(e) {
     if (e.target === document.getElementById('modalConfirm')) cerrarConfirm();
 }
 
+// ── Normalizar número argentino para wa.me ────────────────────────────────────
+// wa.me requiere: 549 + 10 dígitos (ej: 5492944578657)
+// Casos: "2944578657" → "5492944578657"
+//        "2944578657" con 54 adelante → agrega 9
+//        "9 2944578657" → quita el 9 inicial y agrega 549
+function _normNumWA(tel) {
+    let n = String(tel || '').replace(/\D/g, '');
+    if (!n) return '';
+    // Si ya tiene 13 dígitos y empieza con 549 → ok
+    if (n.length === 13 && n.startsWith('549')) return n;
+    // Si empieza con 54 y tiene 12 dígitos → le falta el 9
+    if (n.startsWith('54') && n.length === 12) return '549' + n.slice(2);
+    // Si empieza con 54 y tiene 13 dígitos → ya correcto
+    if (n.startsWith('54') && n.length === 13) return n;
+    // Si tiene 11 dígitos y empieza con 9 → 54 + número
+    if (n.length === 11 && n.startsWith('9')) return '54' + n;
+    // Si tiene 10 dígitos (número local) → 549 + número
+    if (n.length === 10) return '549' + n;
+    // Cualquier otro caso: agregar 549
+    return '549' + n;
+}
+
 function abrirWABusiness(texto, telefono) {
     const encoded = encodeURIComponent(texto);
-    // wa.me con número abre directamente WA Business si está instalado
-    // whatsapp://send funciona en Android sin necesidad de intent
-    const num = (telefono || '').replace(/\D/g,'');
+    const num = _normNumWA(telefono);
     let url;
     if (num) {
         url = 'https://wa.me/' + num + '?text=' + encoded;
@@ -8468,8 +8488,7 @@ function _actualizarBarraCobro() {
         const mismoCliente = seleccionados.every(f => f.cliente === seleccionados[0].cliente);
         const nombre = mismoCliente ? seleccionados[0].cliente : seleccionados.length + ' clientes';
         const tel = (seleccionados[0].telefono || '').replace(/\D/g,'');
-        let num = tel;
-        if (num && !num.startsWith('549') && !num.startsWith('54')) num = '549' + num;
+        const num = _normNumWA(tel);
 
         const bloques = seleccionados.map((f, i) => {
             const fecha = _fmtFecha(f.fecha);
@@ -8508,7 +8527,7 @@ function _actualizarBarraCobro() {
         ].join('\n');
 
         const waUrl = num
-            ? 'https://wa.me/' + num + '?text=' + encodeURIComponent(msg)
+            ? 'https://wa.me/' + _normNumWA(num) + '?text=' + encodeURIComponent(msg)
             : 'https://wa.me/?text=' + encodeURIComponent(msg);
         _waFlotanteUrl = waUrl;
         // Actualizar el href del link <a> directamente — Chrome siempre permite tocar un <a> real
@@ -8640,9 +8659,7 @@ function _recordarDeudaCliente(btn) {
         '📍 Almacén Copihue'
     ].join('\n');
 
-    let num = (telefono || '').replace(/\D/g, '');
-    if (num && !num.startsWith('549') && !num.startsWith('54')) num = '549' + num;
-    abrirWABusiness(msg, num || '');
+    abrirWABusiness(msg, _normNumWA(telefono));
 }
 
 function _reenviarWAFiado(idFiado) {
@@ -8672,9 +8689,7 @@ function _enviarWACobranzaFiado(f) {
         `¡Gracias por saldar tu deuda! 🙌`,
         `📍 Almacén Copihue`
     ].filter(l => l !== '').join('\n');
-    let num = tel;
-    if (!num.startsWith('549') && !num.startsWith('54')) num = '549' + num;
-    abrirWABusiness(msg, num);
+    abrirWABusiness(msg, _normNumWA(tel));
 }
 
 // Cargar badge al iniciar
