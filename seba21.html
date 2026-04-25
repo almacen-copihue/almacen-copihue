@@ -53,6 +53,22 @@
   • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
     evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
 
+  v302 — 25/04/2026
+  ------------------
+  • WA: Eliminado modal intermedio «Enviar por WhatsApp Business» que no
+    funcionaba en Android Chrome/PWA. Ahora abrirWABusiness() abre directo
+    con whatsapp://send — Android elige la app WA que esté configurada.
+  • WA: Eliminadas funciones cerrarModalWA / _modalWAAbrir / _modalWACopiar
+    y el HTML del modal (z-index 99999). Código más limpio.
+
+  v301 — 25/04/2026
+  ------------------
+  • WA BUSINESS: _modalWAAbrir() ahora usa intent Android directo a
+    com.whatsapp.w4b (package de WA Business) en vez de api.whatsapp.com
+    que abría la app asociada por defecto (WA personal). iOS sigue con wa.me.
+  • FIADOS PANEL: Fix botón WA flotante en Android — position:relative en
+    contenedor del panel y ontouchstart para forzar recepción del tap.
+
   v300 — 25/04/2026
   ------------------
   • FIADOS PANEL: Fix botón WA flotante no pasaba el teléfono del cliente.
@@ -65,7 +81,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v300</title>
+    <title>Copihue — POS v302</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3398,49 +3414,17 @@ function _normNumWA(tel) {
     return '549' + base;
 }
 
-// URL y texto guardados para el modal WA
-let _modalWAUrl = '';
-let _modalWATexto = '';
-
+// ── Abrir WhatsApp directo (sin modal intermedio) ───────────────────────────
 function abrirWABusiness(texto, telefono) {
     const num = _normNumWA(telefono);
     const encoded = safeEnc(texto);
-    _modalWATexto = texto;
-    _modalWAUrl = num
-        ? 'https://api.whatsapp.com/send?phone=' + num + '&text=' + encoded
-        : 'https://api.whatsapp.com/send?text=' + encoded;
-    document.getElementById('modalWAPreview').textContent = texto.substring(0, 300) + (texto.length > 300 ? '...' : '');
-    document.getElementById('modalWACopiadoMsg').style.display = 'none';
-    document.getElementById('modalWA').style.display = 'flex';
+    const url = num
+        ? 'whatsapp://send?phone=' + num + '&text=' + encoded
+        : 'whatsapp://send?text=' + encoded;
+    window.location.href = url;
 }
-function cerrarModalWA() {
-    document.getElementById('modalWA').style.display = 'none';
-}
-function _modalWAAbrir() {
-    if (!_modalWAUrl) return;
-    // Intentar con window.open primero, luego location.href
-    const w = window.open(_modalWAUrl, '_blank');
-    if (!w || w.closed || typeof w.closed === 'undefined') {
-        window.location.href = _modalWAUrl;
-    }
-}
-function _modalWACopiar() {
-    if (!_modalWATexto) return;
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(_modalWATexto).then(() => {
-            document.getElementById('modalWACopiadoMsg').style.display = 'block';
-        });
-    } else {
-        // Fallback para Android sin clipboard API
-        const ta = document.createElement('textarea');
-        ta.value = _modalWATexto;
-        ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;';
-        document.body.appendChild(ta);
-        ta.focus(); ta.select();
-        try { document.execCommand('copy'); document.getElementById('modalWACopiadoMsg').style.display = 'block'; } catch(e) {}
-        document.body.removeChild(ta);
-    }
-}
+// Alias vacíos — modal eliminado
+function cerrarModalWA() {}
 
 function enviarTicketWA() {
     var v = window._ultimaVenta;
@@ -7620,28 +7604,10 @@ abrirNuevoProducto = function() {
 
 </body>
 <!-- MODAL WA UNIVERSAL -->
-<div id="modalWA" onclick="if(event.target===this)cerrarModalWA()" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.7);align-items:flex-end;justify-content:center;">
-  <div style="background:white;border-radius:20px 20px 0 0;padding:20px 20px 36px;width:100%;max-width:500px;">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
-      <span style="font-size:1.3rem;">📲</span>
-      <span style="font-weight:900;font-size:0.95rem;color:#1a1a1a;">Enviar por WhatsApp Business</span>
-      <button onclick="cerrarModalWA()" style="margin-left:auto;background:none;border:none;font-size:1.4rem;cursor:pointer;color:#888;line-height:1;">✕</button>
-    </div>
-    <div id="modalWAPreview" style="background:#e7fbe9;border-radius:12px;padding:12px;font-size:0.74rem;color:#1a1a1a;max-height:160px;overflow-y:auto;white-space:pre-wrap;margin-bottom:16px;font-family:monospace;line-height:1.5;border:1px solid #c8e6c9;"></div>
-    <button id="modalWABtn" onclick="_modalWAAbrir()"
-       style="width:100%;background:#25D366;color:white;font-weight:900;font-size:1.05rem;padding:15px;border-radius:14px;border:none;cursor:pointer;margin-bottom:10px;">
-      📲 Abrir WhatsApp Business
-    </button>
-    <button onclick="_modalWACopiar()"
-       style="width:100%;background:#f5f5f5;color:#333;font-weight:700;font-size:0.9rem;padding:12px;border-radius:14px;border:none;cursor:pointer;">
-      📋 Copiar mensaje
-    </button>
-    <div id="modalWACopiadoMsg" style="display:none;text-align:center;color:#2e7d32;font-size:0.82rem;margin-top:8px;font-weight:700;">✅ Mensaje copiado al portapapeles</div>
-  </div>
-</div>
+<!-- modal WA eliminado — apertura directa con whatsapp:// -->
 
 <div id="modalPanelFiados" style="display:none;position:fixed;inset:0;z-index:5000;background:rgba(0,0,0,0.7);align-items:flex-end;justify-content:center;">
-  <div style="background:white;border-radius:18px 18px 0 0;width:100%;max-width:600px;max-height:90vh;display:flex;flex-direction:column;">
+  <div style="background:white;border-radius:18px 18px 0 0;width:100%;max-width:600px;max-height:90vh;display:flex;flex-direction:column;position:relative;">
     <!-- Header -->
     <div style="padding:16px 20px 12px;border-bottom:1px solid #eee;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
       <div>
@@ -7657,7 +7623,7 @@ abrirNuevoProducto = function() {
     <!-- Barra flotante cobrar seleccionados -->
     <div id="barraCobrarSeleccionados" style="display:none;position:absolute;bottom:0;left:0;right:0;background:#1b5e20;padding:12px 16px;flex-direction:row;align-items:center;justify-content:space-between;gap:8px;border-top:2px solid #0a3d0a;">
       <span id="barraTextoSeleccionados" style="color:white;font-weight:700;font-size:0.85rem;flex:1;"></span>
-      <button id="btnWAFlotante" onclick="_abrirWAFlotante()"
+      <button id="btnWAFlotante" ontouchstart="void(0)" onclick="_abrirWAFlotante()"
          style="padding:9px 14px;border:none;border-radius:10px;background:#25d366;color:white;font-weight:900;font-size:0.85rem;cursor:pointer;">📲 WA</button>
       <button onclick="abrirCobrarSeleccionados()" style="padding:9px 14px;border:none;border-radius:10px;background:white;color:#2e7d32;font-weight:900;font-size:0.85rem;cursor:pointer;">✅ Cobrar</button>
     </div>
