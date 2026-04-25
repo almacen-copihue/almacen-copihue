@@ -30,7 +30,7 @@
   • FIADOS: _fmtFecha() mejorada con mismo parser robusto (ISO, DD/MM/YYYY,
     string largo de GAS).
 
-  v297 — 23/04/2026
+  v298 — 23/04/2026
   -----------------
   • FIADOS: Fix crítico de desfase UTC en fechas de GAS.
     GAS serializa fechas como "Wed Apr 22 2026 00:00:00 GMT-0300". Al parsear
@@ -44,7 +44,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v297</title>
+    <title>Copihue — POS v298</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -7704,7 +7704,7 @@ abrirNuevoProducto = function() {
     </div>
     <div style="display:flex;gap:10px;">
       <button onclick="cerrarModalFiado()" style="flex:1;padding:12px;border:2px solid #ddd;border-radius:12px;background:white;color:#555;font-size:0.95rem;cursor:pointer;">Cancelar</button>
-      <button ontouchend="event.preventDefault();confirmarFiado();" onclick="confirmarFiado()" style="flex:2;padding:12px;border:none;border-radius:12px;background:#e65100;color:white;font-size:0.95rem;font-weight:700;cursor:pointer;">🧾 Registrar fiado</button>
+      <button onclick="confirmarFiado()" style="flex:2;padding:12px;border:none;border-radius:12px;background:#e65100;color:white;font-size:0.95rem;font-weight:700;cursor:pointer;">🧾 Registrar fiado</button>
     </div>
   </div>
 </div>
@@ -9045,17 +9045,14 @@ async function confirmarFiado() {
     if (!telefono) { mostrarToast('⚠️ Ingresá el teléfono', 'rojo'); document.getElementById('fiadoTelefono').focus(); return; }
     if (!vencimiento) { mostrarToast('⚠️ Ingresá la fecha de vencimiento', 'rojo'); return; }
 
-    // Guard — evitar doble ejecución
     if (window._fiadoEnProceso) return;
     window._fiadoEnProceso = true;
-    // Safety timeout — libera el guard en caso de error inesperado
     const _fiadoGuardTimeout = setTimeout(() => { window._fiadoEnProceso = false; }, 30000);
 
-    const btn = document.querySelector('#modalFiado button[onclick="confirmarFiado()"]');
-    if (btn) { btn.disabled = true; btn.textContent = '⏳ Registrando...'; }
+    // ✅ CAPTURAR ITEMS ANTES DE CERRAR MODAL Y VACIAR CARRITO
+    const itemsSnapshot = [...ventaActual];
+    const total = window._totalConRedondeo || itemsSnapshot.reduce((s,i) => s + i.price * i.qty, 0);
 
-    const total = window._totalConRedondeo || ventaActual.reduce((s,i) => s + i.price * i.qty, 0);
-    const cantItems = ventaActual.reduce((s,i) => s + (i.esPeso ? 1 : i.qty), 0);
     const now = new Date();
     const idFiado = 'FIADO-' + now.getFullYear() +
         String(now.getMonth()+1).padStart(2,'0') +
@@ -9064,40 +9061,36 @@ async function confirmarFiado() {
         String(now.getMinutes()).padStart(2,'0') +
         String(now.getSeconds()).padStart(2,'0');
 
-    // Resumen del ticket para descripción
-    const descripcion = ventaActual.slice(0,3).map(i =>
+    const descripcion = itemsSnapshot.slice(0,3).map(i =>
         (i.esPeso ? i.gramos + 'gr' : i.qty + 'x') + ' ' + i.name.substring(0,15)
-    ).join(' · ') + (ventaActual.length > 3 ? ' (+' + (ventaActual.length-3) + ')' : '');
+    ).join(' · ') + (itemsSnapshot.length > 3 ? ' (+' + (itemsSnapshot.length-3) + ')' : '');
 
     const datosFiado = {
         idFiado, cliente, telefono,
-        descripcion, cantItems,
+        descripcion, cantItems: itemsSnapshot.length,
         total: Math.round(total),
         vencimiento, obs,
-        ticket: null // se llenará después de guardar la venta
+        ticket: null
     };
 
     try {
         document.getElementById('modalFiado').style.display = 'none';
-        // 1. Guardar cliente en hoja Clientes si es nuevo o actualizar teléfono
         _guardarClienteFiado(cliente, telefono);
-        // 2. Procesar venta primero — el modal ya está cerrado, el botón no bloquea
-        await _procesarVentaFiado(datosFiado);
-        // 3. WA en setTimeout — sale después del await sin interrumpir la ejecución
-        const _waDatos = datosFiado, _waTotal = Math.round(total);
-        setTimeout(() => _enviarFiadoWhatsApp(_waDatos, _waTotal), 300);
+        await _procesarVentaFiado(datosFiado, itemsSnapshot);
+        setTimeout(() => _enviarFiadoWhatsApp(datosFiado, Math.round(total)), 300);
+        cerrarConfirm();
     } catch(e) {
         mostrarToast('❌ Error al registrar: ' + e.message, 'rojo');
-        if (btn) { btn.disabled = false; btn.textContent = '🧾 Registrar fiado'; }
     } finally {
         clearTimeout(_fiadoGuardTimeout);
         window._fiadoEnProceso = false;
+        const btn = document.querySelector('#modalFiado button[onclick="confirmarFiado()"]');
+        if (btn) { btn.disabled = false; btn.textContent = '🧾 Registrar fiado'; }
     }
 }
 
-async function _procesarVentaFiado(datosFiado) {
-    // FIX: capturar snapshot de ventaActual ANTES de vaciarla
-    const itemsSnapshot = [...ventaActual];
+async function _procesarVentaFiado(datosFiado, itemsSnapshot) {
+    // itemsSnapshot viene desde confirmarFiado — capturado antes de cerrar modal
     const totalOriginal = itemsSnapshot.reduce((s,i) => s + i.price * i.qty, 0);
     const total = window._totalConRedondeo || totalOriginal;
     const _t = new Date();
@@ -9150,8 +9143,6 @@ async function _procesarVentaFiado(datosFiado) {
 
     // 5. Toast, cierre de modales y limpieza
     mostrarToast(`✅ Fiado de ${datosFiado.cliente} registrado — $${Math.round(total).toLocaleString('es-AR')}`, 'naranja');
-    // FIX: cerrar el modal de confirmación que quedaba abierto
-    cerrarConfirm();
     seleccionarMetodo('efectivo');
     actualizarRanking();
     renderVenta();
