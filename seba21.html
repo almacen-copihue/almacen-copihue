@@ -38,13 +38,28 @@
     Solución: extracción directa del día/mes/año del string con regex, sin pasar
     por new Date(), eliminando el desfase de zona horaria completamente.
 
+  v299 — 25/04/2026
+  -----------------
+  • FIADO: Fix bug dropdown de clientes bloqueando botón "Registrar fiado" en
+    Android — ontouchstart cierra el dropdown antes de que onclick procese.
+  • FIADO: Dropdown también se cierra al inicio de confirmarFiado() como
+    segunda línea de defensa.
+  • FIADO: Teléfono ya no bloquea el registro. Si falta, aparece advertencia
+    inline con dos opciones: "Agregar número" (foco al campo) o
+    "Continuar igual →" (registra sin tel, sin WA automático).
+  • FIADO: _enviarFiadoWhatsApp() ya no retorna silenciosamente sin teléfono.
+    Ahora abre el modal WA siempre — con número pre-cargado si hay, sin número
+    si no hay (el vendedor puede copiar el comprobante manualmente).
+  • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
+    evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
+
 ================================================================================
 -->
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v298</title>
+    <title>Copihue — POS v299</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -7702,9 +7717,23 @@ abrirNuevoProducto = function() {
       <label style="font-size:0.8rem;font-weight:700;color:#555;display:block;margin-bottom:4px;">Observación (opcional)</label>
       <textarea id="fiadoObs" placeholder="Ej: paga el viernes" style="width:100%;padding:10px 12px;border:2px solid #ddd;border-radius:10px;font-size:0.9rem;box-sizing:border-box;resize:none;height:60px;"></textarea>
     </div>
+    <!-- Advertencia sin teléfono — aparece solo si falta el número -->
+    <div id="fiadoAlertaSinTel" style="display:none;background:#fff8e1;border:1.5px solid #ffe082;border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:0.85rem;color:#e65100;line-height:1.5;">
+      📵 <strong>Sin teléfono</strong> — no se guardará en Clientes ni se enviará el comprobante por WA.<br>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button onclick="document.getElementById('fiadoAlertaSinTel').style.display='none';document.getElementById('fiadoTelefono').focus();"
+                style="flex:1;padding:8px;border:2px solid #e65100;border-radius:8px;background:white;color:#e65100;font-weight:700;font-size:0.82rem;cursor:pointer;">
+          📱 Agregar número
+        </button>
+        <button ontouchstart="void(0)" onclick="_confirmarFiadoSinTel()"
+                style="flex:1;padding:8px;border:none;border-radius:8px;background:#e65100;color:white;font-weight:700;font-size:0.82rem;cursor:pointer;">
+          Continuar igual →
+        </button>
+      </div>
+    </div>
     <div style="display:flex;gap:10px;">
       <button onclick="cerrarModalFiado()" style="flex:1;padding:12px;border:2px solid #ddd;border-radius:12px;background:white;color:#555;font-size:0.95rem;cursor:pointer;">Cancelar</button>
-      <button onclick="confirmarFiado()" style="flex:2;padding:12px;border:none;border-radius:12px;background:#e65100;color:white;font-size:0.95rem;font-weight:700;cursor:pointer;">🧾 Registrar fiado</button>
+      <button ontouchstart="document.getElementById('fiadoClienteDropdown').style.display='none'" onclick="confirmarFiado()" style="flex:2;padding:12px;border:none;border-radius:12px;background:#e65100;color:white;font-size:0.95rem;font-weight:700;cursor:pointer;">🧾 Registrar fiado</button>
     </div>
   </div>
 </div>
@@ -9041,9 +9070,19 @@ async function confirmarFiado() {
     const vencimiento = document.getElementById('fiadoVencimiento').value;
     const obs = document.getElementById('fiadoObs').value.trim();
 
+    // Cerrar dropdown por si quedó abierto (puede interferir con el touch)
+    document.getElementById('fiadoClienteDropdown').style.display = 'none';
+    document.getElementById('fiadoAlertaSinTel').style.display = 'none';
+
     if (!cliente) { mostrarToast('⚠️ Ingresá el nombre del cliente', 'rojo'); document.getElementById('fiadoCliente').focus(); return; }
-    if (!telefono) { mostrarToast('⚠️ Ingresá el teléfono', 'rojo'); document.getElementById('fiadoTelefono').focus(); return; }
     if (!vencimiento) { mostrarToast('⚠️ Ingresá la fecha de vencimiento', 'rojo'); return; }
+
+    // Sin teléfono → advertir antes de continuar (el número va a hoja Clientes y al WA)
+    if (!telefono) {
+        document.getElementById('fiadoAlertaSinTel').style.display = 'block';
+        document.getElementById('fiadoAlertaSinTel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        return;
+    }
 
     if (window._fiadoEnProceso) return;
     window._fiadoEnProceso = true;
@@ -9086,6 +9125,56 @@ async function confirmarFiado() {
         window._fiadoEnProceso = false;
         const btn = document.querySelector('#modalFiado button[onclick="confirmarFiado()"]');
         if (btn) { btn.disabled = false; btn.textContent = '🧾 Registrar fiado'; }
+    }
+}
+
+// Confirmar fiado sin teléfono (el usuario eligió continuar igual desde la advertencia)
+async function _confirmarFiadoSinTel() {
+    document.getElementById('fiadoAlertaSinTel').style.display = 'none';
+    const cliente = document.getElementById('fiadoCliente').value.trim();
+    const vencimiento = document.getElementById('fiadoVencimiento').value;
+    const obs = document.getElementById('fiadoObs').value.trim();
+    // telefono vacío — se sabe que no hay número
+
+    if (window._fiadoEnProceso) return;
+    window._fiadoEnProceso = true;
+    const _fiadoGuardTimeout = setTimeout(() => { window._fiadoEnProceso = false; }, 30000);
+
+    const itemsSnapshot = [...ventaActual];
+    const total = window._totalConRedondeo || itemsSnapshot.reduce((s,i) => s + i.price * i.qty, 0);
+
+    const now = new Date();
+    const idFiado = 'FIADO-' + now.getFullYear() +
+        String(now.getMonth()+1).padStart(2,'0') +
+        String(now.getDate()).padStart(2,'0') + '-' +
+        String(now.getHours()).padStart(2,'0') +
+        String(now.getMinutes()).padStart(2,'0') +
+        String(now.getSeconds()).padStart(2,'0');
+
+    const descripcion = itemsSnapshot.slice(0,3).map(i =>
+        (i.esPeso ? i.gramos + 'gr' : i.qty + 'x') + ' ' + i.name.substring(0,15)
+    ).join(' · ') + (itemsSnapshot.length > 3 ? ' (+' + (itemsSnapshot.length-3) + ')' : '');
+
+    const datosFiado = {
+        idFiado, cliente, telefono: '',
+        descripcion, cantItems: itemsSnapshot.length,
+        total: Math.round(total),
+        vencimiento, obs,
+        ticket: null
+    };
+
+    try {
+        document.getElementById('modalFiado').style.display = 'none';
+        _guardarClienteFiado(cliente, ''); // guarda en Clientes sin teléfono
+        await _procesarVentaFiado(datosFiado, itemsSnapshot);
+        // Sin teléfono → abrir modal WA igual para que el vendedor copie el texto
+        setTimeout(() => _enviarFiadoWhatsApp(datosFiado, Math.round(total)), 300);
+        cerrarConfirm();
+    } catch(e) {
+        mostrarToast('❌ Error al registrar: ' + e.message, 'rojo');
+    } finally {
+        clearTimeout(_fiadoGuardTimeout);
+        window._fiadoEnProceso = false;
     }
 }
 
@@ -9186,7 +9275,6 @@ function _guardarClienteFiado(nombre, telefono) {
 
 function _enviarFiadoWhatsApp(datosFiado, total) {
     const tel = (datosFiado.telefono || '').replace(/\D/g, '');
-    if (!tel || tel.length < 6) return; // sin teléfono válido no abre WA
 
     const now   = new Date();
     const fecha = now.toLocaleDateString('es-AR');
@@ -9206,13 +9294,16 @@ function _enviarFiadoWhatsApp(datosFiado, total) {
     ].join('\n');
 
     // Número argentino — agregar 549 si no lo tiene
-    let numWA = tel;
-    if (!numWA.startsWith('549') && !numWA.startsWith('54')) {
-        numWA = '549' + numWA;
+    let numWA = '';
+    if (tel && tel.length >= 6) {
+        numWA = tel;
+        if (!numWA.startsWith('549') && !numWA.startsWith('54')) {
+            numWA = '549' + numWA;
+        }
     }
 
-    // Siempre usar WhatsApp Business
-    _abrirWABusinessForzado(msg, numWA);
+    // Abre modal WA siempre — con o sin número
+    abrirWABusiness(msg, numWA);
 }
 
 // ========== RETIRO DE CAJA ==========
