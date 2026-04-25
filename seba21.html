@@ -30,7 +30,7 @@
   • FIADOS: _fmtFecha() mejorada con mismo parser robusto (ISO, DD/MM/YYYY,
     string largo de GAS).
 
-  v295 — 23/04/2026
+  v297 — 23/04/2026
   -----------------
   • FIADOS: Fix crítico de desfase UTC en fechas de GAS.
     GAS serializa fechas como "Wed Apr 22 2026 00:00:00 GMT-0300". Al parsear
@@ -44,7 +44,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v295</title>
+    <title>Copihue — POS v297</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3377,19 +3377,48 @@ function _normNumWA(tel) {
     return '549' + base;
 }
 
+// URL y texto guardados para el modal WA
+let _modalWAUrl = '';
+let _modalWATexto = '';
+
 function abrirWABusiness(texto, telefono) {
     const num = _normNumWA(telefono);
     const encoded = safeEnc(texto);
-    const waUrl = num
+    _modalWATexto = texto;
+    _modalWAUrl = num
         ? 'https://api.whatsapp.com/send?phone=' + num + '&text=' + encoded
         : 'https://api.whatsapp.com/send?text=' + encoded;
-    // Mostrar modal — el usuario toca el link directamente (único método confiable en PWA)
     document.getElementById('modalWAPreview').textContent = texto.substring(0, 300) + (texto.length > 300 ? '...' : '');
-    document.getElementById('modalWALink').href = waUrl;
+    document.getElementById('modalWACopiadoMsg').style.display = 'none';
     document.getElementById('modalWA').style.display = 'flex';
 }
 function cerrarModalWA() {
     document.getElementById('modalWA').style.display = 'none';
+}
+function _modalWAAbrir() {
+    if (!_modalWAUrl) return;
+    // Intentar con window.open primero, luego location.href
+    const w = window.open(_modalWAUrl, '_blank');
+    if (!w || w.closed || typeof w.closed === 'undefined') {
+        window.location.href = _modalWAUrl;
+    }
+}
+function _modalWACopiar() {
+    if (!_modalWATexto) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(_modalWATexto).then(() => {
+            document.getElementById('modalWACopiadoMsg').style.display = 'block';
+        });
+    } else {
+        // Fallback para Android sin clipboard API
+        const ta = document.createElement('textarea');
+        ta.value = _modalWATexto;
+        ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;';
+        document.body.appendChild(ta);
+        ta.focus(); ta.select();
+        try { document.execCommand('copy'); document.getElementById('modalWACopiadoMsg').style.display = 'block'; } catch(e) {}
+        document.body.removeChild(ta);
+    }
 }
 
 function enviarTicketWA() {
@@ -7569,7 +7598,7 @@ abrirNuevoProducto = function() {
 <!-- ============================================= -->
 
 </body>
-<!-- MODAL WA UNIVERSAL — dentro del body para renderizar correctamente -->
+<!-- MODAL WA UNIVERSAL -->
 <div id="modalWA" onclick="if(event.target===this)cerrarModalWA()" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.7);align-items:flex-end;justify-content:center;">
   <div style="background:white;border-radius:20px 20px 0 0;padding:20px 20px 36px;width:100%;max-width:500px;">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
@@ -7577,11 +7606,16 @@ abrirNuevoProducto = function() {
       <span style="font-weight:900;font-size:0.95rem;color:#1a1a1a;">Enviar por WhatsApp Business</span>
       <button onclick="cerrarModalWA()" style="margin-left:auto;background:none;border:none;font-size:1.4rem;cursor:pointer;color:#888;line-height:1;">✕</button>
     </div>
-    <div id="modalWAPreview" style="background:#e7fbe9;border-radius:12px;padding:12px;font-size:0.74rem;color:#1a1a1a;max-height:180px;overflow-y:auto;white-space:pre-wrap;margin-bottom:16px;font-family:monospace;line-height:1.5;border:1px solid #c8e6c9;"></div>
-    <a id="modalWALink" href="#" target="_blank"
-       style="display:block;text-align:center;background:#25D366;color:white;font-weight:900;font-size:1.05rem;padding:15px;border-radius:14px;text-decoration:none;-webkit-tap-highlight-color:transparent;">
+    <div id="modalWAPreview" style="background:#e7fbe9;border-radius:12px;padding:12px;font-size:0.74rem;color:#1a1a1a;max-height:160px;overflow-y:auto;white-space:pre-wrap;margin-bottom:16px;font-family:monospace;line-height:1.5;border:1px solid #c8e6c9;"></div>
+    <button id="modalWABtn" onclick="_modalWAAbrir()"
+       style="width:100%;background:#25D366;color:white;font-weight:900;font-size:1.05rem;padding:15px;border-radius:14px;border:none;cursor:pointer;margin-bottom:10px;">
       📲 Abrir WhatsApp Business
-    </a>
+    </button>
+    <button onclick="_modalWACopiar()"
+       style="width:100%;background:#f5f5f5;color:#333;font-weight:700;font-size:0.9rem;padding:12px;border-radius:14px;border:none;cursor:pointer;">
+      📋 Copiar mensaje
+    </button>
+    <div id="modalWACopiadoMsg" style="display:none;text-align:center;color:#2e7d32;font-size:0.82rem;margin-top:8px;font-weight:700;">✅ Mensaje copiado al portapapeles</div>
   </div>
 </div>
 
@@ -7670,7 +7704,7 @@ abrirNuevoProducto = function() {
     </div>
     <div style="display:flex;gap:10px;">
       <button onclick="cerrarModalFiado()" style="flex:1;padding:12px;border:2px solid #ddd;border-radius:12px;background:white;color:#555;font-size:0.95rem;cursor:pointer;">Cancelar</button>
-      <button onclick="confirmarFiado()" style="flex:2;padding:12px;border:none;border-radius:12px;background:#e65100;color:white;font-size:0.95rem;font-weight:700;cursor:pointer;">🧾 Registrar fiado</button>
+      <button ontouchend="event.preventDefault();confirmarFiado();" onclick="confirmarFiado()" style="flex:2;padding:12px;border:none;border-radius:12px;background:#e65100;color:white;font-size:0.95rem;font-weight:700;cursor:pointer;">🧾 Registrar fiado</button>
     </div>
   </div>
 </div>
@@ -8888,7 +8922,7 @@ async function abrirModalFiado() {
     // Mostrar modal
     const modal = document.getElementById('modalFiado');
     modal.style.display = 'flex';
-    setTimeout(() => document.getElementById('fiadoCliente').focus(), 200);
+    // No hacer focus automático — en Android abre el teclado innecesariamente
     // Cargar clientes si no están en caché
     if (!_fiadoClientesCache) {
         try {
