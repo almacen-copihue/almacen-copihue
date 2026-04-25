@@ -53,6 +53,14 @@
   • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
     evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
 
+  v303 — 25/04/2026
+  ------------------
+  • SEGURIDAD (fotos): _mostrarGridFotos() ya no usa innerHTML para insertar
+    URLs — usa createElement + img.src. Además valida que el protocolo sea
+    http/https antes de insertar (evita XSS si la API devuelve algo raro).
+  • SEGURIDAD (API key): copihue_anthropic_key migrada de localStorage a
+    sessionStorage — la key ya no persiste entre sesiones del browser.
+
   v302 — 25/04/2026
   ------------------
   • WA: Eliminado modal intermedio «Enviar por WhatsApp Business» que no
@@ -81,7 +89,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v302</title>
+    <title>Copihue — POS v303</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -7818,7 +7826,7 @@ async function buscarEnInternet() {
     document.getElementById('fotosStatus').innerHTML = '<div style="display:flex;align-items:center;justify-content:center;gap:10px;"><div style="width:18px;height:18px;border:2px solid #eee;border-top-color:#1565c0;border-radius:50%;animation:spin 0.7s linear infinite;"></div> Buscando <strong>' + nombre + '</strong>...</div>';
     document.getElementById('btnBuscarNet').disabled = true;
     try {
-        var _ak = localStorage.getItem('copihue_anthropic_key') || '';
+        var _ak = sessionStorage.getItem('copihue_anthropic_key') || '';
         if (!_ak) {
             document.getElementById('fotosStatus').innerHTML = '⚠️ Configurá tu API Key de Anthropic primero. Tocá <strong>Publicar en GitHub</strong> → aparece el panel de config.';
             document.getElementById('btnBuscarNet').disabled = false;
@@ -7908,9 +7916,23 @@ function _mostrarGridFotos(urls) {
     var grid = document.getElementById('fotosGridItems');
     grid.innerHTML = '';
     urls.forEach(function(url) {
+        // Validar protocolo antes de insertar (evitar XSS)
+        try { var u = new URL(url); if (u.protocol !== 'http:' && u.protocol !== 'https:') return; }
+        catch(e) { return; }
         var item = document.createElement('div');
         item.style.cssText = 'aspect-ratio:1;background:#f5f5f5;border-radius:10px;overflow:hidden;border:2px solid #e0e0e0;cursor:pointer;';
-        item.innerHTML = '<img src="'+url+'" crossorigin="anonymous" style="width:100%;height:100%;object-fit:cover;display:block;" onerror="this.parentElement.innerHTML=\'<div style=\\\'display:flex;align-items:center;justify-content:center;height:100%;color:#ccc;font-size:1.5rem;\\\'>❌</div>\'">';
+        var img = document.createElement('img');
+        img.src = url;
+        img.crossOrigin = 'anonymous';
+        img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;';
+        img.onerror = function() {
+            item.innerHTML = '';
+            var err = document.createElement('div');
+            err.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:#ccc;font-size:1.5rem;';
+            err.textContent = '❌';
+            item.appendChild(err);
+        };
+        item.appendChild(img);
         item.onclick = (function(u,el){return function(){_previsualizar(u,el);};})(url,item);
         grid.appendChild(item);
     });
@@ -7999,7 +8021,7 @@ function guardarConfigGH(){
     _ghConfig={owner:owner,repo:repo,branch:branch,token:token};
     localStorage.setItem('copihue_gh_config',JSON.stringify(_ghConfig));
     var ak=document.getElementById('anthropicKey').value.trim();
-    if(ak) localStorage.setItem('copihue_anthropic_key', ak);
+    if(ak) sessionStorage.setItem('copihue_anthropic_key', ak);
     document.getElementById('fotosGHConfig').style.display='none';
     mostrarToast('✅ Config guardada','verde');
     publicarEnGitHub();
@@ -8008,7 +8030,7 @@ function guardarConfigGH(){
 function _mostrarConfigGH(){
     var cfg=_cargarConfigGH();
     if(cfg){document.getElementById('ghOwner').value=cfg.owner||'';document.getElementById('ghRepo').value=cfg.repo||'';document.getElementById('ghBranch').value=cfg.branch||'main';document.getElementById('ghToken').value=cfg.token||'';}
-    var ak=localStorage.getItem('copihue_anthropic_key')||''; document.getElementById('anthropicKey').value=ak;
+    var ak=sessionStorage.getItem('copihue_anthropic_key')||''; document.getElementById('anthropicKey').value=ak;
     document.getElementById('fotosGHConfig').style.display='block';
     document.getElementById('fotosGHConfig').scrollIntoView({behavior:'smooth',block:'nearest'});
 }
