@@ -53,6 +53,18 @@
   • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
     evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
 
+  v304 — 25/04/2026
+  ------------------
+  • FIADOS: Eliminado WhatsApp como canal de recordatorio de deuda.
+    Reemplazado por modal «Recordatorio de deuda» con:
+    — 📤 Compartir: usa Web Share API nativa de Android (elige la app el usuario)
+    — 📋 Copiar texto: copia el mensaje al portapapeles
+    El botón 📲 WA de la barra flotante ahora dice 📋 Recordatorio.
+    Funciones eliminadas del flujo fiado: _abrirWAFlotante, _enviarWASeleccionados,
+    _recordarDeudaCliente (WA), _reenviarWAFiado (WA), _enviarWACobranzaFiado,
+    _enviarFiadoWhatsApp. Todas llaman ahora a mostrarRecordatorio().
+    abrirWABusiness se mantiene solo para ticket de venta normal.
+
   v303 — 25/04/2026
   ------------------
   • SEGURIDAD (fotos): _mostrarGridFotos() ya no usa innerHTML para insertar
@@ -89,7 +101,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v303</title>
+    <title>Copihue — POS v304</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3422,7 +3434,52 @@ function _normNumWA(tel) {
     return '549' + base;
 }
 
-// ── Abrir WhatsApp directo (sin modal intermedio) ───────────────────────────
+// ── Modal Recordatorio — reemplaza WA en fiados ─────────────────────────────
+let _recordatorioTexto = '';
+
+function mostrarRecordatorio(texto) {
+    _recordatorioTexto = texto;
+    const prev = document.getElementById('recordatorioPreview');
+    const copiado = document.getElementById('recordatorioCopiadoMsg');
+    if (prev) prev.textContent = texto;
+    if (copiado) copiado.style.display = 'none';
+    document.getElementById('modalRecordatorio').style.display = 'flex';
+}
+
+function cerrarRecordatorio() {
+    document.getElementById('modalRecordatorio').style.display = 'none';
+}
+
+function _recordatorioCopiar() {
+    if (!_recordatorioTexto) return;
+    const copiado = document.getElementById('recordatorioCopiadoMsg');
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(_recordatorioTexto).then(() => {
+            if (copiado) { copiado.style.display = 'block'; setTimeout(() => copiado.style.display = 'none', 2500); }
+        });
+    } else {
+        const ta = document.createElement('textarea');
+        ta.value = _recordatorioTexto;
+        ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;';
+        document.body.appendChild(ta);
+        ta.focus(); ta.select();
+        try { document.execCommand('copy'); if (copiado) { copiado.style.display = 'block'; setTimeout(() => copiado.style.display = 'none', 2500); } } catch(e) {}
+        document.body.removeChild(ta);
+    }
+}
+
+function _recordatorioCompartir() {
+    if (!_recordatorioTexto) return;
+    if (navigator.share) {
+        navigator.share({ text: _recordatorioTexto }).catch(() => {});
+    } else {
+        // Fallback: copiar
+        _recordatorioCopiar();
+        mostrarToast('📋 Texto copiado — pegalo donde quieras', 'verde');
+    }
+}
+
+// ── Abrir WhatsApp directo (sin modal intermedio) — aún usado en otras partes ─
 function abrirWABusiness(texto, telefono) {
     const num = _normNumWA(telefono);
     const encoded = safeEnc(texto);
@@ -7614,6 +7671,27 @@ abrirNuevoProducto = function() {
 <!-- MODAL WA UNIVERSAL -->
 <!-- modal WA eliminado — apertura directa con whatsapp:// -->
 
+<!-- Modal Recordatorio de deuda — reemplaza WA -->
+<div id="modalRecordatorio" onclick="if(event.target===this)cerrarRecordatorio()" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.7);align-items:flex-end;justify-content:center;">
+  <div style="background:white;border-radius:20px 20px 0 0;padding:20px 20px 36px;width:100%;max-width:500px;">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+      <span style="font-size:1.3rem;">📋</span>
+      <span style="font-weight:900;font-size:0.95rem;color:#1a1a1a;">Recordatorio de deuda</span>
+      <button onclick="cerrarRecordatorio()" style="margin-left:auto;background:none;border:none;font-size:1.4rem;cursor:pointer;color:#888;line-height:1;">✕</button>
+    </div>
+    <div id="recordatorioPreview" style="background:#f5f5f5;border-radius:12px;padding:12px;font-size:0.74rem;color:#1a1a1a;max-height:220px;overflow-y:auto;white-space:pre-wrap;margin-bottom:16px;font-family:monospace;line-height:1.5;border:1px solid #e0e0e0;"></div>
+    <button onclick="_recordatorioCompartir()"
+       style="width:100%;background:#1b5e20;color:white;font-weight:900;font-size:1.05rem;padding:15px;border-radius:14px;border:none;cursor:pointer;margin-bottom:10px;">
+      📤 Compartir
+    </button>
+    <button onclick="_recordatorioCopiar()"
+       style="width:100%;background:#f5f5f5;color:#333;font-weight:700;font-size:0.9rem;padding:12px;border-radius:14px;border:none;cursor:pointer;">
+      📋 Copiar texto
+    </button>
+    <div id="recordatorioCopiadoMsg" style="display:none;text-align:center;color:#2e7d32;font-size:0.82rem;margin-top:8px;font-weight:700;">✅ Copiado al portapapeles</div>
+  </div>
+</div>
+
 <div id="modalPanelFiados" style="display:none;position:fixed;inset:0;z-index:5000;background:rgba(0,0,0,0.7);align-items:flex-end;justify-content:center;">
   <div style="background:white;border-radius:18px 18px 0 0;width:100%;max-width:600px;max-height:90vh;display:flex;flex-direction:column;position:relative;">
     <!-- Header -->
@@ -7631,8 +7709,8 @@ abrirNuevoProducto = function() {
     <!-- Barra flotante cobrar seleccionados -->
     <div id="barraCobrarSeleccionados" style="display:none;position:absolute;bottom:0;left:0;right:0;background:#1b5e20;padding:12px 16px;flex-direction:row;align-items:center;justify-content:space-between;gap:8px;border-top:2px solid #0a3d0a;">
       <span id="barraTextoSeleccionados" style="color:white;font-weight:700;font-size:0.85rem;flex:1;"></span>
-      <button id="btnWAFlotante" ontouchstart="void(0)" onclick="_abrirWAFlotante()"
-         style="padding:9px 14px;border:none;border-radius:10px;background:#25d366;color:white;font-weight:900;font-size:0.85rem;cursor:pointer;">📲 WA</button>
+      <button id="btnWAFlotante" ontouchstart="void(0)" onclick="_abrirRecordatorio()"
+         style="padding:9px 14px;border:none;border-radius:10px;background:#1b5e20;color:white;font-weight:900;font-size:0.85rem;cursor:pointer;">📋 Recordatorio</button>
       <button onclick="abrirCobrarSeleccionados()" style="padding:9px 14px;border:none;border-radius:10px;background:white;color:#2e7d32;font-weight:900;font-size:0.85rem;cursor:pointer;">✅ Cobrar</button>
     </div>
   </div>
@@ -8412,13 +8490,15 @@ function _fiadoTouchStart(e, idFiado) { /* no usado */ }
 function _fiadoTouchEnd(e, idFiado)   { /* no usado */ }
 function _fiadoTouchCancel()           { /* no usado */ }
 
-// ── URL WA precalculada al seleccionar ───────────────────────────────────────
-let _waFlotanteMensaje = '';
+// ── Mensaje de recordatorio precalculado al seleccionar ─────────────────────
+let _waFlotanteMensaje = ''; // se mantiene el nombre para no romper _actualizarBarraCobro
 
-function _abrirWAFlotante() {
+function _abrirRecordatorio() {
     if (!_waFlotanteMensaje) return;
-    abrirWABusiness(_waFlotanteMensaje, window._waFlotanteTel || '');
+    mostrarRecordatorio(_waFlotanteMensaje);
 }
+// alias por si queda alguna referencia vieja
+function _abrirWAFlotante() { _abrirRecordatorio(); }
 
 function _toggleFiadoSelect(idFiado) {
     if (_fiadosSeleccionados.has(idFiado)) {
@@ -8501,7 +8581,7 @@ function _enviarWASeleccionados() {
 
     let num = tel.replace(/\D/g, '');
     if (num && !num.startsWith('549') && !num.startsWith('54')) num = '549' + num;
-    abrirWABusiness(msg, num || '');
+    mostrarRecordatorio(msg);
 }
 
 function _toggleFiadoCheck(idFiado, labelEl) {
@@ -8556,13 +8636,6 @@ function _actualizarBarraCobro() {
         }
         return (i+1) + '. ' + fecha + ' — ' + estado + '\n' + items + '\n💰 *' + monto + '*';
     }).join('\n\n');
-
-    // Guardar teléfono del primer cliente para la URL de WA
-    const _telFlotante = seleccionados[0].telefono || '';
-    window._waFlotanteTel = _telFlotante.replace(/\D/g,'');
-    if (window._waFlotanteTel && !window._waFlotanteTel.startsWith('549') && !window._waFlotanteTel.startsWith('54')) {
-        window._waFlotanteTel = '549' + window._waFlotanteTel;
-    }
 
     _waFlotanteMensaje = [
         '📋 *RESUMEN DE DEUDA*',
@@ -8705,7 +8778,7 @@ function _recordarDeudaCliente(btn) {
         '📍 Almacén Copihue'
     ].join('\n');
 
-    abrirWABusiness(msg, _normNumWA(telefono));
+    mostrarRecordatorio(msg);
 }
 
 function _reenviarWAFiado(idFiado) {
@@ -8735,7 +8808,7 @@ function _enviarWACobranzaFiado(f) {
         `¡Gracias por saldar tu deuda! 🙌`,
         `📍 Almacén Copihue`
     ].filter(l => l !== '').join('\n');
-    abrirWABusiness(msg, _normNumWA(tel));
+    mostrarRecordatorio(msg);
 }
 
 // Cargar badge al iniciar
@@ -9303,8 +9376,7 @@ function _enviarFiadoWhatsApp(datosFiado, total) {
         }
     }
 
-    // Abre modal WA siempre — con o sin número
-    abrirWABusiness(msg, numWA);
+    mostrarRecordatorio(msg);
 }
 
 // ========== RETIRO DE CAJA ==========
