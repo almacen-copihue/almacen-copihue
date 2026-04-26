@@ -284,9 +284,14 @@ function renderClientes(){
     const venc=c.fiados.filter(f=>f.estado==='VENCIDO').length;
     const prox=c.fiados.filter(f=>{if(!f.fechaVencimiento)return false;const d=new Date(f.fechaVencimiento+'T12:00:00');const dias=Math.round((d-hoy)/86400000);return dias>=0&&dias<=3;}).length;
     const bdg=venc>0?`<span class="bdg bdg-r">🔴 ${venc} vencido${venc>1?'s':''}</span>`:prox>0?`<span class="bdg bdg-o">⏰ Vence pronto</span>`:`<span class="bdg bdg-g">${c.fiados.length} fiado${c.fiados.length>1?'s':''}</span>`;
-    html+=`<div class="cli-card" onclick="abrirCli(${JSON.stringify(c.nom)})"><div><div class="cli-nombre">${c.nom}</div><div class="cli-tel">${c.tel?'📞 '+c.tel:'Sin teléfono'}</div><div style="margin-top:3px">${bdg}</div></div><div class="cli-deuda">${fmt(c.tot)}</div></div>`;
+    // Guardamos índice numérico para evitar problemas con caracteres especiales en onclick inline
+    html+=`<div class="cli-card" data-idx="${Object.values(map).indexOf(c)}"><div><div class="cli-nombre">${c.nom}</div><div class="cli-tel">${c.tel?'📞 '+c.tel:'Sin teléfono'}</div><div style="margin-top:3px">${bdg}</div></div><div class="cli-deuda">${fmt(c.tot)}</div></div>`;
   });
   document.getElementById('cuerpoClientes').innerHTML=html;
+  // Event delegation — robusto con cualquier nombre
+  document.querySelectorAll('.cli-card').forEach(el=>{
+    el.addEventListener('click',()=>abrirCli(clis[parseInt(el.dataset.idx)].nom));
+  });
 }
 
 // ── ABRIR CLIENTE ──────────────────────────────────
@@ -329,11 +334,11 @@ function renderFiados(){
     const tkt=f.ticket&&f.ticket.trim()!=='';
     // Desc line: si tiene ticket → enlace a detalle, sino texto guardado
     const descLine=tkt
-      ?`<div class="fc-desc" style="cursor:pointer" onclick="event.stopPropagation();abrirDet('${f.ticket}','${f.idFiado}')">🎫 Ticket #${f.ticket} <span style="color:var(--vd);font-weight:700">· Ver venta →</span></div>`
+      ?`<div class="fc-desc" style="cursor:pointer" data-det="1" data-tkt="${f.ticket}" data-id="${f.idFiado}">🎫 Ticket #${f.ticket} <span style="color:var(--vd);font-weight:700">· Ver venta →</span></div>`
       :(f.descripcion?`<div class="fc-desc">📦 ${f.descripcion}</div>`:'');
     const pagoLine=!esPend?`<div class="fc-pago">✅ Cobrado el ${_fmt(f.fechaPago)}${f.metodoPago?' · '+f.metodoPago:''}</div>`:'';
     const dot=selec?`<div class="sel-dot">✓</div>`:'';
-    return`<div class="${cls}" id="fc-${f.idFiado}" onclick="${esPend?`toggleSel('${f.idFiado}')`:tkt?`abrirDet('${f.ticket}','${f.idFiado}')`:''}">${dot}
+    return`<div class="${cls}" id="fc-${f.idFiado}" data-id="${f.idFiado}" data-tkt="${f.ticket||''}" data-espend="${esPend?'1':'0'}">${dot}
       <div class="fc-top">
         <div><div class="fc-fecha">📅 ${_fmt(f.fecha)}</div><div class="fc-id">${f.idFiado}</div></div>
         <div style="text-align:right"><div class="fc-monto" style="color:${esPend?'var(--rojo)':'var(--verde)'}">${fmt(f.total)}</div>${bdgEstado(f)}</div>
@@ -345,6 +350,25 @@ function renderFiados(){
   if(pagados.length){html+=`<div class="sec-lbl">Cobrados últimos 30 días (${pagados.length})</div>`;pagados.forEach(f=>html+=card(f));}
   if(!html)html='<div class="empty"><div class="icon">✅</div>Sin fiados registrados</div>';
   document.getElementById('cuerpoFiados').innerHTML=html;
+  // Event delegation — evita problemas con IDs especiales en onclick inline
+  document.querySelectorAll('#cuerpoFiados .fc').forEach(el=>{
+    el.addEventListener('click', e=>{
+      // Si el click viene del enlace "Ver venta" interno no hacer nada aquí
+      if(e.target.closest('[data-det]'))return;
+      const esPend=el.dataset.espend==='1';
+      const id=el.dataset.id;
+      const tkt=el.dataset.tkt;
+      if(esPend) toggleSel(id);
+      else if(tkt) abrirDet(tkt,id);
+    });
+  });
+  // Links "Ver venta →" dentro de cards pagados
+  document.querySelectorAll('#cuerpoFiados [data-det]').forEach(el=>{
+    el.addEventListener('click', e=>{
+      e.stopPropagation();
+      abrirDet(el.dataset.tkt, el.dataset.id);
+    });
+  });
   actualizarBarra();
 }
 
