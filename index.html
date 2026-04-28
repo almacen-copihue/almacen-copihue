@@ -301,23 +301,11 @@
             font-weight: 500;
         }
 
-        /* ========== ÚLTIMAS UNIDADES ========== */
+        /* ========== RECIÉN LLEGADOS ========== */
         .ofertas-container.recien-llegados {
     border-top: 4px solid #00897b;
     background: linear-gradient(135deg, rgba(0,137,123,0.06) 0%, rgba(255,255,255,1) 100%);
 }
-.ofertas-container.ultimas {
-            border: 2px solid #e53935;
-            background: linear-gradient(135deg, #fff5f5 0%, #ffebee 100%);
-        }
-        .ofertas-container.ultimas .ofertas-header {
-            background: linear-gradient(135deg, #b71c1c, #e53935);
-        }
-        .ofertas-container.ultimas .ofertas-badge {
-            background: #ff1744;
-            color: white;
-            animation: flash 0.8s infinite;
-        }
 
         /* ========== CONTENEDOR GENÉRICO OFERTAS ========== */
         .ofertas-container {
@@ -406,19 +394,6 @@
             background: #b2ebf2;
             color: #006064;
             border-left-color: #00bcd4;
-        }
-
-        /* 🏷️ ÚLTIMAS UNIDADES — rojo urgencia */
-        .ofertas-container.ultimas .ofertas-product-card {
-            border-color: #ef9a9a;
-        }
-        .ofertas-container.ultimas .ofertas-exclusive-badge {
-            background: linear-gradient(135deg, #b71c1c, #e53935);
-        }
-        .ofertas-container.ultimas .ofertas-stock-warning {
-            background: #ffebee;
-            color: #b71c1c;
-            border-left-color: #e53935;
         }
 
         /* 🍺 JUEVES CERVECERO */
@@ -1913,7 +1888,6 @@
 .ofertas-products-grid img { aspect-ratio: 1 / 1; }
 /* Reservar altura en todos los grids de ofertas — evita CLS cuando se llenan */
 #recien-grid,
-#ultimas-grid,
 #relampago-grid,
 #destacadas-grid,
 #especiales-grid { min-height: 320px; }
@@ -1927,7 +1901,7 @@
     to   { opacity: 1; transform: translateY(0); }
 }
 #ofertasRelampago, #ofertasDestacadas, #ofertasEspeciales,
-#ofertasUltimas, #ofertasRecienLlegados, #ofertasCervecero {
+#ofertasRecienLlegados, #ofertasCervecero {
     overflow-anchor: none;
 }
 </style>
@@ -2079,25 +2053,6 @@
         
         <div class="ofertas-products-grid" id="especiales-grid">
             <!-- Productos especiales -->
-        </div>
-    </div>
-
-    <!-- ========== ÚLTIMAS UNIDADES — siempre visible, skeleton mientras carga ========== -->
-    <div class="ofertas-container ultimas" id="ofertasUltimas" style="margin-bottom:2rem;">
-        <div class="ofertas-header">
-            <h2>
-                🏷️ ÚLTIMAS UNIDADES
-                <span class="ofertas-badge">HASTA AGOTAR STOCK</span>
-            </h2>
-        </div>
-        <div class="ofertas-stock-warning" id="msg-ultimas">
-            🏷️ <strong>¡ÚLTIMAS UNIDADES!</strong> Stock muy limitado — ¡llevate el tuyo antes de que se agote!
-        </div>
-        <div class="ofertas-products-grid" id="ultimas-grid">
-            <!-- skeleton mientras cargan los productos -->
-            <div class="skeleton-card" style="min-height:280px;"></div>
-            <div class="skeleton-card" style="min-height:280px;"></div>
-            <div class="skeleton-card" style="min-height:280px;"></div>
         </div>
     </div>
 
@@ -2373,41 +2328,6 @@ const OFERTAS_RELAMPAGO_SISTEMA = {
 let products = [];
 let cart = [];
 
-// ─── FUENTE ÚNICA DE VERDAD — DESCUENTO ÚLTIMAS UNIDADES ───────────────────
-// Regla: ≤3 días → 25% | >3 días → % del código relampago | sin código → 10%
-// Retorna { pct, precio, caso } donde caso es el string del caso aplicado
-function calcularDescuentoUltimas(diasVenc, relampagoCodigo, precioBase) {
-    let pct, caso;
-
-    // PUNTO 2: productos vencidos (diasVenc <= 0) → excluidos del pool
-    // Si por algún motivo llegan aquí, no aplicar descuento y marcar como vencido
-    if (diasVenc !== null && diasVenc <= 0) {
-        caso = 'VENCIDO — no debería estar en Últimas';
-        pct = 0;
-        console.debug(`[calcularDescuentoUltimas] ⚠️ VENCIDO diasVenc=${diasVenc} precio=$${precioBase} → sin descuento (excluir del pool)`);
-        return { pct: 0, precio: precioBase, caso };
-    }
-
-    if (diasVenc !== null && diasVenc <= 3) {
-        pct = 25;
-        caso = `URGENTE ≤3d (diasVenc=${diasVenc})`;
-    } else {
-        const cfg = OFERTAS_RELAMPAGO_SISTEMA[String(relampagoCodigo)];
-        if (cfg && cfg.tipo === 'pct' && cfg.descuento > 0) {
-            pct = cfg.descuento;
-            caso = `RELAMPAGO codigo=${relampagoCodigo} → ${pct}%`;
-        } else {
-            pct = 10;
-            caso = `AUTO 10% (diasVenc=${diasVenc ?? 'null'}, sin código relampago)`;
-        }
-    }
-
-    const precio = Math.round(precioBase * (1 - pct / 100));
-    console.debug(`[calcularDescuentoUltimas] caso="${caso}" precio=$${precioBase} → -${pct}% = $${precio}`);
-    return { pct, precio, caso };
-}
-// ───────────────────────────────────────────────────────────────────────────
-
 // ========== PAGINACIÓN ==========
 let paginaActual = 1;
 const PRODUCTOS_POR_PAGINA = 50;
@@ -2419,13 +2339,8 @@ let esAdmin = false;
 let poolRelampago = [];
 let _relampagoActivoBackend = []; // Los 3 del día según code.gs
 let _poolRecienLlegados = []; // Recién llegados desde Historial
-let _ultimasSeleccionBackend = []; // IDs seleccionados manualmente en seba21
-let _ultimasAutoBackend = [];      // Pool automático por vencimiento (del JSON, sin límite local)
 let _destacadasBackend = []; // IDs de destacadas rotadas del día según code.gs
-let poolUltimas = [];
 let _limiteDestacadas = 9; // configurable desde config_sistema → "máximo destacadas"
-let _limiteUltimas    = 3; // configurable desde config_sistema → "máximo ultimas"
-let productosUltimas = [];
 let poolDestacadas = [];
 let poolEspeciales = [];
 
@@ -2512,8 +2427,7 @@ const ROTACION_SISTEMA = {
 const OFERTA_ACTIVA = {
     relampago:  false,
     destacadas: false,
-    especiales: false,
-    ultimas:    false
+    especiales: false
 };
 
 // Mapeo columna planilla → día JS (0=Dom,1=Lun,...,6=Sab)
@@ -2610,8 +2524,7 @@ async function cargarConfigSistema() {
         const claves = {
             relampago:  cfg['relampago|Dias ofertas RELAMPAGO']         || cfg['Dias ofertas RELAMPAGO']         || cfg['Dias ofertas relampago'],
             destacadas: cfg['destacadas|Dias ofertas FINDE DESTACADAS'] || cfg['Dias ofertas FINDE DESTACADAS'] || cfg['Dias ofertas destacadas'],
-            especiales: cfg['especiales|Dias ofertas ESPECIALES']       || cfg['Dias ofertas ESPECIALES']       || cfg['Dias ofertas especiales'],
-            ultimas:    cfg['ultimas|Dias ofertas ULTIMAS UNIDADES']    || cfg['Dias ofertas ULTIMAS UNIDADES'] || cfg['Dias ofertas UNIDADES']
+            especiales: cfg['especiales|Dias ofertas ESPECIALES']       || cfg['Dias ofertas ESPECIALES']       || cfg['Dias ofertas especiales']
         };
 
         Object.keys(claves).forEach(function(tipo) {
@@ -2638,17 +2551,6 @@ async function cargarConfigSistema() {
             if (valMax !== null && !isNaN(parseInt(valMax)) && parseInt(valMax) > 0) {
                 _limiteDestacadas = parseInt(valMax);
                 console.log('🔥 Límite destacadas configurado desde planilla:', _limiteDestacadas);
-            }
-        }
-
-        // Leer límite configurable de últimas unidades
-        const claveMaxUlt = Object.keys(cfg).find(k => k.toLowerCase().includes('máximo ultimas') || k.toLowerCase().includes('maximo ultimas'));
-        if (claveMaxUlt) {
-            const rowMaxUlt = cfg[claveMaxUlt];
-            const valMaxUlt = rowMaxUlt ? rowMaxUlt[diaIdx] : null;
-            if (valMaxUlt !== null && !isNaN(parseInt(valMaxUlt)) && parseInt(valMaxUlt) > 0) {
-                _limiteUltimas = parseInt(valMaxUlt);
-                console.log('🏷️ Límite últimas configurado desde planilla:', _limiteUltimas);
             }
         }
 
@@ -2773,8 +2675,7 @@ function actualizarMensajesOfertas() {
     const configs = {
         relampago:  { id: 'msg-relampago',  emoji: '⚡', nombre: 'OFERTAS RELÁMPAGO', positivo: '¡Precios especiales activados ahora, aprovechá!' },
         destacadas: { id: 'msg-destacadas', emoji: '🔥', nombre: 'OFERTAS DESTACADAS', positivo: '¡Los mejores descuentos, solo mientras dure!' },
-        especiales: { id: 'msg-especiales', emoji: '🌙', nombre: 'OFERTAS ESPECIALES',  positivo: '¡Precios únicos que no vas a encontrar en otro lado!' },
-        ultimas:    { id: 'msg-ultimas',    emoji: '🏷️', nombre: 'ÚLTIMAS UNIDADES',   positivo: '¡Llevate el tuyo antes de que se agote!' }
+        especiales: { id: 'msg-especiales', emoji: '🌙', nombre: 'OFERTAS ESPECIALES',  positivo: '¡Precios únicos que no vas a encontrar en otro lado!' }
     };
     Object.keys(configs).forEach(function(tipo) {
         const el = document.getElementById(configs[tipo].id);
@@ -2858,7 +2759,7 @@ function construirPools() {
     console.log('🏗️ Construyendo pools (motor activo)...');
 
     // REGLA ANTI-CONFLICTO: productos con vencimiento <= 3 días
-    // van SOLO a Últimas Unidades, NO a relámpago
+    // van a relámpago solo si no tienen conflicto de stock
     const idsVencCritico = new Set(
         products.filter(p => esVencimientoCritico(p)).map(p => p.id)
     );
@@ -2889,75 +2790,7 @@ function construirPools() {
         p.stockNumber > 0
     );
 
-    // POOL ÚLTIMAS UNIDADES — usa campos del motor si están disponibles
-    // Criterio: ALERTA o EMPUJAR YA/EMPUJAR, con vencimiento real
-    const hoyUlt = new Date();
-    hoyUlt.setHours(0,0,0,0);
-
-    poolUltimas = products.filter(p => {
-        if (p.categoria === 'CERVEZAS') return false;
-        if (p.stockNumber <= 2) return false;
-
-        // Prioridad 1: señal explícita del motor
-        const riesgo = (p.riesgoVencimiento || '').toUpperCase();
-        const prioridad = (p.prioridad || p.prioridadEmpuje || '').toUpperCase();
-        const tieneSenal =
-            riesgo === 'ALERTA' ||
-            prioridad === 'EMPUJAR YA' ||
-            prioridad === 'EMPUJAR';
-
-        if (tieneSenal) {
-            return p.stockNumber > 0;
-        }
-
-        // Prioridad 2: fallback si el motor no corrió
-        if (!p.vencimiento) return false;
-
-        const partes = String(p.vencimiento).split('-');
-        if (partes.length !== 3) return false;
-
-        const vD = new Date(parseInt(partes[0]), parseInt(partes[1]) - 1, parseInt(partes[2]));
-        vD.setHours(0,0,0,0);
-
-        const diasVenc = Math.round((vD - hoyUlt) / 86400000);
-        if (diasVenc <= 0 || diasVenc > 30) return false;
-
-        const promDia = p.promDia > 0 ? p.promDia : (p.rotacion > 0 ? p.rotacion / 30 : 0);
-        const diasStock = promDia > 0 ? p.stockNumber / promDia : 999;
-
-        return diasStock > diasVenc;
-    }).map(p => {
-        const riesgo = (p.riesgoVencimiento || '').toUpperCase();
-        const prioridad = (p.prioridad || p.prioridadEmpuje || '').toUpperCase();
-
-        let _diasVenc = 9999;
-        if (p.vencimiento) {
-            const partes = String(p.vencimiento).split('-');
-            if (partes.length === 3) {
-                const vD = new Date(parseInt(partes[0]), parseInt(partes[1]) - 1, parseInt(partes[2]));
-                vD.setHours(0,0,0,0);
-                _diasVenc = Math.round((vD - hoyUlt) / 86400000);
-            }
-        }
-
-        const urgencia =
-            (riesgo === 'ALERTA' || prioridad === 'EMPUJAR YA') ? 2 :
-            (prioridad === 'EMPUJAR') ? 1 : 0;
-
-        return {
-            ...p,
-            _diasVenc,
-            _puntaje: urgencia * 10000 + (1000 - _diasVenc)
-        };
-    });
-
-    // Ordenar: urgencia primero, luego menor diasVenc
-    poolUltimas.sort((a, b) => b._puntaje - a._puntaje);
-
-    // Limitar pool local a 6 candidatos razonables
-    poolUltimas = poolUltimas.slice(0, 6);
-
-    console.log(`⚡ Pool Relámpago: ${poolRelampago.length} | 🔥 Destacadas: ${poolDestacadas.length} | 🏷️ Últimas: ${poolUltimas.length}`);
+    console.log(`⚡ Pool Relámpago: ${poolRelampago.length} | 🔥 Destacadas: ${poolDestacadas.length}`);
 }
 
 function seleccionarProductosOfertas() {
@@ -2965,7 +2798,6 @@ function seleccionarProductosOfertas() {
     productosRelampago = [];
     productosDestacadas = [];
     productosEspeciales = [];
-    
     // MODO ADMIN: Mostrar TODOS los productos de oferta relámpago
     if (modoMostrarTodasOfertas && esAdmin) {
         productosRelampago = poolRelampago; // TODOS
@@ -3030,7 +2862,6 @@ function seleccionarProductosOfertas() {
 function renderizarContenedorOfertas(tipo, productos) {
     const containerId = tipo === 'relampago' ? 'ofertasRelampago' :
                        tipo === 'destacadas' ? 'ofertasDestacadas' :
-                       tipo === 'ultimas' ? 'ofertasUltimas' :
                        'ofertasEspeciales';
     
     const gridId = `${tipo}-grid`;
@@ -3040,15 +2871,6 @@ function renderizarContenedorOfertas(tipo, productos) {
     if (!container || !grid) return;
     
     if (productos.length === 0) {
-        // Últimas Unidades siempre visible — mantener skeleton para anclar layout
-        if (tipo === 'ultimas') {
-            grid.innerHTML = `
-                <div class="skeleton-card" style="min-height:280px;"></div>
-                <div class="skeleton-card" style="min-height:280px;"></div>
-                <div class="skeleton-card" style="min-height:280px;"></div>
-            `;
-            return;
-        }
         container.classList.add('cls-oculto'); container.style.marginBottom = '';
         return;
     }
@@ -3119,36 +2941,6 @@ function renderizarContenedorOfertas(tipo, productos) {
         }
 
         /* ================= ESPECIALES ================= */
-        else if (tipo === 'ultimas') {
-            // PUNTO 1: card visual — usa calcularDescuentoUltimas (fuente única)
-            let diasVencUlt = null;
-            if (product.vencimiento) {
-                const hoyU = new Date(); hoyU.setHours(0,0,0,0);
-                const vU = parseFechaLocal(product.vencimiento);
-                if (vU) diasVencUlt = Math.round((vU - hoyU) / 86400000);
-            }
-            const descUlt = calcularDescuentoUltimas(diasVencUlt, product.relampago, product.price);
-            const esUrgente = diasVencUlt !== null && diasVencUlt <= 3;
-            const labelDias = diasVencUlt === 0 ? 'Vence HOY' : diasVencUlt === 1 ? 'Vence mañana' : `Vence en ${diasVencUlt} días`;
-
-            badgeTexto = esUrgente
-                ? `⚡ OFERTA VENCIMIENTO · ÚLTIMAS UNIDADES`
-                : `🏷️ ÚLTIMAS UNIDADES · -${descUlt.pct}% OFF`;
-
-            precioHTML = `
-                <div style="margin:10px 0;">
-                    <div style="font-size:0.78rem;color:#999;text-decoration:line-through;">$${product.price.toLocaleString('es-AR')}</div>
-                    <div style="font-size:1.4rem;font-weight:900;color:#b71c1c;">$${descUlt.precio.toLocaleString('es-AR')}</div>
-                    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
-                        <span style="background:#b71c1c;color:white;padding:4px 10px;border-radius:12px;font-size:0.82rem;font-weight:700;">-${descUlt.pct}% OFF</span>
-                        ${esUrgente ? `<span style="background:#ff6f00;color:white;padding:4px 10px;border-radius:12px;font-size:0.82rem;font-weight:700;">⏰ ${labelDias}</span>` : `<span style="background:#ff6f00;color:white;padding:4px 10px;border-radius:12px;font-size:0.82rem;font-weight:700;">⚠️ ¡Últimas unidades!</span>`}
-                    </div>
-                    <div style="background:#fff3e0;border-left:3px solid #b71c1c;padding:6px 10px;border-radius:0 8px 8px 0;margin-top:8px;font-size:0.75rem;color:#b71c1c;font-weight:600;">
-                        ${esUrgente ? '¡Llevátelo antes de que venza!' : `✅ Ahorrás $${(product.price - descUlt.precio).toLocaleString('es-AR')}`}
-                    </div>
-                </div>
-            `;
-        }
         else if (tipo === 'especiales' && product.especial) {
             const precioConDescuento = Math.round(product.price * 0.9);
             badgeTexto = `⭐ ESPECIAL -10%`;
@@ -3187,7 +2979,7 @@ function renderizarContenedorOfertas(tipo, productos) {
                     </div>
                     
                     <div class="product-stock in-stock">
-                        ${tipo === 'ultimas' ? '' : `✅ Stock: ${product.stockNumber}`}
+                        ✅ Stock: ${product.stockNumber}
                     </div>
                     
                     <button class="add-to-cart" data-id="${product.id}" data-tipo="${tipo}" data-testid="add-to-cart-${product.id}">
@@ -3198,7 +2990,7 @@ function renderizarContenedorOfertas(tipo, productos) {
         `;
     }).join('');
     
-    if (tipo !== 'ultimas') iniciarCountdown(tipo);
+    iniciarCountdown(tipo);
 }
 
 // ========== COUNTDOWN — reemplazado por indicador ACTIVO ==========
@@ -3814,26 +3606,6 @@ function actualizarTodasLasVistas() {
     iniciarMotorAutoCheck();
     
     renderizarContenedorOfertas('relampago', productosRelampago);
-    // Últimas unidades
-    if (_ultimasSeleccionBackend.length > 0) {
-        // Selección manual del día — siempre mostrar, ignorar horario y límite
-        productosUltimas = _ultimasSeleccionBackend
-            .map(id => products.find(p => p.id === id))
-            .filter(p => p && p.stockNumber > 0);
-        console.log(`🏷️ Últimas selección manual: ${productosUltimas.length} productos`);
-    } else if (_ultimasAutoBackend.length > 0) {
-        // Pool automático del backend — ya calculado por code.gs, sin límite local
-        productosUltimas = _ultimasAutoBackend
-            .map(id => products.find(p => p.id === id))
-            .filter(p => p && p.stockNumber > 0);
-        console.log(`🏷️ Últimas auto backend: ${productosUltimas.length} productos`);
-    } else if (validarHorario('ultimas') || (esAdmin && modoMostrarTodasOfertas)) {
-        // Último recurso — pool local
-        productosUltimas = poolUltimas.filter(p => !idsEnOfertas.has(p.id)).slice(0, _limiteUltimas);
-    } else {
-        productosUltimas = [];
-    }
-    renderizarContenedorOfertas('ultimas', productosUltimas);
     renderizarContenedorOfertas('destacadas', productosDestacadas);
     renderizarRecienLlegados();
     renderizarContenedorOfertas('especiales', productosEspeciales);
@@ -3873,10 +3645,6 @@ async function loadProductsFromAPI() {
             if (dOfertas.success) {
                 if (dOfertas.relampagoActivo) _relampagoActivoBackend = dOfertas.relampagoActivo.map(p => Number(p.id));
                 if (dOfertas.destacadasActivas) _destacadasBackend = dOfertas.destacadasActivas.map(p => Number(p.id));
-                if (dOfertas.ultimasUnidades) _ultimasAutoBackend = dOfertas.ultimasUnidades.map(p => Number(p.id));
-                _ultimasSeleccionBackend = (dOfertas.ultimasSeleccionadas && dOfertas.ultimasSeleccionadas.length > 0)
-                    ? dOfertas.ultimasSeleccionadas.map(p => Number(p.id))
-                    : [];
                 if (dOfertas.poolRecienLlegados) _poolRecienLlegados = dOfertas.poolRecienLlegados;
             }
         } catch(e) {
@@ -4013,15 +3781,12 @@ function actualizarSoloOfertas() {
             if (!d.success) return;
             if (d.relampagoActivo)  _relampagoActivoBackend = d.relampagoActivo.map(p => Number(p.id));
             if (d.destacadasActivas) _destacadasBackend = d.destacadasActivas.map(p => Number(p.id));
-            if (d.ultimasUnidades)   _ultimasAutoBackend = d.ultimasUnidades.map(p => Number(p.id));
-            _ultimasSeleccionBackend = (d.ultimasSeleccionadas || []).map(p => Number(p.id));
             if (d.poolRecienLlegados) _poolRecienLlegados = d.poolRecienLlegados;
             // Re-seleccionar y re-renderizar sin tocar los pools base
             seleccionarProductosOfertas();
             renderizarContenedorOfertas('relampago',  productosRelampago);
             renderizarContenedorOfertas('destacadas', productosDestacadas);
             renderizarContenedorOfertas('especiales', productosEspeciales);
-            renderizarContenedorOfertas('ultimas',    productosUltimas);
             renderizarRecienLlegados();
         })
         .catch(() => {}); // silencioso — siguiente ciclo lo reintenta
@@ -4036,8 +3801,7 @@ function renderizarRecienLlegados() {
     const idsOcupados = new Set([
         ...productosRelampago.map(p => p.id),
         ...productosDestacadas.map(p => p.id),
-        ...productosEspeciales.map(p => p.id),
-        ...productosUltimas.map(p => p.id)
+        ...productosEspeciales.map(p => p.id)
     ]);
 
     const lista = (_poolRecienLlegados || []).filter(p => !idsOcupados.has(p.id));
@@ -4268,7 +4032,6 @@ function addToCart(productId, tipoForzado) {
     let esOfertaEspecial = false;
     let esOfertaDestacada = false;
     let esOfertaRelampago = false;
-    let esOfertaUltimas = false;
     let esPromo = false;
     let ofertaConfig = null;
     
@@ -4303,26 +4066,6 @@ function addToCart(productId, tipoForzado) {
             eslogan: `${product.destacada}% OFF`
         };
         console.log('✅ Producto tiene oferta DESTACADA:', product.destacada + '%');
-    }
-    // 2b. Verificar ÚLTIMAS UNIDADES
-    else if (tipoForzado === 'ultimas' || productosUltimas.some(p => p.id === productId)) {
-        // PUNTO 2: carrito addToCart — usa calcularDescuentoUltimas (fuente única)
-        let diasVenc = null;
-        if (product.vencimiento) {
-            const partes = String(product.vencimiento).split('-');
-            if (partes.length === 3) {
-                const vD = new Date(parseInt(partes[0]), parseInt(partes[1]) - 1, parseInt(partes[2]));
-                const hoy = new Date(); hoy.setHours(0,0,0,0);
-                diasVenc = Math.round((vD - hoy) / 86400000);
-            }
-        }
-        const enPool = productosUltimas.find(p => p.id === productId);
-        if (diasVenc === null && enPool && enPool.diasParaVencer !== undefined) diasVenc = enPool.diasParaVencer;
-
-        esOfertaUltimas = true;
-        const descUltCarrito = calcularDescuentoUltimas(diasVenc, product.relampago, product.price);
-        ofertaConfig = { nombre: "Últimas", tipo: "ultimas", descuento: descUltCarrito.pct, eslogan: `🏷️ -${descUltCarrito.pct}% ÚLTIMAS UNIDADES` };
-        console.log('✅ Producto tiene oferta ÚLTIMAS UNIDADES:', descUltCarrito.pct + '% off');
     }
     // 3. Verificar RELÁMPAGO
     else if (tipoForzado === 'relampago' ||
@@ -4359,7 +4102,6 @@ function addToCart(productId, tipoForzado) {
         existingItem.esOfertaEspecial = esOfertaEspecial;
         existingItem.esOfertaDestacada = esOfertaDestacada;
         existingItem.esOfertaRelampago = esOfertaRelampago;
-        existingItem.esOfertaUltimas = esOfertaUltimas;
         existingItem.esPromo = esPromo;
         existingItem.productRef = product; // Actualizar referencia
     } else {
@@ -4373,7 +4115,6 @@ function addToCart(productId, tipoForzado) {
             esOfertaEspecial: esOfertaEspecial,
             esOfertaDestacada: esOfertaDestacada,
             esOfertaRelampago: esOfertaRelampago,
-            esOfertaUltimas: esOfertaUltimas,
             esPromo: esPromo,
             productRef: product
         });
@@ -4547,17 +4288,6 @@ function renderCartItems() {
             ahorroItem = precioNormalTotal - precioTotalItem;
             badge = `${item.oferta.descuento}%`;
             formula = `<div style="color:#ff6f00;font-size:0.7rem;">👉 -${item.oferta.descuento}% c/u</div>`;
-        }
-        // ===== ÚLTIMAS UNIDADES =====
-        else if (item.esOfertaUltimas && item.oferta) {
-            esProductoNormal = false;
-            badgeColor = '#b71c1c';
-            const descuento = item.oferta.descuento / 100;
-            const precioUnitario = Math.round(product.price * (1 - descuento));
-            precioTotalItem = precioUnitario * item.quantity;
-            ahorroItem = precioNormalTotal - precioTotalItem;
-            badge = `-${item.oferta.descuento}%`;
-            formula = `<div style="color:#b71c1c;font-size:0.7rem;">🏷️ Últimas unidades -${item.oferta.descuento}%</div>`;
         }
         // ===== OFERTAS ESPECIALES =====
         else if (item.esOfertaEspecial && item.oferta) {
@@ -4757,14 +4487,6 @@ function sendOrderViaWhatsApp() {
             precioItem = precioUnitario * item.quantity;
             const ahorro = precioNormalItem - precioItem;
             ofertaInfo = `\n🔥 Ahorrás $${ahorro}`;
-        }
-        // ÚLTIMAS UNIDADES (ej: -15% o -25%)
-        else if (item.esOfertaUltimas && item.oferta) {
-            const descuento = item.oferta.descuento / 100;
-            const precioUnitario = Math.round(product.price * (1 - descuento));
-            precioItem = precioUnitario * item.quantity;
-            const ahorro = precioNormalItem - precioItem;
-            ofertaInfo = `\n🏷️ Últimas unidades -${item.oferta.descuento}% · Ahorrás $${ahorro}`;
         }
         // OFERTA RELÁMPAGO (ej: 3x2)
         else if (item.esOfertaRelampago && item.oferta) {
