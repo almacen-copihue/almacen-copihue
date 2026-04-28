@@ -1565,9 +1565,9 @@
         </div>
         <div class="peso-producto-nombre" id="pesoNombre"></div>
         <div class="peso-display">
-            <div class="peso-gramos" id="pesoGramos">0</div>
-            <div class="peso-unit">gramos</div>
-            <div class="peso-precio-calculado" id="pesoPrecio">$0</div>
+            <div class="peso-gramos" id="pesoGramos">$0</div>
+            <div class="peso-unit">pesos</div>
+            <div class="peso-precio-calculado" id="pesoPrecio">0 gr</div>
         </div>
         <div class="peso-teclado">
             <button class="peso-tecla" onclick="pesoTecla('1')">1</button>
@@ -1579,7 +1579,7 @@
             <button class="peso-tecla" onclick="pesoTecla('7')">7</button>
             <button class="peso-tecla" onclick="pesoTecla('8')">8</button>
             <button class="peso-tecla" onclick="pesoTecla('9')">9</button>
-            <button class="peso-tecla" onclick="pesoTecla('500')">½kg</button>
+            <button class="peso-tecla" onclick="pesoTecla('000')">000</button>
             <button class="peso-tecla" onclick="pesoTecla('0')">0</button>
             <button class="peso-tecla borrar" onclick="pesoBorrar()">⌫</button>
             <button class="peso-tecla ok" id="pesoOkBtn" onclick="confirmarPeso()" disabled>
@@ -4161,15 +4161,14 @@ function cerrarModalPeso(e) {
 }
 
 function pesoTecla(valor) {
-    // Botón ½kg = suma 500gr al valor actual
-    if (valor === '500') {
-        const actual = parseInt(pesoValor) || 0;
-        pesoValor = String(actual + 500);
+    if (valor === '000') {
+        if (pesoValor.length >= 7) return;
+        pesoValor = pesoValor === '' ? '' : pesoValor + '000';
     } else {
-        if (pesoValor.length >= 5) return; // máximo 99999gr
+        if (pesoValor.length >= 7) return;
         pesoValor += valor;
-        // Evitar ceros a la izquierda
         pesoValor = String(parseInt(pesoValor) || 0);
+        if (pesoValor === '0') pesoValor = '';
     }
     actualizarDisplayPeso();
 }
@@ -4180,27 +4179,25 @@ function pesoBorrar() {
 }
 
 function actualizarDisplayPeso() {
-    const gramos = parseInt(pesoValor) || 0;
+    const totalPesos = parseInt(pesoValor) || 0;
     const precioPorKg = pesoProductoActual ? pesoProductoActual.price : 0;
-    const precioCalculado = Math.round((precioPorKg / 1000) * gramos);
+    const gramos = precioPorKg > 0 ? Math.round((totalPesos / precioPorKg) * 1000) : 0;
 
-    document.getElementById('pesoGramos').textContent = gramos || '0';
-    document.getElementById('pesoPrecio').textContent = gramos > 0 
-        ? '$' + precioCalculado.toLocaleString('es-AR') 
+    document.getElementById('pesoGramos').textContent = totalPesos > 0
+        ? '$' + totalPesos.toLocaleString('es-AR')
         : '$0';
-    document.getElementById('pesoOkBtn').disabled = gramos <= 0;
+    document.getElementById('pesoPrecio').textContent = totalPesos > 0
+        ? gramos + ' gr'
+        : '0 gr';
+    document.getElementById('pesoOkBtn').disabled = totalPesos <= 0;
 }
 
 function confirmarPeso() {
-    const gramos = parseInt(pesoValor, 10) || 0;
-    if (gramos <= 0 || !pesoProductoActual) return;
+    const totalPesos = parseInt(pesoValor, 10) || 0;
+    if (totalPesos <= 0 || !pesoProductoActual) return;
 
-    // price en la planilla = $/kg (entero). Si viene con ceros extra por error de formato,
-    // normalizar: precio razonable para verduras/frutas < $50.000/kg
-    let precioPorKg = pesoProductoActual.price;
-    // Sanity check: si precioCalculado > precio del producto * 10, probablemente mal dato
-    const precioCalculado = Math.round((precioPorKg / 1000) * gramos);
-    // Costo también escalado por gramos (costo x kg → costo x gramos vendidos)
+    const precioPorKg = pesoProductoActual.price;
+    const gramos = precioPorKg > 0 ? Math.round((totalPesos / precioPorKg) * 1000) : 0;
     const costoPorKg = pesoProductoActual.precioCosto || 0;
     const costoCalculado = costoPorKg > 0 ? Math.round((costoPorKg / 1000) * gramos) : 0;
 
@@ -4208,7 +4205,7 @@ function confirmarPeso() {
         id: `peso_${Date.now()}`,
         idOriginal: pesoProductoActual.id,
         name: `${pesoProductoActual.name} (${gramos}gr)`,
-        price: precioCalculado,
+        price: totalPesos,
         qty: 1,
         gramos: gramos,
         stockDisponible: 999,
@@ -4219,7 +4216,7 @@ function confirmarPeso() {
     cerrarPeso();
     renderVenta();
     guardarCarritoPendiente();
-    mostrarToast(`✅ ${gramos}gr — $${precioCalculado.toLocaleString('es-AR')}`, 'verde');
+    mostrarToast(`✅ ${gramos}gr — $${totalPesos.toLocaleString('es-AR')}`, 'verde');
 }
 
 // ========== MÉTODO DE PAGO ==========
@@ -5931,7 +5928,9 @@ async function _cargarVentas60Dias(nombre, id) {
     const el = document.getElementById('infoProdSemana');
     if (!el) return;
     try {
-        const url = API_URL + '?action=ventasProducto&data=' + encodeURIComponent(JSON.stringify({ nombre: nombre.trim().toUpperCase(), dias: 60 }));
+        // Para productos por peso el nombre puede venir con sufijo "(800gr)" — sacarlo
+        const nombreBase = nombre.trim().toUpperCase().replace(/\s*\(\d+GR\)\s*$/i, '');
+        const url = API_URL + '?action=ventasProducto&data=' + encodeURIComponent(JSON.stringify({ nombre: nombreBase, dias: 60 }));
         const data = await _apiFetchUrl('ventasProducto', url);
         if (!data.success || !data.dias || data.dias.length === 0) {
             el.innerHTML = '<div style="color:#555;font-size:.78rem;text-align:center;padding:4px 0;">Sin ventas en 60 días</div>';
