@@ -149,6 +149,24 @@
   .estado-vacio p{font-size:14px;color:var(--gris);}
 
   @media(max-width:480px){.cliente-nombre{font-size:19px;}.deuda-monto{font-size:24px;}.barra-total{font-size:20px;}}
+
+  /* ── TOAST ── */
+  #toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;padding:10px 18px;border-radius:20px;font-size:14px;font-weight:600;z-index:9999;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap;max-width:90vw;text-align:center;}
+  #toast.show{opacity:1;}
+  #toast.verde{background:#1a6b3c;}
+  #toast.rojo{background:#c0392b;}
+
+  /* ── MODAL CONFIRMAR ── */
+  #modalConfirm{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center;z-index:400;opacity:0;pointer-events:none;transition:opacity .25s;}
+  #modalConfirm.visible{opacity:1;pointer-events:all;}
+  .mc-sheet{background:#fff;border-radius:20px 20px 0 0;padding:24px 20px 36px;width:100%;max-width:480px;transform:translateY(30px);transition:transform .25s;}
+  #modalConfirm.visible .mc-sheet{transform:translateY(0);}
+  .mc-titulo{font-family:'Syne',sans-serif;font-size:17px;font-weight:800;margin-bottom:6px;color:var(--negro);}
+  .mc-sub{font-size:14px;color:var(--gris);margin-bottom:6px;line-height:1.5;}
+  .mc-metodo{font-size:13px;font-weight:600;color:var(--verde);margin-bottom:18px;}
+  .mc-btns{display:flex;gap:10px;}
+  .mc-cancel{flex:1;padding:13px;border:2px solid var(--borde);border-radius:12px;background:#fff;color:#555;font-size:15px;font-family:'DM Sans',sans-serif;cursor:pointer;}
+  .mc-ok{flex:2;padding:13px;border:none;border-radius:12px;background:var(--verde);color:#fff;font-size:15px;font-weight:700;font-family:'Syne',sans-serif;cursor:pointer;}
 </style>
 </head>
 <body>
@@ -243,6 +261,22 @@
   </button>
 </div>
 
+<!-- Toast -->
+<div id="toast"></div>
+
+<!-- Modal confirmar pago -->
+<div id="modalConfirm">
+  <div class="mc-sheet">
+    <div class="mc-titulo" id="mcTitulo">¿Confirmar cobro?</div>
+    <div class="mc-sub" id="mcSub"></div>
+    <div class="mc-metodo" id="mcMetodo"></div>
+    <div class="mc-btns">
+      <button class="mc-cancel" onclick="cerrarConfirmModal()">Cancelar</button>
+      <button class="mc-ok" id="mcOk">✅ Confirmar</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal éxito -->
 <div class="modal-overlay" id="modalExito">
   <div class="modal">
@@ -250,8 +284,8 @@
     <h3>¡Cobro registrado!</h3>
     <p>Se registró el pago correctamente.</p>
     <span class="modal-monto" id="modalMonto"></span>
+    <button class="btn-modal-wa" onclick="compartirConfirmacion()" style="margin-bottom:10px">📤 Compartir comprobante</button>
     <button class="btn-modal-cerrar" onclick="cerrarModal()">Listo</button>
-    <button class="btn-modal-wa" onclick="enviarWhatsAppConfirmacion()">💬 Enviar comprobante WA</button>
   </div>
 </div>
 
@@ -259,7 +293,7 @@
 // ══════════════════════════════════════════════════
 // CONFIGURACIÓN
 // ══════════════════════════════════════════════════
-const WEBAPP_URL = 'https://script.google.com/macros/s/TU_DEPLOYMENT_ID/exec';
+const WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
 
 // ══════════════════════════════════════════════════
 // ESTADO
@@ -404,7 +438,7 @@ async function buscarCliente() {
     params = { cliente: app.selCliente.nombre, telefono: app.selCliente.telefono || '' };
   } else {
     const txt = document.getElementById('inputNombre').value.trim();
-    if (!txt) { alert('Escribí el nombre del cliente'); return; }
+    if (!txt) { showToast('⚠️ Escribí el nombre del cliente'); return; }
     params = { cliente: txt, telefono: '' };
   }
 
@@ -581,34 +615,38 @@ function setMetodo(m, btn) {
 // ══════════════════════════════════════════════════
 // CONFIRMAR PAGO
 // ══════════════════════════════════════════════════
-async function confirmarPago() {
+function confirmarPago() {
   const ids = Object.keys(app.seleccionados);
   if (!ids.length) return;
   const pagos = ids.map(function(id){ return { idFiado:id, monto:app.seleccionados[id].monto, parcial:app.seleccionados[id].parcial }; });
   const total = pagos.reduce(function(s,p){ return s+p.monto; }, 0);
   const hayParciales = pagos.some(function(p){ return p.parcial; });
-  if (!confirm(hayParciales
-    ? '¿Registrar cobro de '+$$(total)+' ('+app.metodoPago+')?\nAlgunos fiados quedarán con saldo pendiente.'
-    : '¿Confirmar pago de '+$$(total)+' ('+app.metodoPago+')?')) return;
+  showConfirmModal(
+    (hayParciales ? 'Registrar abono de '+$$(total) : 'Confirmar pago de '+$$(total)),
+    (hayParciales ? 'Algunos fiados quedarán con saldo pendiente' : ''),
+    app.metodoPago,
+    function() { _ejecutarPago(pagos); }
+  );
+}
 
+async function _ejecutarPago(pagos) {
+  const total = pagos.reduce(function(s,p){ return s+p.monto; }, 0);
   const btn = document.getElementById('btnConfirmar');
   btn.disabled = true; btn.textContent = '⏳ Registrando...';
-
   try {
     const cli = app.selCliente || { nombre: (app.fiados[0]||{}).cliente||'', telefono: (app.fiados[0]||{}).telefono||'' };
     const res = await gas('pagarFiadosSeleccionados', { pagos, metodoPago: app.metodoPago, cliente: cli.nombre, telefono: cli.telefono||'' });
     btn.disabled = false; btn.innerHTML = '💳 Confirmar cobro';
-    if (!res.ok) { alert('❌ Error: '+(res.error||'No se pudo registrar')); return; }
-    app.totalCobrado = res.totalCobrado;
-    document.getElementById('modalMonto').textContent = $$(res.totalCobrado);
+    if (!res.ok) { showToast('❌ '+(res.error||'No se pudo registrar')); return; }
+    app.totalCobrado = res.totalCobrado || total;
+    document.getElementById('modalMonto').textContent = $$(app.totalCobrado);
     document.getElementById('modalExito').classList.add('visible');
     setTimeout(recargar, 700);
   } catch(e) {
     btn.disabled = false; btn.innerHTML = '💳 Confirmar cobro';
-    alert('❌ Error de conexión: '+e.message);
+    showToast('❌ Error: '+e.message);
   }
 }
-
 async function recargar() {
   try {
     const cli = app.selCliente || { nombre:(app.fiados[0]||{}).cliente||'', telefono:(app.fiados[0]||{}).telefono||'' };
@@ -632,7 +670,7 @@ function cerrarModal() {
 // ══════════════════════════════════════════════════
 function enviarWhatsApp() {
   const cli = app.selCliente || { nombre:(app.fiados[0]||{}).cliente||'', telefono:(app.fiados[0]||{}).telefono||'' };
-  if (!cli.telefono) { alert('Este cliente no tiene teléfono registrado'); return; }
+  if (!cli.telefono) { showToast('⚠️ Este cliente no tiene teléfono registrado'); return; }
   const total  = app.fiados.reduce(function(s,f){ return s+f.totalPendiente; },0);
   const lineas = app.fiados.map(function(f){
     const items = f.detalle&&f.detalle.length
@@ -643,31 +681,68 @@ function enviarWhatsApp() {
   wa(cli.telefono, '¡Hola '+cli.nombre+'! 👋\n\nTe recordamos que tenés fiado pendiente en *Almacén Copihue*:\n\n'+lineas.join('\n\n')+'\n\n*Total deuda: '+$$(total)+'*\n\n¡Gracias! 🙏');
 }
 
-function enviarWhatsAppConfirmacion() {
+function compartirConfirmacion() {
   const cli = app.selCliente || { nombre:'', telefono:(app.fiados[0]||{}).telefono||'' };
-  if (!cli.telefono) return;
-  wa(cli.telefono, '¡Hola '+cli.nombre+'! ✅\n\nSe registró tu pago de *'+$$(app.totalCobrado)+'* ('+app.metodoPago+') en *Almacén Copihue*.\n\n¡Muchas gracias! 🙏');
+  const msg = '✅ *PAGO RECIBIDO — Almacén Copihue*\n\n'+
+    '👤 Cliente: '+cli.nombre+'\n'+
+    '💰 *Total cobrado: '+$$(app.totalCobrado)+'*\n'+
+    '💳 Método: '+app.metodoPago+'\n\n'+
+    '✅ ¡Gracias por saldar tu deuda! 🙌\n'+
+    '📍 Almacén Copihue';
+  if (cli.telefono) { wa(cli.telefono, msg); }
+  else if (navigator.share) { navigator.share({text: msg}).catch(function(){}); }
+  else { showToast('⚠️ Sin teléfono registrado'); }
 }
 
 function wa(tel, msg) {
-  const n = String(tel).replace(/\D/g,'');
-  const t = '549'+n.replace(/^0?549?/,'').replace(/^0/,'');
-  window.open('https://wa.me/'+t+'?text='+encodeURIComponent(msg),'_blank');
+  const n = String(tel||'').replace(/\D/g,'');
+  const t = n ? '549'+n.replace(/^0?549?/,'').replace(/^0/,'') : '';
+  const encoded = (function(s){try{return encodeURIComponent(s);}catch(e){return encodeURIComponent(String(s).replace(/[\uD800-\uDFFF]/g,'?'));})(msg);
+  const url = t ? 'whatsapp://send?phone='+t+'&text='+encoded : 'whatsapp://send?text='+encoded;
+  // Compartir nativo si no hay número
+  if (!t && navigator.share) { navigator.share({text: msg}).catch(()=>{}); return; }
+  window.location.href = url;
 }
 
 // ══════════════════════════════════════════════════
 // FETCH GAS
 // ══════════════════════════════════════════════════
 async function gas(accion, params, metodo) {
-  const url = WEBAPP_URL+'?action='+accion;
-  if ((metodo||'POST')==='GET') {
-    const r = await fetch(url);
-    if (!r.ok) throw new Error('HTTP '+r.status);
-    return r.json();
-  }
-  const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(params)});
+  // GAS doGet acepta GET con ?data=... — más confiable en móvil que POST
+  let url = WEBAPP_URL+'?action='+accion+'&t='+Date.now();
+  if (params) url += '&data='+encodeURIComponent(JSON.stringify(params));
+  const r = await fetch(url, {redirect:'follow', signal: AbortSignal.timeout(25000)});
   if (!r.ok) throw new Error('HTTP '+r.status);
-  return r.json();
+  const txt = await r.text();
+  if (!txt.trim()) throw new Error('Respuesta vacía');
+  return JSON.parse(txt);
+}
+
+// ══════════════════════════════════════════════════
+// TOAST
+// ══════════════════════════════════════════════════
+let _toastT;
+function showToast(msg, tipo) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'show' + (tipo ? ' '+tipo : '');
+  clearTimeout(_toastT);
+  _toastT = setTimeout(function(){ t.className = ''; }, 3200);
+}
+
+// ══════════════════════════════════════════════════
+// MODAL CONFIRMAR
+// ══════════════════════════════════════════════════
+function showConfirmModal(titulo, sub, metodo, onOk) {
+  document.getElementById('mcTitulo').textContent = titulo || '¿Confirmar?';
+  document.getElementById('mcSub').textContent    = sub || '';
+  document.getElementById('mcMetodo').textContent = metodo ? '💳 Método: ' + metodo : '';
+  const btn = document.getElementById('mcOk');
+  btn.onclick = function() { cerrarConfirmModal(); onOk(); };
+  document.getElementById('modalConfirm').classList.add('visible');
+}
+function cerrarConfirmModal() {
+  document.getElementById('modalConfirm').classList.remove('visible');
 }
 
 // ══════════════════════════════════════════════════
