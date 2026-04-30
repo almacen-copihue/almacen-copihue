@@ -1,5 +1,15 @@
 // ======================
-// ALMACÉN COPIHUE - SISTEMA COMPLETO v7.0
+// ALMACÉN COPIHUE - SISTEMA COMPLETO v7.7
+// v7.7: vender() ahora devuelve ticket en la respuesta — guardarFiado() lo recibe
+//       y lo graba en columna C de FIADOS (antes siempre quedaba vacía)
+// v7.6: getDetalleTicket — devuelve items reales de hoja Ventas por número de ticket
+//       cobrarFiado — fechaPago ahora graba fecha+hora (yyyy-MM-dd HH:mm) para mejor filtrado
+// v7.5: upsertCliente — guardarFiado crea/actualiza hoja Clientes automáticamente
+// v7.4: listarClientes — lee hoja Clientes (nombre + teléfono) para autocomplete modal fiado
+// v7.3: listarFiados incluye pagados últimos 30 días + fechaPago/metodoPago
+// v7.2: Fix getVentasProducto — strip (XXXgr) para productos por peso
+// v7.1: Fix guardarFiado — eliminado DATEVALUE() en fórmula columna K de FIADOS
+//       (DATEVALUE rompe cuando J ya es fecha real, no texto)
 // v7.0: Fix categoría en producto nuevo — usa datos.categoria en vez de hardcodear ALMACEN
 //       + actualizarStockMinimos() — calcula col N con promedio 7 días × 2
 //       + actualizarEstadisticas() — rotación + stock mínimos en un paso
@@ -305,14 +315,33 @@ function ingresarMercaderia(datos) {
       sheetInventario.getRange(f, 9).setValue(0);   // I: Especial
       sheetInventario.getRange(f, 12).setValue(0);  // L: promos/antojo_popup
 
-      // J: categoriaOferta — fórmula
+      // ── J: categoriaOferta — fórmula en INGLÉS ──────────────────
       sheetInventario.getRange(f, 10).setFormula(
-        '=SI(A'+f+'="";"";SI(F'+f+'<=0;"sin stock";SI(NO(O(I'+f+'=0;I'+f+'=1));"ERROR ESPECIAL";SI(NO(ESNUMERO(COINCIDIR(G'+f+';{0;1;2;3;4;5;6;10;11;12;13;14};0)));"ERROR RELAMPAGO";SI(O(H'+f+'>70;Y(H'+f+'>0;H'+f+'<15));"ERROR DESTACADA";SI((I'+f+'=1)+(H'+f+'>0)+(G'+f+'>0)>1;"ERROR DOBLE OFERTA";SI(I'+f+'=1;"especial";SI(H'+f+'>0;"destacada";SI(G'+f+'>0;SI(O(Y(G'+f+'<=6;F'+f+'<(G'+f+'+1));Y(G'+f+'=10;F'+f+'<2);Y(G'+f+'>=11;F'+f+'<1));"REPONER "&SI(G'+f+'<=6;G'+f+'+1-F'+f+';SI(G'+f+'=10;2-F'+f+';1-F'+f+'))&" PARA PROMO";SI(G'+f+'<=6;"relampago "&(G'+f+'+1)&"x"&G'+f+';SI(G'+f+'=10;"2da50off";SI(G'+f+'>=11;"relampago "&ELEGIR(G'+f+'-10;10;15;20;25)&"%";"relampago"))));"sin oferta"))))))))))'
+        '=IF(A'+f+'="","",IF(F'+f+'<=0,"sin stock",IF(NOT(OR(I'+f+'=0,I'+f+'=1)),"ERROR ESPECIAL",' +
+        'IF(NOT(ISNUMBER(MATCH(G'+f+',{0,1,2,3,4,5,6,10,11,12,13,14},0))),"ERROR RELAMPAGO",' +
+        'IF(OR(H'+f+'>70,AND(H'+f+'>0,H'+f+'<15)),"ERROR DESTACADA",' +
+        'IF((I'+f+'=1)+(H'+f+'>0)+(G'+f+'>0)>1,"ERROR DOBLE OFERTA",' +
+        'IF(I'+f+'=1,"especial",' +
+        'IF(H'+f+'>0,"destacada",' +
+        'IF(G'+f+'>0,' +
+          'IF(OR(AND(G'+f+'<=6,F'+f+'<(G'+f+'+1)),AND(G'+f+'=10,F'+f+'<2),AND(G'+f+'>=11,F'+f+'<1)),' +
+            '"REPONER "&IF(G'+f+'<=6,G'+f+'+1-F'+f+',IF(G'+f+'=10,2-F'+f+',1-F'+f+'))&" PARA PROMO",' +
+            'IF(G'+f+'<=6,"relampago "&(G'+f+'+1)&"x"&G'+f+',' +
+            'IF(G'+f+'=10,"2da50off",' +
+            'IF(G'+f+'>=11,"relampago "&CHOOSE(G'+f+'-10,10,15,20,25)&"%","relampago")))),' +
+        '"sin oferta"))))))))))'
       );
 
-      // K: PT (Precio Técnico) — fórmula
+      // ── K: PT (Precio Técnico) — fórmula en INGLÉS ──────────────
       sheetInventario.getRange(f, 11).setFormula(
-        '=SI(Y(C'+f+'="PROMOS";F'+f+'>=1);"COMBO ACTIVADO EN CAT. PROMOS";SI(O(F'+f+'<=0;B'+f+'<=0);"SIN STOCK / CARGAR STOCK";SI(B'+f+'="";"CARGAR PRECIO";SI(Y(ESNUMERO(G'+f+');G'+f+'>0);B'+f+'*BUSCARV(G'+f+';{1\\0,5;2\\0,6667;3\\0,75;4\\0,8;5\\0,8333;6\\0,8571;10\\0,75};2;FALSO);SI(Y(ESNUMERO(H'+f+');H'+f+'>0);B'+f+'*(1-H'+f+'/100);SI(I'+f+'=1;B'+f+'*0,9;"NORMAL / SIN OFERTA"))))))'
+        '=IF(AND(C'+f+'="PROMOS",F'+f+'>=1),"COMBO ACTIVADO EN CAT. PROMOS",' +
+        'IF(OR(F'+f+'<=0,B'+f+'<=0),"SIN STOCK / CARGAR STOCK",' +
+        'IF(B'+f+'="","CARGAR PRECIO",' +
+        'IF(AND(ISNUMBER(G'+f+'),G'+f+'>0),' +
+          'B'+f+'*VLOOKUP(G'+f+',{1,0.5;2,0.6667;3,0.75;4,0.8;5,0.8333;6,0.8571;10,0.75},2,FALSE),' +
+        'IF(AND(ISNUMBER(H'+f+'),H'+f+'>0),' +
+          'B'+f+'*(1-H'+f+'/100),' +
+        'IF(I'+f+'=1,B'+f+'*0.9,"NORMAL / SIN OFERTA"))))))'
       );
 
       if (fechaVencimiento) sheetInventario.getRange(f, 16).setValue(fechaVencimiento);
@@ -347,6 +376,31 @@ function ingresarMercaderia(datos) {
     if (datos.categoria && datos.categoria.trim()) sheetInventario.getRange(filaProducto, 3).setValue(datos.categoria.trim().toUpperCase());
 
     const fecha = new Date();
+    const tz   = Session.getScriptTimeZone();
+    const fechaStr = Utilities.formatDate(fecha, tz, 'yyyy-MM-dd');
+    const horaStr  = Utilities.formatDate(fecha, tz, 'HH:mm');
+
+    // ── REGISTRAR EN SALIDAS si es retiro por vencimiento (stockDirecto=0 y cantidad=0) ──
+    const esRetiroVencido = esAjusteDirecto && Number(datos.stockDirecto) === 0 && cantidad === 0 && stockActual > 0;
+    if (esRetiroVencido) {
+      var shSal = ss.getSheetByName('SALIDAS');
+      if (!shSal) {
+        shSal = ss.insertSheet('SALIDAS');
+        shSal.getRange(1, 1, 1, 10).setValues([['Fecha','Hora','Producto','ID','Cantidad','Costo Unit.','Precio Venta','Motivo','Observación','Vendedor']]);
+        shSal.getRange(1, 1, 1, 10).setFontWeight('bold');
+      }
+      // Obtener ID del producto
+      var idProd = datosInventario[filaProducto - 1][3] || '';
+      var costoProd = datosInventario[filaProducto - 1][18] || 0; // col S = costo
+      var precioProd = datosInventario[filaProducto - 1][1] || 0; // col B = precio venta
+      shSal.appendRow([
+        fechaStr, horaStr,
+        producto, idProd,
+        stockActual, costoProd, precioProd,
+        'VENCIDO', 'Auto-retiro por vencimiento', datos.vendedor || ''
+      ]);
+    }
+
     // Solo escribir en Historial si es un ingreso real (cantidad > 0) o si trae precio/costo
     const esIngresoReal = cantidad > 0 || precioCosto || precioVenta;
     if (esIngresoReal) {
@@ -687,7 +741,7 @@ function _ofertaBuildProducto_(fila, i) {
     rotacion:          fila.length > 14 ? (parseInt(fila[14]) || 0) : 0,
     vencimiento:       venc,
     diasParaVencer:    dpv,
-    estadoVencimiento: estadoVencimiento,  // 'vencido' | 'urgente' | 'proximo' | 'ok'
+    estadoVencimiento: estadoVencimiento,
     puntaje:           _ofertaPuntaje_(fila)
   };
 }
@@ -697,59 +751,28 @@ function calcularOfertas() {
   var sheet = ss.getSheetByName(HOJA_INVENTARIO);
   var datos = sheet.getDataRange().getValues();
 
-  // ── Límites de visualización (hardcoded + puede sobreescribirse desde config) ──
-  var limites = { relampago: 3, ultimas: 3, especiales: 2, destacadas: 9 };
+  var limites = { relampago: 3, especiales: 2, destacadas: 9 };
+
+  var diaIdxJC = [1,2,3,4,5,6,0].indexOf(new Date().getDay());
+
+  // Leer todos los límites desde config_sistema al inicio
+  try {
+    var shCfgLim = SpreadsheetApp.openById(SS_ID).getSheetByName(HOJA_CONFIG);
+    if (shCfgLim) {
+      var cfgLim = shCfgLim.getDataRange().getValues();
+      for (var li = 1; li < cfgLim.length; li++) {
+        var lk = String(cfgLim[li][0] || '').trim().toLowerCase();
+        var lv = parseInt(cfgLim[li][diaIdxJC + 1]);
+        if (isNaN(lv) || lv <= 0) continue;
+        if (lk.indexOf('maximo relampago') !== -1 || lk.indexOf('máximo relampago') !== -1) limites.relampago = lv;
+        if (lk.indexOf('maximo especiales') !== -1 || lk.indexOf('máximo especiales') !== -1) limites.especiales = lv;
+        if (lk.indexOf('maximo destacadas') !== -1 || lk.indexOf('máximo destacadas') !== -1) limites.destacadas = lv;
+      }
+    }
+  } catch(eLim) { Logger.log('Error leyendo limites config: ' + eLim); }
 
   var relampagoActivo = [];
-  var ultimasUnidades = [];
   var idsUsados = {};
-  var candidatosUltimas = [];
-
-  // REGLA DE ORO — ÚLTIMAS UNIDADES:
-  // Solo productos CON fecha de vencimiento donde diasStock > diasVencimiento
-  // (van a sobrar unidades al vencer) O vencen en ≤15 días
-  var hoyUlt = new Date(); hoyUlt.setHours(0,0,0,0);
-  for (var i = 1; i < datos.length; i++) {
-    var fila = datos[i];
-    if (!fila[0]) continue;
-    var stock = parseInt(fila[5]) || 0;
-    if (stock <= 0) continue;
-    var catUlt = String(fila[2] || '').trim().toUpperCase();
-    if (catUlt === 'CERVEZAS') continue;
-
-    // Sin vencimiento → nunca entra
-    var vencUlt = fila[15];
-    if (!vencUlt || !(vencUlt instanceof Date)) continue;
-    var vNorm = new Date(vencUlt); vNorm.setHours(0,0,0,0);
-    var diasVenc = Math.round((vNorm - hoyUlt) / 86400000);
-    if (diasVenc <= 0) continue; // ya vencido
-
-    // Calcular días de stock
-    var promDiaUlt = parseFloat(fila[23]) || 0; // col X = PromDia
-    var diasStockUlt = promDiaUlt > 0 ? stock / promDiaUlt : 999;
-
-    // Entra si no alcanza a venderlo todo O si vence pronto (≤15 días)
-    if (diasStockUlt <= diasVenc && diasVenc > 15) continue;
-
-    var puntajeUlt = _ofertaPuntaje_(fila) + Math.max(0, 100 - diasVenc);
-    candidatosUltimas.push({ fila: fila, i: i, p: puntajeUlt, diasVenc: diasVenc });
-  }
-
-  var totalCandidatosUltimas = candidatosUltimas.length;
-  candidatosUltimas
-    .sort(function(a, b) { return b.p - a.p; })
-    .slice(0, limites.ultimas)
-    .forEach(function(c) {
-      var prod = _ofertaBuildProducto_(c.fila, c.i);
-      prod.diasParaVencer = c.diasVenc;
-      ultimasUnidades.push(prod);
-      idsUsados[c.i] = true;
-    });
-
-  // ── ¿Está activo Jueves Cervecero hoy? ────────────────────
-  // Si está activo, cervezas tienen su propia oferta y no deben
-  // aparecer en relámpago / destacadas / especiales.
-  var diaIdxJC = [1,2,3,4,5,6,0].indexOf(new Date().getDay()); // 0=Lun…6=Dom
   var cerveceroActivoHoy = false;
   try {
     var ssCfgJC = SpreadsheetApp.openById(SS_ID);
@@ -765,9 +788,8 @@ function calcularOfertas() {
         }
       }
     }
-  } catch(eCJ) { /* si falla, no excluir */ }
+  } catch(eCJ) {}
 
-  // Helper: ¿es cerveza? (misma lógica que getJuevesCervecero)
   function _esCerveza_(fila) {
     var nom = String(fila[0] || '').trim().toUpperCase();
     var cat = String(fila[2] || '').trim().toUpperCase();
@@ -775,8 +797,19 @@ function calcularOfertas() {
            nom.includes('BIRRA') || nom.includes(' IPA') || nom.includes(' STOUT') || nom.includes(' PORTER');
   }
 
-  // Candidatos relámpago — incluye TODO con relampago>0 y stock>0
-  // Sin filtro de puntaje: el puntaje es para sugerencias automáticas, no para bloquear ofertas manuales
+  // Helper: detecta si la columna J dice que hay que reponer stock para la promo
+  function _stockSuficienteParaOferta_(fila) {
+    var catOferta = String(fila[9] || '').trim().toUpperCase();
+    // Si dice REPONER → stock insuficiente para la promo
+    if (catOferta.indexOf('REPONER') !== -1) return false;
+    // Verificar stock mínimo según tipo de promo
+    var stock = parseInt(fila[5]) || 0;
+    if (catOferta.indexOf('3X2') !== -1 || catOferta.indexOf('3 X 2') !== -1) return stock >= 3;
+    if (catOferta.indexOf('2X1') !== -1 || catOferta.indexOf('2 X 1') !== -1) return stock >= 2;
+    if (catOferta.indexOf('4X3') !== -1 || catOferta.indexOf('4 X 3') !== -1) return stock >= 4;
+    return stock >= 1;
+  }
+
   var candidatosRelampago = [];
   for (var i3 = 1; i3 < datos.length; i3++) {
     var fila3 = datos[i3];
@@ -785,19 +818,16 @@ function calcularOfertas() {
     var stock3 = parseInt(fila3[5]) || 0;
     var relampago3 = parseInt(fila3[6]) || 0;
     if (stock3 <= 0 || relampago3 <= 0) continue;
+    if (!_stockSuficienteParaOferta_(fila3)) continue; // columna J: REPONER o stock insuficiente
     var cat3 = String(fila3[2] || '').trim().toUpperCase();
-    if (cat3 === 'CERVEZAS') continue;                    // espejo del filtro en index.html
-    if (cerveceroActivoHoy && _esCerveza_(fila3)) continue; // JC tiene prioridad
+    if (cat3 === 'CERVEZAS') continue;
+    if (cerveceroActivoHoy && _esCerveza_(fila3)) continue;
     candidatosRelampago.push({ fila: fila3, i: i3, p: _ofertaPuntaje_(fila3) });
   }
 
-  candidatosRelampago
-    .sort(function(a, b) { return b.p - a.p; });
+  candidatosRelampago.sort(function(a, b) { return b.p - a.p; });
 
-  // ── Rotación diaria de relámpago ──────────────────────────────────────────
-  // Mismo algoritmo que ROTACION_SISTEMA en index.html: seed = dayOfYear
-  // Así seba21 (que lee este resultado) y index (que rota localmente) ven los mismos 3
-  var relampagoCandidatosParaRotar = candidatosRelampago; // pool ordenado por puntaje
+  var relampagoCandidatosParaRotar = candidatosRelampago;
   if (relampagoCandidatosParaRotar.length > limites.relampago) {
     var tzDateR   = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
     var dateKeyR  = tzDateR.getFullYear() + '-' +
@@ -814,7 +844,7 @@ function calcularOfertas() {
     }
     relampagoCandidatosParaRotar = rotadosR;
   }
-  // Pool completo para que seba21 calcule precios correctos en todos los productos con relampago
+
   var relampagoPoolCompleto = candidatosRelampago.map(function(c) {
     return _ofertaBuildProducto_(c.fila, c.i);
   });
@@ -823,7 +853,6 @@ function calcularOfertas() {
     relampagoActivo.push(_ofertaBuildProducto_(c.fila, c.i));
   });
 
-  // Destacadas y Especiales — excluir cervezas si JC activo
   var destacadasActivas = [];
   var especialesActivas = [];
   for (var idx = 1; idx < datos.length; idx++) {
@@ -831,31 +860,12 @@ function calcularOfertas() {
     if (!fd[0]) continue;
     var stockD = parseInt(fd[5]) || 0;
     if (stockD <= 0) continue;
-    if (cerveceroActivoHoy && _esCerveza_(fd)) continue; // JC tiene prioridad
+    if (!_stockSuficienteParaOferta_(fd)) continue; // columna J: REPONER o stock insuficiente
+    if (cerveceroActivoHoy && _esCerveza_(fd)) continue;
     if ((parseInt(fd[7]) || 0) > 0) destacadasActivas.push(_ofertaBuildProducto_(fd, idx));
     if ((parseInt(fd[8]) || 0) > 0) especialesActivas.push(_ofertaBuildProducto_(fd, idx));
   }
 
-  // ── Sobreescribir límite de destacadas desde config_sistema si existe ──
-  try {
-    var ssCfg = SpreadsheetApp.openById(SS_ID);
-    var shCfg = ssCfg.getSheetByName(HOJA_CONFIG);
-    if (shCfg) {
-      var cfgRows = shCfg.getDataRange().getValues();
-      for (var ci = 1; ci < cfgRows.length; ci++) {
-        var clave = String(cfgRows[ci][0] || '').trim().toLowerCase();
-        if (clave.indexOf('máximo destacadas') !== -1 || clave.indexOf('maximo destacadas') !== -1) {
-          for (var cj = 1; cj <= 7; cj++) {
-            var v = parseInt(cfgRows[ci][cj]);
-            if (!isNaN(v) && v > 0) { limites.destacadas = v; break; }
-          }
-          break;
-        }
-      }
-    }
-  } catch(eCfg) { /* usa el default 9 */ }
-
-  // ── Rotación diaria de especiales ──────────────────────────
   var especialesPool = especialesActivas;
   if (especialesActivas.length > limites.especiales) {
     var tzDate    = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
@@ -874,8 +884,7 @@ function calcularOfertas() {
     especialesActivas = rotados;
   }
 
-  // ── Rotación diaria de destacadas (mismo algoritmo) ────────
-  var destacadasPool = destacadasActivas.slice(); // pool completo
+  var destacadasPool = destacadasActivas.slice();
   var destacadasRotadas = destacadasActivas.slice();
   if (destacadasActivas.length > limites.destacadas) {
     var tzDateD   = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
@@ -893,55 +902,27 @@ function calcularOfertas() {
     }
   }
 
-  // ── Leer selección manual de Últimas Unidades (hecha en seba21) ──
-  var ultimasSeleccionadas = [];
+  var poolRecienLlegados = [];
+  // Leer configuracion de Recien Llegados desde config_sistema
+  var precioMinVidriera = 2000; // fallback RECIEN_LLEGADOS_PRECIO_MIN
+  var limiteRecienLlegados = 12;  // fallback RECIEN_LLEGADOS_LIMITE
   try {
-    var ssCfgU = SpreadsheetApp.openById(SS_ID);
-    var shCfgU = ssCfgU.getSheetByName(HOJA_CONFIG);
-    if (shCfgU) {
-      var cfgRowsU = shCfgU.getDataRange().getValues();
-      for (var ui = 0; ui < cfgRowsU.length; ui++) {
-        if (String(cfgRowsU[ui][0]).trim() === 'ultimas_seleccion') {
-          var rawU = cfgRowsU[ui][1];
-          var tsU  = cfgRowsU[ui][2];
-          if (rawU && tsU) {
-            var fechaU = new Date(tsU);
-            var hoyU   = new Date();
-            var mismoDiaU = fechaU.getFullYear() === hoyU.getFullYear()
-                         && fechaU.getMonth()    === hoyU.getMonth()
-                         && fechaU.getDate()     === hoyU.getDate();
-            if (mismoDiaU) {
-              var idsU = JSON.parse(rawU);
-              // Buscar cada producto por su ID (índice de fila en inventario)
-              for (var uj = 0; uj < idsU.length; uj++) {
-                var idxU = parseInt(idsU[uj]);
-                if (idxU > 0 && idxU < datos.length) {
-                  var filaU = datos[idxU];
-                  if (filaU && filaU[0]) {
-                    var prodU = _ofertaBuildProducto_(filaU, idxU);
-                    // Calcular días para vencer
-                    var vencU = filaU[15];
-                    if (vencU) {
-                      var fechaVencU = vencU instanceof Date ? vencU : new Date(String(vencU).trim());
-                      if (!isNaN(fechaVencU.getTime())) {
-                        var hoyU2 = new Date(); hoyU2.setHours(0,0,0,0);
-                        prodU.diasParaVencer = Math.round((fechaVencU - hoyU2) / 86400000);
-                      }
-                    }
-                    ultimasSeleccionadas.push(prodU);
-                  }
-                }
-              }
-            }
-          }
-          break;
+    var shCfgRL = SpreadsheetApp.openById(SS_ID).getSheetByName(HOJA_CONFIG);
+    if (shCfgRL) {
+      var cfgRL = shCfgRL.getDataRange().getValues();
+      for (var ci = 1; ci < cfgRL.length; ci++) {
+        var ck = String(cfgRL[ci][0] || '').trim().toUpperCase();
+        if (ck === 'RECIEN_LLEGADOS_PRECIO_MIN') {
+          var cv = parseInt(cfgRL[ci][1]);
+          if (!isNaN(cv) && cv >= 0) precioMinVidriera = cv;
+        }
+        if (ck === 'RECIEN_LLEGADOS_LIMITE') {
+          var cl = parseInt(cfgRL[ci][1]);
+          if (!isNaN(cl) && cl > 0) limiteRecienLlegados = cl;
         }
       }
     }
-  } catch(eU) { /* sin selección guardada */ }
-
-  // ── RECIÉN LLEGADOS ──────────────────────────────────────────────
-  var poolRecienLlegados = [];
+  } catch(eCfgRL) { Logger.log('Error leyendo config Recien Llegados: ' + eCfgRL); }
   try {
     var ssRL = SpreadsheetApp.openById(SS_ID);
     var shHistRL = ssRL.getSheetByName(HOJA_HISTORIAL);
@@ -951,7 +932,6 @@ function calcularOfertas() {
       var hace2 = new Date(hoyRL.getTime() - 2 * 86400000);
       var tzRL = Session.getScriptTimeZone();
 
-      // Última fecha de ingreso por nombre (normalizado)
       var ultimaFechaMap = {};
       var histRowsRL = shHistRL.getDataRange().getValues();
       for (var hi = 1; hi < histRowsRL.length; hi++) {
@@ -967,14 +947,11 @@ function calcularOfertas() {
         }
       }
 
-      // IDs de productos ya en otros pools activos (para exclusión)
       var idsOtrosPools = {};
       relampagoActivo.forEach(function(p){ idsOtrosPools[p.id] = true; });
-      ultimasUnidades.forEach(function(p){ idsOtrosPools[p.id] = true; });
       destacadasRotadas.forEach(function(p){ idsOtrosPools[p.id] = true; });
       especialesActivas.forEach(function(p){ idsOtrosPools[p.id] = true; });
 
-      // Cruzar con inventario
       var invRowsRL = shInvRL.getDataRange().getValues();
       var candidatosRL = [];
       for (var ri = 1; ri < invRowsRL.length; ri++) {
@@ -982,7 +959,9 @@ function calcularOfertas() {
         if (!rNom || !ultimaFechaMap[rNom]) continue;
         var rStock = parseInt(invRowsRL[ri][5]) || 0;
         if (rStock <= 0) continue;
-        if (idsOtrosPools[ri]) continue; // ya en otro pool
+        var rPrecio = parseInt(invRowsRL[ri][1]) || 0;
+        if (rPrecio < precioMinVidriera) continue; // Precio minimo vidriera (desde config_sistema)
+        if (idsOtrosPools[ri]) continue;
         candidatosRL.push({
           id:           ri,
           nombre:       String(invRowsRL[ri][0]).trim(),
@@ -994,9 +973,8 @@ function calcularOfertas() {
         });
       }
 
-      // Ordenar por más reciente primero, limitar a 5
       candidatosRL.sort(function(a, b){ return b._ts - a._ts; });
-      poolRecienLlegados = candidatosRL.slice(0, 5).map(function(p){
+      poolRecienLlegados = candidatosRL.slice(0, limiteRecienLlegados + 10).map(function(p){
         return { id: p.id, nombre: p.nombre, precio: p.precio,
                  categoria: p.categoria, stock: p.stock, fechaIngreso: p.fechaIngreso };
       });
@@ -1007,18 +985,15 @@ function calcularOfertas() {
     success: true,
     relampagoActivo:      relampagoActivo,
     relampagoPool:        relampagoPoolCompleto,
-    ultimasUnidades:      ultimasUnidades,
-    ultimasSeleccionadas: ultimasSeleccionadas,
-    destacadasActivas:    destacadasRotadas,    // ya rotadas — mismas que verán index y seba21
-    destacadasPool:       destacadasPool,        // pool completo (para stats)
+    destacadasActivas:    destacadasRotadas,
+    destacadasPool:       destacadasPool,
     especialesActivas:    especialesActivas,
-    poolRecienLlegados: poolRecienLlegados,
+    poolRecienLlegados:     poolRecienLlegados,
+    limiteRecienLlegados:   limiteRecienLlegados,
     limites: limites,
     fecha: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm'),
     stats: {
       totalRelampago:          relampagoActivo.length,
-      totalUltimas:            ultimasUnidades.length,
-      totalUltimasCandidatos:  totalCandidatosUltimas,
       totalDestacadas:         destacadasActivas.length,
       totalEspeciales:         especialesPool.length,
       especialesMostradas:     especialesActivas.length
@@ -1075,7 +1050,6 @@ function calcularMotorSugerencias() {
       if (precio > 1000) puntaje += 2;
 
       let tipo = 'relampago';
-      if (diasParaVencer !== null && diasParaVencer <= 3) tipo = 'ultimas';
 
       sugerencias.push({ id: i, nombre, stock, rotacion, diasParaVencer, diasDesdeUltimaPromo, puntaje, tipo, relampago });
     }
@@ -1130,7 +1104,6 @@ function getConfig() {
         if (c.includes('relámpago') || c.includes('relampago')) seccionActual = 'relampago';
         else if (c.includes('destacada')) seccionActual = 'destacadas';
         else if (c.includes('especial')) seccionActual = 'especiales';
-        else if (c.includes('unidad') || c.includes('última') || c.includes('ultima')) seccionActual = 'ultimas';
         else if (c.includes('horario')) seccionActual = 'horario';
         continue;
       }
@@ -1159,7 +1132,6 @@ function setConfig(datos) {
     const seccion  = String(datos.seccion || '').toLowerCase();
     const clave    = String(datos.clave   || '').trim();
     const diaIdx   = parseInt(datos.dia);
-    // A = auto horario | 1 = forzado ON | 0 = forzado OFF
     const valor = (datos.valor === 'A' || datos.valor === null || datos.valor === undefined) ? 'A' :
                   (datos.valor === 1 || datos.valor === '1') ? 1 : 0;
 
@@ -1168,7 +1140,7 @@ function setConfig(datos) {
     const hojaData = sheet.getDataRange().getValues();
     let seccionActual = 'general';
     let filaObjetivo = -1;
-    let filaFallback = -1; // si no matchea sección, usar la primera que matchee por clave
+    let filaFallback = -1;
 
     const claveNorm = clave.toLowerCase();
 
@@ -1180,25 +1152,20 @@ function setConfig(datos) {
         if (c.includes('relámpago') || c.includes('relampago')) seccionActual = 'relampago';
         else if (c.includes('destacada')) seccionActual = 'destacadas';
         else if (c.includes('especial')) seccionActual = 'especiales';
-        else if (c.includes('unidad') || c.includes('última') || c.includes('ultima')) seccionActual = 'ultimas';
         else if (c.includes('horario')) seccionActual = 'horario';
         continue;
       }
       const celdaNorm = celda.toLowerCase();
-      // Match exacto con sección
       if (seccionActual === seccion && celdaNorm === claveNorm) {
         filaObjetivo = i + 1;
         break;
       }
-      // Fallback: match solo por clave sin importar sección
       if (filaFallback === -1 && celdaNorm === claveNorm) {
         filaFallback = i + 1;
       }
     }
 
-    // Si no encontró con sección, usar fallback
     if (filaObjetivo === -1) filaObjetivo = filaFallback;
-
     if (filaObjetivo === -1) return { success: false, mensaje: 'No se encontró: ' + seccion + '|' + clave };
 
     const columna = diaIdx + 2;
@@ -1311,9 +1278,8 @@ function getJuevesCervecero() {
         Math.round(c.precio * (1 - descuento / 100)),
         c.costo > 0 ? Math.ceil(c.costo * 1.05) : 0
       );
-      // Efecto psicológico: X99 más cercano, nunca por encima del precio original
       const precioPromo99 = Math.round((precioBase - 99) / 100) * 100 + 99;
-      const precioPromo = Math.min(precioPromo99, c.precio - 1); // nunca supera el original
+      const precioPromo = Math.min(precioPromo99, c.precio - 1);
       return { ...c, descuento, precioPromo, esGancho: idx === idxGancho };
     });
 
@@ -1463,18 +1429,12 @@ function doGet(e) {
     if (e && e.parameter && e.parameter.action === 'getListaCompra') {
       return respuestaJSON(getListaCompraJSON());
     }
-    if (e && e.parameter && e.parameter.action === 'getCandidatosUltimas') {
-      return respuestaJSON(getCandidatosUltimas());
-    }
-    if (e && e.parameter && e.parameter.action === 'guardarUltimasSeleccion') {
-      const datos = JSON.parse(decodeURIComponent(e.parameter.data));
-      return respuestaJSON(guardarUltimasSeleccion(datos));
-    }
-    if (e && e.parameter && e.parameter.action === 'getUltimasSeleccion') {
-      return respuestaJSON(getUltimasSeleccion());
-    }
     if (e && e.parameter && e.parameter.action === 'listarFiados') {
       return respuestaJSON(listarFiados());
+    }
+    if (e && e.parameter && e.parameter.action === 'getDetalleTicket') {
+      var ticket = e.parameter.data ? JSON.parse(decodeURIComponent(e.parameter.data)).ticket : '';
+      return respuestaJSON(getDetalleTicket(ticket));
     }
     if (e && e.parameter && e.parameter.action === 'cobrarFiado') {
       var datosCobro = e.parameter.data ? JSON.parse(decodeURIComponent(e.parameter.data)) : {};
@@ -1483,6 +1443,15 @@ function doGet(e) {
     if (e && e.parameter && e.parameter.action === 'abonarFiado') {
       var datosAbono = e.parameter.data ? JSON.parse(decodeURIComponent(e.parameter.data)) : {};
       return respuestaJSON(abonarFiado(datosAbono));
+    }
+    // ── NUEVAS ACCIONES v2.0 FIADOS ──
+    if (e && e.parameter && e.parameter.action === 'listarFiadosCliente') {
+      var datosFC = e.postData ? JSON.parse(e.postData.contents) : JSON.parse(decodeURIComponent(e.parameter.data || '{}'));
+      return respuestaJSON(listarFiadosCliente(datosFC));
+    }
+    if (e && e.parameter && e.parameter.action === 'pagarFiadosSeleccionados') {
+      var datosPFS = e.postData ? JSON.parse(e.postData.contents) : JSON.parse(decodeURIComponent(e.parameter.data || '{}'));
+      return respuestaJSON(pagarFiadosSeleccionados(datosPFS));
     }
     if (e && e.parameter && e.parameter.action === 'abonoFiado') {
       var datosAbono = JSON.parse(decodeURIComponent(e.parameter.data));
@@ -1495,8 +1464,20 @@ function doGet(e) {
     if (e && e.parameter && e.parameter.action === 'consultarFiado') {
       return respuestaJSON(consultarFiado(e.parameter.telefono));
     }
+    if (e && e.parameter && e.parameter.action === 'listarClientes') {
+      return respuestaJSON(listarClientes());
+    }
+    if (e && e.parameter && e.parameter.action === 'setPausadoNombre') {
+      var datosPN = JSON.parse(decodeURIComponent(e.parameter.data));
+      return respuestaJSON(setPausadoNombre(datosPN));
+    }
     if (e && e.parameter && e.parameter.action === 'registrarMovimientoCaja') {
-      return respuestaJSON(registrarMovimientoCaja(e.parameter.data));
+      var datosCaja = JSON.parse(decodeURIComponent(e.parameter.data));
+      return respuestaJSON(registrarMovimientoCaja(datosCaja));
+    }
+    if (e && e.parameter && e.parameter.action === 'ventasProducto') {
+      var datosVP = JSON.parse(decodeURIComponent(e.parameter.data));
+      return respuestaJSON(getVentasProducto(datosVP));
     }
 
     // ── GET PRODUCTOS (carga la tienda) ──
@@ -1539,7 +1520,8 @@ function doGet(e) {
         stockMin: parseInt(fila[13]) || 0,
         prioridad: fila.length > 31 ? String(fila[31] || '').trim().toUpperCase() : 'NORMAL',
         pausadoListaCompra: fila.length > 34 ? String(fila[34] || '').trim().toUpperCase() : '',
-        ultimaPromo: ''
+        ultimaPromo: '',
+        categoriaOferta: String(fila[9] || '').trim()
       };
 
       if (fila.length > 11) {
@@ -1584,9 +1566,21 @@ function procesarVenta(dataStr) {
     const items = Array.isArray(payload) ? payload : (payload.items || []);
     const metodoPago = Array.isArray(payload) ? 'efectivo' : (payload.metodoPago || 'efectivo');
     const vendedor = Array.isArray(payload) ? '' : (payload.vendedor || '');
-    const ventaPayload = Array.isArray(payload) ? {} : payload; // para acceder a campos extra
+    const ventaPayload = Array.isArray(payload) ? {} : payload;
 
     if (!items || !Array.isArray(items) || items.length === 0) return respuestaJSON({ success: false, mensaje: 'Sin items' });
+
+    if (payload.idVenta) {
+      var props = PropertiesService.getScriptProperties();
+      var procesados2 = props.getProperty('ventas_procesadas') || '';
+      if (procesados2.indexOf(payload.idVenta) !== -1) {
+        return respuestaJSON({ success: true, duplicate: true });
+      }
+      var lista2 = procesados2 ? procesados2.split(',') : [];
+      lista2.push(payload.idVenta);
+      if (lista2.length > 100) lista2 = lista2.slice(-100);
+      props.setProperty('ventas_procesadas', lista2.join(','));
+    }
 
     const ss = SpreadsheetApp.openById(SS_ID);
     const sheetInventario = ss.getSheetByName(HOJA_INVENTARIO);
@@ -1630,6 +1624,7 @@ function procesarVenta(dataStr) {
       }
     }
 
+    var ticketStr = null;
     try {
       const sheetVentas = ss.getSheetByName('Ventas');
       if (sheetVentas) {
@@ -1644,7 +1639,7 @@ function procesarVenta(dataStr) {
           }
         }
         const nroTicket = ultimoTicket + 1;
-        const ticketStr = String(nroTicket).padStart(4, '0');
+        ticketStr = String(nroTicket).padStart(4, '0');
 
         for (const p of procesados) {
           const filaActual = sheetVentas.getLastRow() + 1;
@@ -1670,7 +1665,7 @@ function procesarVenta(dataStr) {
       console.warn('No se pudo registrar en hoja Ventas:', e);
     }
 
-    return respuestaJSON({ success: true, procesados: procesados.length, total: totalVenta, errores: errores, fecha: fecha.toISOString() });
+    return respuestaJSON({ success: true, procesados: procesados.length, total: totalVenta, ticket: ticketStr, errores: errores, fecha: fecha.toISOString() });
   } catch (error) {
     return respuestaJSON({ success: false, mensaje: error.toString() });
   }
@@ -1754,21 +1749,85 @@ function getReportes() {
 
     if (sheetInv) {
       const inv = sheetInv.getDataRange().getValues();
+      const _aliasEspecificos = {};
+          _aliasEspecificos["AZUCAR LEDESMA 1KG"] = "AZUCAR LEDESMA CLASICA 1KG";
+          _aliasEspecificos["ENCENDEDOR BIC MAXI J6LISO"] = "ENCENDEDOR GRANDE BIC MAXI J6LISO";
+          _aliasEspecificos["ENCENDEDOR BIC MINI J5LISO"] = "ENCENDEDOR CHICO BIC MINI J5LISO";
+          _aliasEspecificos["FIDEOS MATARAZZO 500GR (CODITOS RAYADOS) 500 GR"] = "FIDEOS MATARAZZO 500GR (CODITO RAYADO) 500 GR";
+          _aliasEspecificos["FIDEOS MATARAZZO 500GR (TALLARINES N5) 500 GR"] = "FIDEOS MATARAZZO 500GR (TALLARIN N5) 500 GR";
+          _aliasEspecificos["JUGO EN POLVO NARANJA BANANA ARCOR X 15GR"] = "JUGO EN POLVO NARANJA BANANA ARCOR X 15GR";
+          _aliasEspecificos["JUGO EN POLVO NARANJA DULCE TANG X 15GR"] = "JUGO EN POLVO NARANJA TANG X 15GR";
+          _aliasEspecificos["JUGO EN POLVO SABOR A MULTIFRUTA ARCOR 15G 1L"] = "JUGO EN POLVO MULTIFRUTA ARCOR 15GR";
+          _aliasEspecificos["LAMPARA 9W E27"] = "LAMPARA 9W E27 FOCO";
+          _aliasEspecificos["LENTEJAS SECAS REMOJADAS INALPA LATA"] = "LENTEJAS SECAS REMOJADAS INALPA LATA 300GR";
+          _aliasEspecificos["LEVADURA 10GR"] = "LEVADURA MI PAN 10GR";
+          _aliasEspecificos["PAN RALLADO 500GR"] = "PAN RALLADO PREFERIDO  500GR";
+          _aliasEspecificos["PURE DE TOMATE NOEL 530GR"] = "PURE DE TOMATE NOEL 520GR";
+          _aliasEspecificos["RAZA COMIDA DE GATO 1KG"] = "RAZA GATO CARNE PESCADO ARROZ 1KG";
+          _aliasEspecificos["RAZA COMIDA DE GATO 500GR"] = "RAZA GATO CARNE PESCADO ARROZ 500GR";
+          _aliasEspecificos["REBOSADOR 500GR"] = "REBOSADOR PREFERIDO 500GR";
+          _aliasEspecificos["SAL DOS ESTRELLAS ENTREFINA 1KG"] = "SAL  ENTREFINA DOS ESTRELLAS  1KG";
+          _aliasEspecificos["SAL FINA 500GR"] = "SAL FINA DOS ESTRELLAS 500GR";
+          _aliasEspecificos["TOMATE PERITAS EN LATA ARCOR 400GR"] = "TOMATE PELADO PERITA ARCOR LATA 400GR";
+          _aliasEspecificos["JUGO BAGGIO CAJA 1,5 LITROS NARANJA"] = "JUGO BAGGIO FRESH CAJA 1,5 LITROS NARANJA";
+          _aliasEspecificos["NARANJAS KG"] = "NARANJA X KG";
+          _aliasEspecificos["QUESO LA PAULINA BARRA SANDWICH 1KG"] = "QUESO LA PAULINA BARRA SANDWICH X KG";
+          _aliasEspecificos["PAPELILLO"] = "PAPELILLO OCB SEDA";
+          _aliasEspecificos["JUGO EN POLVO ARCOR SABOR A MULTIFRUTA 15G 1L"] = "JUGO EN POLVO MULTIFRUTA ARCOR 15GR";
+          _aliasEspecificos["ARROZ 1 KG PRIMOR"] = "ARROZ 1KG PRIMOR";
+          _aliasEspecificos["PROCENEX"] = "PROCENEX LIMPIADOR PISOS 900ML";
+          _aliasEspecificos["MISTER TRAPO PISO 62X48"] = "MISTER TRAPO PISO 62X48 MR";
+          _aliasEspecificos["ALFAJOR PEPITOS X3 57GR"] = "ALFAJOR TRIPLE PEPITOS 57GR";
+
+      const _aliasOrigen = {};
+
       for (let i = 1; i < inv.length; i++) {
         const nom = String(inv[i][0]||'').trim().toUpperCase();
         const sto = parseInt(inv[i][5]) || 0;
         const cos = parseFloat(inv[i][18]) || 0;
-        if (nom) {
-          stockInfo[nom] = sto;
-          if (cos > 0) costos[nom] = cos;
-          // Alias para productos por peso: "ZANAHORIA X KG" → también indexa "ZANAHORIA KG"
-          // Cubre el caso en que Ventas registra el nombre sin el " X " intermedio
-          const nomAlias = nom.replace(/ X KG$/, ' KG').replace(/ X KG /, ' KG ');
-          if (nomAlias !== nom) {
-            if (stockInfo[nomAlias] === undefined) stockInfo[nomAlias] = sto;
-            if (cos > 0 && !costos[nomAlias]) costos[nomAlias] = cos;
-          }
+        if (!nom) continue;
+
+        stockInfo[nom] = sto;
+        if (cos > 0) costos[nom] = cos;
+        if (String(inv[i][34] || '').trim().toUpperCase() === 'SI') {
+          stockInfo['__pausado__' + nom] = true;
         }
+
+        Object.keys(_aliasEspecificos).forEach(function(viejo) {
+          if (_aliasEspecificos[viejo] === nom && stockInfo[viejo] === undefined) {
+            stockInfo[viejo] = sto;
+            if (cos > 0 && !costos[viejo]) costos[viejo] = cos;
+            Logger.log('⚠️ Alias específico: "' + viejo + '" → "' + nom + '"');
+          }
+        });
+
+        function _normBase(s) {
+          return s.replace(/\s+/g, ' ').replace(/,/g, '.').trim();
+        }
+
+        var base = _normBase(nom);
+        var candidatos = new Set();
+
+        candidatos.add(base.replace(/ X KG$/, ' KG').replace(/ X KG /, ' KG ').trim());
+        candidatos.add(base.replace(/\bFRESH\b/g, '').replace(/\s+/g, ' ').trim());
+        candidatos.add(base.replace(/\bCON FRUTAS?\b/gi, '').replace(/\s+/g, ' ').trim());
+        candidatos.add(base.replace(/\bDOBLE CREMA\b/gi, '').replace(/\s+/g, ' ').trim());
+        candidatos.add(base.replace(/\bX (\d+GR)\b/g, '$1').replace(/\s+/g, ' ').trim());
+        candidatos.add(base.replace(/ X KG$/, ' KG').replace(/ X KG /, ' KG ').replace(/\bFRESH\b/g, '').replace(/\s+/g, ' ').trim());
+
+        candidatos.forEach(function(alias) {
+          if (!alias || alias === nom) return;
+          if (stockInfo[alias] !== undefined) {
+            if (_aliasOrigen[alias] && _aliasOrigen[alias] !== nom) {
+              Logger.log('⚠️ Colisión de alias: "' + alias + '" entre "' + _aliasOrigen[alias] + '" y "' + nom + '"');
+            }
+            return;
+          }
+          stockInfo[alias] = sto;
+          if (cos > 0 && !costos[alias]) costos[alias] = cos;
+          _aliasOrigen[alias] = nom;
+          Logger.log('⚠️ Alias usado para stockInfo: "' + alias + '" -> "' + nom + '"');
+        });
       }
     }
     if (sheetHist2) {
@@ -1862,66 +1921,61 @@ function getReportes() {
       .sort((a, b) => b.ganancia - a.ganancia)
       .slice(0, 20);
 
-// Recién llegados — ingresos del Historial en los últimos 3 días
-var recienLlegados = [];
-try {
-  var hoy3 = new Date();
-  hoy3.setHours(0, 0, 0, 0);
-  var hace3 = new Date(hoy3.getTime() - 3 * 86400000);
+    var recienLlegados = [];
+    try {
+      var hoy3 = new Date();
+      hoy3.setHours(0, 0, 0, 0);
+      var hace3 = new Date(hoy3.getTime() - 3 * 86400000);
 
-  var nomIngresados = {}; // nombre → fechaIngreso (la más reciente)
-  if (sheetHist2) {
-    var histRL = sheetHist2.getDataRange().getValues();
-    for (var hi = 1; hi < histRL.length; hi++) {
-      var hFecha = histRL[hi][0];
-      var hNom   = String(histRL[hi][1] || '').trim().toUpperCase();
-      if (!hNom) continue;
-      // Convertir correctamente — el Historial guarda Date objects en Apps Script
-      var hFechaD;
-      if (hFecha instanceof Date) {
-        hFechaD = hFecha;
-      } else {
-        // Intentar parsear string "dd/mm/yyyy hh:mm:ss"
-        var partes = String(hFecha).match(/(\d+)\/(\d+)\/(\d+)/);
-        if (!partes) continue;
-        hFechaD = new Date(parseInt(partes[3]), parseInt(partes[2])-1, parseInt(partes[1]));
+      var nomIngresados = {};
+      if (sheetHist2) {
+        var histRL = sheetHist2.getDataRange().getValues();
+        for (var hi = 1; hi < histRL.length; hi++) {
+          var hFecha = histRL[hi][0];
+          var hNom   = String(histRL[hi][1] || '').trim().toUpperCase();
+          if (!hNom) continue;
+          var hFechaD;
+          if (hFecha instanceof Date) {
+            hFechaD = hFecha;
+          } else {
+            var partes = String(hFecha).match(/(\d+)\/(\d+)\/(\d+)/);
+            if (!partes) continue;
+            hFechaD = new Date(parseInt(partes[3]), parseInt(partes[2])-1, parseInt(partes[1]));
+          }
+          if (isNaN(hFechaD.getTime())) continue;
+          var dNorm = new Date(hFechaD); dNorm.setHours(0,0,0,0);
+          if (dNorm < hace3) continue;
+          if (!nomIngresados[hNom] || hFechaD > nomIngresados[hNom]) {
+            nomIngresados[hNom] = hFechaD;
+          }
+        }
       }
-      if (isNaN(hFechaD.getTime())) continue;
-      var dNorm = new Date(hFechaD); dNorm.setHours(0,0,0,0);
-      if (dNorm < hace3) continue; // más viejo que 3 días → ignorar
-      // Guardar la fecha más reciente por producto
-      if (!nomIngresados[hNom] || hFechaD > nomIngresados[hNom]) {
-        nomIngresados[hNom] = hFechaD;
-      }
-    }
-  }
 
-  if (sheetInv) {
-    var invRL = sheetInv.getDataRange().getValues();
-    for (var ri = 1; ri < invRL.length; ri++) {
-      var rNom = String(invRL[ri][0] || '').trim().toUpperCase();
-      if (!rNom || !nomIngresados[rNom]) continue;
-      var rStock = parseInt(invRL[ri][5]) || 0;
-      if (rStock <= 0) continue;
-      recienLlegados.push({
-        nombre:       String(invRL[ri][0]).trim(),
-        precio:       parseInt(invRL[ri][1]) || 0,
-        categoria:    String(invRL[ri][2] || '').trim(),
-        stock:        rStock,
-        relampago:    parseInt(invRL[ri][6]) || 0,
-        destacada:    parseInt(invRL[ri][7]) || 0,
-        especial:     parseInt(invRL[ri][8]) || 0,
-        fechaIngreso: Utilities.formatDate(nomIngresados[rNom], tz, 'dd/MM/yyyy')
+      if (sheetInv) {
+        var invRL = sheetInv.getDataRange().getValues();
+        for (var ri = 1; ri < invRL.length; ri++) {
+          var rNom = String(invRL[ri][0] || '').trim().toUpperCase();
+          if (!rNom || !nomIngresados[rNom]) continue;
+          var rStock = parseInt(invRL[ri][5]) || 0;
+          if (rStock <= 0) continue;
+          recienLlegados.push({
+            nombre:       String(invRL[ri][0]).trim(),
+            precio:       parseInt(invRL[ri][1]) || 0,
+            categoria:    String(invRL[ri][2] || '').trim(),
+            stock:        rStock,
+            relampago:    parseInt(invRL[ri][6]) || 0,
+            destacada:    parseInt(invRL[ri][7]) || 0,
+            especial:     parseInt(invRL[ri][8]) || 0,
+            fechaIngreso: Utilities.formatDate(nomIngresados[rNom], tz, 'dd/MM/yyyy')
+          });
+        }
+      }
+      recienLlegados.sort(function(a, b) {
+        return b.fechaIngreso.localeCompare(a.fechaIngreso);
       });
-    }
-  }
-  // Ordenar por fecha de ingreso descendente (más reciente primero)
-  recienLlegados.sort(function(a, b) {
-    return b.fechaIngreso.localeCompare(a.fechaIngreso);
-  });
-} catch(eRL) { Logger.log('Error recienLlegados: ' + eRL); }
+    } catch(eRL) { Logger.log('Error recienLlegados: ' + eRL); }
 
-return { items, totales, vencProximos, stockInfo, topGanancia, recienLlegados };
+    return { items, totales, vencProximos, stockInfo, topGanancia, recienLlegados };
   } catch(e) {
     return { error: e.toString() };
   }
@@ -1992,18 +2046,16 @@ function getCarritoTemp() {
   }
 }
 
-// ========== LISTA DE COMPRA JSON (para seba21) ==========
+// ========== LISTA DE COMPRA JSON ==========
 function getListaCompraJSON() {
   try {
     var ss = SpreadsheetApp.openById(SS_ID);
 
-    // Leer Lista de compra
     var shLista = ss.getSheetByName('Lista de compra');
-    if (!shLista) return { ok: false, error: 'Hoja "Lista de compra" no encontrada. Ejecutá "Actualizar lista de compra" primero.' };
+    if (!shLista) return { ok: false, error: 'Hoja "Lista de compra" no encontrada.' };
     var listaData = shLista.getDataRange().getValues();
-    if (listaData.length <= 1) return { ok: false, error: 'Lista vacía. Ejecutá "Actualizar lista de compra" desde el menú COPIHUE.' };
+    if (listaData.length <= 1) return { ok: false, error: 'Lista vacía.' };
 
-    // Leer inventario para enriquecer con diasStock, urgencia y rotación
     var shInv = ss.getSheetByName('inventario');
     var invMap = {};
     if (shInv) {
@@ -2027,12 +2079,10 @@ function getListaCompraJSON() {
       }
     }
 
-    // Leer Historial para obtener último precio de costo por producto
     var costoMap = {};
     var shHist = ss.getSheetByName(HOJA_HISTORIAL);
     if (shHist) {
       var histData = shHist.getDataRange().getValues();
-      // Recorrer de atrás hacia adelante → primer match = más reciente
       for (var h = histData.length - 1; h >= 1; h--) {
         var nomHist = String(histData[h][1] || '').trim().toUpperCase();
         var costoHist = parseFloat(histData[h][6]) || 0;
@@ -2060,7 +2110,6 @@ function getListaCompraJSON() {
 
       var inv = invMap[nombre.toUpperCase().replace(/\s+/g,' ')] || {};
 
-      // Excluir categorías que no se recompran
       var catInv = inv.categoria || '';
       if (catInv === 'COMPUTACION' || catInv === 'ELECTRONICA' || catInv === 'TECNOLOGIA') continue;
 
@@ -2072,24 +2121,15 @@ function getListaCompraJSON() {
       var alertaPiso = inv.alertaPiso || '';
       var pausado   = inv.pausado   || false;
 
-      // Productos pausados — van al final, sin urgencia
       if (pausado) {
         items.push({
-          nombre, stock, minimo, cantidad, precio, costo: costoMap[nomKey] || 0,
+          nombre, stock, minimo, cantidad, precio, costo: costoMap[nombre.trim().toUpperCase()] || 0,
           total, totalVenta: total, proveedor, diasStock, urgencia: 99,
           prioridad: 'PAUSADO', pausado: true
         });
         continue;
       }
 
-      // Calcular urgencia según reglas de Javier:
-      // 0 = piso manual PEDIR YA
-      // 1 = alta rotación sin stock (v30>15 y stock=0) O prioridad EMPUJAR YA
-      // 2 = riesgo vencimiento (ALERTA)
-      // 3 = stock crítico ≤3 días
-      // 4 = stock bajo ≤7 días
-      // 5 = baja rotación solo si vendió +2 en 15 días (v7>=2 y stock=0)
-      // 7 = compra normal
       var urgencia;
       var altaRotacion = v30 > 15;
 
@@ -2104,7 +2144,6 @@ function getListaCompraJSON() {
       } else if (diasStock !== null && diasStock <= 7) {
         urgencia = 4;
       } else if (v7 >= 2 && stock === 0) {
-        // Baja rotación pero vendió +2 en 15 días → incluir
         urgencia = 5;
       } else {
         urgencia = 7;
@@ -2116,204 +2155,27 @@ function getListaCompraJSON() {
       var totalCosto = costo > 0 ? Math.round(costo * cantidad) : 0;
       totalPesos += totalCosto > 0 ? totalCosto : total;
 
-      var nomKey = nombre.trim().toUpperCase();
-      var costo = costoMap[nomKey] || 0;
-      var totalCosto = costo > 0 ? Math.round(costo * cantidad) : 0;
-
       items.push({
-        nombre:     nombre,
-        stock:      stock,
-        minimo:     minimo,
-        cantidad:   cantidad,
-        precio:     precio,       // precio de VENTA (referencia)
-        costo:      costo,        // precio de COSTO desde Historial
-        total:      totalCosto > 0 ? totalCosto : total, // usar costo si está disponible
-        totalVenta: total,        // total con precio de venta (para referencia)
-        proveedor:  proveedor,
-        diasStock:  diasStock,
-        urgencia:   urgencia,
-        prioridad:  prioridad || (urgencia <= 2 ? 'URGENTE' : 'OK')
+        nombre, stock, minimo, cantidad,
+        precio, costo,
+        total:      totalCosto > 0 ? totalCosto : total,
+        totalVenta: total,
+        proveedor, diasStock, urgencia,
+        prioridad: prioridad || (urgencia <= 2 ? 'URGENTE' : 'OK')
       });
     }
 
-    // Ordenar por urgencia
     items.sort(function(a, b) { return a.urgencia - b.urgencia; });
 
-    return {
-      ok:         true,
-      items:      items,
-      urgentes:   urgentes,
-      totalPesos: totalPesos,
-      generadoEn: new Date().toISOString()
-    };
+    return { ok: true, items, urgentes, totalPesos, generadoEn: new Date().toISOString() };
   } catch(e) {
     return { ok: false, error: e.toString() };
   }
 }
 
-// ========== ÚLTIMAS UNIDADES — CANDIDATOS Y SELECCIÓN ==========
+// ========== FIADOS ==========
+var HOJA_FIADOS = 'FIADOS';
 
-function getCandidatosUltimas() {
-  try {
-    var ss    = SpreadsheetApp.openById(SS_ID);
-    var shInv = ss.getSheetByName(HOJA_INVENTARIO);
-    if (!shInv) return { ok: false, error: 'Hoja inventario no encontrada' };
-
-    var datos = shInv.getDataRange().getValues();
-    var hoy   = new Date(); hoy.setHours(0,0,0,0);
-    var candidatos = [];
-
-    for (var i = 1; i < datos.length; i++) {
-      var row      = datos[i];
-      var nombre   = String(row[0] || '').trim();
-      if (!nombre) continue;
-
-      var precio   = parseFloat(row[1])  || 0;
-      var categoria= String(row[2] || '').trim().toUpperCase();
-      var stock    = parseFloat(row[5])  || 0;
-      var relampago= parseInt(row[6])    || 0;
-      var venc     = row[15];
-      var v7       = parseFloat(row[21]) || 0;   // col V
-      var v30      = parseFloat(row[22]) || 0;   // col W
-      var promDia  = parseFloat(row[23]) || 0;   // col X
-      var diasStock= row[24] !== '' ? parseFloat(row[24]) : null; // col Y
-
-      if (stock <= 0) continue;               // sin stock no hay nada que empujar
-      if (categoria === 'CERVEZAS') continue;
-
-      // Días hasta vencimiento — acepta Date o string "yyyy-MM-dd"
-      var diasVenc = null;
-      if (venc) {
-        var fechaVenc = venc instanceof Date ? venc : new Date(String(venc).trim());
-        if (!isNaN(fechaVenc.getTime())) {
-          var vNorm = new Date(fechaVenc); vNorm.setHours(0,0,0,0);
-          diasVenc = Math.round((vNorm - hoy) / 86400000);
-        }
-      }
-
-      // CONDICIÓN PRINCIPAL: el producto no se va a vender todo antes de vencer
-      // diasStock > diasVenc → va a sobrar stock al vencimiento → EMPUJAR
-      var score = null;
-      var motivo = '';
-
-      if (diasVenc !== null && diasVenc > 0 && diasStock !== null) {
-        if (diasStock > diasVenc) {
-          // Cuántas unidades van a sobrar
-          var sobran = Math.round(stock - (promDia * diasVenc));
-          var pctRiesgo = Math.round((diasStock / diasVenc - 1) * 100); // % de exceso
-          score = pctRiesgo; // mayor % = más urgente
-          motivo = 'Vence en ' + diasVenc + 'd · stock para ' + Math.round(diasStock) + 'd · sobran ~' + Math.max(sobran, 0) + ' u.';
-        }
-      }
-
-      // CONDICIÓN SECUNDARIA: alta rotación con stock muy justo (puede quedarse sin stock)
-      // Solo si no tiene vencimiento claro
-      if (score === null && promDia > 0 && diasStock !== null && diasStock <= 7) {
-        score = 0 - diasStock; // negativo = más urgente cuanto menos días
-        motivo = 'Stock para solo ' + Math.round(diasStock) + 'd · vende ' + v7 + ' por semana';
-      }
-
-      if (score === null) continue; // no cumple ninguna condición
-
-      // Buscar oferta configurada
-      var ofertaKey  = String(relampago || '');
-      var ofertaDesc = '';
-      if (ofertaKey === '10') ofertaDesc = '2da 50%';
-      else if (ofertaKey === '11') ofertaDesc = '-10%';
-      else if (ofertaKey === '12') ofertaDesc = '-15%';
-      else if (ofertaKey === '13') ofertaDesc = '-20%';
-      else if (ofertaKey === '14') ofertaDesc = '-25%';
-      else if (['1','2','3','4','5','6'].indexOf(ofertaKey) !== -1) {
-        var nxm = {1:'2x1',2:'3x2',3:'4x3',4:'5x4',5:'6x5',6:'7x6'};
-        ofertaDesc = nxm[ofertaKey] || '';
-      }
-
-      candidatos.push({
-        id:         i,
-        nombre:     nombre,
-        precio:     precio,
-        categoria:  categoria,
-        stock:      stock,
-        relampago:  relampago,
-        ofertaDesc: ofertaDesc,
-        diasVenc:   diasVenc,
-        diasStock:  diasStock !== null ? Math.round(diasStock) : null,
-        promDia:    promDia,
-        v7:         v7,
-        v30:        v30,
-        score:      score,
-        motivo:     motivo
-      });
-    }
-
-    // Ordenar: mayor score primero (más urgente)
-    candidatos.sort(function(a, b) { return b.score - a.score; });
-
-    return { ok: true, candidatos: candidatos, total: candidatos.length };
-
-  } catch(e) {
-    return { ok: false, error: e.toString() };
-  }
-}
-
-function guardarUltimasSeleccion(datos) {
-  try {
-    var ss = SpreadsheetApp.openById(SS_ID);
-    var sh = ss.getSheetByName('config_sistema');
-    if (!sh) return { ok: false, error: 'config_sistema no encontrada' };
-
-    // Guardar en una celda específica como JSON
-    // Buscar fila "ultimas_seleccion" o usar celda fija K2
-    var filas = sh.getDataRange().getValues();
-    var filaObj = -1;
-    for (var i = 0; i < filas.length; i++) {
-      if (String(filas[i][0]).trim() === 'ultimas_seleccion') { filaObj = i + 1; break; }
-    }
-    if (filaObj === -1) {
-      // Agregar al final
-      filaObj = filas.length + 1;
-      sh.getRange(filaObj, 1).setValue('ultimas_seleccion');
-    }
-    sh.getRange(filaObj, 2).setValue(JSON.stringify(datos));
-    sh.getRange(filaObj, 3).setValue(new Date().toISOString());
-
-    return { ok: true };
-  } catch(e) {
-    return { ok: false, error: e.toString() };
-  }
-}
-
-function getUltimasSeleccion() {
-  try {
-    var ss = SpreadsheetApp.openById(SS_ID);
-    var sh = ss.getSheetByName('config_sistema');
-    if (!sh) return { ok: true, seleccion: [] };
-
-    var filas = sh.getDataRange().getValues();
-    for (var i = 0; i < filas.length; i++) {
-      if (String(filas[i][0]).trim() === 'ultimas_seleccion') {
-        var raw = filas[i][1];
-        var ts  = filas[i][2];
-        if (!raw) return { ok: true, seleccion: [] };
-
-        // Verificar que la selección es de hoy
-        var fecha = new Date(ts);
-        var hoy   = new Date();
-        var mismodia = fecha.getFullYear() === hoy.getFullYear()
-                    && fecha.getMonth()    === hoy.getMonth()
-                    && fecha.getDate()     === hoy.getDate();
-
-        if (!mismodia) return { ok: true, seleccion: [], expirada: true };
-        return { ok: true, seleccion: JSON.parse(raw) };
-      }
-    }
-    return { ok: true, seleccion: [] };
-  } catch(e) {
-    return { ok: true, seleccion: [] };
-  }
-}
-
-// ══════════════════════════════════════════════
 function listarFiados() {
   try {
     var ss = SpreadsheetApp.openById(SS_ID);
@@ -2326,10 +2188,14 @@ function listarFiados() {
       var fila = datos[i];
       if (!fila[0]) continue;
       var estado = String(fila[10] || '').toUpperCase();
-      if (estado === 'PAGADO') continue; // no mostrar pagados
-      // Recalcular si venció
       var vencFecha = fila[9] ? new Date(String(fila[9]).split('T')[0] + 'T12:00:00') : null;
       if (vencFecha && vencFecha < hoy && estado !== 'PAGADO') estado = 'VENCIDO';
+      // Pagados: incluir solo los de los últimos 30 días
+      if (estado === 'PAGADO') {
+        var fechaPago = fila[11] ? new Date(String(fila[11]).split('T')[0] + 'T12:00:00') : null;
+        var hace30 = new Date(hoy); hace30.setDate(hace30.getDate() - 30);
+        if (!fechaPago || fechaPago < hace30) continue;
+      }
       fiados.push({
         fila:            i + 1,
         idFiado:         String(fila[0] || ''),
@@ -2341,22 +2207,22 @@ function listarFiados() {
         cantItems:       fila[6] || 0,
         total:           parseFloat(fila[8]) || 0,
         fechaVencimiento: fila[9] ? String(fila[9]).split('T')[0] : '',
+        fechaPago:       fila[11] ? String(fila[11]).split('T')[0] : '',
+        metodoPago:      String(fila[12] || ''),
         estado:          estado
       });
     }
     fiados.sort(function(a, b) {
-      // Vencidos primero, luego por fecha de vencimiento
       if (a.estado === 'VENCIDO' && b.estado !== 'VENCIDO') return -1;
       if (b.estado === 'VENCIDO' && a.estado !== 'VENCIDO') return 1;
       return (a.fechaVencimiento || '').localeCompare(b.fechaVencimiento || '');
     });
-    return { ok: true, fiados: fiados };
+    return { ok: true, fiados };
   } catch(e) {
     return { ok: false, error: e.toString() };
   }
 }
 
-// Abono parcial — reduce el total del fiado y agrega obs
 function abonarFiado(datos) {
   try {
     if (!datos.idFiado) return { success: false, mensaje: 'Falta ID del fiado' };
@@ -2370,21 +2236,19 @@ function abonarFiado(datos) {
       var abono = parseFloat(datos.abono) || 0;
       if (abono <= 0) return { success: false, mensaje: 'Monto inválido' };
       var nuevoTotal = Math.max(0, totalActual - abono);
-      sh.getRange(i + 1, 9).setValue(nuevoTotal); // I: Total
-      // Obs
+      sh.getRange(i + 1, 9).setValue(nuevoTotal);
       var obsActual = String(rows[i][13] || '');
       var tz = Session.getScriptTimeZone();
       var fecha = Utilities.formatDate(new Date(), tz, 'dd/MM/yyyy');
       var nuevaObs = (obsActual ? obsActual + ' | ' : '') +
         'Abono $' + abono + ' (' + (datos.metodoPago||'EFECTIVO') + ') ' + fecha;
       sh.getRange(i + 1, 14).setValue(nuevaObs);
-      // Si quedó en 0 → marcar PAGADO
       if (nuevoTotal === 0) {
         sh.getRange(i + 1, 11).setValue('PAGADO');
         sh.getRange(i + 1, 12).setValue(fecha);
         sh.getRange(i + 1, 13).setValue(datos.metodoPago || 'EFECTIVO');
       }
-      return { success: true, nuevoTotal: nuevoTotal };
+      return { success: true, nuevoTotal };
     }
     return { success: false, mensaje: 'Fiado no encontrado' };
   } catch(e) {
@@ -2401,16 +2265,16 @@ function cobrarFiado(datos) {
     var rows = sh.getDataRange().getValues();
     for (var i = 1; i < rows.length; i++) {
       if (String(rows[i][0]) === String(datos.idFiado)) {
-        var fechaPago = datos.fechaPago || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+        var tz = Session.getScriptTimeZone();
+      var fechaPago = datos.fechaPago || Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd HH:mm');
         if (datos.esAbonoParcial) {
-          // Solo agregar observación, no cambiar estado a PAGADO
           var obsActual = String(rows[i][13] || '');
           var nuevaObs = obsActual ? obsActual + ' | ' + (datos.obs||'') : (datos.obs||'');
-          sh.getRange(i + 1, 14).setValue(nuevaObs); // N: Observaciones
+          sh.getRange(i + 1, 14).setValue(nuevaObs);
         } else {
-          sh.getRange(i + 1, 11).setValue('PAGADO');        // K: Estado
-          sh.getRange(i + 1, 12).setValue(fechaPago);       // L: Fecha Pago
-          sh.getRange(i + 1, 13).setValue(datos.metodoPago || 'EFECTIVO'); // M: Método Pago
+          sh.getRange(i + 1, 11).setValue('PAGADO');
+          sh.getRange(i + 1, 12).setValue(fechaPago);
+          sh.getRange(i + 1, 13).setValue(datos.metodoPago || 'EFECTIVO');
           if (datos.obs) {
             var obsAct = String(rows[i][13] || '');
             sh.getRange(i + 1, 14).setValue(obsAct ? obsAct + ' | ' + datos.obs : datos.obs);
@@ -2425,9 +2289,7 @@ function cobrarFiado(datos) {
   }
 }
 
-// ========== PAUSADO LISTA COMPRA ==========
-// Columna AI = índice 34 (base 0)
-var COL_PAUSADO_LC = 35; // columna 35 en Sheets (1-based) = AI
+var COL_PAUSADO_LC = 35;
 
 function setPausadoNombre(datos) {
   try {
@@ -2461,9 +2323,7 @@ function setPausadoListaCompra(datos) {
     return { success: false, mensaje: e.toString() };
   }
 }
-// ==========================================
 
-// ========== SALIDA INTERNA ==========
 function registrarSalidaInterna(datos) {
   try {
     var ss = SpreadsheetApp.openById(SS_ID);
@@ -2472,7 +2332,6 @@ function registrarSalidaInterna(datos) {
 
     if (!shInv) return { success: false, mensaje: 'Hoja inventario no encontrada' };
 
-    // Crear hoja SALIDAS si no existe
     if (!shSal) {
       shSal = ss.insertSheet('SALIDAS');
       shSal.getRange(1, 1, 1, 10).setValues([[
@@ -2481,9 +2340,8 @@ function registrarSalidaInterna(datos) {
       shSal.getRange(1, 1, 1, 10).setFontWeight('bold');
     }
 
-    // Buscar producto en inventario
     var invData = shInv.getDataRange().getValues();
-    var filaIdx = datos.id; // id = fila index
+    var filaIdx = datos.id;
     if (!filaIdx || filaIdx < 1 || filaIdx >= invData.length) {
       return { success: false, mensaje: 'Producto no encontrado' };
     }
@@ -2494,38 +2352,28 @@ function registrarSalidaInterna(datos) {
     if (cantidad <= 0) return { success: false, mensaje: 'Cantidad inválida' };
     if (cantidad > stockActual) return { success: false, mensaje: 'Stock insuficiente (hay ' + stockActual + ')' };
 
-    // Descontar stock
     var nuevoStock = Math.max(0, stockActual - cantidad);
     shInv.getRange(filaIdx + 1, 6).setValue(nuevoStock);
 
-    // Registrar en SALIDAS
-   
+    var tz    = Session.getScriptTimeZone();
     var now   = new Date();
     var fecha = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
     var hora  = Utilities.formatDate(now, tz, 'HH:mm');
 
     shSal.appendRow([
-      fecha,
-      hora,
-      datos.nombre || '',
-      'ID' + filaIdx,
-      cantidad,
-      datos.costo  || 0,
-      datos.precio || 0,
-      datos.motivo || '',
-      datos.obs    || '',
-      datos.vendedor || ''
+      fecha, hora,
+      datos.nombre || '', 'ID' + filaIdx,
+      cantidad, datos.costo || 0, datos.precio || 0,
+      datos.motivo || '', datos.obs || '', datos.vendedor || ''
     ]);
 
-    return { success: true, nuevoStock: nuevoStock };
+    return { success: true, nuevoStock };
   } catch(e) {
     return { success: false, mensaje: e.toString() };
   }
 }
 
 function abonoFiado(datos) {
-  // Aplica un abono parcial: cancela fiados completos de más viejo a más nuevo,
-  // y si sobra reduce el total del siguiente fiado.
   try {
     var ss = SpreadsheetApp.openById(SS_ID);
     var sh = ss.getSheetByName(HOJA_FIADOS);
@@ -2540,14 +2388,12 @@ function abonoFiado(datos) {
 
     if (restante <= 0) return { success: false, mensaje: 'Monto inválido' };
 
-    // Identificar fiados del cliente ordenados por fecha (más viejo primero)
     var fiados = [];
     for (var i = 1; i < rows.length; i++) {
       var tel = String(rows[i][4] || '').replace(/\D/g,'');
       var cli = String(rows[i][3] || '').trim().toLowerCase();
       var est = String(rows[i][10] || '').toUpperCase();
       if (est === 'PAGADO') continue;
-      // Matchear por teléfono o por nombre
       var telBuscar = String(datos.telefono || '').replace(/\D/g,'');
       var cliBuscar = String(datos.cliente || '').trim().toLowerCase();
       if ((telBuscar && tel === telBuscar) || (!telBuscar && cli === cliBuscar)) {
@@ -2555,24 +2401,21 @@ function abonoFiado(datos) {
       }
     }
 
-    // Ordenar de más viejo a más nuevo
     fiados.sort(function(a,b){ return a.fecha.localeCompare(b.fecha); });
 
     for (var j = 0; j < fiados.length; j++) {
       if (restante <= 0) break;
       var f = fiados[j];
       if (restante >= f.total) {
-        // Cancela este fiado completo
         sh.getRange(f.fila, 11).setValue('PAGADO');
         sh.getRange(f.fila, 12).setValue(hoy);
         sh.getRange(f.fila, 13).setValue(metodo);
         restante = Math.round((restante - f.total) * 100) / 100;
         cancelados++;
       } else {
-        // Abono parcial — reduce el total del fiado
         var nuevoTotal = Math.round((f.total - restante) * 100) / 100;
-        sh.getRange(f.fila, 9).setValue(nuevoTotal);   // I: Total
-        sh.getRange(f.fila, 8).setValue(nuevoTotal);   // H: Precio Unitario
+        sh.getRange(f.fila, 9).setValue(nuevoTotal);
+        sh.getRange(f.fila, 8).setValue(nuevoTotal);
         var obsActual = String(sh.getRange(f.fila, 14).getValue() || '');
         var nuevaObs = (obsActual ? obsActual + ' | ' : '') +
           'Abono $' + datos.monto + ' (' + metodo + ') ' + hoy + ' — queda $' + nuevoTotal;
@@ -2581,15 +2424,108 @@ function abonoFiado(datos) {
       }
     }
 
-    return { success: true, cancelados: cancelados, restante: restante };
+    return { success: true, cancelados, restante };
   } catch(e) {
     return { success: false, mensaje: e.toString() };
   }
 }
 
-// FIADOS — guardar y consultar
-// ══════════════════════════════════════════════
-var HOJA_FIADOS = 'FIADOS';
+function registrarMovimientoCaja(datos) {
+  try {
+    var ss = SpreadsheetApp.openById(SS_ID);
+    var HOJA_CAJA = 'CAJA_MOVIMIENTOS';
+    var sh = ss.getSheetByName(HOJA_CAJA);
+    if (!sh) {
+      sh = ss.insertSheet(HOJA_CAJA);
+      sh.getRange(1, 1, 1, 8).setValues([['FECHA', 'HORA', 'TIPO', 'MOTIVO', 'MONTO', 'MEDIO', 'CATEGORIA', 'OBSERVACION']]);
+      sh.getRange(1, 1, 1, 8).setBackground('#37474f').setFontColor('white').setFontWeight('bold');
+    }
+    sh.appendRow([
+      datos.fecha       || '',
+      datos.hora        || '',
+      datos.tipo        || 'EGRESO',
+      datos.motivo      || '',
+      datos.monto       || 0,
+      datos.medio       || 'EFECTIVO',
+      datos.categoria   || '',
+      datos.observacion || ''
+    ]);
+    return { success: true };
+  } catch(e) {
+    return { success: false, mensaje: e.toString() };
+  }
+}
+
+// ========== DETALLE DE TICKET DESDE HOJA VENTAS ==========
+function getDetalleTicket(ticket) {
+  try {
+    if (!ticket) return { ok: false, error: 'Ticket requerido' };
+    var ss = SpreadsheetApp.openById(SS_ID);
+    var sh = ss.getSheetByName('Ventas');
+    if (!sh) return { ok: false, error: 'Hoja Ventas no encontrada' };
+
+    var ticketStr = String(ticket).trim();
+    // Normalizar: puede venir como "0123" o "123"
+    var ticketNum  = parseInt(ticketStr, 10);
+    var ticketPad  = String(ticketNum).padStart(4, '0');
+
+    var filas = sh.getDataRange().getValues();
+    var items = [];
+    var totalTicket = 0;
+    var fechaTicket = '';
+    var horaTicket  = '';
+    var metodoPago  = '';
+    var vendedor    = '';
+    var clienteInfo = '';
+
+    for (var i = 1; i < filas.length; i++) {
+      var f = filas[i];
+      var tFila = String(f[0] || '').trim();
+      // Fila TOTAL del ticket
+      var desc = String(f[3] || '');
+      if (desc.includes('TOTAL TICKET') && (desc.includes('N° ' + ticketPad) || desc.includes('N° ' + ticketNum))) {
+        fechaTicket = f[1] instanceof Date
+          ? Utilities.formatDate(f[1], Session.getScriptTimeZone(), 'dd/MM/yyyy')
+          : String(f[1] || '');
+        horaTicket  = String(f[2] || '');
+        metodoPago  = String(f[5] || '');
+        vendedor    = String(f[6] || '');
+        totalTicket = parseFloat(f[7]) || 0;
+        // clienteInfo está dentro del metodoPago después del pipe
+        if (metodoPago.includes('|')) {
+          var partes = metodoPago.split('|');
+          metodoPago  = partes[0].trim();
+          clienteInfo = partes[1].trim();
+        }
+        continue;
+      }
+      // Filas de productos del ticket
+      if (tFila !== ticketPad && tFila !== String(ticketNum)) continue;
+      items.push({
+        nombre:    String(f[3] || '').trim(),
+        cantidad:  f[4],
+        precio:    parseFloat(f[5]) || 0,
+        subtotal:  parseFloat(f[6]) || 0
+      });
+    }
+
+    if (!items.length && !totalTicket) return { ok: false, error: 'Ticket ' + ticketStr + ' no encontrado' };
+
+    return {
+      ok: true,
+      ticket:     ticketPad,
+      fecha:      fechaTicket,
+      hora:       horaTicket,
+      metodoPago: metodoPago,
+      vendedor:   vendedor,
+      cliente:    clienteInfo,
+      total:      totalTicket,
+      items:      items
+    };
+  } catch(e) {
+    return { ok: false, error: e.toString() };
+  }
+}
 
 function guardarFiado(datos) {
   try {
@@ -2601,41 +2537,68 @@ function guardarFiado(datos) {
     var tz  = Session.getScriptTimeZone();
     var fechaStr = Utilities.formatDate(now, tz, 'yyyy-MM-dd HH:mm');
 
-    // Calcular ID_FIADO autoincrementalL
     var ultimaFila = sh.getLastRow();
-    var numFiado = ultimaFila; // fila 1 = header, fila 2 = primer fiado
+    var numFiado = ultimaFila;
     var idFiado = datos.idFiado || ('FIADO-' + String(numFiado).padStart(4, '0'));
 
-    // Estado automático
-    var venc = datos.vencimiento ? new Date(datos.vencimiento) : null;
-    var estado = 'PENDIENTE';
-
     sh.appendRow([
-      idFiado,                    // A: ID_FIADO
-      fechaStr,                   // B: Fecha
-      datos.ticket || '',         // C: Ticket
-      datos.cliente || '',        // D: Cliente
-      datos.telefono || '',       // E: Teléfono
-      datos.descripcion || 'TICKET COMPLETO', // F: Producto/Descripción
-      datos.cantItems || 1,       // G: Cantidad
-      datos.total || 0,           // H: Precio Unitario (total ticket)
-      datos.total || 0,           // I: Total
-      datos.vencimiento || '',    // J: Fecha Vencimiento
-      '',                         // K: Estado — la fórmula =SI(L<>"";"PAGADO";SI(HOY()>J;"VENCIDO";"PENDIENTE")) lo calcula
-      '',                         // L: Fecha Pago
-      '',                         // M: Método Pago
-      datos.obs || ''             // N: Observaciones
+      idFiado, fechaStr,
+      datos.ticket || '', datos.cliente || '', datos.telefono || '',
+      datos.descripcion || 'TICKET COMPLETO',
+      datos.cantItems || 1, datos.total || 0, datos.total || 0,
+      datos.vencimiento || '',
+      '', '', '',
+      datos.obs || ''
     ]);
 
-    // Insertar fórmula de estado en la celda K de la nueva fila
     var nuevaFila = sh.getLastRow();
     sh.getRange(nuevaFila, 11).setFormula(
-      '=SI(D' + nuevaFila + '="";"";SI(L' + nuevaFila + '<>"";"PAGADO";SI(Y(J' + nuevaFila + '<>"";HOY()>FECHANUMERO(J' + nuevaFila + '));"VENCIDO";"PENDIENTE")))'
+      '=IF(D'+nuevaFila+'="";"";IF(L'+nuevaFila+'<>"";"PAGADO";IF(AND(J'+nuevaFila+'<>"";TODAY()>J'+nuevaFila+');"VENCIDO";"PENDIENTE")))'
     );
 
-    return { success: true, idFiado: idFiado };
+    // Registrar / actualizar cliente automáticamente
+    if (datos.cliente) {
+      upsertCliente(ss, datos.cliente, datos.telefono || '');
+    }
+
+    return { success: true, idFiado };
   } catch(e) {
     return { success: false, mensaje: e.toString() };
+  }
+}
+
+// Inserta el cliente si no existe; si existe actualiza el teléfono si estaba vacío
+function upsertCliente(ss, nombre, telefono) {
+  try {
+    var sh = ss.getSheetByName('Clientes');
+    if (!sh) {
+      // Crear hoja con encabezados si no existe
+      sh = ss.insertSheet('Clientes');
+      sh.getRange(1, 1, 1, 2).setValues([['Nombre', 'Telefono']]);
+      sh.getRange(1, 1, 1, 2).setFontWeight('bold').setBackground('#e8f5e9');
+      sh.setFrozenRows(1);
+    }
+
+    var nombreNorm = nombre.trim().toUpperCase();
+    var telLimpio  = String(telefono).replace(/\D/g, '');
+    var datos = sh.getDataRange().getValues();
+
+    // Buscar fila existente por nombre (insensible a mayúsculas)
+    for (var i = 1; i < datos.length; i++) {
+      if (String(datos[i][0] || '').trim().toUpperCase() === nombreNorm) {
+        // Ya existe — completar teléfono solo si la celda está vacía
+        if (!String(datos[i][1] || '').trim() && telLimpio) {
+          sh.getRange(i + 1, 2).setValue(telLimpio);
+        }
+        return; // nada más que hacer
+      }
+    }
+
+    // No existe — agregar nueva fila
+    sh.appendRow([nombre.trim(), telLimpio]);
+  } catch(e) {
+    console.error('upsertCliente error (no crítico):', e);
+    // Fallo silencioso — no interrumpe el guardado del fiado
   }
 }
 
@@ -2647,7 +2610,7 @@ function consultarFiado(telefono) {
     if (!sh) return { ok: true, deuda: null };
 
     var datos = sh.getDataRange().getValues();
-    var telBuscar = String(telefono).replace(/\D/g, ''); // solo números
+    var telBuscar = String(telefono).replace(/\D/g, '');
 
     var totalDeuda = 0;
     var pendientes = 0;
@@ -2661,13 +2624,10 @@ function consultarFiado(telefono) {
       if (telFila !== telBuscar) continue;
 
       var estado = String(fila[10] || '').toUpperCase();
-      if (estado === 'PAGADO') continue; // no contar los pagados
+      if (estado === 'PAGADO') continue;
 
-      // Recalcular estado por si venció
       var fechaVenc = fila[9] ? new Date(fila[9]) : null;
-      if (fechaVenc && fechaVenc < hoy && estado !== 'PAGADO') {
-        estado = 'VENCIDO';
-      }
+      if (fechaVenc && fechaVenc < hoy && estado !== 'PAGADO') estado = 'VENCIDO';
 
       var total = parseFloat(fila[8]) || 0;
       totalDeuda += total;
@@ -2677,43 +2637,344 @@ function consultarFiado(telefono) {
     }
 
     if (pendientes === 0) return { ok: true, deuda: null };
-
-    return {
-      ok: true,
-      deuda: {
-        nombre: nombreCliente,
-        total: totalDeuda,
-        pendientes: pendientes,
-        vencidos: vencidos
-      }
-    };
+    return { ok: true, deuda: { nombre: nombreCliente, total: totalDeuda, pendientes, vencidos } };
   } catch(e) {
     return { ok: true, deuda: null };
   }
 }
 
-// ========== RETIRO DE CAJA ==========
-function registrarMovimientoCaja(dataStr) {
+// ========== LISTAR CLIENTES v2 (autocomplete fiados) ==========
+// Lee primero hoja Clientes; si está vacía, extrae clientes únicos de FIADOS.
+// Así siempre hay datos aunque la hoja Clientes no esté poblada aún.
+function listarClientes() {
   try {
-    var data = JSON.parse(decodeURIComponent(dataStr));
     var ss = SpreadsheetApp.openById(SS_ID);
-    var hoja = ss.getSheetByName('CAJA_MOVIMIENTOS');
-    if (!hoja) {
-      return { success: false, error: 'Hoja CAJA_MOVIMIENTOS no encontrada' };
+    var clientes = [];
+    var vistos   = {}; // para deduplicar por nombre normalizado
+
+    // ── 1. Leer hoja Clientes (fuente principal) ──
+    var shCli = ss.getSheetByName('Clientes');
+    if (shCli) {
+      var datosCli = shCli.getDataRange().getValues();
+      if (datosCli.length >= 2) {
+        var hdr     = datosCli[0].map(function(h){ return String(h).toLowerCase().trim(); });
+        var iNombre = hdr.findIndex(function(h){ return h.includes('nombre'); });
+        var iTel    = hdr.findIndex(function(h){ return h.includes('tel') || h.includes('fono') || h.includes('phone'); });
+        if (iNombre >= 0) {
+          for (var i = 1; i < datosCli.length; i++) {
+            var nom = String(datosCli[i][iNombre] || '').trim();
+            if (!nom) continue;
+            var key = nom.toUpperCase();
+            if (vistos[key]) continue;
+            vistos[key] = true;
+            var tel = iTel >= 0 ? String(datosCli[i][iTel] || '').trim() : '';
+            clientes.push({ nombre: nom, telefono: tel });
+          }
+        }
+      }
     }
-    hoja.appendRow([
-      data.fecha       || '',
-      data.hora        || '',
-      data.tipo        || 'EGRESO',
-      data.motivo      || '',
-      data.monto       || 0,
-      data.medio       || 'EFECTIVO',
-      data.categoria   || '',
-      data.observacion || '',
-      data.vendedor    || 'Victor'
-    ]);
-    return { success: true };
+
+    // ── 2. Fallback: extraer clientes únicos de hoja FIADOS ──
+    // (necesario si los fiados se crearon antes de la v7.5 que puebla Clientes)
+    var shFia = ss.getSheetByName('FIADOS');
+    if (shFia) {
+      var datosFia = shFia.getDataRange().getValues();
+      // Col D (idx 3) = Cliente, Col E (idx 4) = Teléfono
+      for (var j = 1; j < datosFia.length; j++) {
+        var fila = datosFia[j];
+        if (!fila[0]) continue; // fila vacía
+        var nomF = String(fila[3] || '').trim();
+        if (!nomF) continue;
+        var keyF = nomF.toUpperCase();
+        if (vistos[keyF]) continue; // ya está desde hoja Clientes
+        vistos[keyF] = true;
+        var telF = String(fila[4] || '').trim();
+        clientes.push({ nombre: nomF, telefono: telF });
+
+        // Aprovechar y sincronizar a hoja Clientes para próximas consultas
+        try { upsertCliente(nomF, telF); } catch(ex) {}
+      }
+    }
+
+    // Ordenar alfabéticamente
+    clientes.sort(function(a, b) { return a.nombre.localeCompare(b.nombre, 'es'); });
+
+    return { ok: true, clientes: clientes };
   } catch(e) {
-    return { success: false, error: e.toString() };
+    console.error('Error listarClientes v2:', e);
+    return { ok: true, clientes: [] };
+  }
+}
+
+// ========== VENTAS POR PRODUCTO (para panel de info POS) ==========
+function getVentasProducto(datos) {
+  try {
+    var ss = SpreadsheetApp.openById(SS_ID);
+    var sh = ss.getSheetByName('Ventas');
+    if (!sh) return { success: false, mensaje: 'Hoja Ventas no encontrada' };
+
+    var nombre = String(datos.nombre || '').trim().toUpperCase();
+    var dias   = parseInt(datos.dias) || 60;
+    if (!nombre) return { success: false, mensaje: 'Nombre requerido' };
+
+    var tz    = Session.getScriptTimeZone();
+    var hoy   = new Date(); hoy.setHours(0,0,0,0);
+    var desde = new Date(hoy); desde.setDate(desde.getDate() - dias);
+
+    var filas = sh.getDataRange().getValues();
+    var porDia = {}; // 'YYYY-MM-DD' -> qty
+
+    for (var i = 1; i < filas.length; i++) {
+      var f = filas[i];
+      // Fila de producto: col A tiene ticket, col D tiene nombre
+      if (!f[0] || String(f[3] || '').includes('TOTAL TICKET')) continue;
+      var nomFila = String(f[3] || '').trim().toUpperCase();
+      // Quitar sufijos de precio especial para comparar
+      var nomLimpio = nomFila.replace(/\s*\[PRECIO.*?\]$/,'').trim();
+      if (nomLimpio !== nombre) continue;
+
+      var fechaFila = f[1] instanceof Date ? f[1] : new Date(f[1]);
+      if (isNaN(fechaFila) || fechaFila < desde) continue;
+
+      var fechaKey = Utilities.formatDate(fechaFila, tz, 'yyyy-MM-dd');
+      var qty = parseFloat(f[4]) || 1;
+      porDia[fechaKey] = (porDia[fechaKey] || 0) + qty;
+    }
+
+    // Convertir a array ordenado desc
+    var resultado = Object.keys(porDia).sort().reverse().map(function(d) {
+      return { fecha: d, qty: Math.round(porDia[d] * 1000) / 1000 };
+    });
+
+    var totalQty = resultado.reduce(function(s, r) { return s + r.qty; }, 0);
+
+    return { success: true, dias: resultado, total: Math.round(totalQty * 1000) / 1000 };
+  } catch(e) {
+    return { success: false, mensaje: e.toString() };
+  }
+}
+
+// ======================
+// FIADOS v2.0 — Detalle por ticket + Pago selectivo
+// ======================
+
+// ========== LISTAR FIADOS DE UN CLIENTE CON DETALLE DE TICKETS ==========
+// Busca por teléfono (o nombre) todos los fiados pendientes de un cliente
+// y enriquece cada uno con el detalle real de productos desde hoja Ventas.
+function listarFiadosCliente(datos) {
+  try {
+    var ss = SpreadsheetApp.openById(SS_ID);
+    var shFiados = ss.getSheetByName(HOJA_FIADOS);
+    if (!shFiados) return { ok: false, error: 'Hoja FIADOS no encontrada' };
+
+    var telefono = String(datos.telefono  || '').replace(/\D/g, '');
+    var cliente  = String(datos.cliente   || '').trim().toUpperCase();
+    if (!telefono && !cliente) return { ok: false, error: 'Se requiere teléfono o cliente' };
+
+    var rows = shFiados.getDataRange().getValues();
+    var hoy  = new Date(); hoy.setHours(0, 0, 0, 0);
+    var fiados = [];
+
+    for (var i = 1; i < rows.length; i++) {
+      var fila = rows[i];
+      if (!fila[0]) continue;
+
+      var telFila = String(fila[4] || '').replace(/\D/g, '');
+      var cliFila = String(fila[3] || '').trim().toUpperCase();
+
+      var coincide = (telefono && telFila === telefono) ||
+                     (!telefono && cliFila === cliente);
+      if (!coincide) continue;
+
+      var estado = String(fila[10] || '').toUpperCase();
+      var vencFecha = fila[9]
+        ? new Date(String(fila[9]).split('T')[0] + 'T12:00:00')
+        : null;
+      if (vencFecha && vencFecha < hoy && estado !== 'PAGADO') estado = 'VENCIDO';
+
+      // Solo pendientes + vencidos
+      if (estado === 'PAGADO') continue;
+
+      var ticketNum    = String(fila[2] || '').trim();
+      var detalle      = [];
+      var totalDetalle = 0;
+
+      // Enriquecer con detalle real de hoja Ventas si hay ticket
+      if (ticketNum) {
+        var res = getDetalleTicket(ticketNum);
+        if (res.ok && res.items && res.items.length) {
+          detalle      = res.items;
+          totalDetalle = res.total;
+        }
+      }
+
+      var totalPendiente = parseFloat(fila[8]) || 0;
+      var totalOriginal  = parseFloat(fila[7]) || totalPendiente;
+
+      fiados.push({
+        idFiado:          String(fila[0]),
+        fecha:            String(fila[1] || ''),
+        ticket:           ticketNum,
+        cliente:          String(fila[3] || ''),
+        telefono:         String(fila[4] || ''),
+        descripcion:      String(fila[5] || ''),
+        cantItems:        fila[6] || 0,
+        totalOriginal:    totalOriginal,
+        totalPendiente:   totalPendiente,
+        abonadoParcial:   totalOriginal > totalPendiente,
+        montoAbonado:     Math.round((totalOriginal - totalPendiente) * 100) / 100,
+        fechaVencimiento: fila[9] ? String(fila[9]).split('T')[0] : '',
+        estado:           estado,
+        observaciones:    String(fila[13] || ''),
+        detalle:          detalle,
+        totalDetalle:     totalDetalle
+      });
+    }
+
+    // Ordenar: VENCIDO primero, luego por fecha ascendente
+    fiados.sort(function(a, b) {
+      if (a.estado === 'VENCIDO' && b.estado !== 'VENCIDO') return -1;
+      if (b.estado === 'VENCIDO' && a.estado !== 'VENCIDO') return 1;
+      return a.fecha.localeCompare(b.fecha);
+    });
+
+    var totalDeuda  = fiados.reduce(function(s, f) { return s + f.totalPendiente; }, 0);
+    var hayVencidos = fiados.some(function(f) { return f.estado === 'VENCIDO'; });
+
+    return {
+      ok:          true,
+      cliente:     fiados.length ? fiados[0].cliente : (datos.cliente || ''),
+      telefono:    telefono,
+      totalDeuda:  Math.round(totalDeuda * 100) / 100,
+      cantFiados:  fiados.length,
+      hayVencidos: hayVencidos,
+      fiados:      fiados
+    };
+  } catch(e) {
+    return { ok: false, error: e.toString() };
+  }
+}
+
+// ========== PAGAR FIADOS SELECCIONADOS (total o parcial) ==========
+// Recibe array de pagos: [{ idFiado, monto, parcial }]
+// Actualiza FIADOS y registra ingreso en CAJA_MOVIMIENTOS.
+function pagarFiadosSeleccionados(datos) {
+  try {
+    if (!datos.pagos || !datos.pagos.length) {
+      return { ok: false, error: 'No se indicaron fiados a cobrar' };
+    }
+
+    var ss      = SpreadsheetApp.openById(SS_ID);
+    var shFiado = ss.getSheetByName(HOJA_FIADOS);
+    if (!shFiado) return { ok: false, error: 'Hoja FIADOS no encontrada' };
+
+    var tz       = Session.getScriptTimeZone();
+    var ahora    = new Date();
+    var fechaStr = Utilities.formatDate(ahora, tz, 'yyyy-MM-dd');
+    var horaStr  = Utilities.formatDate(ahora, tz, 'HH:mm');
+    var metodo   = String(datos.metodoPago || 'EFECTIVO').toUpperCase();
+
+    var rows      = shFiado.getDataRange().getValues();
+    var resultado = [];
+    var totalCobrado = 0;
+
+    for (var p = 0; p < datos.pagos.length; p++) {
+      var pago      = datos.pagos[p];
+      var idFiado   = String(pago.idFiado || '').trim();
+      var monto     = parseFloat(pago.monto) || 0;
+      var esParcial = !!pago.parcial;
+
+      if (!idFiado || monto <= 0) continue;
+
+      // Buscar fila en sheet
+      var filaEncontrada = -1;
+      for (var i = 1; i < rows.length; i++) {
+        if (String(rows[i][0]).trim() === idFiado) {
+          filaEncontrada = i;
+          break;
+        }
+      }
+      if (filaEncontrada < 0) {
+        resultado.push({ idFiado: idFiado, ok: false, error: 'No encontrado' });
+        continue;
+      }
+
+      var totalActual = parseFloat(rows[filaEncontrada][8]) || 0;
+      var montoReal   = Math.min(monto, totalActual); // nunca cobrar más de lo que debe
+      var nuevo       = Math.round((totalActual - montoReal) * 100) / 100;
+      var filaSh      = filaEncontrada + 1;
+
+      // Actualizar total pendiente (col I = col 9)
+      shFiado.getRange(filaSh, 9).setValue(nuevo);
+
+      // Actualizar observaciones (col N = col 14)
+      var obsActual = String(rows[filaEncontrada][13] || '');
+      var tipoOp    = esParcial ? 'Abono' : 'Pago total';
+      var nuevaObs  = (obsActual ? obsActual + ' | ' : '') +
+        tipoOp + ' $' + montoReal + ' (' + metodo + ') ' + fechaStr + ' ' + horaStr;
+      shFiado.getRange(filaSh, 14).setValue(nuevaObs);
+
+      // Si quedó en cero: marcar PAGADO (col K=11, L=12, M=13)
+      if (nuevo === 0) {
+        shFiado.getRange(filaSh, 11).setValue('PAGADO');
+        shFiado.getRange(filaSh, 12).setValue(fechaStr + ' ' + horaStr);
+        shFiado.getRange(filaSh, 13).setValue(metodo);
+      }
+
+      totalCobrado += montoReal;
+      resultado.push({
+        idFiado:      idFiado,
+        ok:           true,
+        montoCobrado: montoReal,
+        nuevoTotal:   nuevo,
+        pagadoTotal:  nuevo === 0
+      });
+    }
+
+    // Registrar en CAJA_MOVIMIENTOS
+    if (totalCobrado > 0) {
+      _registrarIngresoFiadoCaja_(ss, {
+        fecha:    fechaStr,
+        hora:     horaStr,
+        monto:    totalCobrado,
+        medio:    metodo,
+        cliente:  datos.cliente || '',
+        obs:      'Cobro fiado — ' + resultado.filter(function(r){ return r.ok; }).length + ' ticket(s)'
+      });
+    }
+
+    return {
+      ok:           true,
+      totalCobrado: Math.round(totalCobrado * 100) / 100,
+      detalle:      resultado
+    };
+  } catch(e) {
+    return { ok: false, error: e.toString() };
+  }
+}
+
+// ——— Helper: registra ingreso en CAJA_MOVIMIENTOS ———
+function _registrarIngresoFiadoCaja_(ss, d) {
+  try {
+    var HOJA_CAJA = 'CAJA_MOVIMIENTOS';
+    var sh = ss.getSheetByName(HOJA_CAJA);
+    if (!sh) {
+      sh = ss.insertSheet(HOJA_CAJA);
+      sh.getRange(1, 1, 1, 8).setValues([[
+        'FECHA','HORA','TIPO','MOTIVO','MONTO','MEDIO','CATEGORIA','OBSERVACION'
+      ]]);
+      sh.getRange(1, 1, 1, 8).setBackground('#37474f').setFontColor('white').setFontWeight('bold');
+    }
+    sh.appendRow([
+      d.fecha, d.hora,
+      'INGRESO',
+      'COBRO FIADO — ' + (d.cliente || '').toUpperCase(),
+      d.monto,
+      d.medio,
+      'FIADOS',
+      d.obs || ''
+    ]);
+  } catch(e) {
+    console.error('_registrarIngresoFiadoCaja_ error (no crítico):', e);
   }
 }
