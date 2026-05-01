@@ -2495,24 +2495,56 @@ function _aplicarHorarioUI() {
     document.querySelectorAll('[data-hora-apertura]').forEach(el => el.textContent = apStr);
 }
 
+// Pre-procesa config_sistema en horarios por sección (igual que el GAS)
+function _extraerHorariosPorSeccion(cfg, diaIdx) {
+    const secciones = {
+        relampago:  { inicio: null, cierre: null },
+        destacadas: { inicio: null, cierre: null },
+        especiales: { inicio: null, cierre: null }
+    };
+    let seccionActual = null;
+
+    // cfg es un objeto {clave: [lun,mar,mie,jue,vie,sab,dom]}
+    // Necesitamos recorrerlo en el orden original — usamos las claves ordenadas
+    const claves = Object.keys(cfg);
+    for (let i = 0; i < claves.length; i++) {
+        const lk = claves[i].trim().toLowerCase();
+        // Detectar sección por encabezado
+        if (lk.includes('relampago') || lk.includes('relámpago')) seccionActual = 'relampago';
+        else if (lk.includes('destacadas')) seccionActual = 'destacadas';
+        else if (lk.includes('especiales')) seccionActual = 'especiales';
+        else if (lk.includes('ultimas') || lk.includes('últimas')) seccionActual = 'ultimas';
+
+        if (!seccionActual || !secciones[seccionActual]) continue;
+        const val = cfg[claves[i]][diaIdx];
+
+        if (lk === 'hora inicio oferta') {
+            const p = _parsearValorHora(val);
+            if (p) secciones[seccionActual].inicio = p;
+        }
+        if (lk === 'hora cierre oferta') {
+            const p = _parsearValorHora(val);
+            if (p) secciones[seccionActual].cierre = p;
+        }
+    }
+    return secciones;
+}
+
 // Verifica si la hora actual está dentro del horario de una sección
 function _dentroDeHorarioIndex(cfg, tipo, diaIdx) {
     try {
-        const rowIni = cfg[tipo + '|Hora inicio oferta'] || cfg['Hora inicio oferta'];
-        const rowCie = cfg[tipo + '|Hora cierre oferta'] || cfg['Hora cierre oferta'];
-        if (!rowIni || !rowCie) return false;
-        const ini = rowIni[diaIdx];
-        const cie = rowCie[diaIdx];
-        if (ini === null || ini === undefined || cie === null || cie === undefined) return false;
-        const ph = _parsearValorHora(ini);
-        const pc = _parsearValorHora(cie);
-        if (!ph || !pc) return false;
-        const hIni = ph.h + ph.m / 60;
-        const hCie = pc.h + pc.m / 60;
+        const secciones = _extraerHorariosPorSeccion(cfg, diaIdx);
+        const s = secciones[tipo];
+        if (!s || !s.inicio || !s.cierre) return false;
+        const hIni = s.inicio.h + s.inicio.m / 60;
+        const hCie = s.cierre.h + s.cierre.m / 60;
         const ahora = new Date();
-        const horaActual = ahora.getHours() + ahora.getMinutes() / 60;
-        return horaActual >= hIni && horaActual < hCie;
-    } catch(e) { return false; }
+        const arg = new Date(ahora.toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+        const horaActual = arg.getHours() + arg.getMinutes() / 60;
+        const activo = horaActual >= hIni && horaActual < hCie;
+        console.log(`🕐 ${tipo}: horario ${String(s.inicio.h).padStart(2,'0')}:${String(s.inicio.m).padStart(2,'0')} a ${String(s.cierre.h).padStart(2,'0')}:${String(s.cierre.m).padStart(2,'0')} → ${activo ? '✅ dentro' : '❌ fuera'} (ahora ${arg.getHours()}:${String(arg.getMinutes()).padStart(2,'0')})`);
+        return activo;
+    } catch(e) { console.warn('_dentroDeHorarioIndex error:', e); return false; }
 }
 
 // ── Cargar config_sistema desde GAS ──
@@ -3011,10 +3043,21 @@ function renderizarContenedorOfertas(tipo, productos) {
     iniciarCountdown(tipo);
 }
 
-// ========== COUNTDOWN — reemplazado por indicador ACTIVO ==========
+// ========== COUNTDOWN — muestra hora de cierre real desde _horariosOferta ==========
 function iniciarCountdown(tipo) {
     const countdownEl = document.getElementById(tipo + '-countdown');
-    if (countdownEl) countdownEl.textContent = 'ACTIVO';
+    if (!countdownEl) return;
+
+    // Si tenemos el horario del GAS, mostrar hora de cierre
+    const h = _horariosOferta && _horariosOferta[tipo];
+    if (h && h.cierre !== null && h.cierre !== undefined) {
+        const totalMins = Math.round(h.cierre * 60);
+        const hh = Math.floor(totalMins / 60) % 24;
+        const mm = totalMins % 60;
+        countdownEl.textContent = `hasta las ${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')} hs`;
+    } else {
+        countdownEl.textContent = 'ACTIVO';
+    }
 }
         
 function renderizarProductosNormales() {
