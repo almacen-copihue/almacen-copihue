@@ -752,24 +752,84 @@ function calcularOfertas() {
   var datos = sheet.getDataRange().getValues();
 
   var limites = { relampago: 3, especiales: 2, destacadas: 9 };
+  var horariosOferta = {
+    relampago:  { inicio: 0,  cierre: 24, activo: false },
+    destacadas: { inicio: 0,  cierre: 24, activo: false },
+    especiales: { inicio: 0,  cierre: 24, activo: false }
+  };
+  var _inicioRelampago = null, _cierreRelampago = null;
+  var _inicioDestacadas = null, _cierreDestacadas = null;
+  var _inicioEspeciales = null, _cierreEspeciales = null;
 
   var diaIdxJC = [1,2,3,4,5,6,0].indexOf(new Date().getDay());
+  var tzNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+  var horaActual = tzNow.getHours() + tzNow.getMinutes() / 60;
 
-  // Leer todos los límites desde config_sistema al inicio
+  // Leer todos los límites y horarios desde config_sistema al inicio
   try {
     var shCfgLim = SpreadsheetApp.openById(SS_ID).getSheetByName(HOJA_CONFIG);
     if (shCfgLim) {
       var cfgLim = shCfgLim.getDataRange().getValues();
-      for (var li = 1; li < cfgLim.length; li++) {
+
+      // Helper: parsear hora de celda (número o "HH:MM")
+      function _parsearHora_(val) {
+        if (val === null || val === undefined || val === '') return null;
+        // Google Sheets manda HH:MM como fracción de día (0-1) cuando la celda es tipo Hora
+        if (typeof val === 'number') {
+          if (val > 0 && val < 1) return val * 24; // fracción de día → horas decimales
+          return val; // ya es hora en formato decimal (ej: 21, 22)
+        }
+        var s = String(val).trim();
+        var m = s.match(/^(\d{1,2}):(\d{2})/);
+        if (m) return parseInt(m[1]) + parseInt(m[2]) / 60;
+        var n = parseFloat(s);
+        return isNaN(n) ? null : n;
+      }
+
+      // Helper: verificar si el modo A respeta el horario
+      function _estaActivoHoy_(diasVal, inicioVal, cierreVal) {
+        var d = String(diasVal || '').trim().toUpperCase();
+        if (d === '0') return false;           // desactivado forzado
+        if (d === '1') return true;            // activado forzado
+        // modo A: respetar horario
+        var ini = _parsearHora_(inicioVal);
+        var cie = _parsearHora_(cierreVal);
+        if (ini === null || cie === null) return true;
+        if (cie > ini) return horaActual >= ini && horaActual < cie;
+        // horario que cruza medianoche
+        return horaActual >= ini || horaActual < cie;
+      }
+
+      for (var li = 0; li < cfgLim.length; li++) {
         var lk = String(cfgLim[li][0] || '').trim().toLowerCase();
-        var lv = parseInt(cfgLim[li][diaIdxJC + 1]);
-        if (isNaN(lv) || lv <= 0) continue;
-        if (lk.indexOf('maximo relampago') !== -1 || lk.indexOf('máximo relampago') !== -1) limites.relampago = lv;
-        if (lk.indexOf('maximo especiales') !== -1 || lk.indexOf('máximo especiales') !== -1) limites.especiales = lv;
-        if (lk.indexOf('maximo destacadas') !== -1 || lk.indexOf('máximo destacadas') !== -1) limites.destacadas = lv;
+        var lv = cfgLim[li][diaIdxJC + 1];
+
+        // Límites
+        if (lk.indexOf('maximo relampago') !== -1 || lk.indexOf('máximo relampago') !== -1) { var n = parseInt(lv); if (!isNaN(n) && n > 0) limites.relampago = n; }
+        if (lk.indexOf('maximo especiales') !== -1 || lk.indexOf('máximo especiales') !== -1) { var n = parseInt(lv); if (!isNaN(n) && n > 0) limites.especiales = n; }
+        if (lk.indexOf('maximo destacadas') !== -1 || lk.indexOf('máximo destacadas') !== -1) { var n = parseInt(lv); if (!isNaN(n) && n > 0) limites.destacadas = n; }
+
+        // Horarios — claves únicas y descriptivas
+        if (lk === 'hora inicio relampago')         _inicioRelampago  = _parsearHora_(lv);
+        if (lk === 'hora cierre relampago')         _cierreRelampago  = _parsearHora_(lv);
+        if (lk === 'hora inicio destacadas')        _inicioDestacadas = _parsearHora_(lv);
+        if (lk === 'hora cierre destacadas')        _cierreDestacadas = _parsearHora_(lv);
+        if (lk === 'hora inicio especiales')        _inicioEspeciales = _parsearHora_(lv);
+        if (lk === 'hora cierre especiales')        _cierreEspeciales = _parsearHora_(lv);
+
+        // Flag días
+        if (lk === 'dias ofertas relampago' || lk === 'dias ofertas relámpago') {
+          horariosOferta.relampago.activo = _estaActivoHoy_(lv, _inicioRelampago, _cierreRelampago);
+        }
+        if (lk === 'dias ofertas destacadas') {
+          horariosOferta.destacadas.activo = _estaActivoHoy_(lv, _inicioDestacadas, _cierreDestacadas);
+        }
+        if (lk === 'dias ofertas especiales') {
+          horariosOferta.especiales.activo = _estaActivoHoy_(lv, _inicioEspeciales, _cierreEspeciales);
+        }
       }
     }
-  } catch(eLim) { Logger.log('Error leyendo limites config: ' + eLim); }
+  } catch(eLim) { Logger.log('Error leyendo config: ' + eLim); }
 
   var relampagoActivo = [];
   var idsUsados = {};
@@ -903,6 +963,11 @@ function calcularOfertas() {
   }
 
   var poolRecienLlegados = [];
+
+  // Respetar horarios: vaciar pools inactivos segun config_sistema
+  if (!horariosOferta.relampago.activo)  { relampagoActivo = []; relampagoPoolCompleto = []; }
+  if (!horariosOferta.destacadas.activo) { destacadasActivas = []; destacadasRotadas = []; destacadasPool = []; }
+  if (!horariosOferta.especiales.activo) { especialesActivas = []; especialesPool = []; }
   // Leer configuracion de Recien Llegados desde config_sistema
   var precioMinVidriera = 2000; // fallback RECIEN_LLEGADOS_PRECIO_MIN
   var limiteRecienLlegados = 12;  // fallback RECIEN_LLEGADOS_LIMITE
@@ -991,6 +1056,11 @@ function calcularOfertas() {
     poolRecienLlegados:     poolRecienLlegados,
     limiteRecienLlegados:   limiteRecienLlegados,
     limites: limites,
+    horariosOferta: {
+      relampago:  { inicio: _inicioRelampago,  cierre: _cierreRelampago,  activo: horariosOferta.relampago.activo  },
+      destacadas: { inicio: _inicioDestacadas, cierre: _cierreDestacadas, activo: horariosOferta.destacadas.activo },
+      especiales: { inicio: _inicioEspeciales, cierre: _cierreEspeciales, activo: horariosOferta.especiales.activo }
+    },
     fecha: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm'),
     stats: {
       totalRelampago:          relampagoActivo.length,
@@ -1187,18 +1257,26 @@ function getJuevesCervecero() {
     if (!sheetInv) return { success: false, mensaje: 'Sin inventario' };
 
     let horaCierre = 22;
+    let horaInicio = 14; // fallback — fila JUEVES CERVECERO columna INICIO
+    let modoActivo = 'A'; // 'A', '0', '1'
     if (sheetCfg) {
       const cfgData = sheetCfg.getDataRange().getValues();
-      let enHorario = false;
       for (let i = 0; i < cfgData.length; i++) {
         const clave = String(cfgData[i][0] || '').trim().toLowerCase();
-        if (clave.includes('horario local') || clave.includes('── horario')) { enHorario = true; continue; }
-        if (enHorario && clave.includes('cierre local')) {
-          const v = cfgData[i][4];
-          if (v !== null && v !== '') {
-            const parsed = parseFloat(String(v).split(':')[0]);
-            if (!isNaN(parsed)) horaCierre = parsed;
+        if (clave.includes('jueves cervecero') || clave.includes('cervecero')) {
+          // Fila del cervecero: B=INICIO, C=HRS, D=—, E=FINAL, F=valor, G=HRS
+          const ini = cfgData[i][1]; // columna B = hora inicio
+          const fin = cfgData[i][5]; // columna F = hora cierre  
+          const modo = cfgData[i][7]; // columna H = modo A/0/1 (si existe)
+          if (ini !== null && ini !== '') {
+            var pIni = (typeof ini === 'number' && ini < 1) ? ini * 24 : parseFloat(String(ini).split(':')[0]);
+            if (!isNaN(pIni)) horaInicio = pIni;
           }
+          if (fin !== null && fin !== '') {
+            var pFin = (typeof fin === 'number' && fin < 1) ? fin * 24 : parseFloat(String(fin).split(':')[0]);
+            if (!isNaN(pFin)) horaCierre = pFin;
+          }
+          if (modo !== null && modo !== undefined && modo !== '') modoActivo = String(modo).trim().toUpperCase();
           break;
         }
       }
@@ -1283,7 +1361,7 @@ function getJuevesCervecero() {
       return { ...c, descuento, precioPromo, esGancho: idx === idxGancho };
     });
 
-    return { success: true, productos: top6Final, horaCierre };
+    return { success: true, productos: top6Final, horaCierre, horaInicio, modoActivo };
   } catch(e) {
     return { success: false, mensaje: e.toString() };
   }

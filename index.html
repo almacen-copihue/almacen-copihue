@@ -2495,54 +2495,39 @@ function _aplicarHorarioUI() {
     document.querySelectorAll('[data-hora-apertura]').forEach(el => el.textContent = apStr);
 }
 
-// Pre-procesa config_sistema en horarios por sección (igual que el GAS)
-function _extraerHorariosPorSeccion(cfg, diaIdx) {
-    const secciones = {
-        relampago:  { inicio: null, cierre: null },
-        destacadas: { inicio: null, cierre: null },
-        especiales: { inicio: null, cierre: null }
-    };
-    let seccionActual = null;
-
-    // cfg es un objeto {clave: [lun,mar,mie,jue,vie,sab,dom]}
-    // Necesitamos recorrerlo en el orden original — usamos las claves ordenadas
-    const claves = Object.keys(cfg);
-    for (let i = 0; i < claves.length; i++) {
-        const lk = claves[i].trim().toLowerCase();
-        // Detectar sección por encabezado
-        if (lk.includes('relampago') || lk.includes('relámpago')) seccionActual = 'relampago';
-        else if (lk.includes('destacadas')) seccionActual = 'destacadas';
-        else if (lk.includes('especiales')) seccionActual = 'especiales';
-        else if (lk.includes('ultimas') || lk.includes('últimas')) seccionActual = 'ultimas';
-
-        if (!seccionActual || !secciones[seccionActual]) continue;
-        const val = cfg[claves[i]][diaIdx];
-
-        if (lk === 'hora inicio oferta') {
-            const p = _parsearValorHora(val);
-            if (p) secciones[seccionActual].inicio = p;
-        }
-        if (lk === 'hora cierre oferta') {
-            const p = _parsearValorHora(val);
-            if (p) secciones[seccionActual].cierre = p;
-        }
-    }
-    return secciones;
-}
-
-// Verifica si la hora actual está dentro del horario de una sección
+// Lee horario por nombre único desde cfg
 function _dentroDeHorarioIndex(cfg, tipo, diaIdx) {
     try {
-        const secciones = _extraerHorariosPorSeccion(cfg, diaIdx);
-        const s = secciones[tipo];
-        if (!s || !s.inicio || !s.cierre) return false;
-        const hIni = s.inicio.h + s.inicio.m / 60;
-        const hCie = s.cierre.h + s.cierre.m / 60;
+        const mapa = {
+            relampago:  { ini: 'hora inicio relampago',  cie: 'hora cierre relampago'  },
+            destacadas: { ini: 'hora inicio destacadas', cie: 'hora cierre destacadas' },
+            especiales: { ini: 'hora inicio especiales', cie: 'hora cierre especiales' }
+        };
+        const claves = mapa[tipo];
+        if (!claves) return false;
+
+        // Buscar clave ignorando mayúsculas/minúsculas y tildes
+        const normalizar = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+        const keyIni = Object.keys(cfg).find(k => normalizar(k) === normalizar(claves.ini));
+        const keyCie = Object.keys(cfg).find(k => normalizar(k) === normalizar(claves.cie));
+        if (!keyIni || !keyCie) {
+            console.warn('⚠️ No se encontraron claves de horario para:', tipo, claves);
+            return false;
+        }
+
+        const ini = cfg[keyIni][diaIdx];
+        const cie = cfg[keyCie][diaIdx];
+        const ph = _parsearValorHora(ini);
+        const pc = _parsearValorHora(cie);
+        if (!ph || !pc) return false;
+
+        const hIni = ph.h + ph.m / 60;
+        const hCie = pc.h + pc.m / 60;
         const ahora = new Date();
         const arg = new Date(ahora.toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
         const horaActual = arg.getHours() + arg.getMinutes() / 60;
-        const activo = horaActual >= hIni && horaActual < hCie;
-        console.log(`🕐 ${tipo}: horario ${String(s.inicio.h).padStart(2,'0')}:${String(s.inicio.m).padStart(2,'0')} a ${String(s.cierre.h).padStart(2,'0')}:${String(s.cierre.m).padStart(2,'0')} → ${activo ? '✅ dentro' : '❌ fuera'} (ahora ${arg.getHours()}:${String(arg.getMinutes()).padStart(2,'0')})`);
+        const activo = hCie > hIni ? (horaActual >= hIni && horaActual < hCie) : (horaActual >= hIni || horaActual < hCie);
+        console.log(`🕐 ${tipo}: ${String(ph.h).padStart(2,'0')}:${String(ph.m).padStart(2,'0')} → ${String(pc.h).padStart(2,'0')}:${String(pc.m).padStart(2,'0')} | ahora ${arg.getHours()}:${String(arg.getMinutes()).padStart(2,'0')} → ${activo ? '✅ activo' : '❌ fuera'}`);
         return activo;
     } catch(e) { console.warn('_dentroDeHorarioIndex error:', e); return false; }
 }
