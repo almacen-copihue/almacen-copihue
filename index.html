@@ -2343,6 +2343,11 @@ let _limiteRecienLlegados = 12; // configurable desde config_sistema → RECIEN_
 let _destacadasBackend = []; // IDs de destacadas rotadas del día según code.gs
 let _limiteDestacadas = 9; // configurable desde config_sistema → "máximo destacadas"
 let _limiteEspeciales = 2; // configurable desde config_sistema → "maximo especiales"
+let _horariosOferta = { // horarios reales leídos desde planilla
+    relampago:  { inicio: null, cierre: null, modo: 'A' },
+    destacadas: { inicio: null, cierre: null, modo: 'A' },
+    especiales: { inicio: null, cierre: null, modo: 'A' }
+};
 let poolDestacadas = [];
 let poolEspeciales = [];
 
@@ -3269,6 +3274,35 @@ function iniciarMotorAutoCheck() {
 const GAS_URL_CERVECERO = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
 let _cerveceroProductos = [];
 let _cerveceroHoraCierre = 22;
+let _cerveceroHoraInicio = 14;
+let _cerveceroModo = 'A';
+
+function _formatHora_(h) {
+    if (h === null || h === undefined) return '?';
+    const hh = Math.floor(h);
+    const mm = Math.round((h - hh) * 60);
+    return String(hh).padStart(2,'0') + ':' + String(mm).padStart(2,'0');
+}
+
+function _textoHorarioOferta_(tipo) {
+    const h = _horariosOferta[tipo];
+    if (!h) return '';
+    if (h.activo === false) return '';
+    // modo forzado — no hay horario que mostrar
+    const modo = String(h.modo || 'A').toUpperCase();
+    if (modo === '1') return ' · <em>Activo toda la jornada</em>';
+    if (h.inicio !== null && h.cierre !== null) {
+        return ` · <em>Horario: ${_formatHora_(h.inicio)} a ${_formatHora_(h.cierre)} hs</em>`;
+    }
+    return '';
+}
+
+function _actualizarMensajesOfertas_() {
+    // Mensajes de oferta con horario real desde planilla
+    _actualizarMensajesOfertas_();
+}
+let _cerveceroHoraInicio = 14;
+let _cerveceroModo = 'A';
 let _cerveceroOverride = null; // null=auto, true=forzado ON, false=forzado OFF
 
 function _esCerveceroActivo() {
@@ -3292,6 +3326,8 @@ async function cargarJuevesCervecero() {
         if (!data.success) return;
         _cerveceroProductos  = data.productos || [];
         _cerveceroHoraCierre = data.horaCierre || 22;
+        _cerveceroHoraInicio = data.horaInicio || 14;
+        _cerveceroModo       = data.modoActivo || 'A';
         // Actualizar texto de cierre
         const elCierre = document.getElementById('cervecero-cierre');
         if (elCierre) elCierre.textContent = _cerveceroHoraCierre + ':00';
@@ -3323,7 +3359,10 @@ function renderizarCervecero() {
         container.classList.remove('cervecero-activo');
         if (badge)     badge.textContent = 'TODOS LOS JUEVES';
         if (timer)     timer.style.display = 'none';
-        if (msg)       msg.innerHTML = '🍺 <strong>¡JUEVES CERVECERO!</strong> Todos los jueves, precios especiales en cervezas seleccionadas. ¡Volvé el próximo jueves!';
+        const horarioTexto = _cerveceroModo === '1'
+            ? 'toda la jornada'
+            : `de ${_formatHora_(_cerveceroHoraInicio)} a ${_formatHora_(_cerveceroHoraCierre)} hs`;
+        if (msg) msg.innerHTML = `🍺 <strong>¡JUEVES CERVECERO!</strong> Todos los jueves ${horarioTexto}, precios especiales en cervezas seleccionadas. ¡Volvé el próximo jueves!`;
         if (compartir) compartir.style.display = 'none';
         grid.innerHTML = '';
         return;
@@ -3660,6 +3699,7 @@ async function loadProductsFromAPI() {
                 if (dOfertas.destacadasActivas) _destacadasBackend = dOfertas.destacadasActivas.map(p => Number(p.id));
                 if (dOfertas.poolRecienLlegados) _poolRecienLlegados = dOfertas.poolRecienLlegados;
                 if (dOfertas.limiteRecienLlegados) _limiteRecienLlegados = dOfertas.limiteRecienLlegados;
+                if (dOfertas.horariosOferta) { _horariosOferta = dOfertas.horariosOferta; _actualizarMensajesOfertas_(); }
             }
         } catch(e) {
             console.warn('⚠️ getOfertas fallback:', e.message);
@@ -3797,6 +3837,7 @@ function actualizarSoloOfertas() {
             if (d.destacadasActivas) _destacadasBackend = d.destacadasActivas.map(p => Number(p.id));
             if (d.poolRecienLlegados) _poolRecienLlegados = d.poolRecienLlegados;
             if (d.limiteRecienLlegados) _limiteRecienLlegados = d.limiteRecienLlegados;
+            if (d.horariosOferta) { _horariosOferta = d.horariosOferta; _actualizarMensajesOfertas_(); }
             // Re-seleccionar y re-renderizar sin tocar los pools base
             seleccionarProductosOfertas();
             renderizarContenedorOfertas('relampago',  productosRelampago);
