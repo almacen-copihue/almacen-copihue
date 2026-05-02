@@ -101,7 +101,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v304</title>
+    <title>Copihue — POS v305</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2385,13 +2385,9 @@ function renderResultados(results, term = '') {
                            border:2px solid white;z-index:2;line-height:1;">${badgeQtyLabel}</div>`
             : '';
 
-        const esPromoCard = String(p.category || '').toUpperCase() === 'PROMOS' && p.normal > 0 && p.normal < p.price;
-        const precioMostrar = esPromoCard ? p.normal : (oferta.precioUnitario || p.price);
-        const esNxMSinActivar = oferta.tieneOferta && oferta.tipoOferta === 'relampago' && precioMostrar === p.price;
+        const esNxMSinActivar = oferta.tieneOferta && oferta.tipoOferta === 'relampago' && precio === p.price;
         const precioUnitHTML = (oferta.tieneOferta && !esNxMSinActivar)
-            ? `<span style="font-size:.6rem;color:#999;text-decoration:line-through;margin-right:3px;">$${p.price.toLocaleString('es-AR')}</span><span style="color:#f9a825;font-weight:900;font-size:.72rem;">$${precioMostrar.toLocaleString('es-AR')}</span>`
-            : esPromoCard
-            ? `<span style="font-size:.6rem;color:#999;text-decoration:line-through;margin-right:3px;">$${p.price.toLocaleString('es-AR')}</span><span style="color:#e65100;font-weight:900;font-size:.72rem;">$${p.normal.toLocaleString('es-AR')} 🏷️</span>`
+            ? `<span style="font-size:.6rem;color:#999;text-decoration:line-through;margin-right:3px;">$${p.price.toLocaleString('es-AR')}</span><span style="color:#f9a825;font-weight:900;font-size:.72rem;">$${precio.toLocaleString('es-AR')}</span>`
             : `<span style="color:#666;font-size:.72rem;">$${p.price.toLocaleString('es-AR')}</span>`;
 
         const stockColor = sinStock ? '#e53935' : stockBajo ? '#f57c00' : '#aaa';
@@ -2699,22 +2695,21 @@ function agregarProducto(id) {
         existente.qty++;
         const o = calcularOfertaPOS(producto, existente.qty);
         existente.price          = o.precioUnitario;
-        existente.precioOriginal = o.tieneOferta ? producto.price : 0;
+        existente.precioOriginal = o.tipoOferta === 'normal' ? producto.normal : (o.tieneOferta ? producto.price : 0);
         existente.precioModificado = o.tieneOferta;
         existente.ofertaEtiqueta = o.etiqueta || null;
         existente.ofertaTipo     = o.tipoOferta || null;
     } else {
         const oferta = calcularOfertaPOS(producto, 1);
-        // PROMOS: price=precio alto original (antes), normal=precio oferta (ahora)
+        // PROMOS: usar columna normal (precio original) como "antes"
         const esPromo = String(producto.category || '').toUpperCase() === 'PROMOS' 
-            && producto.normal > 0 && producto.normal < producto.price;
-        const precioVenta  = esPromo ? producto.normal : oferta.precioUnitario;
-        const precioOrig   = oferta.tieneOferta ? producto.price : (esPromo ? producto.price : 0);
-        const tieneDesc    = oferta.tieneOferta || esPromo;
+            && producto.normal > 0 && producto.normal > producto.price;
+        const precioOrig = oferta.tipoOferta === 'normal' ? producto.normal : (oferta.tieneOferta ? producto.price : (esPromo ? producto.normal : 0));
+        const tieneDesc  = oferta.tieneOferta || esPromo;
         ventaActual.push({
             id: producto.id,
             name: producto.name,
-            price: precioVenta,
+            price: oferta.precioUnitario,
             precioOriginal: precioOrig,
             precioModificado: tieneDesc,
             qty: 1,
@@ -2795,7 +2790,7 @@ function confirmarSelectorQty() {
     if (existente) {
         existente.qty   = qty;
         existente.price = oferta.precioUnitario;
-        existente.precioOriginal  = oferta.tieneOferta ? p.price : 0;
+        existente.precioOriginal  = oferta.tipoOferta === 'normal' ? p.normal : (oferta.tieneOferta ? p.price : 0);
         existente.precioModificado = oferta.tieneOferta;
         existente.ofertaTipo   = oferta.tipoOferta || null;
         existente.ofertaEtiqueta = oferta.etiqueta || null;
@@ -2803,7 +2798,7 @@ function confirmarSelectorQty() {
         ventaActual.push({
             id: p.id, name: p.name,
             price: oferta.precioUnitario,
-            precioOriginal: oferta.tieneOferta ? p.price : 0,
+            precioOriginal: oferta.tipoOferta === 'normal' ? p.normal : (oferta.tieneOferta ? p.price : 0),
             precioModificado: oferta.tieneOferta,
             qty,
             stockDisponible: p.stock,
@@ -2861,7 +2856,7 @@ function cambiarCantidad(id, delta) {
         if (p) {
             const oferta = calcularOfertaPOS(p, nuevaCant);
             item.price           = oferta.precioUnitario;
-            item.precioOriginal  = oferta.tieneOferta ? p.price : 0;
+            item.precioOriginal  = oferta.tipoOferta === 'normal' ? p.normal : (oferta.tieneOferta ? p.price : 0);
             item.precioModificado = oferta.tieneOferta;
             item.ofertaEtiqueta  = oferta.etiqueta || null;
             item.ofertaTipo      = oferta.tipoOferta || null;
@@ -4104,7 +4099,7 @@ function recuperarVenta() {
             return {
                 ...item,
                 price:           oferta.precioUnitario,
-                precioOriginal:  oferta.tieneOferta ? p.price : 0,
+                precioOriginal:  oferta.tipoOferta === 'normal' ? p.normal : (oferta.tieneOferta ? p.price : 0),
                 precioModificado: oferta.tieneOferta,
                 ofertaEtiqueta:  oferta.etiqueta || null,
                 ofertaTipo:      oferta.tipoOferta || null,
@@ -6683,7 +6678,7 @@ cargarProductos().then(() => {
                         return {
                             ...item,
                             price:            oferta.precioUnitario,
-                            precioOriginal:   oferta.tieneOferta ? p.price : 0,
+                            precioOriginal:   oferta.tipoOferta === 'normal' ? p.normal : (oferta.tieneOferta ? p.price : 0),
                             precioModificado: oferta.tieneOferta,
                             ofertaEtiqueta:   oferta.etiqueta || null,
                             ofertaTipo:       oferta.tipoOferta || null,
