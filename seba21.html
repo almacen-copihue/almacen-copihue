@@ -101,7 +101,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v305</title>
+    <title>Copihue — POS v306</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2386,8 +2386,9 @@ function renderResultados(results, term = '') {
             : '';
 
         const esNxMSinActivar = oferta.tieneOferta && oferta.tipoOferta === 'relampago' && precio === p.price;
+        const precioAntes     = oferta.tipoOferta === 'normal' ? p.normal : p.price;
         const precioUnitHTML = (oferta.tieneOferta && !esNxMSinActivar)
-            ? `<span style="font-size:.6rem;color:#999;text-decoration:line-through;margin-right:3px;">$${p.price.toLocaleString('es-AR')}</span><span style="color:#f9a825;font-weight:900;font-size:.72rem;">$${precio.toLocaleString('es-AR')}</span>`
+            ? `<span style="font-size:.6rem;color:#999;text-decoration:line-through;margin-right:3px;">$${precioAntes.toLocaleString('es-AR')}</span><span style="color:#f9a825;font-weight:900;font-size:.72rem;">$${precio.toLocaleString('es-AR')}</span>`
             : `<span style="color:#666;font-size:.72rem;">$${p.price.toLocaleString('es-AR')}</span>`;
 
         const stockColor = sinStock ? '#e53935' : stockBajo ? '#f57c00' : '#aaa';
@@ -2471,18 +2472,20 @@ function renderResultados(results, term = '') {
         const conStock = resto.filter(p => p.stock > 0);
         const sinStock = resto.filter(p => p.stock === 0);
 
-        const grRelampago  = conStock.filter(p => _poolIdsRelampago.has(p.id)  && _tipoActivo('relampago'));
-        const grUltimas    = conStock.filter(p => _poolIdsUltimas.has(p.id)    && _tipoActivo('ultimas')    && !grRelampago.includes(p));
-        const grDestacadas = conStock.filter(p => _destacadasFiltradas.has(p.id) && _tipoActivo('destacadas') && !grRelampago.includes(p) && !grUltimas.includes(p));
-        const grEspeciales = conStock.filter(p => _poolIdsEspeciales.has(p.id) && _tipoActivo('especiales') && !grRelampago.includes(p) && !grUltimas.includes(p) && !grDestacadas.includes(p));
-        const idsOferta    = new Set([...grRelampago, ...grUltimas, ...grDestacadas, ...grEspeciales].map(p => p.id));
-        const grNormal     = conStock.filter(p => !idsOferta.has(p.id));
+        const grRelampago      = conStock.filter(p => _poolIdsRelampago.has(p.id)  && _tipoActivo('relampago'));
+        const grUltimas        = conStock.filter(p => _poolIdsUltimas.has(p.id)    && _tipoActivo('ultimas')    && !grRelampago.includes(p));
+        const grDestacadas     = conStock.filter(p => _destacadasFiltradas.has(p.id) && _tipoActivo('destacadas') && !grRelampago.includes(p) && !grUltimas.includes(p));
+        const grEspeciales     = conStock.filter(p => _poolIdsEspeciales.has(p.id) && _tipoActivo('especiales') && !grRelampago.includes(p) && !grUltimas.includes(p) && !grDestacadas.includes(p));
+        const grPrecioRebajado = conStock.filter(p => p.normal > p.price && !grRelampago.includes(p) && !grUltimas.includes(p) && !grDestacadas.includes(p) && !grEspeciales.includes(p));
+        const idsOferta        = new Set([...grRelampago, ...grUltimas, ...grDestacadas, ...grEspeciales, ...grPrecioRebajado].map(p => p.id));
+        const grNormal         = conStock.filter(p => !idsOferta.has(p.id));
 
         if (enCarrito.length) html += seccion('🛒', 'En carrito', '#2e7d32', enCarrito);
         html += seccion('⚡', 'Relámpago', '#f9a825', grRelampago);
         html += seccion('🏷️', 'Últimas Unidades', '#b71c1c', grUltimas);
         html += seccion('🔥', 'Destacadas', '#e65100', grDestacadas);
         html += seccion('⭐', 'Especiales', '#00838f', grEspeciales);
+        html += seccion('↓', 'Precio Rebajado', '#43a047', grPrecioRebajado);
         if (grNormal.length) html += `<div style="padding:6px 10px 4px;font-size:0.65rem;font-weight:900;color:#aaa;
                             text-transform:uppercase;letter-spacing:0.8px;background:#f9f9f9;
                             margin:4px 0 0;">📦 Productos</div>` + grNormal.map(cardHTML).join('');
@@ -3674,6 +3677,7 @@ function _tieneOfertaActiva(p) {
     if (_tipoActivo('ultimas') && _poolIdsUltimas.has(p.id)) return true;
     if (p.destacada > 0 && _tipoActivo('destacadas') && _destacadasFiltradas.has(p.id)) return true;
     if (p.especial  > 0 && _tipoActivo('especiales') && _poolIdsEspeciales.has(p.id)) return true;
+    if (p.normal > p.price) return true;
     return false;
 }
 
