@@ -6225,9 +6225,9 @@ function badgeOfertaPOS(producto) {
 // Leen el estado real de la planilla (día actual) y escriben via GAS
 
 const _TOGGLE_CONFIG = {
-    relampago:  { id: 'toggleRelampago',  emoji: '⚡', label: 'REL',  clave: 'Dias ofertas RELAMPAGO',         colorActivo: 'rgba(249,168,37,0.5)',  bordeActivo: '#f9a825'  },
-    destacadas: { id: 'toggleDestacadas', emoji: '🔥', label: 'DEST', clave: 'Dias ofertas FINDE DESTACADAS',  colorActivo: 'rgba(255,111,0,0.5)',  bordeActivo: '#ff6f00'  },
-    especiales: { id: 'toggleEspeciales', emoji: '⭐', label: 'ESP',  clave: 'Dias ofertas ESPECIALES',        colorActivo: 'rgba(0,188,212,0.5)',   bordeActivo: '#00bcd4'  },
+    relampago:  { id: 'toggleRelampago',  emoji: '⚡', label: 'REL',  clave: 'Dias ofertas RELAMPAGO',        colorActivo: 'rgba(249,168,37,0.5)',  bordeActivo: '#f9a825'  },
+    destacadas: { id: 'toggleDestacadas', emoji: '🔥', label: 'DEST', clave: 'Dias ofertas DESTACADAS',       colorActivo: 'rgba(255,111,0,0.5)',  bordeActivo: '#ff6f00'  },
+    especiales: { id: 'toggleEspeciales', emoji: '⭐', label: 'ESP',  clave: 'Dias ofertas ESPECIALES',       colorActivo: 'rgba(0,188,212,0.5)',   bordeActivo: '#00bcd4'  },
     ultimas:    { id: 'toggleUltimas',    emoji: '🏷️', label: 'ULT',  clave: 'Dias ofertas ULTIMAS UNIDADES', colorActivo: 'rgba(229,57,53,0.5)',   bordeActivo: '#e53935'  }
 };
 
@@ -6320,23 +6320,49 @@ async function _cargarHorarioSistema() {
 // Lee si la hora actual está dentro del rango de una sección
 function _dentroDeHorario(cfg, tipo, diaIdx) {
     try {
-        const rowIni = cfg[tipo + '|Hora inicio oferta'] || cfg['Hora inicio oferta'];
-        const rowCie = cfg[tipo + '|Hora cierre oferta'] || cfg['Hora cierre oferta'];
-        if (!rowIni || !rowCie) return false;
-        const ini = rowIni[diaIdx];
-        const cie = rowCie[diaIdx];
-        if (ini === null || ini === undefined || cie === null || cie === undefined) return false;
+        const mapa = {
+            relampago:  { ini: 'Hora inicio RELAMPAGO',  cie: 'Hora cierre RELAMPAGO'  },
+            destacadas: { ini: 'Hora inicio DESTACADAS', cie: 'Hora cierre DESTACADAS' },
+            especiales: { ini: 'Hora inicio ESPECIALES', cie: 'Hora cierre ESPECIALES' }
+        };
+        const claves = mapa[tipo];
+        if (!claves) return false;
+
+        // Buscar clave con o sin prefijo de sección
+        const normalizar = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+        const keyIni = Object.keys(cfg).find(k => normalizar(k).endsWith(normalizar(claves.ini)));
+        const keyCie = Object.keys(cfg).find(k => normalizar(k).endsWith(normalizar(claves.cie)));
+        if (!keyIni || !keyCie) {
+            console.warn('⚠️ seba21 no encontró claves horario para:', tipo, claves);
+            return false;
+        }
+
         const parseH = v => {
-            if (typeof v === 'number') return v;
+            if (v === null || v === undefined || v === '') return null;
+            // ISO string de Google Sheets
+            if (typeof v === 'string' && v.includes('T')) {
+                try {
+                    const d = new Date(v);
+                    return ((d.getUTCHours() - 3 + 24) % 24) + d.getUTCMinutes() / 60;
+                } catch(e) { return null; }
+            }
+            if (typeof v === 'number') return v > 0 && v < 1 ? v * 24 : v;
             const s = String(v).trim();
             if (s.includes(':')) { const [h,m] = s.split(':'); return parseInt(h) + parseInt(m)/60; }
             return parseFloat(s);
         };
-        const hIni = parseH(ini), hCie = parseH(cie);
+
+        const hIni = parseH(cfg[keyIni][diaIdx]);
+        const hCie = parseH(cfg[keyCie][diaIdx]);
+        if (hIni === null || hCie === null || isNaN(hIni) || isNaN(hCie)) return false;
+
         const ahora = new Date();
-        const horaActual = ahora.getHours() + ahora.getMinutes()/60;
-        return horaActual >= hIni && horaActual < hCie;
-    } catch(e) { return false; }
+        const arg = new Date(ahora.toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+        const horaActual = arg.getHours() + arg.getMinutes() / 60;
+        const activo = hCie > hIni ? (horaActual >= hIni && horaActual < hCie) : (horaActual >= hIni || horaActual < hCie);
+        console.log(`🕐 POS ${tipo}: ${String(Math.floor(hIni)).padStart(2,'0')}:${String(Math.round((hIni%1)*60)).padStart(2,'0')} → ${String(Math.floor(hCie)).padStart(2,'0')}:${String(Math.round((hCie%1)*60)).padStart(2,'0')} | ahora ${arg.getHours()}:${String(arg.getMinutes()).padStart(2,'0')} → ${activo ? '✅' : '❌'}`);
+        return activo;
+    } catch(e) { console.warn('_dentroDeHorario error:', e); return false; }
 }
 
 async function cargarEstadoToggles() {
@@ -6350,8 +6376,6 @@ async function cargarEstadoToggles() {
             const clave = _TOGGLE_CONFIG[tipo].clave;
             const row = cfg[tipo + '|' + clave] || cfg[clave];
             const val = row ? row[diaIdx] : null;
-            const rowIni = cfg[tipo + '|Hora inicio oferta'] || cfg['Hora inicio oferta'];
-            const rowCie = cfg[tipo + '|Hora cierre oferta'] || cfg['Hora cierre oferta'];
             let activo;
             if (val === 1 || val === '1') {
                 activo = true;   // 1 = forzado ON
@@ -6364,7 +6388,7 @@ async function cargarEstadoToggles() {
             const modo = (val === 1 || val === '1') ? 'on' : (val === 0 || val === '0') ? 'off' : 'auto';
             _toggleEstado[tipo] = activo;
             _toggleModo[tipo] = modo;
-            console.log(`  ${tipo}: val=${JSON.stringify(val)} modo=${modo} activo=${activo} horario=${rowIni?.[diaIdx]}-${rowCie?.[diaIdx]}`);
+            console.log(`  ${tipo}: val=${JSON.stringify(val)} modo=${modo} activo=${activo}`);
             _pintarToggle(tipo, activo);
         });
         _guardarTogglesPersistidos();
