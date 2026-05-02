@@ -2701,22 +2701,27 @@ function agregarProducto(id) {
         existente.ofertaTipo     = o.tipoOferta || null;
     } else {
         const oferta = calcularOfertaPOS(producto, 1);
+        // PROMOS: usar columna normal (precio original) como "antes"
+        const esPromo = String(producto.category || '').toUpperCase() === 'PROMOS' 
+            && producto.normal > 0 && producto.normal > producto.price;
+        const precioOrig = oferta.tieneOferta ? producto.price : (esPromo ? producto.normal : 0);
+        const tieneDesc  = oferta.tieneOferta || esPromo;
         ventaActual.push({
             id: producto.id,
             name: producto.name,
             price: oferta.precioUnitario,
-            precioOriginal: oferta.tieneOferta ? producto.price : 0,
-            precioModificado: oferta.tieneOferta,
+            precioOriginal: precioOrig,
+            precioModificado: tieneDesc,
             qty: 1,
             stockDisponible: producto.stock,
             vencimiento: producto.vencimiento || '',
             rotacion: producto.rotacion || 3,
             precioCosto: producto.precioCosto || 0,
-            ofertaTipo: oferta.tipoOferta || null,
-            ofertaEtiqueta: oferta.etiqueta || null,
+            ofertaTipo: oferta.tipoOferta || (esPromo ? 'promo' : null),
+            ofertaEtiqueta: oferta.etiqueta || (esPromo ? '🏷️ PROMO' : null),
             insertedAt: Date.now()
         });
-        if (oferta.tieneOferta) mostrarToast(`${oferta.etiqueta} — ${producto.name.substring(0,25)}`, 'naranja');
+        if (tieneDesc) mostrarToast(`${oferta.etiqueta || '🏷️ PROMO'} — ${producto.name.substring(0,25)}`, 'naranja');
     }
 
     renderVenta(true); // ligero: solo panel y totales
@@ -2941,7 +2946,7 @@ function _renderVentaCompleta(ligero) {
         const imgSrc = `imagenes-productos/${simplificarNombre(item.name)}.jpg`;
 
         // ── Calcular precios y ahorro ──────────────────────────────
-        const tieneOferta  = item.precioModificado && item.precioOriginal > 0;
+        const tieneOferta  = item.precioModificado && item.precioOriginal > 0 && item.precioOriginal > item.price;
         const precioUnit   = item.price;
         const subtotal     = Math.round(precioUnit * item.qty);
         const ahorroTotal  = tieneOferta ? Math.round(item.precioOriginal * item.qty - subtotal) : 0;
