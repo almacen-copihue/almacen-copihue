@@ -1,5 +1,9 @@
 // ======================
-// ALMACÉN COPIHUE - SISTEMA COMPLETO v7.7
+// ALMACÉN COPIHUE - SISTEMA COMPLETO v8.0
+// v8.0: Últimas Unidades — getCandidatosUltimas, getUltimasSeleccion, guardarUltimasSeleccion
+//        calcularOfertas ahora devuelve ultimasSeleccionadas via _leerUltimasConDias_()
+// v7.9: RECIEN_LLEGADOS_DIAS — ventana configurable desde config_sistema (fallback 7 dias)
+// v7.8: Fix getVentasProducto — strip (XXXgr)\/(XXXkg) de nomFila antes de comparar
 // v7.7: vender() ahora devuelve ticket en la respuesta — guardarFiado() lo recibe
 //       y lo graba en columna C de FIADOS (antes siempre quedaba vacía)
 // v7.6: getDetalleTicket — devuelve items reales de hoja Ventas por número de ticket
@@ -774,10 +778,17 @@ function calcularOfertas() {
       // Helper: parsear hora de celda (número o "HH:MM")
       function _parsearHora_(val) {
         if (val === null || val === undefined || val === '') return null;
-        // Google Sheets manda HH:MM como fracción de día (0-1) cuando la celda es tipo Hora
+        // ISO string: Google Sheets manda horas como "1899-12-30T21:00:00.000Z"
+        if (typeof val === 'string' && val.includes('T')) {
+          try {
+            var d = new Date(val);
+            return ((d.getUTCHours() - 3 + 24) % 24) + d.getUTCMinutes() / 60;
+          } catch(e) { return null; }
+        }
+        // Fracción de día (0-1)
         if (typeof val === 'number') {
-          if (val > 0 && val < 1) return val * 24; // fracción de día → horas decimales
-          return val; // ya es hora en formato decimal (ej: 21, 22)
+          if (val > 0 && val < 1) return val * 24;
+          return val;
         }
         var s = String(val).trim();
         var m = s.match(/^(\d{1,2}):(\d{2})/);
@@ -969,8 +980,9 @@ function calcularOfertas() {
   if (!horariosOferta.destacadas.activo) { destacadasActivas = []; destacadasRotadas = []; destacadasPool = []; }
   if (!horariosOferta.especiales.activo) { especialesActivas = []; especialesPool = []; }
   // Leer configuracion de Recien Llegados desde config_sistema
-  var precioMinVidriera = 2000; // fallback RECIEN_LLEGADOS_PRECIO_MIN
+  var precioMinVidriera   = 2000; // fallback RECIEN_LLEGADOS_PRECIO_MIN
   var limiteRecienLlegados = 12;  // fallback RECIEN_LLEGADOS_LIMITE
+  var diasRecienLlegados  = 7;    // fallback RECIEN_LLEGADOS_DIAS
   try {
     var shCfgRL = SpreadsheetApp.openById(SS_ID).getSheetByName(HOJA_CONFIG);
     if (shCfgRL) {
@@ -985,6 +997,10 @@ function calcularOfertas() {
           var cl = parseInt(cfgRL[ci][1]);
           if (!isNaN(cl) && cl > 0) limiteRecienLlegados = cl;
         }
+        if (ck === 'RECIEN_LLEGADOS_DIAS') {
+          var cd = parseInt(cfgRL[ci][1]);
+          if (!isNaN(cd) && cd > 0) diasRecienLlegados = cd;
+        }
       }
     }
   } catch(eCfgRL) { Logger.log('Error leyendo config Recien Llegados: ' + eCfgRL); }
@@ -994,7 +1010,7 @@ function calcularOfertas() {
     var shInvRL  = ssRL.getSheetByName(HOJA_INVENTARIO);
     if (shHistRL && shInvRL) {
       var hoyRL = new Date(); hoyRL.setHours(0,0,0,0);
-      var hace2 = new Date(hoyRL.getTime() - 2 * 86400000);
+      var hace2 = new Date(hoyRL.getTime() - diasRecienLlegados * 86400000);
       var tzRL = Session.getScriptTimeZone();
 
       var ultimaFechaMap = {};
@@ -1055,6 +1071,7 @@ function calcularOfertas() {
     especialesActivas:    especialesActivas,
     poolRecienLlegados:     poolRecienLlegados,
     limiteRecienLlegados:   limiteRecienLlegados,
+    ultimasSeleccionadas:   _leerUltimasConDias_(),
     limites: limites,
     horariosOferta: {
       relampago:  { inicio: _inicioRelampago,  cierre: _cierreRelampago,  activo: horariosOferta.relampago.activo  },
@@ -1264,17 +1281,36 @@ function getJuevesCervecero() {
       for (let i = 0; i < cfgData.length; i++) {
         const clave = String(cfgData[i][0] || '').trim().toLowerCase();
         if (clave.includes('jueves cervecero') || clave.includes('cervecero')) {
-          // Fila del cervecero: B=INICIO, C=HRS, D=—, E=FINAL, F=valor, G=HRS
-          const ini = cfgData[i][1]; // columna B = hora inicio
-          const fin = cfgData[i][5]; // columna F = hora cierre  
-          const modo = cfgData[i][7]; // columna H = modo A/0/1 (si existe)
+          Logger.log('Fila cervecero encontrada en fila ' + i + '. Columnas: ' + JSON.stringify(cfgData[i]));
+          Logger.log('C[2]=' + cfgData[i][2] + ' tipo=' + typeof cfgData[i][2] + ' | G[6]=' + cfgData[i][6] + ' tipo=' + typeof cfgData[i][6]);
+          // Fila 26: A=JUEVES CERVECERO, B=INICIO, C=hora inicio, D=HRS, E=—, F=FINAL, G=hora cierre, H=HRS
+          const ini = cfgData[i][2]; // columna C = hora inicio
+          const fin = cfgData[i][6]; // columna G = hora cierre
+          const modo = cfgData[i][8]; // columna I = modo (si existe)
           if (ini !== null && ini !== '') {
-            var pIni = (typeof ini === 'number' && ini < 1) ? ini * 24 : parseFloat(String(ini).split(':')[0]);
-            if (!isNaN(pIni)) horaInicio = pIni;
+            var pIni;
+            if (typeof ini === 'number' && ini > 0 && ini < 1) {
+              pIni = ini * 24;
+            } else if (typeof ini === 'string' && ini.includes('T')) {
+              // Google Sheets manda hora como ISO: usar UTC horas + ajuste ARG (-3)
+              var dIni = new Date(ini);
+              pIni = ((dIni.getUTCHours() - 3 + 24) % 24) + dIni.getUTCMinutes() / 60;
+            } else {
+              pIni = typeof ini === 'number' ? ini : parseFloat(String(ini).split(':')[0]);
+            }
+            if (!isNaN(pIni)) horaInicio = Math.round(pIni * 100) / 100;
           }
           if (fin !== null && fin !== '') {
-            var pFin = (typeof fin === 'number' && fin < 1) ? fin * 24 : parseFloat(String(fin).split(':')[0]);
-            if (!isNaN(pFin)) horaCierre = pFin;
+            var pFin;
+            if (typeof fin === 'number' && fin > 0 && fin < 1) {
+              pFin = fin * 24;
+            } else if (typeof fin === 'string' && fin.includes('T')) {
+              var dFin = new Date(fin);
+              pFin = ((dFin.getUTCHours() - 3 + 24) % 24) + dFin.getUTCMinutes() / 60;
+            } else {
+              pFin = typeof fin === 'number' ? fin : parseFloat(String(fin).split(':')[0]);
+            }
+            if (!isNaN(pFin)) horaCierre = Math.round(pFin * 100) / 100;
           }
           if (modo !== null && modo !== undefined && modo !== '') modoActivo = String(modo).trim().toUpperCase();
           break;
@@ -1556,6 +1592,16 @@ function doGet(e) {
     if (e && e.parameter && e.parameter.action === 'ventasProducto') {
       var datosVP = JSON.parse(decodeURIComponent(e.parameter.data));
       return respuestaJSON(getVentasProducto(datosVP));
+    }
+    if (e && e.parameter && e.parameter.action === 'getCandidatosUltimas') {
+      return respuestaJSON(getCandidatosUltimas());
+    }
+    if (e && e.parameter && e.parameter.action === 'getUltimasSeleccion') {
+      return respuestaJSON(getUltimasSeleccion());
+    }
+    if (e && e.parameter && e.parameter.action === 'guardarUltimasSeleccion') {
+      var idsUlt = JSON.parse(decodeURIComponent(e.parameter.data));
+      return respuestaJSON(guardarUltimasSeleccion(idsUlt));
     }
 
     // ── GET PRODUCTOS (carga la tienda) ──
@@ -2808,7 +2854,7 @@ function getVentasProducto(datos) {
       if (!f[0] || String(f[3] || '').includes('TOTAL TICKET')) continue;
       var nomFila = String(f[3] || '').trim().toUpperCase();
       // Quitar sufijos de precio especial para comparar
-      var nomLimpio = nomFila.replace(/\s*\[PRECIO.*?\]$/,'').trim();
+      var nomLimpio = nomFila.replace(/\s*\[PRECIO.*?\]$/,'').replace(/\s*\(\d+\s*gr\)$/i,'').replace(/\s*\(\d+\.?\d*\s*kg\)$/i,'').trim();
       if (nomLimpio !== nombre) continue;
 
       var fechaFila = f[1] instanceof Date ? f[1] : new Date(f[1]);
@@ -3054,5 +3100,181 @@ function _registrarIngresoFiadoCaja_(ss, d) {
     ]);
   } catch(e) {
     console.error('_registrarIngresoFiadoCaja_ error (no crítico):', e);
+  }
+}
+
+// ========== ÚLTIMAS UNIDADES — Selección manual ==========
+
+/**
+ * Helper interno: lee ultimas_seleccion de config_sistema y cruza con inventario
+ * para devolver [{id, diasParaVencer}]. Usado por calcularOfertas().
+ */
+function _leerUltimasConDias_() {
+  try {
+    var ss   = SpreadsheetApp.openById(SS_ID);
+    var shCfg = ss.getSheetByName(HOJA_CONFIG);
+    if (!shCfg) return [];
+    var cfgVals = shCfg.getDataRange().getValues();
+    var ids = [];
+    for (var i = 0; i < cfgVals.length; i++) {
+      if (String(cfgVals[i][0] || '').trim().toLowerCase() === 'ultimas_seleccion') {
+        try { ids = JSON.parse(cfgVals[i][1] || '[]'); } catch(e) { ids = []; }
+        break;
+      }
+    }
+    if (!ids.length) return [];
+
+    // Cruzar con inventario para obtener diasParaVencer actual
+    var shInv  = ss.getSheetByName(HOJA_INVENTARIO);
+    var invVals = shInv.getDataRange().getValues();
+    var hoy = new Date(); hoy.setHours(0,0,0,0);
+    var idsSet = {};
+    ids.forEach(function(id){ idsSet[Number(id)] = true; });
+
+    var resultado = [];
+    for (var r = 1; r < invVals.length; r++) {
+      if (!idsSet[r]) continue;
+      var stock = parseInt(invVals[r][5]) || 0;
+      if (stock <= 0) continue; // excluir sin stock
+      var dpv = null;
+      var vencRaw = invVals[r][9];
+      if (vencRaw) {
+        try {
+          var vFecha = new Date(vencRaw); vFecha.setHours(0,0,0,0);
+          dpv = Math.round((vFecha - hoy) / 86400000);
+          if (dpv < 0) continue; // vencido: excluir
+        } catch(e) {}
+      }
+      resultado.push({ id: r, diasParaVencer: dpv });
+    }
+    return resultado;
+  } catch(e) {
+    Logger.log('_leerUltimasConDias_ error: ' + e);
+    return [];
+  }
+}
+
+/**
+ * Devuelve candidatos para el selector manual de Últimas Unidades.
+ * Productos con vencimiento, stock > 0, ordenados por urgencia.
+ */
+function getCandidatosUltimas() {
+  try {
+    var ss    = SpreadsheetApp.openById(SS_ID);
+    var shInv = ss.getSheetByName(HOJA_INVENTARIO);
+    var datos = shInv.getDataRange().getValues();
+    var hoy   = new Date(); hoy.setHours(0,0,0,0);
+
+    var candidatos = [];
+    for (var i = 1; i < datos.length; i++) {
+      var fila  = datos[i];
+      if (!fila[0]) continue;
+      var stock = parseInt(fila[5]) || 0;
+      if (stock <= 0) continue;
+      var vencRaw = fila[9];
+      if (!vencRaw) continue; // solo productos CON vencimiento
+
+      var vFecha;
+      try {
+        vFecha = new Date(vencRaw); vFecha.setHours(0,0,0,0);
+      } catch(e) { continue; }
+      var dias = Math.round((vFecha - hoy) / 86400000);
+      if (dias < 0) continue; // ya vencido
+
+      var relampago = parseInt(fila[6]) || 0;
+      var precio    = parseInt(fila[1]) || 0;
+      var rotacion  = fila.length > 14 ? (parseInt(fila[14]) || 1) : 1;
+      var diasStock = rotacion > 0 ? Math.ceil(stock / rotacion) : 9999;
+
+      // Score: qué tan urgente es vender antes de que venza
+      var score = 0;
+      var motivo = '';
+      if (dias === 0) {
+        score = 200; motivo = '🔴 Vence HOY';
+      } else if (dias === 1) {
+        score = 150; motivo = '🔴 Vence mañana';
+      } else if (dias <= 3) {
+        score = 100; motivo = '🔴 Vence en ' + dias + ' días';
+      } else if (diasStock >= dias) {
+        score = Math.round((diasStock / dias) * 60);
+        motivo = '🟡 Stock para ' + diasStock + 'd, vence en ' + dias + 'd';
+      } else {
+        score = Math.round((dias <= 14 ? 20 : 5));
+        motivo = '⚪ Vence en ' + dias + ' días';
+      }
+
+      candidatos.push({
+        id:           i,
+        nombre:       String(fila[0]).trim(),
+        precio:       precio,
+        stock:        stock,
+        vencimiento:  Utilities.formatDate(vFecha, Session.getScriptTimeZone(), 'dd/MM/yyyy'),
+        diasParaVencer: dias,
+        score:        score,
+        motivo:       motivo,
+        ofertaDesc:   relampago > 0 ? ('-' + relampago + '%') : ''
+      });
+    }
+
+    candidatos.sort(function(a, b){ return b.score - a.score || a.diasParaVencer - b.diasParaVencer; });
+    return { ok: true, candidatos: candidatos };
+  } catch(e) {
+    return { ok: false, error: e.toString() };
+  }
+}
+
+/**
+ * Lee la selección guardada de Últimas Unidades desde config_sistema.
+ */
+function getUltimasSeleccion() {
+  try {
+    var shCfg = SpreadsheetApp.openById(SS_ID).getSheetByName(HOJA_CONFIG);
+    if (!shCfg) return { ok: true, seleccion: [] };
+    var vals = shCfg.getDataRange().getValues();
+    for (var i = 0; i < vals.length; i++) {
+      if (String(vals[i][0] || '').trim().toLowerCase() === 'ultimas_seleccion') {
+        var ids = [];
+        try { ids = JSON.parse(vals[i][1] || '[]'); } catch(e) {}
+        return { ok: true, seleccion: ids };
+      }
+    }
+    return { ok: true, seleccion: [] };
+  } catch(e) {
+    return { ok: false, error: e.toString() };
+  }
+}
+
+/**
+ * Guarda la selección manual de IDs en config_sistema → fila 'ultimas_seleccion'.
+ * Si la fila no existe, la crea.
+ */
+function guardarUltimasSeleccion(ids) {
+  try {
+    var ss    = SpreadsheetApp.openById(SS_ID);
+    var shCfg = ss.getSheetByName(HOJA_CONFIG);
+    if (!shCfg) return { ok: false, error: 'Hoja config_sistema no encontrada' };
+
+    var vals = shCfg.getDataRange().getValues();
+    var filaIdx = -1;
+    for (var i = 0; i < vals.length; i++) {
+      if (String(vals[i][0] || '').trim().toLowerCase() === 'ultimas_seleccion') {
+        filaIdx = i + 1; // 1-indexed para Sheets
+        break;
+      }
+    }
+
+    var jsonIds = JSON.stringify(ids || []);
+    var ts      = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
+
+    if (filaIdx > 0) {
+      shCfg.getRange(filaIdx, 2).setValue(jsonIds);
+      shCfg.getRange(filaIdx, 3).setValue(ts);
+    } else {
+      shCfg.appendRow(['ultimas_seleccion', jsonIds, ts]);
+    }
+
+    return { ok: true, guardados: (ids || []).length };
+  } catch(e) {
+    return { ok: false, error: e.toString() };
   }
 }

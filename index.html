@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Almacén Copihue v130</title>
+    <title>Almacén Copihue v133</title>
     
     <!-- META TAGS PARA PWA -->
     <meta name="theme-color" content="#2e7d32" id="meta-theme-color">
@@ -1977,6 +1977,18 @@
         <div class="ofertas-products-grid" id="cervecero-grid"></div>
     </div>
 
+    <!-- ========== ÚLTIMAS UNIDADES ========== -->
+    <div class=\"ofertas-container cls-oculto\" id=\"ofertasUltimas\" style=\"border-top:3px solid #b71c1c;\">
+        <div class=\"ofertas-header\">
+            <h2>
+                🏷️ ÚLTIMAS UNIDADES
+                <span class=\"ofertas-badge\" style=\"background:#b71c1c;\">OFERTA</span>
+            </h2>
+            <p>Productos seleccionados con descuento especial. ¡Quedan pocas unidades!</p>
+        </div>
+        <div class=\"ofertas-products-grid\" id=\"ultimas-grid\"></div>
+    </div>
+
     <!-- ========== RECIÉN LLEGADOS ========== -->
     <div class="ofertas-container recien-llegados" id="ofertasRecienLlegados" class="cls-oculto">
         <div class="ofertas-header">
@@ -2339,6 +2351,7 @@ let esAdmin = false;
 let poolRelampago = [];
 let _relampagoActivoBackend = []; // Los 3 del día según code.gs
 let _poolRecienLlegados = []; // Recién llegados desde Historial
+let _poolUltimasSeleccion = []; // Últimas Unidades — selección manual desde seba21
 let _limiteRecienLlegados = 12; // configurable desde config_sistema → RECIEN_LLEGADOS_LIMITE
 let _destacadasBackend = []; // IDs de destacadas rotadas del día según code.gs
 let _limiteDestacadas = 9; // configurable desde config_sistema → "máximo destacadas"
@@ -3708,6 +3721,7 @@ function actualizarTodasLasVistas() {
     
     renderizarContenedorOfertas('relampago', productosRelampago);
     renderizarContenedorOfertas('destacadas', productosDestacadas);
+    renderizarUltimasUnidades();
     renderizarRecienLlegados();
     renderizarContenedorOfertas('especiales', productosEspeciales);
     renderizarCervecero();
@@ -3748,6 +3762,7 @@ async function loadProductsFromAPI() {
                 if (dOfertas.destacadasActivas) _destacadasBackend = dOfertas.destacadasActivas.map(p => Number(p.id));
                 if (dOfertas.poolRecienLlegados) _poolRecienLlegados = dOfertas.poolRecienLlegados;
                 if (dOfertas.limiteRecienLlegados) _limiteRecienLlegados = dOfertas.limiteRecienLlegados;
+                if (dOfertas.ultimasSeleccionadas) _poolUltimasSeleccion = dOfertas.ultimasSeleccionadas;
                 if (dOfertas.horariosOferta) {
                     _horariosOferta = dOfertas.horariosOferta;
                     console.log('📡 Horarios GAS recibidos:', JSON.stringify({
@@ -3894,15 +3909,71 @@ function actualizarSoloOfertas() {
             if (d.destacadasActivas) _destacadasBackend = d.destacadasActivas.map(p => Number(p.id));
             if (d.poolRecienLlegados) _poolRecienLlegados = d.poolRecienLlegados;
             if (d.limiteRecienLlegados) _limiteRecienLlegados = d.limiteRecienLlegados;
+            if (d.ultimasSeleccionadas) _poolUltimasSeleccion = d.ultimasSeleccionadas;
             if (d.horariosOferta) { _horariosOferta = d.horariosOferta; _actualizarMensajesOfertas_(); }
             // Re-seleccionar y re-renderizar sin tocar los pools base
             seleccionarProductosOfertas();
             renderizarContenedorOfertas('relampago',  productosRelampago);
             renderizarContenedorOfertas('destacadas', productosDestacadas);
             renderizarContenedorOfertas('especiales', productosEspeciales);
+            renderizarUltimasUnidades();
             renderizarRecienLlegados();
         })
         .catch(() => {}); // silencioso — siguiente ciclo lo reintenta
+}
+
+function renderizarUltimasUnidades() {
+    const container = document.getElementById('ofertasUltimas');
+    const grid      = document.getElementById('ultimas-grid');
+    if (!container || !grid) return;
+
+    const lista = (_poolUltimasSeleccion || []).map(u => {
+        const prod = products.find(p => p.id === Number(u.id));
+        if (!prod || prod.stockNumber <= 0) return null;
+        return { prod, diasParaVencer: u.diasParaVencer };
+    }).filter(Boolean);
+
+    if (!lista.length) { container.classList.add('cls-oculto'); return; }
+    container.classList.remove('cls-oculto');
+
+    grid.innerHTML = lista.map(({ prod, diasParaVencer }) => {
+        const descPct   = prod.relampago > 0 ? prod.relampago : 10;
+        const precioDesc = Math.round(prod.price * (1 - descPct / 100));
+        const foto = prod.name.toLowerCase()
+            .replace(/[áàä]/g,'a').replace(/[éèë]/g,'e').replace(/[íìï]/g,'i')
+            .replace(/[óòö]/g,'o').replace(/[úùü]/g,'u').replace(/ñ/g,'n')
+            .replace(/[^a-z0-9\s-]/g,'').replace(/\s+/g,'-').trim();
+        const diasLabel = diasParaVencer !== null && diasParaVencer !== undefined
+            ? (diasParaVencer === 0 ? '⚠️ Vence hoy' : `Vence en ${diasParaVencer}d`)
+            : '';
+
+        return `<div class="product-card" onclick="abrirModalProducto(${prod.id})" style="cursor:pointer;">
+            <div style="position:relative;width:100%;aspect-ratio:1/1;background:#f9f9f9;border-radius:10px 10px 0 0;overflow:hidden;">
+                <img src="imagenes-productos/${foto}.jpg" onerror="this.style.display='none'"
+                     style="width:100%;height:100%;object-fit:contain;" loading="lazy">
+                <div style="position:absolute;top:6px;left:6px;background:#b71c1c;color:white;
+                            font-size:0.6rem;font-weight:900;padding:3px 7px;border-radius:20px;">
+                    -${descPct}%
+                </div>
+                ${diasLabel ? `<div style="position:absolute;bottom:4px;left:0;right:0;text-align:center;
+                    font-size:0.55rem;color:#b71c1c;font-weight:700;background:rgba(255,255,255,0.9);
+                    padding:2px 4px;">${diasLabel}</div>` : ''}
+            </div>
+            <div class="product-info">
+                <div class="product-name" style="font-size:0.72rem;">${prod.name}</div>
+                <div style="margin-top:4px;">
+                    <span style="font-size:0.6rem;color:#999;text-decoration:line-through;margin-right:3px;">
+                        $${prod.price.toLocaleString('es-AR')}
+                    </span>
+                    <span style="color:#b71c1c;font-weight:900;font-size:0.78rem;">
+                        $${precioDesc.toLocaleString('es-AR')}
+                    </span>
+                </div>
+                <button class="add-to-cart-btn" onclick="event.stopPropagation();agregarAlCarrito(${prod.id})"
+                        style="background:#b71c1c;">🛒 Agregar al Carrito</button>
+            </div>
+        </div>`;
+    }).join('');
 }
 
 function renderizarRecienLlegados() {
