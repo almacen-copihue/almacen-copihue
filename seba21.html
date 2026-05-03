@@ -101,7 +101,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v315</title>
+    <title>Copihue — POS v316</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -6852,7 +6852,17 @@ document.getElementById('modalWifiQR').addEventListener('click', function(e) {
 </style>
 
 <div class="flyer-overlay-admin" id="flyerOverlayAdmin">
-    <div style="color:#f9a825;font-size:0.85rem;font-weight:700;margin-bottom:4px">🖼️ Flyer Jueves Cervecero</div>
+    <div style="display:flex;gap:6px;margin-bottom:8px;">
+        <button id="flyerTabCervecero" onclick="switchFlyerMode('cervecero')"
+                style="flex:1;padding:7px;border-radius:10px;border:none;font-size:0.8rem;font-weight:700;cursor:pointer;background:#f9a825;color:#0d47a1;">
+            🍺 Cervecero
+        </button>
+        <button id="flyerTabOfertas" onclick="switchFlyerMode('ofertas')"
+                style="flex:1;padding:7px;border-radius:10px;border:none;font-size:0.8rem;font-weight:700;cursor:pointer;background:rgba(255,255,255,0.15);color:white;">
+            🏷️ Ofertas del día
+        </button>
+    </div>
+    <div id="flyerModoLabel" style="color:#f9a825;font-size:0.85rem;font-weight:700;margin-bottom:4px">🍺 Flyer Jueves Cervecero</div>
     <div class="flyer-canvas-wrap-admin" id="flyerWrapAdmin"></div>
     <div class="flyer-btns-admin">
         <button class="flyer-btn-admin" style="background:#25D366;color:white" onclick="compartirFlyerAdminWA()">📲 Compartir</button>
@@ -6867,7 +6877,218 @@ let _flyerCanvasAdmin = null;
 let _flyerProductos = [];
 let _flyerHoraCierre = 22;
 
+let _flyerModoActual = 'cervecero';
+
+function switchFlyerMode(modo, skipDraw) {
+    _flyerModoActual = modo;
+    const esCerv = modo === 'cervecero';
+    document.getElementById('flyerTabCervecero').style.background = esCerv ? '#f9a825' : 'rgba(255,255,255,0.15)';
+    document.getElementById('flyerTabCervecero').style.color      = esCerv ? '#0d47a1' : 'white';
+    document.getElementById('flyerTabOfertas').style.background   = !esCerv ? '#b71c1c' : 'rgba(255,255,255,0.15)';
+    document.getElementById('flyerTabOfertas').style.color        = 'white';
+    document.getElementById('flyerModoLabel').textContent = esCerv ? '🍺 Flyer Jueves Cervecero' : '🏷️ Flyer Ofertas del Día';
+    if (skipDraw) return;
+    if (esCerv) {
+        const canvas = _generarCanvasFlyer(_flyerProductos, _flyerHoraCierre);
+        _flyerCanvasAdmin = canvas;
+        const wrap = document.getElementById('flyerWrapAdmin');
+        wrap.innerHTML = ''; wrap.appendChild(canvas);
+    } else {
+        _generarFlyerOfertas();
+    }
+}
+
+async function _generarFlyerOfertas() {
+    const wrap = document.getElementById('flyerWrapAdmin');
+    wrap.innerHTML = '<div style="color:white;text-align:center;padding:20px;font-size:0.85rem;">⏳ Preparando flyer...</div>';
+
+    // Recolectar productos de todos los pools activos
+    const ids = new Set();
+    const prods = [];
+
+    productos.forEach(p => {
+        if (!p || p.stock <= 0) return;
+        const enRelampago  = _poolIdsRelampago.has(p.id)     && _tipoActivo('relampago');
+        const enDestacadas = _destacadasFiltradas.has(p.id)   && _tipoActivo('destacadas');
+        const enEspeciales = _poolIdsEspeciales.has(p.id)     && _tipoActivo('especiales');
+        const enPromos     = p.normal > p.price               && p.category === 'PROMOS';
+        if ((enRelampago || enDestacadas || enEspeciales || enPromos) && !ids.has(p.id)) {
+            ids.add(p.id);
+            // Calcular precio oferta
+            let precioOferta = p.price;
+            let descPct = 0;
+            if (enRelampago) {
+                const cfg = OFERTAS_RELAMPAGO_SISTEMA?.[String(p.relampago)];
+                if (cfg) { precioOferta = Math.round(p.price * (1 - cfg.descuento / 100)); descPct = cfg.descuento; }
+                else { precioOferta = Math.round(p.price * (1 - p.relampago / 100)); descPct = p.relampago; }
+            } else if (enPromos && p.normal > p.price) {
+                descPct = Math.round((1 - p.price / p.normal) * 100);
+                precioOferta = p.price;
+            } else if (enDestacadas || enEspeciales) {
+                descPct = 10;
+                precioOferta = Math.round(p.price * 0.9);
+            }
+            prods.push({ id: p.id, nombre: p.name, precio: p.normal > p.price ? p.normal : p.price, precioOferta, descPct });
+        }
+    });
+
+    if (prods.length === 0) {
+        wrap.innerHTML = '<div style="color:#ffb300;text-align:center;padding:20px;font-size:0.85rem;">⚠️ No hay ofertas activas en este momento</div>';
+        return;
+    }
+    if (prods.length > 8) {
+        wrap.innerHTML = `<div style="color:#ff5252;text-align:center;padding:20px;font-size:0.88rem;line-height:1.6;">
+            ⚠️ Hay <strong>${prods.length} productos</strong> en oferta — máximo 8 para el flyer.<br>
+            <span style="font-size:0.78rem;color:rgba(255,255,255,0.6);">Desactivá algunos toggles de ofertas y volvé a intentar.</span>
+        </div>`;
+        return;
+    }
+
+    const canvas = await _dibujarFlyerOfertas(prods);
+    _flyerCanvasAdmin = canvas;
+    wrap.innerHTML = '';
+    wrap.appendChild(canvas);
+}
+
+async function _dibujarFlyerOfertas(prods) {
+    const W = 600;
+    const COLS = prods.length <= 2 ? 2 : prods.length <= 4 ? 2 : 3;
+    const ROWS = Math.ceil(prods.length / COLS);
+    const CELL_W = Math.floor((W - 32 - (COLS - 1) * 8) / COLS);
+    const CELL_H = 180;
+    const HEADER_H = 100, FOOTER_H = 56, PAD = 16;
+    const H = HEADER_H + ROWS * CELL_H + (ROWS - 1) * 8 + PAD + FOOTER_H;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+
+    // Fondo crema
+    ctx.fillStyle = '#f5f0e0'; ctx.fillRect(0, 0, W, H);
+
+    // Textura sutil — líneas horizontales muy leves
+    ctx.strokeStyle = 'rgba(180,160,100,0.08)'; ctx.lineWidth = 1;
+    for (let y = 0; y < H; y += 8) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+
+    // Header
+    ctx.fillStyle = '#2e1a0e';
+    ctx.font = 'bold 28px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('ALMACÉN COPIHUE', W / 2, 42);
+    ctx.fillStyle = '#b71c1c';
+    ctx.font = 'bold 18px sans-serif';
+    ctx.fillText('🏷️ OFERTAS DEL DÍA', W / 2, 68);
+    ctx.strokeStyle = '#c8b87a'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(PAD, 80); ctx.lineTo(W - PAD, 80); ctx.stroke();
+
+    // Cargar fotos y dibujar celdas
+    await Promise.all(prods.map((p, i) => new Promise(resolve => {
+        const col = i % COLS, row = Math.floor(i / COLS);
+        const cx = PAD + col * (CELL_W + 8);
+        const cy = HEADER_H + row * (CELL_H + 8);
+
+        // Fondo celda
+        ctx.fillStyle = 'white';
+        _rr(ctx, cx, cy, CELL_W, CELL_H, 12); ctx.fill();
+        ctx.strokeStyle = '#e0d5b0'; ctx.lineWidth = 1;
+        _rr(ctx, cx, cy, CELL_W, CELL_H, 12); ctx.stroke();
+
+        // Badge descuento
+        if (p.descPct > 0) {
+            ctx.fillStyle = '#b71c1c';
+            _rr(ctx, cx + CELL_W - 46, cy + 6, 40, 22, 6); ctx.fill();
+            ctx.fillStyle = 'white'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
+            ctx.fillText('-' + p.descPct + '%', cx + CELL_W - 26, cy + 21);
+        }
+
+        // Foto
+        const slug = p.nombre.toLowerCase()
+            .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').trim();
+        const img = new Image();
+        const fotoH = 100;
+
+        const drawRest = () => {
+            // Nombre corto
+            const nomCorto = p.nombre
+                .replace(/\b(\d+\s*GR|\d+\s*KG|\d+\s*ML|\d+\s*L|X\s*\d+|\d+\s*U)\b/gi, '')
+                .replace(/\s+/g, ' ').trim()
+                .split(' ').slice(0, 4).join(' ');
+
+            ctx.fillStyle = '#2e1a0e'; ctx.textAlign = 'center';
+            ctx.font = 'bold 12px sans-serif';
+            _wrapText(ctx, nomCorto, cx + CELL_W / 2, cy + fotoH + 18, CELL_W - 16, 15, 2);
+
+            // Precio antes tachado
+            if (p.precio !== p.precioOferta) {
+                ctx.fillStyle = '#aaa'; ctx.font = '11px sans-serif';
+                const pAntes = '$' + p.precio.toLocaleString('es-AR');
+                const pw = ctx.measureText(pAntes).width;
+                const px = cx + CELL_W / 2;
+                ctx.fillText(pAntes, px, cy + CELL_H - 36);
+                ctx.strokeStyle = '#aaa'; ctx.lineWidth = 1;
+                ctx.beginPath(); ctx.moveTo(px - pw / 2, cy + CELL_H - 39); ctx.lineTo(px + pw / 2, cy + CELL_H - 39); ctx.stroke();
+            }
+
+            // Precio oferta
+            ctx.fillStyle = '#b71c1c'; ctx.font = 'bold 20px sans-serif'; ctx.textAlign = 'center';
+            ctx.fillText('$' + p.precioOferta.toLocaleString('es-AR'), cx + CELL_W / 2, cy + CELL_H - 14);
+            resolve();
+        };
+
+        img.onload = () => {
+            ctx.save();
+            _rr(ctx, cx + 8, cy + 8, CELL_W - 16, fotoH - 4, 8);
+            ctx.clip();
+            ctx.drawImage(img, cx + 8, cy + 8, CELL_W - 16, fotoH - 4);
+            ctx.restore();
+            drawRest();
+        };
+        img.onerror = () => {
+            ctx.fillStyle = '#f0ebe0';
+            _rr(ctx, cx + 8, cy + 8, CELL_W - 16, fotoH - 4, 8); ctx.fill();
+            ctx.fillStyle = 'rgba(180,150,80,0.3)'; ctx.font = '28px sans-serif'; ctx.textAlign = 'center';
+            ctx.fillText('🛒', cx + CELL_W / 2, cy + 52);
+            drawRest();
+        };
+        img.src = 'imagenes-productos/' + slug + '.jpg';
+    })));
+
+    // Footer
+    const fy = H - FOOTER_H + 8;
+    ctx.strokeStyle = '#c8b87a'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(PAD, fy); ctx.lineTo(W - PAD, fy); ctx.stroke();
+    ctx.fillStyle = '#2e1a0e'; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('Copihue 457 · Bariloche', W / 2, fy + 22);
+    ctx.fillStyle = '#8a7040'; ctx.font = '11px sans-serif';
+    ctx.fillText('almacen-copihue.vercel.app', W / 2, fy + 40);
+
+    return canvas;
+}
+
+function _rr(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
+}
+
+function _wrapText(ctx, text, x, y, maxW, lineH, maxLines) {
+    const words = text.split(' ');
+    let line = '', lines = [];
+    for (const w of words) {
+        const test = line ? line + ' ' + w : w;
+        if (ctx.measureText(test).width > maxW && line) { lines.push(line); line = w; }
+        else line = test;
+    }
+    if (line) lines.push(line);
+    if (maxLines) lines = lines.slice(0, maxLines);
+    lines.forEach((l, i) => ctx.fillText(l, x, y + i * lineH));
+}
+
 async function abrirFlyerAdmin() {
+    _flyerModoActual = 'cervecero';
+    switchFlyerMode('cervecero'); // reset tabs visualmente
     mostrarToast('⏳ Cargando cervezas...', 'verde');
     try {
         const r = await fetch(GAS_URL_FLYER + '?action=getJuevesCervecero&t=' + Date.now(),
