@@ -101,7 +101,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v313</title>
+    <title>Copihue — POS v314</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -9542,26 +9542,40 @@ async function cargarHistorialRetiros() {
     if (!el) return;
     el.innerHTML = '<div style="text-align:center;color:#aaa;padding:12px;font-size:0.82rem;">⏳ Cargando...</div>';
     try {
-        const url = API_URL + '?action=getCajaEgresos&data=' + encodeURIComponent(JSON.stringify({limite:15})) + '&t=' + Date.now();
+        const url = API_URL + '?action=getCajaEgresos&data=' + encodeURIComponent(JSON.stringify({limite:200})) + '&t=' + Date.now();
         const data = await _apiFetchUrl('getCajaEgresos', url);
         if (!data.ok || !data.registros || data.registros.length === 0) {
             el.innerHTML = '<div style="text-align:center;color:#aaa;padding:12px;font-size:0.82rem;">Sin retiros registrados</div>';
             return;
         }
-        el.innerHTML = data.registros.map(m => `
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;
-                        padding:10px 0;border-bottom:1px solid #f0f0f0;gap:8px;">
-                <div style="flex:1;min-width:0;">
-                    <div style="font-weight:700;font-size:0.85rem;color:#222;">${m.motivo || '—'}</div>
-                    <div style="font-size:0.72rem;color:#888;margin-top:2px;">
-                        ${m.fecha || ''} ${m.hora ? m.hora.slice(0,5) + 'hs' : ''} · ${m.categoria || ''} · ${m.medio || 'EFECTIVO'}
-                        ${m.obs ? '<br><span style="color:#aaa;">📝 ' + m.obs + '</span>' : ''}
+        const porFecha = {};
+        data.registros.forEach(m => { (porFecha[m.fecha] = porFecha[m.fecha] || []).push(m); });
+        el.innerHTML = Object.keys(porFecha).sort().reverse().map(f => {
+            const items = porFecha[f];
+            const total = items.reduce((s, m) => s + (parseFloat(m.monto) || 0), 0);
+            return `<div style="margin-bottom:14px;">
+                <div style="font-size:0.7rem;font-weight:700;color:#37474f;text-transform:uppercase;
+                            padding:4px 0;border-bottom:2px solid #37474f;margin-bottom:6px;
+                            display:flex;justify-content:space-between;">
+                    <span>📅 ${f}</span>
+                    <span>−$${total.toLocaleString('es-AR')}</span>
+                </div>
+                ${items.map(m => `
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;
+                            padding:8px 0;border-bottom:1px solid #f0f0f0;gap:8px;">
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-weight:700;font-size:0.85rem;color:#222;">${m.motivo || '—'}</div>
+                        <div style="font-size:0.7rem;color:#888;margin-top:2px;">
+                            ${m.hora ? m.hora.slice(0,5) + 'hs' : ''} · ${m.categoria || ''} · ${m.medio || 'EFECTIVO'}
+                            ${m.obs ? '<br><span style="color:#aaa;">📝 ' + m.obs + '</span>' : ''}
+                        </div>
                     </div>
-                </div>
-                <div style="font-weight:900;font-size:0.95rem;color:#c62828;flex-shrink:0;">
-                    −$${parseFloat(m.monto||0).toLocaleString('es-AR')}
-                </div>
-            </div>`).join('');
+                    <div style="font-weight:900;font-size:0.95rem;color:#c62828;flex-shrink:0;">
+                        −$${parseFloat(m.monto||0).toLocaleString('es-AR')}
+                    </div>
+                </div>`).join('')}
+            </div>`;
+        }).join('');
     } catch(e) {
         el.innerHTML = '<div style="text-align:center;color:#e53935;padding:12px;font-size:0.82rem;">❌ No se pudo cargar</div>';
     }
