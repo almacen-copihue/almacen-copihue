@@ -101,7 +101,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v314</title>
+    <title>Copihue — POS v315</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -9542,40 +9542,98 @@ async function cargarHistorialRetiros() {
     if (!el) return;
     el.innerHTML = '<div style="text-align:center;color:#aaa;padding:12px;font-size:0.82rem;">⏳ Cargando...</div>';
     try {
-        const url = API_URL + '?action=getCajaEgresos&data=' + encodeURIComponent(JSON.stringify({limite:200})) + '&t=' + Date.now();
+        const hoy = new Date();
+        const primerDiaMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+        const fechaDesde = primerDiaMes.toISOString().split('T')[0];
+        const url = API_URL + '?action=getCajaEgresos&data=' + encodeURIComponent(JSON.stringify({limite:500})) + '&t=' + Date.now();
         const data = await _apiFetchUrl('getCajaEgresos', url);
-        if (!data.ok || !data.registros || data.registros.length === 0) {
-            el.innerHTML = '<div style="text-align:center;color:#aaa;padding:12px;font-size:0.82rem;">Sin retiros registrados</div>';
+        if (!data.ok || !data.registros || !data.registros.length) {
+            el.innerHTML = '<div style="text-align:center;color:#aaa;padding:20px;font-size:0.85rem;">Sin retiros registrados</div>';
             return;
         }
-        const porFecha = {};
-        data.registros.forEach(m => { (porFecha[m.fecha] = porFecha[m.fecha] || []).push(m); });
-        el.innerHTML = Object.keys(porFecha).sort().reverse().map(f => {
-            const items = porFecha[f];
-            const total = items.reduce((s, m) => s + (parseFloat(m.monto) || 0), 0);
-            return `<div style="margin-bottom:14px;">
-                <div style="font-size:0.7rem;font-weight:700;color:#37474f;text-transform:uppercase;
-                            padding:4px 0;border-bottom:2px solid #37474f;margin-bottom:6px;
-                            display:flex;justify-content:space-between;">
-                    <span>📅 ${f}</span>
-                    <span>−$${total.toLocaleString('es-AR')}</span>
-                </div>
-                ${items.map(m => `
-                <div style="display:flex;justify-content:space-between;align-items:flex-start;
-                            padding:8px 0;border-bottom:1px solid #f0f0f0;gap:8px;">
-                    <div style="flex:1;min-width:0;">
-                        <div style="font-weight:700;font-size:0.85rem;color:#222;">${m.motivo || '—'}</div>
-                        <div style="font-size:0.7rem;color:#888;margin-top:2px;">
-                            ${m.hora ? m.hora.slice(0,5) + 'hs' : ''} · ${m.categoria || ''} · ${m.medio || 'EFECTIVO'}
-                            ${m.obs ? '<br><span style="color:#aaa;">📝 ' + m.obs + '</span>' : ''}
-                        </div>
+
+        // Filtrar mes actual
+        const mesStr = `${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}`;
+        const delMes = data.registros.filter(r => r.fecha && r.fecha.startsWith(mesStr));
+
+        // Agrupar por semana del mes (1-5)
+        const semanas = {};
+        delMes.forEach(r => {
+            const d = new Date(r.fecha + 'T12:00:00');
+            const semana = Math.ceil(d.getDate() / 7);
+            const key = `Semana ${semana}`;
+            if (!semanas[key]) semanas[key] = { total: 0, dias: {} };
+            semanas[key].total += parseFloat(r.monto) || 0;
+            (semanas[key].dias[r.fecha] = semanas[key].dias[r.fecha] || []).push(r);
+        });
+
+        const totalMes = delMes.reduce((s, r) => s + (parseFloat(r.monto)||0), 0);
+        const maxSemana = Math.max(...Object.values(semanas).map(s => s.total), 1);
+        const nombreMes = hoy.toLocaleString('es-AR', { month: 'long', year: 'numeric' });
+
+        // Render
+        const keySemanas = Object.keys(semanas).sort();
+        el.innerHTML = `
+            <!-- Encabezado del mes -->
+            <div style="text-align:center;margin-bottom:14px;">
+                <div style="font-size:0.72rem;color:#888;text-transform:uppercase;letter-spacing:1px;">${nombreMes}</div>
+                <div style="font-size:1.6rem;font-weight:900;color:#c62828;">−$${totalMes.toLocaleString('es-AR')}</div>
+                <div style="font-size:0.7rem;color:#aaa;">${delMes.length} retiro${delMes.length !== 1 ? 's' : ''}</div>
+            </div>
+
+            <!-- Barras semanales -->
+            <div style="display:flex;align-items:flex-end;gap:6px;height:80px;margin-bottom:6px;padding:0 4px;">
+                ${keySemanas.map(k => {
+                    const pct = Math.round((semanas[k].total / maxSemana) * 100);
+                    return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;">
+                        <div style="font-size:0.58rem;color:#c62828;font-weight:700;">$${Math.round(semanas[k].total/1000)}k</div>
+                        <div style="width:100%;background:#c62828;border-radius:4px 4px 0 0;height:${Math.max(pct*0.65, 4)}px;"></div>
+                    </div>`;
+                }).join('')}
+            </div>
+            <div style="display:flex;gap:6px;padding:0 4px;margin-bottom:16px;border-top:2px solid #c62828;">
+                ${keySemanas.map(k => `
+                    <div style="flex:1;text-align:center;font-size:0.6rem;color:#888;padding-top:3px;">${k.replace('Semana ','S')}</div>
+                `).join('')}
+            </div>
+
+            <!-- Detalle por semana -->
+            ${keySemanas.map(k => {
+                const sem = semanas[k];
+                const diasOrdenados = Object.keys(sem.dias).sort().reverse();
+                return `<div style="margin-bottom:14px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;
+                                padding:5px 8px;background:#37474f;border-radius:8px;margin-bottom:6px;">
+                        <span style="font-size:0.75rem;font-weight:700;color:white;">📅 ${k}</span>
+                        <span style="font-size:0.75rem;font-weight:900;color:#ef9a9a;">−$${sem.total.toLocaleString('es-AR')}</span>
                     </div>
-                    <div style="font-weight:900;font-size:0.95rem;color:#c62828;flex-shrink:0;">
-                        −$${parseFloat(m.monto||0).toLocaleString('es-AR')}
-                    </div>
-                </div>`).join('')}
-            </div>`;
-        }).join('');
+                    ${diasOrdenados.map(fecha => {
+                        const items = sem.dias[fecha];
+                        const totalDia = items.reduce((s,r) => s+(parseFloat(r.monto)||0), 0);
+                        return `<div style="margin-bottom:8px;">
+                            <div style="font-size:0.68rem;color:#888;font-weight:600;padding:2px 4px;
+                                        display:flex;justify-content:space-between;border-bottom:1px solid #f0f0f0;margin-bottom:4px;">
+                                <span>${fecha}</span><span>−$${totalDia.toLocaleString('es-AR')}</span>
+                            </div>
+                            ${items.map(r => `
+                            <div style="display:flex;justify-content:space-between;align-items:flex-start;
+                                        padding:5px 4px;gap:8px;">
+                                <div style="flex:1;min-width:0;">
+                                    <div style="font-size:0.82rem;font-weight:600;color:#222;">${r.motivo || '—'}</div>
+                                    <div style="font-size:0.67rem;color:#aaa;">
+                                        ${r.hora ? r.hora.slice(0,5)+'hs' : ''} · ${r.categoria||''} · ${r.medio||'EFECTIVO'}
+                                        ${r.obs ? '· 📝 '+r.obs : ''}
+                                    </div>
+                                </div>
+                                <div style="font-weight:800;font-size:0.9rem;color:#c62828;white-space:nowrap;">
+                                    −$${parseFloat(r.monto||0).toLocaleString('es-AR')}
+                                </div>
+                            </div>`).join('')}
+                        </div>`;
+                    }).join('')}
+                </div>`;
+            }).join('')}
+        `;
     } catch(e) {
         el.innerHTML = '<div style="text-align:center;color:#e53935;padding:12px;font-size:0.82rem;">❌ No se pudo cargar</div>';
     }
