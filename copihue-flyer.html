@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Copihue Flyer v1</title>
+<title>Copihue Flyer v2</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Nunito:wght@400;700;900&display=swap');
 
@@ -259,7 +259,7 @@
     <h1>🖼 Copihue Flyer</h1>
     <span>Generador de flyers para redes</span>
   </div>
-  <span class="badge-version">v1</span>
+  <span class="badge-version">v2</span>
 </header>
 
 <div class="main">
@@ -279,8 +279,11 @@
         <button class="modo-btn" data-modo="especiales" onclick="seleccionarModo('especiales', this)">
           <span class="modo-emoji">⭐</span>Especiales
         </button>
+        <button class="modo-btn" data-modo="promos" onclick="seleccionarModo('promos', this)">
+          <span class="modo-emoji">🏷️</span>Promos Activas
+        </button>
         <button class="modo-btn" data-modo="ultimas" onclick="seleccionarModo('ultimas', this)">
-          <span class="modo-emoji">🏷️</span>Últimas Unidades
+          <span class="modo-emoji">🔖</span>Últimas Unidades
         </button>
         <button class="modo-btn" data-modo="cervecero" onclick="seleccionarModo('cervecero', this)" style="grid-column:span 2;">
           <span class="modo-emoji">🍺</span>Jueves Cervecero
@@ -420,67 +423,70 @@ function poblarCandidatos() {
   _seleccionados.clear();
 
   if (_modo === 'cervecero') {
+    // precioPromo = precio con descuento, precio = precio original
     _candidatos = (cervecero.productos || []).map(p => ({
-      id: p.id || p.nombre,
-      nombre: p.nombre,
-      precio: p.precio,
-      precioOferta: p.precioOferta || p.precio,
-      descPct: p.descuento || 0,
-      esManual: false
+      id: p.id || p.nombre, nombre: p.nombre,
+      precio: p.precio || 0,
+      precioOferta: (p.precioPromo > 0) ? p.precioPromo : p.precio,
+      descPct: (p.precio > 0 && p.precioPromo > 0) ? Math.round((1 - p.precioPromo/p.precio)*100) : 0
     }));
-    // Auto-seleccionar todos (hasta 8)
     _candidatos.slice(0, 8).forEach(p => _seleccionados.add(p.id));
 
   } else if (_modo === 'relampago') {
-    const pool = ofertas.relampagoActivo || [];
-    _candidatos = pool.map(p => ({
-      id: p.id, nombre: p.nombre || p.name,
-      precio: p.precio || p.price,
-      precioOferta: p.precioOferta || Math.round((p.precio || p.price) * (1 - (p.relampago || 10)/100)),
-      descPct: p.relampago || p.descuento || 10
-    }));
+    _candidatos = (ofertas.relampagoActivo || []).map(p => {
+      const precio = p.precio || p.price || 0;
+      const descPct = p.relampago || p.descuento || 10;
+      return { id: p.id, nombre: p.nombre || p.name, precio, precioOferta: Math.round(precio*(1-descPct/100)), descPct };
+    });
     _candidatos.slice(0, 6).forEach(p => _seleccionados.add(p.id));
 
   } else if (_modo === 'destacadas') {
-    _candidatos = (ofertas.destacadasActivas || []).map(p => ({
-      id: p.id, nombre: p.nombre || p.name,
-      precio: p.precio || p.price,
-      precioOferta: Math.round((p.precio || p.price) * 0.9),
-      descPct: 10
-    }));
+    _candidatos = (ofertas.destacadasActivas || []).map(p => {
+      const precio = p.precio || p.price || 0;
+      return { id: p.id, nombre: p.nombre || p.name, precio, precioOferta: Math.round(precio*0.9), descPct: 10 };
+    });
     _candidatos.slice(0, 6).forEach(p => _seleccionados.add(p.id));
 
   } else if (_modo === 'especiales') {
-    _candidatos = (ofertas.especialesActivas || []).map(p => ({
+    _candidatos = (ofertas.especialesActivas || []).map(p => {
+      const precio = p.precio || p.price || 0;
+      return { id: p.id, nombre: p.nombre || p.name, precio, precioOferta: Math.round(precio*0.9), descPct: 10 };
+    });
+    _candidatos.slice(0, 6).forEach(p => _seleccionados.add(p.id));
+
+  } else if (_modo === 'promos') {
+    // Categoría PROMOS con precio rebajado: normal = precio original, price = precio oferta
+    const todos = ofertas.productos || ofertas.relampagoActivo || [];
+    _candidatos = todos.filter(p =>
+      (p.category || p.categoria || '').toUpperCase() === 'PROMOS' &&
+      p.normal > p.price && (p.stock || p.stockNumber || 0) > 0
+    ).map(p => ({
       id: p.id, nombre: p.nombre || p.name,
-      precio: p.precio || p.price,
-      precioOferta: Math.round((p.precio || p.price) * 0.9),
-      descPct: 10
+      precio: p.normal, precioOferta: p.price,
+      descPct: Math.round((1 - p.price/p.normal)*100)
     }));
     _candidatos.slice(0, 6).forEach(p => _seleccionados.add(p.id));
 
   } else if (_modo === 'ultimas') {
-    _candidatos = (ofertas.ultimasSeleccionadas || []).map(p => ({
-      id: p.id, nombre: p.nombre || p.name,
-      precio: p.precio || p.price,
-      precioOferta: p.precioOferta || Math.round((p.precio || p.price) * 0.9),
-      descPct: p.relampago || 10,
-      diasParaVencer: p.diasParaVencer
-    }));
+    _candidatos = (ofertas.ultimasSeleccionadas || []).map(p => {
+      const precio = p.precio || p.price || p.normal || 0;
+      const descPct = p.relampago || 10;
+      return { id: p.id, nombre: p.nombre || p.name, precio, precioOferta: Math.round(precio*(1-descPct/100)), descPct, diasParaVencer: p.diasParaVencer };
+    });
     _candidatos.slice(0, 6).forEach(p => _seleccionados.add(p.id));
 
   } else if (_modo === 'manual') {
-    // Mezcla de todos
     const vistos = new Set();
-    const agregar = (arr, descPct) => (arr || []).forEach(p => {
-      if (vistos.has(p.id)) return; vistos.add(p.id);
-      _candidatos.push({ id: p.id, nombre: p.nombre || p.name, precio: p.precio || p.price,
-        precioOferta: Math.round((p.precio || p.price) * (1 - descPct/100)), descPct });
+    const agregar = (arr, calcOferta) => (arr || []).forEach(p => {
+      if (!p || vistos.has(p.id)) return; vistos.add(p.id);
+      const precio = p.precio || p.price || 0;
+      const { precioOferta, descPct } = calcOferta(p, precio);
+      _candidatos.push({ id: p.id, nombre: p.nombre || p.name, precio, precioOferta, descPct });
     });
-    agregar(ofertas.relampagoActivo, 10);
-    agregar(ofertas.destacadasActivas, 10);
-    agregar(ofertas.especialesActivas, 10);
-    agregar(ofertas.ultimasSeleccionadas, 10);
+    agregar(ofertas.relampagoActivo,      (p,pr) => ({ precioOferta: Math.round(pr*(1-(p.relampago||10)/100)), descPct: p.relampago||10 }));
+    agregar(ofertas.destacadasActivas,    (_,pr) => ({ precioOferta: Math.round(pr*0.9), descPct: 10 }));
+    agregar(ofertas.especialesActivas,    (_,pr) => ({ precioOferta: Math.round(pr*0.9), descPct: 10 }));
+    agregar(ofertas.ultimasSeleccionadas, (p,pr) => ({ precioOferta: Math.round(pr*(1-(p.relampago||10)/100)), descPct: p.relampago||10 }));
   }
 
   renderListaCandidatos();
@@ -560,7 +566,8 @@ const MODO_HEADERS = {
   relampago:  { titulo: '⚡ OFERTA RELÁMPAGO', sub: 'Solo por tiempo limitado' },
   destacadas: { titulo: '🔥 DESTACADAS', sub: 'Los favoritos de nuestros clientes' },
   especiales: { titulo: '⭐ ESPECIALES', sub: 'Precios especiales seleccionados' },
-  ultimas:    { titulo: '🏷️ ÚLTIMAS UNIDADES', sub: '¡Quedan pocas! Aprovechá antes que se acaben' },
+  promos:     { titulo: '🏷️ PROMOS ACTIVAS', sub: 'Productos con precio rebajado' },
+  ultimas:    { titulo: '🔖 ÚLTIMAS UNIDADES', sub: '¡Quedan pocas! Aprovechá antes que se acaben' },
   cervecero:  { titulo: '🍺 JUEVES CERVECERO', sub: 'Ofertas en cervezas — solo esta noche 🕙' },
   manual:     { titulo: '🏷️ OFERTAS DEL DÍA', sub: 'Almacén Copihue' }
 };
@@ -569,13 +576,13 @@ const MODO_HEADERS = {
 async function dibujarGrid(prods, fondoKey) {
   const P = PALETAS[fondoKey];
   const W = 600;
-  const COLS = prods.length <= 2 ? 2 : prods.length <= 4 ? 2 : 3;
+  const COLS = prods.length === 1 ? 1 : prods.length <= 4 ? 2 : 3;
   const ROWS = Math.ceil(prods.length / COLS);
-  const PAD = 16, GAP = 8;
+  const PAD = 14, GAP = 8;
   const CELL_W = Math.floor((W - PAD*2 - GAP*(COLS-1)) / COLS);
-  const FOTO_H = 110, TEXTO_H = 70;
+  const FOTO_H = 90, TEXTO_H = 68;
   const CELL_H = FOTO_H + TEXTO_H;
-  const HEADER_H = 90, FOOTER_H = 52;
+  const HEADER_H = 84, FOOTER_H = 48;
   const H = HEADER_H + ROWS * CELL_H + (ROWS-1) * GAP + PAD + FOOTER_H;
 
   const cv = document.createElement('canvas');
