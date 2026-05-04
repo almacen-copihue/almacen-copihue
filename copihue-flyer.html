@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Copihue Flyer v2</title>
+<title>Copihue Flyer v4</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Nunito:wght@400;700;900&display=swap');
 
@@ -24,14 +24,14 @@
 
   body {
     font-family: 'Nunito', sans-serif;
-    background: #111;
+    background: #0a0a0a;
     color: white;
     min-height: 100vh;
     display: flex;
     flex-direction: column;
+    align-items: stretch;
   }
 
-  /* HEADER */
   .app-header {
     background: linear-gradient(135deg, var(--rojo-osc), var(--rojo));
     padding: 14px 20px;
@@ -40,6 +40,7 @@
     justify-content: space-between;
     border-bottom: 3px solid var(--dorado);
     position: sticky; top: 0; z-index: 100;
+    width: 100%;
   }
   .app-header h1 {
     font-family: 'Bebas Neue', sans-serif;
@@ -69,6 +70,13 @@
     flex: 1;
     gap: 0;
     max-height: calc(100vh - 62px);
+    max-width: 1100px;
+    margin: 0 auto;
+    width: 100%;
+  }
+
+  body {
+    align-items: stretch;
   }
 
   /* PANEL IZQUIERDO — controles */
@@ -196,10 +204,25 @@
   }
   .preview-placeholder p { font-size: 0.85rem; color: rgba(255,255,255,0.3); }
 
+  .panel-preview {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 20px 16px;
+    overflow-y: auto;
+    background: #111;
+    gap: 14px;
+    min-width: 0;
+  }
+
   #canvasPreview {
     border-radius: 12px;
     box-shadow: 0 8px 40px rgba(0,0,0,0.6);
     max-width: 100%;
+    width: auto;
+    height: auto;
     display: none;
   }
 
@@ -259,7 +282,7 @@
     <h1>🖼 Copihue Flyer</h1>
     <span>Generador de flyers para redes</span>
   </div>
-  <span class="badge-version">v2</span>
+  <span class="badge-version">v4</span>
 </header>
 
 <div class="main">
@@ -404,11 +427,12 @@ function seleccionarModo(modo, btn) {
 async function cargarDatos() {
   loading(true);
   try {
-    const [ofertas, cervecero] = await Promise.all([
+    const [ofertas, cervecero, prodResp] = await Promise.all([
       apiFetch('getOfertas'),
-      apiFetch('getJuevesCervecero')
+      apiFetch('getJuevesCervecero'),
+      apiFetch('getProductos')
     ]);
-    _datos = { ofertas, cervecero };
+    _datos = { ofertas, cervecero, productos: prodResp.productos || [] };
     poblarCandidatos();
   } catch(e) {
     alert('❌ Error cargando datos: ' + e.message);
@@ -418,75 +442,78 @@ async function cargarDatos() {
 
 function poblarCandidatos() {
   if (!_datos) return;
-  const { ofertas, cervecero } = _datos;
+  const { ofertas, cervecero, productos } = _datos;
+  const max = parseInt(document.getElementById('cfgMax').value) || 6;
   _candidatos = [];
   _seleccionados.clear();
 
   if (_modo === 'cervecero') {
-    // precioPromo = precio con descuento, precio = precio original
     _candidatos = (cervecero.productos || []).map(p => ({
       id: p.id || p.nombre, nombre: p.nombre,
       precio: p.precio || 0,
       precioOferta: (p.precioPromo > 0) ? p.precioPromo : p.precio,
       descPct: (p.precio > 0 && p.precioPromo > 0) ? Math.round((1 - p.precioPromo/p.precio)*100) : 0
     }));
-    _candidatos.slice(0, 8).forEach(p => _seleccionados.add(p.id));
+    _candidatos.slice(0, max).forEach(p => _seleccionados.add(p.id));
 
   } else if (_modo === 'relampago') {
+    // Campos reales: name, price, relampago (porcentaje)
     _candidatos = (ofertas.relampagoActivo || []).map(p => {
-      const precio = p.precio || p.price || 0;
-      const descPct = p.relampago || p.descuento || 10;
-      return { id: p.id, nombre: p.nombre || p.name, precio, precioOferta: Math.round(precio*(1-descPct/100)), descPct };
+      const precio = p.price || 0;
+      const descPct = p.relampago || 10;
+      return { id: p.id, nombre: p.name, precio, precioOferta: Math.round(precio*(1-descPct/100)), descPct };
     });
-    _candidatos.slice(0, 6).forEach(p => _seleccionados.add(p.id));
+    _candidatos.slice(0, max).forEach(p => _seleccionados.add(p.id));
 
   } else if (_modo === 'destacadas') {
-    _candidatos = (ofertas.destacadasActivas || []).map(p => {
-      const precio = p.precio || p.price || 0;
-      return { id: p.id, nombre: p.nombre || p.name, precio, precioOferta: Math.round(precio*0.9), descPct: 10 };
-    });
-    _candidatos.slice(0, 6).forEach(p => _seleccionados.add(p.id));
+    _candidatos = (ofertas.destacadasActivas || []).map(p => ({
+      id: p.id, nombre: p.name, precio: p.price || 0,
+      precioOferta: Math.round((p.price||0)*0.9), descPct: 10
+    }));
+    _candidatos.slice(0, max).forEach(p => _seleccionados.add(p.id));
 
   } else if (_modo === 'especiales') {
-    _candidatos = (ofertas.especialesActivas || []).map(p => {
-      const precio = p.precio || p.price || 0;
-      return { id: p.id, nombre: p.nombre || p.name, precio, precioOferta: Math.round(precio*0.9), descPct: 10 };
-    });
-    _candidatos.slice(0, 6).forEach(p => _seleccionados.add(p.id));
+    _candidatos = (ofertas.especialesActivas || []).map(p => ({
+      id: p.id, nombre: p.name, precio: p.price || 0,
+      precioOferta: Math.round((p.price||0)*0.9), descPct: 10
+    }));
+    _candidatos.slice(0, max).forEach(p => _seleccionados.add(p.id));
 
   } else if (_modo === 'promos') {
-    // Categoría PROMOS con precio rebajado: normal = precio original, price = precio oferta
-    const todos = ofertas.productos || ofertas.relampagoActivo || [];
-    _candidatos = todos.filter(p =>
-      (p.category || p.categoria || '').toUpperCase() === 'PROMOS' &&
-      p.normal > p.price && (p.stock || p.stockNumber || 0) > 0
+    // Necesita getProductos — productos con category=PROMOS y normal > price
+    _candidatos = (productos || []).filter(p =>
+      (p.category || '').toUpperCase() === 'PROMOS' &&
+      p.normal > p.price && p.stock > 0
     ).map(p => ({
-      id: p.id, nombre: p.nombre || p.name,
+      id: p.id, nombre: p.name,
       precio: p.normal, precioOferta: p.price,
       descPct: Math.round((1 - p.price/p.normal)*100)
     }));
-    _candidatos.slice(0, 6).forEach(p => _seleccionados.add(p.id));
+    _candidatos.slice(0, max).forEach(p => _seleccionados.add(p.id));
 
   } else if (_modo === 'ultimas') {
     _candidatos = (ofertas.ultimasSeleccionadas || []).map(p => {
-      const precio = p.precio || p.price || p.normal || 0;
+      const precio = p.price || p.precio || 0;
       const descPct = p.relampago || 10;
-      return { id: p.id, nombre: p.nombre || p.name, precio, precioOferta: Math.round(precio*(1-descPct/100)), descPct, diasParaVencer: p.diasParaVencer };
+      return { id: p.id, nombre: p.name || p.nombre, precio,
+        precioOferta: Math.round(precio*(1-descPct/100)), descPct,
+        diasParaVencer: p.diasParaVencer };
     });
-    _candidatos.slice(0, 6).forEach(p => _seleccionados.add(p.id));
+    _candidatos.slice(0, max).forEach(p => _seleccionados.add(p.id));
 
   } else if (_modo === 'manual') {
     const vistos = new Set();
     const agregar = (arr, calcOferta) => (arr || []).forEach(p => {
       if (!p || vistos.has(p.id)) return; vistos.add(p.id);
-      const precio = p.precio || p.price || 0;
+      const precio = p.price || p.precio || 0;
       const { precioOferta, descPct } = calcOferta(p, precio);
-      _candidatos.push({ id: p.id, nombre: p.nombre || p.name, precio, precioOferta, descPct });
+      _candidatos.push({ id: p.id, nombre: p.name || p.nombre, precio, precioOferta, descPct });
     });
     agregar(ofertas.relampagoActivo,      (p,pr) => ({ precioOferta: Math.round(pr*(1-(p.relampago||10)/100)), descPct: p.relampago||10 }));
     agregar(ofertas.destacadasActivas,    (_,pr) => ({ precioOferta: Math.round(pr*0.9), descPct: 10 }));
     agregar(ofertas.especialesActivas,    (_,pr) => ({ precioOferta: Math.round(pr*0.9), descPct: 10 }));
     agregar(ofertas.ultimasSeleccionadas, (p,pr) => ({ precioOferta: Math.round(pr*(1-(p.relampago||10)/100)), descPct: p.relampago||10 }));
+    _candidatos.slice(0, max).forEach(p => _seleccionados.add(p.id));
   }
 
   renderListaCandidatos();
@@ -531,9 +558,10 @@ async function generarFlyer() {
   if (!_datos) { await cargarDatos(); }
   if (!_datos) return;
 
+  const max = parseInt(document.getElementById('cfgMax').value) || 6;
   const prods = _candidatos.filter(p => _seleccionados.has(p.id) || _seleccionados.has(Number(p.id)));
   if (!prods.length) { alert('Seleccioná al menos un producto'); return; }
-  if (prods.length > 8) { alert('Máximo 8 productos'); return; }
+  if (prods.length > 8) { alert('Máximo 8 productos. Deseleccioná algunos.'); return; }
 
   const formato = document.getElementById('cfgFormato').value;
   const fondo   = document.getElementById('cfgFondo').value;
@@ -650,7 +678,15 @@ async function dibujarGrid(prods, fondoKey) {
     const img = new Image();
     img.onload = () => {
       ctx.save(); rr(ctx, cx+8, cy+8, CELL_W-16, FOTO_H-8, 8); ctx.clip();
-      ctx.drawImage(img, cx+8, cy+8, CELL_W-16, FOTO_H-8); ctx.restore();
+      // Contain: mantener aspecto, centrar en el área
+      const iw = img.naturalWidth || img.width;
+      const ih = img.naturalHeight || img.height;
+      const fw = CELL_W-16, fh = FOTO_H-8;
+      const scale = Math.min(fw/iw, fh/ih);
+      const dx = cx+8 + (fw - iw*scale)/2;
+      const dy = cy+8 + (fh - ih*scale)/2;
+      ctx.drawImage(img, dx, dy, iw*scale, ih*scale);
+      ctx.restore();
       dibujarTexto();
     };
     img.onerror = () => {
@@ -731,7 +767,13 @@ async function dibujarLista(prods, fondoKey) {
     const img = new Image();
     img.onload = () => {
       ctx.save(); rr(ctx, 12, y+12, FOTO, FOTO, 8); ctx.clip();
-      ctx.drawImage(img, 12, y+12, FOTO, FOTO); ctx.restore();
+      const iw = img.naturalWidth || img.width;
+      const ih = img.naturalHeight || img.height;
+      const scale = Math.min(FOTO/iw, FOTO/ih);
+      const dx = 12 + (FOTO - iw*scale)/2;
+      const dy = y+12 + (FOTO - ih*scale)/2;
+      ctx.drawImage(img, dx, dy, iw*scale, ih*scale);
+      ctx.restore();
       dibujarTexto();
     };
     img.onerror = () => {
