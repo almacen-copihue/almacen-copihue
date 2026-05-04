@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Copihue Flyer v4</title>
+<title>Copihue Flyer v6</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Nunito:wght@400;700;900&display=swap');
 
@@ -282,7 +282,7 @@
     <h1>🖼 Copihue Flyer</h1>
     <span>Generador de flyers para redes</span>
   </div>
-  <span class="badge-version">v4</span>
+  <span class="badge-version">v6</span>
 </header>
 
 <div class="main">
@@ -322,8 +322,11 @@
       <div class="config-row">
         <label>Formato</label>
         <select id="cfgFormato">
-          <option value="grid">Grid (Instagram)</option>
-          <option value="lista">Lista (WhatsApp)</option>
+          <option value="grid">🔲 Grid (Instagram feed)</option>
+          <option value="cuadrado">⬛ Cuadrado 1:1 (Instagram)</option>
+          <option value="story">📱 Story 9:16 (IG/WA)</option>
+          <option value="banner">📺 Banner (Facebook)</option>
+          <option value="lista">📋 Lista (WhatsApp)</option>
         </select>
       </div>
       <div class="config-row" style="margin-top:8px;">
@@ -568,13 +571,17 @@ async function generarFlyer() {
 
   loading(true);
   try {
-    _canvas = formato === 'lista'
-      ? await dibujarLista(prods, fondo)
-      : await dibujarGrid(prods, fondo);
+    if (formato === 'lista')     _canvas = await dibujarLista(prods, fondo);
+    else if (formato === 'story')    _canvas = await dibujarStory(prods, fondo);
+    else if (formato === 'cuadrado') _canvas = await dibujarCuadrado(prods, fondo);
+    else if (formato === 'banner')   _canvas = await dibujarBanner(prods, fondo);
+    else                             _canvas = await dibujarGrid(prods, fondo);
 
     const cv = document.getElementById('canvasPreview');
     cv.width  = _canvas.width;
     cv.height = _canvas.height;
+    cv.style.width  = (_canvas.width / S) + 'px';
+    cv.style.height = (_canvas.height / S) + 'px';
     cv.getContext('2d').drawImage(_canvas, 0, 0);
     cv.style.display = 'block';
     document.getElementById('placeholder').style.display = 'none';
@@ -589,6 +596,264 @@ const PALETAS = {
   negro: { bg: '#111111', bgCard: '#1e1e1e', acento: '#f9a825', texto: '#ffffff', subtexto: '#aaaaaa', borde: '#333333', linea: '#444444', footer: '#1a1a1a' },
   rojo:  { bg: '#8e0000', bgCard: '#c62828', acento: '#f9a825', texto: '#ffffff', subtexto: 'rgba(255,255,255,0.7)', borde: 'rgba(255,255,255,0.2)', linea: '#f9a825', footer: '#6d0000' }
 };
+
+// ─── HiDPI: escala 2× para máxima calidad ────────────────────────────────────
+const S = 2; // multiplicador — canvas interno al doble, se muestra al tamaño original
+
+function crearCanvas(w, h) {
+  const cv = document.createElement('canvas');
+  cv.width  = w * S;
+  cv.height = h * S;
+  cv.style.width  = w + 'px';
+  cv.style.height = h + 'px';
+  const ctx = cv.getContext('2d');
+  ctx.scale(S, S);
+  return { cv, ctx };
+}
+async function dibujarStory(prods, fondoKey) {
+  const P = PALETAS[fondoKey];
+  const W = 540, H = 960;
+  const { cv, ctx } = crearCanvas(W, H);
+  const info = MODO_HEADERS[_modo] || MODO_HEADERS.manual;
+
+  // Fondo con gradiente
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  if (fondoKey === 'crema') { grad.addColorStop(0,'#f5f0e0'); grad.addColorStop(1,'#ede5cc'); }
+  else if (fondoKey === 'rojo') { grad.addColorStop(0,'#8e0000'); grad.addColorStop(1,'#5a0000'); }
+  else { grad.addColorStop(0,'#1a1a1a'); grad.addColorStop(1,'#0a0a0a'); }
+  ctx.fillStyle = grad; ctx.fillRect(0,0,W,H);
+
+  // Franja top
+  ctx.fillStyle = P.acento; ctx.fillRect(0,0,W,6);
+
+  // Logo área
+  ctx.fillStyle = P.acento; ctx.font = 'bold 22px Nunito,sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('ALMACÉN COPIHUE', W/2, 50);
+  ctx.strokeStyle = P.linea; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(40,62); ctx.lineTo(W-40,62); ctx.stroke();
+
+  // Header oferta
+  ctx.fillStyle = P.acento; ctx.font = 'bold 38px Nunito,sans-serif';
+  ctx.fillText(info.titulo, W/2, 108);
+  ctx.fillStyle = P.texto; ctx.font = 'bold 15px Nunito,sans-serif';
+  ctx.fillText(info.sub, W/2, 132);
+
+  // Grid de productos — máx 4 en story
+  const maxStory = Math.min(prods.length, 4);
+  const prodStory = prods.slice(0, maxStory);
+  const COLS = maxStory <= 2 ? 1 : 2;
+  const ROWS = Math.ceil(maxStory / COLS);
+  const PAD = 20, GAP = 10;
+  const CELL_W = Math.floor((W - PAD*2 - GAP*(COLS-1)) / COLS);
+  const FOTO_H = 130, CELL_H = FOTO_H + 72;
+  const startY = 155;
+
+  await Promise.all(prodStory.map((p, i) => new Promise(resolve => {
+    const col = i % COLS, row = Math.floor(i / COLS);
+    const cx = PAD + col*(CELL_W+GAP);
+    const cy = startY + row*(CELL_H+GAP);
+
+    ctx.fillStyle = P.bgCard; rr(ctx,cx,cy,CELL_W,CELL_H,14); ctx.fill();
+    if (p.descPct > 0) {
+      ctx.fillStyle = P.acento; rr(ctx,cx+CELL_W-50,cy+8,44,24,6); ctx.fill();
+      ctx.fillStyle = fondoKey==='crema'?'white':'#111'; ctx.font='bold 12px Nunito,sans-serif'; ctx.textAlign='center';
+      ctx.fillText('-'+p.descPct+'%', cx+CELL_W-28, cy+24);
+    }
+    const drawText = () => {
+      ctx.fillStyle = P.texto; ctx.textAlign='center'; ctx.font='bold 13px Nunito,sans-serif';
+      wrapText(ctx, nombreCorto(p.nombre,3), cx+CELL_W/2, cy+FOTO_H+18, CELL_W-14, 16, 2);
+      if (p.precio !== p.precioOferta) {
+        ctx.fillStyle=P.subtexto; ctx.font='11px Nunito,sans-serif';
+        const t='$'+fmt(p.precio), tw=ctx.measureText(t).width, px=cx+CELL_W/2;
+        ctx.fillText(t,px,cy+FOTO_H+42);
+        ctx.strokeStyle=P.subtexto; ctx.lineWidth=1;
+        ctx.beginPath(); ctx.moveTo(px-tw/2,cy+FOTO_H+39); ctx.lineTo(px+tw/2,cy+FOTO_H+39); ctx.stroke();
+      }
+      ctx.fillStyle=P.acento; ctx.font='bold 20px Nunito,sans-serif';
+      ctx.fillText('$'+fmt(p.precioOferta), cx+CELL_W/2, cy+CELL_H-10); resolve();
+    };
+    const img = new Image();
+    img.onload = () => {
+      ctx.save(); rr(ctx,cx+8,cy+8,CELL_W-16,FOTO_H-8,10); ctx.clip();
+      const iw=img.naturalWidth||img.width, ih=img.naturalHeight||img.height;
+      const sc=Math.min((CELL_W-16)/iw,(FOTO_H-8)/ih);
+      ctx.drawImage(img, cx+8+(CELL_W-16-iw*sc)/2, cy+8+(FOTO_H-8-ih*sc)/2, iw*sc, ih*sc);
+      ctx.restore(); drawText();
+    };
+    img.onerror = () => {
+      ctx.fillStyle=fondoKey==='crema'?'#f0ebe0':'#222'; rr(ctx,cx+8,cy+8,CELL_W-16,FOTO_H-8,10); ctx.fill();
+      ctx.font='28px sans-serif'; ctx.textAlign='center'; ctx.fillText('🛒',cx+CELL_W/2,cy+FOTO_H/2+14); drawText();
+    };
+    img.src = 'imagenes-productos/'+slug(p.nombre)+'.jpg';
+  })));
+
+  if (prods.length > 4) {
+    ctx.fillStyle = P.subtexto; ctx.font='bold 13px Nunito,sans-serif'; ctx.textAlign='center';
+    ctx.fillText(`+ ${prods.length-4} productos más`, W/2, startY+ROWS*(CELL_H+GAP)+20);
+  }
+
+  // Footer
+  const fy = H - 80;
+  ctx.strokeStyle = P.linea; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(40,fy); ctx.lineTo(W-40,fy); ctx.stroke();
+  ctx.fillStyle=P.texto; ctx.font='bold 14px Nunito,sans-serif'; ctx.textAlign='center';
+  ctx.fillText('Almacén Copihue · Copihue 457', W/2, fy+24);
+  ctx.fillStyle=P.subtexto; ctx.font='12px Nunito,sans-serif';
+  ctx.fillText('almacen-copihue.vercel.app', W/2, fy+44);
+  ctx.fillStyle=P.acento; ctx.fillRect(0,H-6,W,6);
+  return cv;
+}
+
+// ─── CUADRADO 1:1 ────────────────────────────────────────────────────────────
+async function dibujarCuadrado(prods, fondoKey) {
+  const P = PALETAS[fondoKey];
+  const W = 600, H = 600;
+  const { cv, ctx } = crearCanvas(W, H);
+  const info = MODO_HEADERS[_modo] || MODO_HEADERS.manual;
+
+  ctx.fillStyle=P.bg; ctx.fillRect(0,0,W,H);
+
+  // Header compacto
+  ctx.fillStyle=P.acento; ctx.fillRect(0,0,W,4);
+  ctx.fillStyle=P.acento; ctx.font='bold 28px Nunito,sans-serif'; ctx.textAlign='center';
+  ctx.fillText(info.titulo, W/2, 46);
+  ctx.fillStyle=P.texto; ctx.font='13px Nunito,sans-serif';
+  ctx.fillText(info.sub, W/2, 66);
+  ctx.strokeStyle=P.linea; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(20,76); ctx.lineTo(W-20,76); ctx.stroke();
+
+  // Grid adaptado al espacio cuadrado
+  const maxC = Math.min(prods.length, 6);
+  const prodC = prods.slice(0,maxC);
+  const COLS = maxC<=2?maxC:maxC<=4?2:3;
+  const ROWS = Math.ceil(maxC/COLS);
+  const PAD=12, GAP=6;
+  const CELL_W=Math.floor((W-PAD*2-GAP*(COLS-1))/COLS);
+  const availH = H - 84 - 52; // header + footer
+  const CELL_H = Math.floor((availH - GAP*(ROWS-1))/ROWS);
+  const FOTO_H = Math.floor(CELL_H*0.55);
+
+  await Promise.all(prodC.map((p,i) => new Promise(resolve => {
+    const col=i%COLS, row=Math.floor(i/COLS);
+    const cx=PAD+col*(CELL_W+GAP), cy=84+row*(CELL_H+GAP);
+    ctx.fillStyle=P.bgCard; rr(ctx,cx,cy,CELL_W,CELL_H,10); ctx.fill();
+    ctx.strokeStyle=P.borde; ctx.lineWidth=1; rr(ctx,cx,cy,CELL_W,CELL_H,10); ctx.stroke();
+    if (p.descPct>0) {
+      ctx.fillStyle=P.acento; rr(ctx,cx+CELL_W-42,cy+4,38,20,5); ctx.fill();
+      ctx.fillStyle=fondoKey==='crema'?'white':'#111'; ctx.font='bold 10px Nunito,sans-serif'; ctx.textAlign='center';
+      ctx.fillText('-'+p.descPct+'%',cx+CELL_W-23,cy+17);
+    }
+    const drawText = () => {
+      ctx.fillStyle=P.texto; ctx.textAlign='center'; ctx.font='bold 11px Nunito,sans-serif';
+      wrapText(ctx,nombreCorto(p.nombre,3),cx+CELL_W/2,cy+FOTO_H+14,CELL_W-10,13,2);
+      if (p.precio!==p.precioOferta){
+        ctx.fillStyle=P.subtexto; ctx.font='10px Nunito,sans-serif';
+        const t='$'+fmt(p.precio),tw=ctx.measureText(t).width,px=cx+CELL_W/2;
+        ctx.fillText(t,px,cy+FOTO_H+34);
+        ctx.strokeStyle=P.subtexto; ctx.lineWidth=0.8;
+        ctx.beginPath(); ctx.moveTo(px-tw/2,cy+FOTO_H+31); ctx.lineTo(px+tw/2,cy+FOTO_H+31); ctx.stroke();
+      }
+      ctx.fillStyle=P.acento; ctx.font='bold 16px Nunito,sans-serif';
+      ctx.fillText('$'+fmt(p.precioOferta),cx+CELL_W/2,cy+CELL_H-8); resolve();
+    };
+    const img=new Image();
+    img.onload=()=>{
+      ctx.save(); rr(ctx,cx+6,cy+6,CELL_W-12,FOTO_H-4,8); ctx.clip();
+      const iw=img.naturalWidth||img.width,ih=img.naturalHeight||img.height;
+      const sc=Math.min((CELL_W-12)/iw,(FOTO_H-4)/ih);
+      ctx.drawImage(img,cx+6+(CELL_W-12-iw*sc)/2,cy+6+(FOTO_H-4-ih*sc)/2,iw*sc,ih*sc);
+      ctx.restore(); drawText();
+    };
+    img.onerror=()=>{ ctx.fillStyle=fondoKey==='crema'?'#f0ebe0':'#222'; rr(ctx,cx+6,cy+6,CELL_W-12,FOTO_H-4,8); ctx.fill(); ctx.font='22px sans-serif'; ctx.textAlign='center'; ctx.fillText('🛒',cx+CELL_W/2,cy+FOTO_H/2+12); drawText(); };
+    img.src='imagenes-productos/'+slug(p.nombre)+'.jpg';
+  })));
+
+  // Footer
+  ctx.strokeStyle=P.linea; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(20,H-48); ctx.lineTo(W-20,H-48); ctx.stroke();
+  ctx.fillStyle=P.texto; ctx.font='bold 13px Nunito,sans-serif'; ctx.textAlign='center';
+  ctx.fillText('Almacén Copihue · Copihue 457, Bariloche',W/2,H-28);
+  ctx.fillStyle=P.subtexto; ctx.font='11px Nunito,sans-serif';
+  ctx.fillText('almacen-copihue.vercel.app',W/2,H-10);
+  ctx.fillStyle=P.acento; ctx.fillRect(0,H-4,W,4);
+  return cv;
+}
+
+// ─── BANNER HORIZONTAL (Facebook) ────────────────────────────────────────────
+async function dibujarBanner(prods, fondoKey) {
+  const P = PALETAS[fondoKey];
+  const W = 820, H = 312;
+  const { cv, ctx } = crearCanvas(W, H);
+  const info = MODO_HEADERS[_modo] || MODO_HEADERS.manual;
+
+  // Fondo con gradiente lateral
+  const grad = ctx.createLinearGradient(0,0,W,0);
+  if (fondoKey==='crema') { grad.addColorStop(0,'#ede5cc'); grad.addColorStop(1,'#f5f0e0'); }
+  else if (fondoKey==='rojo') { grad.addColorStop(0,'#5a0000'); grad.addColorStop(1,'#8e0000'); }
+  else { grad.addColorStop(0,'#0a0a0a'); grad.addColorStop(1,'#1a1a1a'); }
+  ctx.fillStyle=grad; ctx.fillRect(0,0,W,H);
+
+  // Franja izquierda con texto
+  const IZQW = 200;
+  ctx.fillStyle=P.acento+'22'; ctx.fillRect(0,0,IZQW,H);
+  ctx.strokeStyle=P.linea; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(IZQW,20); ctx.lineTo(IZQW,H-20); ctx.stroke();
+
+  ctx.fillStyle=P.acento; ctx.font='bold 16px Nunito,sans-serif'; ctx.textAlign='center';
+  ctx.fillText('ALMACÉN', IZQW/2, 80);
+  ctx.fillText('COPIHUE', IZQW/2, 102);
+  ctx.strokeStyle=P.linea; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(20,118); ctx.lineTo(IZQW-20,118); ctx.stroke();
+  ctx.fillStyle=P.texto; ctx.font='bold 13px Nunito,sans-serif';
+  ctx.fillText(info.titulo.replace(/^[^\s]+\s/,''), IZQW/2, 148);
+  ctx.fillStyle=P.subtexto; ctx.font='10px Nunito,sans-serif';
+  ctx.fillText('Copihue 457, Bariloche', IZQW/2, 220);
+  ctx.fillText('almacen-copihue.vercel.app', IZQW/2, 238);
+
+  // Productos horizontales
+  const maxB=Math.min(prods.length,5);
+  const prodB=prods.slice(0,maxB);
+  const PAD=12, GAP=8;
+  const CELL_W=Math.floor((W-IZQW-PAD*2-GAP*(maxB-1))/maxB);
+  const CELL_H=H-PAD*2;
+  const FOTO_H=Math.floor(CELL_H*0.52);
+
+  await Promise.all(prodB.map((p,i) => new Promise(resolve => {
+    const cx=IZQW+PAD+i*(CELL_W+GAP), cy=PAD;
+    ctx.fillStyle=P.bgCard; rr(ctx,cx,cy,CELL_W,CELL_H,10); ctx.fill();
+    ctx.strokeStyle=P.borde; ctx.lineWidth=0.8; rr(ctx,cx,cy,CELL_W,CELL_H,10); ctx.stroke();
+    if (p.descPct>0) {
+      ctx.fillStyle=P.acento; rr(ctx,cx+CELL_W-42,cy+5,38,20,5); ctx.fill();
+      ctx.fillStyle=fondoKey==='crema'?'white':'#111'; ctx.font='bold 10px Nunito,sans-serif'; ctx.textAlign='center';
+      ctx.fillText('-'+p.descPct+'%',cx+CELL_W-23,cy+18);
+    }
+    const drawText=()=>{
+      ctx.fillStyle=P.texto; ctx.textAlign='center'; ctx.font='bold 11px Nunito,sans-serif';
+      wrapText(ctx,nombreCorto(p.nombre,3),cx+CELL_W/2,cy+FOTO_H+15,CELL_W-10,13,2);
+      if (p.precio!==p.precioOferta){
+        ctx.fillStyle=P.subtexto; ctx.font='10px Nunito,sans-serif';
+        const t='$'+fmt(p.precio),tw=ctx.measureText(t).width,px=cx+CELL_W/2;
+        ctx.fillText(t,px,cy+FOTO_H+34);
+        ctx.strokeStyle=P.subtexto; ctx.lineWidth=0.8;
+        ctx.beginPath(); ctx.moveTo(px-tw/2,cy+FOTO_H+31); ctx.lineTo(px+tw/2,cy+FOTO_H+31); ctx.stroke();
+      }
+      ctx.fillStyle=P.acento; ctx.font='bold 16px Nunito,sans-serif';
+      ctx.fillText('$'+fmt(p.precioOferta),cx+CELL_W/2,cy+CELL_H-10); resolve();
+    };
+    const img=new Image();
+    img.onload=()=>{
+      ctx.save(); rr(ctx,cx+6,cy+6,CELL_W-12,FOTO_H-4,8); ctx.clip();
+      const iw=img.naturalWidth||img.width,ih=img.naturalHeight||img.height;
+      const sc=Math.min((CELL_W-12)/iw,(FOTO_H-4)/ih);
+      ctx.drawImage(img,cx+6+(CELL_W-12-iw*sc)/2,cy+6+(FOTO_H-4-ih*sc)/2,iw*sc,ih*sc);
+      ctx.restore(); drawText();
+    };
+    img.onerror=()=>{ ctx.fillStyle=fondoKey==='crema'?'#f0ebe0':'#222'; rr(ctx,cx+6,cy+6,CELL_W-12,FOTO_H-4,8); ctx.fill(); ctx.font='20px sans-serif'; ctx.textAlign='center'; ctx.fillText('🛒',cx+CELL_W/2,cy+FOTO_H/2+10); drawText(); };
+    img.src='imagenes-productos/'+slug(p.nombre)+'.jpg';
+  })));
+
+  return cv;
+}
 
 const MODO_HEADERS = {
   relampago:  { titulo: '⚡ OFERTA RELÁMPAGO', sub: 'Solo por tiempo limitado' },
@@ -614,8 +879,10 @@ async function dibujarGrid(prods, fondoKey) {
   const H = HEADER_H + ROWS * CELL_H + (ROWS-1) * GAP + PAD + FOOTER_H;
 
   const cv = document.createElement('canvas');
-  cv.width = W; cv.height = H;
+  cv.width = W * S; cv.height = H * S;
+  cv.style.width = W + 'px'; cv.style.height = H + 'px';
   const ctx = cv.getContext('2d');
+  ctx.scale(S, S);
   const info = MODO_HEADERS[_modo] || MODO_HEADERS.manual;
 
   // Fondo
@@ -719,8 +986,9 @@ async function dibujarLista(prods, fondoKey) {
   const H = HEADER_H + prods.length * ROW + (prods.length-1) * GAP + PAD + FOOTER_H;
   const info = MODO_HEADERS[_modo] || MODO_HEADERS.manual;
 
-  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
-  const ctx = cv.getContext('2d');
+  const cv = document.createElement('canvas'); cv.width = W*S; cv.height = H*S;
+  cv.style.width = W+'px'; cv.style.height = H+'px';
+  const ctx = cv.getContext('2d'); ctx.scale(S,S);
 
   ctx.fillStyle = P.bg; ctx.fillRect(0,0,W,H);
 
