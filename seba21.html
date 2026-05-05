@@ -1046,7 +1046,7 @@
                     style="background:rgba(255,152,0,0.3);border-color:rgba(255,152,0,0.6);flex:1;text-align:center;position:relative;display:flex;align-items:center;justify-content:center;">
                 🛒<span id="badgeListaCompra" style="display:none;position:absolute;top:-4px;right:-4px;background:#e65100;color:white;border-radius:50%;min-width:16px;height:16px;font-size:0.6rem;font-weight:900;align-items:center;justify-content:center;line-height:1;padding:0 2px;"></span>
             </button>
-            <button class="btn-resumen" onclick="abrirPanelFiados()" title="Fiados pendientes" id="btnFiadoPanel"
+            <button class="btn-resumen" onclick="window.location.href='copihue-fiado.html'" title="Ver fiados" id="btnFiadoPanel"
                     style="background:rgba(230,81,0,0.3);border-color:rgba(230,81,0,0.6);flex:1;text-align:center;position:relative;display:flex;align-items:center;justify-content:center;">
                 🧾<span id="badgeFiados" style="display:none;position:absolute;top:-4px;right:-4px;background:#e65100;color:white;border-radius:50%;min-width:16px;height:16px;font-size:0.6rem;font-weight:900;align-items:center;justify-content:center;line-height:1;padding:0 2px;"></span>
             </button>
@@ -5774,10 +5774,16 @@ function buscarCliente(q) {
     if (q.length < 2) { res.style.display = 'none'; nuevoPanel.style.display = 'none'; return; }
 
     const clientes = getClientes();
-    const matches = clientes.filter(c =>
-        c.nombre.toLowerCase().includes(q.toLowerCase()) ||
-        (c.telefono || '').includes(q)
-    ).slice(0, 6);
+    const qNorm = _normalizarBusqueda(q);
+    const qTel  = q.replace(/\D/g, '');
+    const terminos = qNorm.split(' ').filter(Boolean);
+
+    const matches = clientes.filter(c => {
+        const nombreNorm = _normalizarBusqueda(c.nombre);
+        const telLimpio  = (c.telefono || '').replace(/\D/g, '');
+        if (qTel.length >= 4 && telLimpio.includes(qTel)) return true;
+        return terminos.every(t => nombreNorm.includes(t));
+    }).slice(0, 6);
 
     if (matches.length > 0) {
         res.innerHTML = matches.map(c => `
@@ -9302,21 +9308,34 @@ async function abrirModalFiado() {
     }
 }
 
+function _normalizarBusqueda(s) {
+    return String(s || '').toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // quitar tildes
+        .replace(/[^a-z0-9\s]/g, '') // solo letras, números y espacios
+        .replace(/\s+/g, ' ').trim();
+}
+
 function fiadoFiltrarClientes(q) {
     const drop = document.getElementById('fiadoClienteDropdown');
     const lista = _fiadoClientesCache || [];
-    if (!q.trim() || lista.length === 0) { drop.style.display = 'none'; return; }
-    const qL = q.toLowerCase().replace(/\D/g,'') || q.toLowerCase();
+    q = q.trim();
+    if (!q || lista.length === 0) { drop.style.display = 'none'; return; }
+
+    const qNorm = _normalizarBusqueda(q);
+    const qTel  = q.replace(/\D/g, '');
+    const terminos = qNorm.split(' ').filter(Boolean);
+
     const matches = lista.filter(c => {
-        const porNombre = c.nombre.toLowerCase().includes(q.toLowerCase());
-        const telLimpio = (c.telefono || '').replace(/\D/g,'');
-        const porTel = telLimpio && telLimpio.includes(q.replace(/\D/g,''));
-        return porNombre || porTel;
+        const nombreNorm = _normalizarBusqueda(c.nombre);
+        const telLimpio  = (c.telefono || '').replace(/\D/g, '');
+        // Buscar por teléfono
+        if (qTel.length >= 4 && telLimpio.includes(qTel)) return true;
+        // Buscar que TODOS los términos estén en el nombre
+        return terminos.every(t => nombreNorm.includes(t));
     }).slice(0, 8);
-    if (matches.length === 0) {
-        drop.style.display = 'none';
-        return;
-    }
+
+    if (matches.length === 0) { drop.style.display = 'none'; return; }
+
     drop.innerHTML = matches.map(c => `
         <div onclick="fiadoSeleccionarCliente('${c.nombre.replace(/'/g,"\\'")}','${(c.telefono||'').replace(/'/g,"\\'")}') "
              style="padding:10px 14px;cursor:pointer;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center;">
@@ -9362,6 +9381,9 @@ function fiadoBuscarDeuda(telParam) {
 }
 
 async function _consultarDeudaFiado(telefono) {
+    // Normalizar teléfono: solo dígitos, sin espacios ni guiones
+    telefono = String(telefono).replace(/\D/g, '');
+    if (telefono.length < 6) return;
     try {
         const url = API_URL + '?action=consultarFiado&telefono=' + encodeURIComponent(telefono) + '&t=' + Date.now();
         const data = await _apiFetchUrl('consultarFiado', url);
