@@ -53,6 +53,19 @@
   • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
     evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
 
+  v318 — 06/05/2026
+  ------------------
+  • ÚLTIMAS UNIDADES: Eliminado fallback automático al pool del sistema.
+    El contenedor solo muestra productos seleccionados manualmente desde el
+    selector — si no hay selección, el pool queda vacío (nunca envío auto).
+  • ÚLTIMAS UNIDADES: Límite del día (config_sistema fila 24) aplicado al
+    cargar el pool en _cargarPoolsOfertas (data.limites.ultimas, default 3).
+  • SELECTOR ÚLTIMAS: Subtítulo muestra "X/máx seleccionados" en tiempo real.
+  • SELECTOR ÚLTIMAS: ultiToggle() bloquea con toast si se intenta superar
+    el máximo permitido según config del día.
+  • SELECTOR ÚLTIMAS: Al abrir, lee ds.maximo de getUltimasSeleccion para
+    sincronizar el límite con la planilla (fallback a 3 si GAS no lo envía).
+
   v304 — 25/04/2026
   ------------------
   • FIADOS: Eliminado WhatsApp como canal de recordatorio de deuda.
@@ -6017,10 +6030,10 @@ async function cargarPoolsOfertas() {
         (data.destacadasActivas || []).filter(p => p.categoria !== 'CERVEZAS').forEach(p => _poolIdsDestacadas.add(Number(p.id)));
         _destacadasFiltradas = new Set([..._poolIdsDestacadas]); // sincronizado con backend
         (data.especialesActivas || []).filter(p => p.categoria !== 'CERVEZAS').forEach(p => _poolIdsEspeciales.add(Number(p.id)));
-        const ultPOS = (data.ultimasSeleccionadas && data.ultimasSeleccionadas.length > 0)
-            ? data.ultimasSeleccionadas
-            : (data.ultimasUnidades || []);
-        ultPOS.filter(p => p.categoria !== 'CERVEZAS').forEach(p => _poolIdsUltimas.set(Number(p.id), p.diasParaVencer !== undefined ? p.diasParaVencer : null));
+        // Solo se usan las seleccionadas manualmente — nunca fallback automático
+        const ultPOS = (data.ultimasSeleccionadas || []);
+        const maxUltimas = (data.limites && data.limites.ultimas) ? data.limites.ultimas : 3;
+        ultPOS.slice(0, maxUltimas).filter(p => p.categoria !== 'CERVEZAS').forEach(p => _poolIdsUltimas.set(Number(p.id), p.diasParaVencer !== undefined ? p.diasParaVencer : null));
         const poolsVacios = _poolIdsRelampago.size === 0 && _poolIdsDestacadas.size === 0 && _poolIdsEspeciales.size === 0;
         if (poolsVacios) _construirPoolsLocalFallback();
         console.log(`✅ Pools POS: ${_poolIdsRelampago.size} rel · ${_destacadasFiltradas.size} dest · ${_poolIdsEspeciales.size} esp · ${_poolIdsUltimas.size} ult`);
@@ -8414,6 +8427,7 @@ async function publicarEnGitHub(){
 // ========== SELECTOR ÚLTIMAS UNIDADES ==========
 let _candidatosUltimas = [];
 let _ultimasSeleccionados = new Set(); // IDs seleccionados
+let _maximoUltimas = 3; // Límite según config_sistema (fila 24)
 
 async function abrirSelectorUltimas() {
     const modal = document.getElementById('modalUltimas');
@@ -8425,9 +8439,10 @@ async function abrirSelectorUltimas() {
         if (!data.ok) throw new Error(data.error || 'Error');
         _candidatosUltimas = data.candidatos || [];
 
-        // Cargar selección vigente del día
+        // Cargar selección vigente del día y límite de config
         const ds = await _apiFetch('getUltimasSeleccion');
-        _ultimasSeleccionados = new Set((ds.seleccion || []).map(Number));
+        _maximoUltimas = (ds.maximo != null && ds.maximo > 0) ? ds.maximo : 3;
+        _ultimasSeleccionados = new Set((ds.seleccion || []).slice(0, _maximoUltimas).map(Number));
 
         ultiRenderizar();
 
@@ -8461,7 +8476,7 @@ function ultiRenderizar() {
     ];
 
     document.getElementById('ultiSubtitulo').textContent =
-        _candidatosUltimas.length + ' candidatos · ' + _ultimasSeleccionados.size + ' seleccionados';
+        _candidatosUltimas.length + ' candidatos · ' + _ultimasSeleccionados.size + '/' + _maximoUltimas + ' seleccionados';
 
     // Chips de filtro
     const chips = `<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;">
@@ -8506,8 +8521,15 @@ function ultiRenderizar() {
 }
 
 function ultiToggle(id) {
-    if (_ultimasSeleccionados.has(id)) _ultimasSeleccionados.delete(id);
-    else _ultimasSeleccionados.add(id);
+    if (_ultimasSeleccionados.has(id)) {
+        _ultimasSeleccionados.delete(id);
+    } else {
+        if (_ultimasSeleccionados.size >= _maximoUltimas) {
+            mostrarToast(`⚠️ Máximo ${_maximoUltimas} producto${_maximoUltimas !== 1 ? 's' : ''} permitido${_maximoUltimas !== 1 ? 's' : ''}`, 'rojo');
+            return;
+        }
+        _ultimasSeleccionados.add(id);
+    }
     ultiRenderizar();
 }
 
