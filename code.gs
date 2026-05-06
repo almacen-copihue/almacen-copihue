@@ -1,5 +1,13 @@
 // ======================
-// ALMACÉN COPIHUE - SISTEMA COMPLETO v7.7
+// ALMACÉN COPIHUE - SISTEMA COMPLETO v8.3
+// v8.3: getSalidasInternas + getCajaEgresos — lectura de SALIDAS y CAJA_MOVIMIENTOS
+// v8.2: getCandidatosUltimas incluye seleccionados aunque no tengan vencimiento
+//        guardarUltimasSeleccion elimina filas duplicadas del sistema anterior
+// v8.1: Fix NaN fechas en getCandidatosUltimas y _leerUltimasConDias_ (timezone)
+// v8.0: Últimas Unidades — getCandidatosUltimas, getUltimasSeleccion, guardarUltimasSeleccion
+//        calcularOfertas ahora devuelve ultimasSeleccionadas via _leerUltimasConDias_()
+// v7.9: RECIEN_LLEGADOS_DIAS — ventana configurable desde config_sistema (fallback 7 dias)
+// v7.8: Fix getVentasProducto — strip (XXXgr)\/(XXXkg) de nomFila antes de comparar
 // v7.7: vender() ahora devuelve ticket en la respuesta — guardarFiado() lo recibe
 //       y lo graba en columna C de FIADOS (antes siempre quedaba vacía)
 // v7.6: getDetalleTicket — devuelve items reales de hoja Ventas por número de ticket
@@ -751,12 +759,103 @@ function calcularOfertas() {
   var sheet = ss.getSheetByName(HOJA_INVENTARIO);
   var datos = sheet.getDataRange().getValues();
 
-  var limites = { relampago: 3, especiales: 2, destacadas: 9 };
+  var limites = { relampago: 3, especiales: 2, destacadas: 9, ultimas: 3 };
+  var horariosOferta = {
+    relampago:  { inicio: 0,  cierre: 24, activo: false },
+    destacadas: { inicio: 0,  cierre: 24, activo: false },
+    especiales: { inicio: 0,  cierre: 24, activo: false },
+    ultimas:    { inicio: 0,  cierre: 24, activo: false }
+  };
+  var _inicioRelampago = null, _cierreRelampago = null;
+  var _inicioDestacadas = null, _cierreDestacadas = null;
+  var _inicioEspeciales = null, _cierreEspeciales = null;
+  var _inicioUltimas = null, _cierreUltimas = null;
+
+  var diaIdxJC = [1,2,3,4,5,6,0].indexOf(new Date().getDay());
+  var tzNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+  var horaActual = tzNow.getHours() + tzNow.getMinutes() / 60;
+
+  // Leer todos los límites y horarios desde config_sistema al inicio
+  try {
+    var shCfgLim = SpreadsheetApp.openById(SS_ID).getSheetByName(HOJA_CONFIG);
+    if (shCfgLim) {
+      var cfgLim = shCfgLim.getDataRange().getValues();
+
+      // Helper: parsear hora de celda (número o "HH:MM")
+      function _parsearHora_(val) {
+        if (val === null || val === undefined || val === '') return null;
+        // ISO string: Google Sheets manda horas como "1899-12-30T21:00:00.000Z"
+        if (typeof val === 'string' && val.includes('T')) {
+          try {
+            var d = new Date(val);
+            return ((d.getUTCHours() - 3 + 24) % 24) + d.getUTCMinutes() / 60;
+          } catch(e) { return null; }
+        }
+        // Fracción de día (0-1)
+        if (typeof val === 'number') {
+          if (val > 0 && val < 1) return val * 24;
+          return val;
+        }
+        var s = String(val).trim();
+        var m = s.match(/^(\d{1,2}):(\d{2})/);
+        if (m) return parseInt(m[1]) + parseInt(m[2]) / 60;
+        var n = parseFloat(s);
+        return isNaN(n) ? null : n;
+      }
+
+      // Helper: verificar si el modo A respeta el horario
+      function _estaActivoHoy_(diasVal, inicioVal, cierreVal) {
+        var d = String(diasVal || '').trim().toUpperCase();
+        if (d === '0') return false;           // desactivado forzado
+        if (d === '1') return true;            // activado forzado
+        // modo A: respetar horario
+        var ini = _parsearHora_(inicioVal);
+        var cie = _parsearHora_(cierreVal);
+        if (ini === null || cie === null) return true;
+        if (cie > ini) return horaActual >= ini && horaActual < cie;
+        // horario que cruza medianoche
+        return horaActual >= ini || horaActual < cie;
+      }
+
+      for (var li = 0; li < cfgLim.length; li++) {
+        var lk = String(cfgLim[li][0] || '').trim().toLowerCase();
+        var lv = cfgLim[li][diaIdxJC + 1];
+
+        // Límites
+        if (lk.indexOf('maximo relampago') !== -1 || lk.indexOf('máximo relampago') !== -1) { var n = parseInt(lv); if (!isNaN(n) && n > 0) limites.relampago = n; }
+        if (lk.indexOf('maximo especiales') !== -1 || lk.indexOf('máximo especiales') !== -1) { var n = parseInt(lv); if (!isNaN(n) && n > 0) limites.especiales = n; }
+        if (lk.indexOf('maximo destacadas') !== -1 || lk.indexOf('máximo destacadas') !== -1) { var n = parseInt(lv); if (!isNaN(n) && n > 0) limites.destacadas = n; }
+        if (lk.indexOf('maximo ultimas') !== -1 || lk.indexOf('máximo ultimas') !== -1 || lk.indexOf('maximo ultimas unidades') !== -1) { var n = parseInt(lv); if (!isNaN(n) && n > 0) limites.ultimas = n; }
+
+        // Horarios — claves únicas y descriptivas
+        if (lk === 'hora inicio relampago')         _inicioRelampago  = _parsearHora_(lv);
+        if (lk === 'hora cierre relampago')         _cierreRelampago  = _parsearHora_(lv);
+        if (lk === 'hora inicio destacadas')        _inicioDestacadas = _parsearHora_(lv);
+        if (lk === 'hora cierre destacadas')        _cierreDestacadas = _parsearHora_(lv);
+        if (lk === 'hora inicio especiales')        _inicioEspeciales = _parsearHora_(lv);
+        if (lk === 'hora cierre especiales')        _cierreEspeciales = _parsearHora_(lv);
+        if (lk === 'hora inicio ultimas unidades')  _inicioUltimas    = _parsearHora_(lv);
+        if (lk === 'hora cierre ultimas unidades')  _cierreUltimas    = _parsearHora_(lv);
+
+        // Flag días
+        if (lk === 'dias ofertas relampago' || lk === 'dias ofertas relámpago') {
+          horariosOferta.relampago.activo = _estaActivoHoy_(lv, _inicioRelampago, _cierreRelampago);
+        }
+        if (lk === 'dias ofertas destacadas') {
+          horariosOferta.destacadas.activo = _estaActivoHoy_(lv, _inicioDestacadas, _cierreDestacadas);
+        }
+        if (lk === 'dias ofertas especiales') {
+          horariosOferta.especiales.activo = _estaActivoHoy_(lv, _inicioEspeciales, _cierreEspeciales);
+        }
+        if (lk === 'dias ofertas ultimas unidades') {
+          horariosOferta.ultimas.activo = _estaActivoHoy_(lv, _inicioUltimas, _cierreUltimas);
+        }
+      }
+    }
+  } catch(eLim) { Logger.log('Error leyendo config: ' + eLim); }
 
   var relampagoActivo = [];
   var idsUsados = {};
-
-  var diaIdxJC = [1,2,3,4,5,6,0].indexOf(new Date().getDay());
   var cerveceroActivoHoy = false;
   try {
     var ssCfgJC = SpreadsheetApp.openById(SS_ID);
@@ -781,6 +880,19 @@ function calcularOfertas() {
            nom.includes('BIRRA') || nom.includes(' IPA') || nom.includes(' STOUT') || nom.includes(' PORTER');
   }
 
+  // Helper: detecta si la columna J dice que hay que reponer stock para la promo
+  function _stockSuficienteParaOferta_(fila) {
+    var catOferta = String(fila[9] || '').trim().toUpperCase();
+    // Si dice REPONER → stock insuficiente para la promo
+    if (catOferta.indexOf('REPONER') !== -1) return false;
+    // Verificar stock mínimo según tipo de promo
+    var stock = parseInt(fila[5]) || 0;
+    if (catOferta.indexOf('3X2') !== -1 || catOferta.indexOf('3 X 2') !== -1) return stock >= 3;
+    if (catOferta.indexOf('2X1') !== -1 || catOferta.indexOf('2 X 1') !== -1) return stock >= 2;
+    if (catOferta.indexOf('4X3') !== -1 || catOferta.indexOf('4 X 3') !== -1) return stock >= 4;
+    return stock >= 1;
+  }
+
   var candidatosRelampago = [];
   for (var i3 = 1; i3 < datos.length; i3++) {
     var fila3 = datos[i3];
@@ -789,6 +901,7 @@ function calcularOfertas() {
     var stock3 = parseInt(fila3[5]) || 0;
     var relampago3 = parseInt(fila3[6]) || 0;
     if (stock3 <= 0 || relampago3 <= 0) continue;
+    if (!_stockSuficienteParaOferta_(fila3)) continue; // columna J: REPONER o stock insuficiente
     var cat3 = String(fila3[2] || '').trim().toUpperCase();
     if (cat3 === 'CERVEZAS') continue;
     if (cerveceroActivoHoy && _esCerveza_(fila3)) continue;
@@ -830,28 +943,11 @@ function calcularOfertas() {
     if (!fd[0]) continue;
     var stockD = parseInt(fd[5]) || 0;
     if (stockD <= 0) continue;
+    if (!_stockSuficienteParaOferta_(fd)) continue; // columna J: REPONER o stock insuficiente
     if (cerveceroActivoHoy && _esCerveza_(fd)) continue;
     if ((parseInt(fd[7]) || 0) > 0) destacadasActivas.push(_ofertaBuildProducto_(fd, idx));
     if ((parseInt(fd[8]) || 0) > 0) especialesActivas.push(_ofertaBuildProducto_(fd, idx));
   }
-
-  try {
-    var ssCfg = SpreadsheetApp.openById(SS_ID);
-    var shCfg = ssCfg.getSheetByName(HOJA_CONFIG);
-    if (shCfg) {
-      var cfgRows = shCfg.getDataRange().getValues();
-      for (var ci = 1; ci < cfgRows.length; ci++) {
-        var clave = String(cfgRows[ci][0] || '').trim().toLowerCase();
-        if (clave.indexOf('máximo destacadas') !== -1 || clave.indexOf('maximo destacadas') !== -1) {
-          for (var cj = 1; cj <= 7; cj++) {
-            var v = parseInt(cfgRows[ci][cj]);
-            if (!isNaN(v) && v > 0) { limites.destacadas = v; break; }
-          }
-          break;
-        }
-      }
-    }
-  } catch(eCfg) {}
 
   var especialesPool = especialesActivas;
   if (especialesActivas.length > limites.especiales) {
@@ -890,8 +986,15 @@ function calcularOfertas() {
   }
 
   var poolRecienLlegados = [];
-  // Leer precio minimo desde config_sistema (clave RECIEN_LLEGADOS_PRECIO_MIN)
-  var precioMinVidriera = 2000; // fallback por si no está en config
+
+  // Respetar horarios: vaciar pools inactivos segun config_sistema
+  if (!horariosOferta.relampago.activo)  { relampagoActivo = []; relampagoPoolCompleto = []; }
+  if (!horariosOferta.destacadas.activo) { destacadasActivas = []; destacadasRotadas = []; destacadasPool = []; }
+  if (!horariosOferta.especiales.activo) { especialesActivas = []; especialesPool = []; }
+  var ultimasParaEnviar = horariosOferta.ultimas.activo ? _leerUltimasConDias_() : [];
+  var precioMinVidriera   = 2000; // fallback RECIEN_LLEGADOS_PRECIO_MIN
+  var limiteRecienLlegados = 12;  // fallback RECIEN_LLEGADOS_LIMITE
+  var diasRecienLlegados  = 7;    // fallback RECIEN_LLEGADOS_DIAS
   try {
     var shCfgRL = SpreadsheetApp.openById(SS_ID).getSheetByName(HOJA_CONFIG);
     if (shCfgRL) {
@@ -901,25 +1004,40 @@ function calcularOfertas() {
         if (ck === 'RECIEN_LLEGADOS_PRECIO_MIN') {
           var cv = parseInt(cfgRL[ci][1]);
           if (!isNaN(cv) && cv >= 0) precioMinVidriera = cv;
-          break;
+        }
+        if (ck === 'RECIEN_LLEGADOS_LIMITE') {
+          var cl = parseInt(cfgRL[ci][1]);
+          if (!isNaN(cl) && cl > 0) limiteRecienLlegados = cl;
+        }
+        if (ck === 'RECIEN_LLEGADOS_DIAS') {
+          var cd = parseInt(cfgRL[ci][1]);
+          if (!isNaN(cd) && cd > 0) diasRecienLlegados = cd;
         }
       }
     }
-  } catch(eCfgRL) { Logger.log('Error leyendo RECIEN_LLEGADOS_PRECIO_MIN: ' + eCfgRL); }
+  } catch(eCfgRL) { Logger.log('Error leyendo config Recien Llegados: ' + eCfgRL); }
   try {
     var ssRL = SpreadsheetApp.openById(SS_ID);
     var shHistRL = ssRL.getSheetByName(HOJA_HISTORIAL);
     var shInvRL  = ssRL.getSheetByName(HOJA_INVENTARIO);
     if (shHistRL && shInvRL) {
       var hoyRL = new Date(); hoyRL.setHours(0,0,0,0);
-      var hace2 = new Date(hoyRL.getTime() - 2 * 86400000);
+      var hace2 = new Date(hoyRL.getTime() - diasRecienLlegados * 86400000);
       var tzRL = Session.getScriptTimeZone();
 
       var ultimaFechaMap = {};
       var histRowsRL = shHistRL.getDataRange().getValues();
+
+      // Helper: normalizar nombre para comparación (quita tildes, dobles espacios)
+      function _normNomRL(s) {
+        return String(s||'').trim().toUpperCase()
+          .replace(/Á/g,'A').replace(/É/g,'E').replace(/Í/g,'I').replace(/Ó/g,'O').replace(/Ú/g,'U').replace(/Ñ/g,'N')
+          .replace(/\s+/g,' ');
+      }
+
       for (var hi = 1; hi < histRowsRL.length; hi++) {
         var hfecha = histRowsRL[hi][0];
-        var hnom   = String(histRowsRL[hi][1] || '').trim().toUpperCase();
+        var hnom   = _normNomRL(histRowsRL[hi][1]);
         if (!hnom) continue;
         var hfechaD = hfecha instanceof Date ? hfecha : new Date(String(hfecha));
         if (isNaN(hfechaD.getTime())) continue;
@@ -930,6 +1048,8 @@ function calcularOfertas() {
         }
       }
 
+      Logger.log('Recién llegados en historial últimos ' + diasRecienLlegados + ' días: ' + Object.keys(ultimaFechaMap).length + ' productos');
+
       var idsOtrosPools = {};
       relampagoActivo.forEach(function(p){ idsOtrosPools[p.id] = true; });
       destacadasRotadas.forEach(function(p){ idsOtrosPools[p.id] = true; });
@@ -938,26 +1058,28 @@ function calcularOfertas() {
       var invRowsRL = shInvRL.getDataRange().getValues();
       var candidatosRL = [];
       for (var ri = 1; ri < invRowsRL.length; ri++) {
-        var rNom = String(invRowsRL[ri][0] || '').trim().toUpperCase();
-        if (!rNom || !ultimaFechaMap[rNom]) continue;
+        var rNom = _normNomRL(invRowsRL[ri][0]);
+        if (!rNom) continue;
+        if (!ultimaFechaMap[rNom]) continue;
         var rStock = parseInt(invRowsRL[ri][5]) || 0;
         if (rStock <= 0) continue;
         var rPrecio = parseInt(invRowsRL[ri][1]) || 0;
-        if (rPrecio < precioMinVidriera) continue; // Precio minimo vidriera (desde config_sistema)
+        if (rPrecio < precioMinVidriera) continue;
         if (idsOtrosPools[ri]) continue;
         candidatosRL.push({
           id:           ri,
           nombre:       String(invRowsRL[ri][0]).trim(),
-          precio:       parseInt(invRowsRL[ri][1]) || 0,
+          precio:       rPrecio,
           categoria:    String(invRowsRL[ri][2] || '').trim(),
           stock:        rStock,
           fechaIngreso: Utilities.formatDate(ultimaFechaMap[rNom], tzRL, 'dd/MM/yyyy'),
           _ts:          ultimaFechaMap[rNom].getTime()
         });
       }
+      Logger.log('Candidatos recién llegados: ' + candidatosRL.length);
 
       candidatosRL.sort(function(a, b){ return b._ts - a._ts; });
-      poolRecienLlegados = candidatosRL.slice(0, 20).map(function(p){
+      poolRecienLlegados = candidatosRL.slice(0, limiteRecienLlegados + 10).map(function(p){
         return { id: p.id, nombre: p.nombre, precio: p.precio,
                  categoria: p.categoria, stock: p.stock, fechaIngreso: p.fechaIngreso };
       });
@@ -971,8 +1093,17 @@ function calcularOfertas() {
     destacadasActivas:    destacadasRotadas,
     destacadasPool:       destacadasPool,
     especialesActivas:    especialesActivas,
-    poolRecienLlegados:   poolRecienLlegados,
+    poolRecienLlegados:     poolRecienLlegados,
+    limiteRecienLlegados:   limiteRecienLlegados,
+    ultimasSeleccionadas:   ultimasParaEnviar,
+    ultimasSeleccionadasSiempre: _leerUltimasConDias_(),
     limites: limites,
+    horariosOferta: {
+      relampago:  { inicio: _inicioRelampago,  cierre: _cierreRelampago,  activo: horariosOferta.relampago.activo  },
+      destacadas: { inicio: _inicioDestacadas, cierre: _cierreDestacadas, activo: horariosOferta.destacadas.activo },
+      especiales: { inicio: _inicioEspeciales, cierre: _cierreEspeciales, activo: horariosOferta.especiales.activo },
+      ultimas:    { inicio: _inicioUltimas,    cierre: _cierreUltimas,    activo: horariosOferta.ultimas.activo    }
+    },
     fecha: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm'),
     stats: {
       totalRelampago:          relampagoActivo.length,
@@ -1169,18 +1300,45 @@ function getJuevesCervecero() {
     if (!sheetInv) return { success: false, mensaje: 'Sin inventario' };
 
     let horaCierre = 22;
+    let horaInicio = 14; // fallback — fila JUEVES CERVECERO columna INICIO
+    let modoActivo = 'A'; // 'A', '0', '1'
     if (sheetCfg) {
       const cfgData = sheetCfg.getDataRange().getValues();
-      let enHorario = false;
       for (let i = 0; i < cfgData.length; i++) {
         const clave = String(cfgData[i][0] || '').trim().toLowerCase();
-        if (clave.includes('horario local') || clave.includes('── horario')) { enHorario = true; continue; }
-        if (enHorario && clave.includes('cierre local')) {
-          const v = cfgData[i][4];
-          if (v !== null && v !== '') {
-            const parsed = parseFloat(String(v).split(':')[0]);
-            if (!isNaN(parsed)) horaCierre = parsed;
+        if (clave.includes('jueves cervecero') || clave.includes('cervecero')) {
+          Logger.log('Fila cervecero encontrada en fila ' + i + '. Columnas: ' + JSON.stringify(cfgData[i]));
+          Logger.log('C[2]=' + cfgData[i][2] + ' tipo=' + typeof cfgData[i][2] + ' | G[6]=' + cfgData[i][6] + ' tipo=' + typeof cfgData[i][6]);
+          // Fila 26: A=JUEVES CERVECERO, B=INICIO, C=hora inicio, D=HRS, E=—, F=FINAL, G=hora cierre, H=HRS
+          const ini = cfgData[i][2]; // columna C = hora inicio
+          const fin = cfgData[i][6]; // columna G = hora cierre
+          const modo = cfgData[i][8]; // columna I = modo (si existe)
+          if (ini !== null && ini !== '') {
+            var pIni;
+            if (typeof ini === 'number' && ini > 0 && ini < 1) {
+              pIni = ini * 24;
+            } else if (typeof ini === 'string' && ini.includes('T')) {
+              // Google Sheets manda hora como ISO: usar UTC horas + ajuste ARG (-3)
+              var dIni = new Date(ini);
+              pIni = ((dIni.getUTCHours() - 3 + 24) % 24) + dIni.getUTCMinutes() / 60;
+            } else {
+              pIni = typeof ini === 'number' ? ini : parseFloat(String(ini).split(':')[0]);
+            }
+            if (!isNaN(pIni)) horaInicio = Math.round(pIni * 100) / 100;
           }
+          if (fin !== null && fin !== '') {
+            var pFin;
+            if (typeof fin === 'number' && fin > 0 && fin < 1) {
+              pFin = fin * 24;
+            } else if (typeof fin === 'string' && fin.includes('T')) {
+              var dFin = new Date(fin);
+              pFin = ((dFin.getUTCHours() - 3 + 24) % 24) + dFin.getUTCMinutes() / 60;
+            } else {
+              pFin = typeof fin === 'number' ? fin : parseFloat(String(fin).split(':')[0]);
+            }
+            if (!isNaN(pFin)) horaCierre = Math.round(pFin * 100) / 100;
+          }
+          if (modo !== null && modo !== undefined && modo !== '') modoActivo = String(modo).trim().toUpperCase();
           break;
         }
       }
@@ -1265,7 +1423,7 @@ function getJuevesCervecero() {
       return { ...c, descuento, precioPromo, esGancho: idx === idxGancho };
     });
 
-    return { success: true, productos: top6Final, horaCierre };
+    return { success: true, productos: top6Final, horaCierre, horaInicio, modoActivo };
   } catch(e) {
     return { success: false, mensaje: e.toString() };
   }
@@ -1461,6 +1619,24 @@ function doGet(e) {
       var datosVP = JSON.parse(decodeURIComponent(e.parameter.data));
       return respuestaJSON(getVentasProducto(datosVP));
     }
+    if (e && e.parameter && e.parameter.action === 'getCandidatosUltimas') {
+      return respuestaJSON(getCandidatosUltimas());
+    }
+    if (e && e.parameter && e.parameter.action === 'getUltimasSeleccion') {
+      return respuestaJSON(getUltimasSeleccion());
+    }
+    if (e && e.parameter && e.parameter.action === 'guardarUltimasSeleccion') {
+      var idsUlt = JSON.parse(decodeURIComponent(e.parameter.data));
+      return respuestaJSON(guardarUltimasSeleccion(idsUlt));
+    }
+    if (e && e.parameter && e.parameter.action === 'getSalidasInternas') {
+      var datosSI = e.parameter.data ? JSON.parse(decodeURIComponent(e.parameter.data)) : {};
+      return respuestaJSON(getSalidasInternas(datosSI));
+    }
+    if (e && e.parameter && e.parameter.action === 'getCajaEgresos') {
+      var datosCE = e.parameter.data ? JSON.parse(decodeURIComponent(e.parameter.data)) : {};
+      return respuestaJSON(getCajaEgresos(datosCE));
+    }
 
     // ── GET PRODUCTOS (carga la tienda) ──
     const ss = SpreadsheetApp.openById(SS_ID);
@@ -1502,7 +1678,8 @@ function doGet(e) {
         stockMin: parseInt(fila[13]) || 0,
         prioridad: fila.length > 31 ? String(fila[31] || '').trim().toUpperCase() : 'NORMAL',
         pausadoListaCompra: fila.length > 34 ? String(fila[34] || '').trim().toUpperCase() : '',
-        ultimaPromo: ''
+        ultimaPromo: '',
+        categoriaOferta: String(fila[9] || '').trim()
       };
 
       if (fila.length > 11) {
@@ -2711,7 +2888,7 @@ function getVentasProducto(datos) {
       if (!f[0] || String(f[3] || '').includes('TOTAL TICKET')) continue;
       var nomFila = String(f[3] || '').trim().toUpperCase();
       // Quitar sufijos de precio especial para comparar
-      var nomLimpio = nomFila.replace(/\s*\[PRECIO.*?\]$/,'').trim();
+      var nomLimpio = nomFila.replace(/\s*\[PRECIO.*?\]$/,'').replace(/\s*\(\d+\s*gr\)$/i,'').replace(/\s*\(\d+\.?\d*\s*kg\)$/i,'').trim();
       if (nomLimpio !== nombre) continue;
 
       var fechaFila = f[1] instanceof Date ? f[1] : new Date(f[1]);
@@ -2957,5 +3134,289 @@ function _registrarIngresoFiadoCaja_(ss, d) {
     ]);
   } catch(e) {
     console.error('_registrarIngresoFiadoCaja_ error (no crítico):', e);
+  }
+}
+
+// ========== ÚLTIMAS UNIDADES — Selección manual ==========
+
+/**
+ * Helper interno: lee ultimas_seleccion de config_sistema y cruza con inventario
+ * para devolver [{id, diasParaVencer}]. Usado por calcularOfertas().
+ */
+function _leerUltimasConDias_() {
+  try {
+    var ss   = SpreadsheetApp.openById(SS_ID);
+    var shCfg = ss.getSheetByName(HOJA_CONFIG);
+    if (!shCfg) return [];
+    var cfgVals = shCfg.getDataRange().getValues();
+    var ids = [];
+    for (var i = 0; i < cfgVals.length; i++) {
+      if (String(cfgVals[i][0] || '').trim().toLowerCase() === 'ultimas_seleccion') {
+        try { ids = JSON.parse(cfgVals[i][1] || '[]'); } catch(e) { ids = []; }
+        break;
+      }
+    }
+    if (!ids.length) return [];
+
+    // Cruzar con inventario para obtener diasParaVencer actual
+    var shInv  = ss.getSheetByName(HOJA_INVENTARIO);
+    var invVals = shInv.getDataRange().getValues();
+    var hoy = new Date(); hoy.setHours(0,0,0,0);
+    var idsSet = {};
+    ids.forEach(function(id){ idsSet[Number(id)] = true; });
+
+    var resultado = [];
+    for (var r = 1; r < invVals.length; r++) {
+      if (!idsSet[r]) continue;
+      var stock = parseInt(invVals[r][5]) || 0;
+      if (stock <= 0) continue; // excluir sin stock
+      var dpv = null;
+      var vencRaw = invVals[r][9];
+      if (vencRaw) {
+        try {
+          var vStr2 = (vencRaw instanceof Date)
+            ? Utilities.formatDate(vencRaw, Session.getScriptTimeZone(), 'yyyy-MM-dd')
+            : String(vencRaw).split('T')[0];
+          var vFecha2 = new Date(vStr2 + 'T12:00:00');
+          dpv = Math.round((vFecha2 - hoy) / 86400000);
+          if (dpv < 0) continue; // vencido: excluir
+        } catch(e) {}
+      }
+      resultado.push({ id: r, diasParaVencer: dpv });
+    }
+    return resultado;
+  } catch(e) {
+    Logger.log('_leerUltimasConDias_ error: ' + e);
+    return [];
+  }
+}
+
+/**
+ * Devuelve candidatos para el selector manual de Últimas Unidades.
+ * Productos con vencimiento, stock > 0, ordenados por urgencia.
+ */
+function getCandidatosUltimas() {
+  try {
+    var ss    = SpreadsheetApp.openById(SS_ID);
+    var shInv = ss.getSheetByName(HOJA_INVENTARIO);
+    var datos = shInv.getDataRange().getValues();
+    var hoy   = new Date(); hoy.setHours(0,0,0,0);
+
+    // Leer selección vigente para incluirla siempre aunque no pase los filtros
+    var selVigente = [];
+    try {
+      var r = getUltimasSeleccion();
+      selVigente = (r.seleccion || []).map(Number);
+    } catch(e) {}
+    var selSet = {};
+    selVigente.forEach(function(id){ selSet[id] = true; });
+
+    var candidatos = [];
+    var idsAgregados = {};
+
+    for (var i = 1; i < datos.length; i++) {
+      var fila  = datos[i];
+      if (!fila[0]) continue;
+      var stock = parseInt(fila[5]) || 0;
+      var yaSeleccionado = selSet[i] === true;
+
+      // Si ya está seleccionado, incluirlo siempre (para poder destickear)
+      // Si no está seleccionado, requiere vencimiento y stock > 0
+      if (!yaSeleccionado) {
+        if (stock <= 0) continue;
+        if (!fila[9]) continue; // sin vencimiento → solo entra si ya estaba seleccionado
+      }
+
+      var relampago = parseInt(fila[6]) || 0;
+      var precio    = parseInt(fila[1]) || 0;
+      var rotacion  = fila.length > 14 ? (parseInt(fila[14]) || 1) : 1;
+
+      var dias = null;
+      var score = 5;
+      var motivo = '⚪ Sin fecha de vencimiento';
+
+      if (fila[9]) {
+        try {
+          var vStr = (fila[9] instanceof Date)
+            ? Utilities.formatDate(fila[9], Session.getScriptTimeZone(), 'yyyy-MM-dd')
+            : String(fila[9]).split('T')[0];
+          var vFecha = new Date(vStr + 'T12:00:00');
+          dias = Math.round((vFecha - hoy) / 86400000);
+
+          if (dias < 0 && !yaSeleccionado) continue; // vencido y no seleccionado: excluir
+
+          var diasStock = rotacion > 0 ? Math.ceil(stock / rotacion) : 9999;
+          if (dias === 0)       { score = 200; motivo = '🔴 Vence HOY'; }
+          else if (dias === 1)  { score = 150; motivo = '🔴 Vence mañana'; }
+          else if (dias <= 3)   { score = 100; motivo = '🔴 Vence en ' + dias + ' días'; }
+          else if (diasStock >= dias) { score = Math.round((diasStock / dias) * 60); motivo = '🟡 Stock para ' + diasStock + 'd, vence en ' + dias + 'd'; }
+          else                  { score = dias <= 14 ? 20 : 5; motivo = '⚪ Vence en ' + dias + ' días'; }
+
+          if (dias < 0) { score = 0; motivo = '⚠️ Vencido — quitar selección'; }
+        } catch(e) {}
+      }
+
+      if (yaSeleccionado && stock <= 0) { score = 0; motivo = '⚠️ Sin stock — quitar selección'; }
+
+      idsAgregados[i] = true;
+      candidatos.push({
+        id: i, nombre: String(fila[0]).trim(), precio: precio, stock: stock,
+        vencimiento: dias !== null ? motivo : '',
+        diasParaVencer: dias, score: score, motivo: motivo,
+        ofertaDesc: relampago > 0 ? ('-' + relampago + '%') : '',
+        yaSeleccionado: yaSeleccionado
+      });
+    }
+
+    candidatos.sort(function(a, b){ return b.score - a.score || a.diasParaVencer - b.diasParaVencer; });
+    return { ok: true, candidatos: candidatos };
+  } catch(e) {
+    return { ok: false, error: e.toString() };
+  }
+}
+
+/**
+ * Lee la selección guardada de Últimas Unidades desde config_sistema.
+ */
+function getUltimasSeleccion() {
+  try {
+    var shCfg = SpreadsheetApp.openById(SS_ID).getSheetByName(HOJA_CONFIG);
+    if (!shCfg) return { ok: true, seleccion: [] };
+    var vals = shCfg.getDataRange().getValues();
+    for (var i = 0; i < vals.length; i++) {
+      if (String(vals[i][0] || '').trim().toLowerCase() === 'ultimas_seleccion') {
+        var ids = [];
+        try { ids = JSON.parse(vals[i][1] || '[]'); } catch(e) {}
+        return { ok: true, seleccion: ids };
+      }
+    }
+    return { ok: true, seleccion: [] };
+  } catch(e) {
+    return { ok: false, error: e.toString() };
+  }
+}
+
+/**
+ * Guarda la selección manual de IDs en config_sistema → fila 'ultimas_seleccion'.
+ * Si la fila no existe, la crea.
+ */
+function guardarUltimasSeleccion(ids) {
+  try {
+    var ss    = SpreadsheetApp.openById(SS_ID);
+    var shCfg = ss.getSheetByName(HOJA_CONFIG);
+    if (!shCfg) return { ok: false, error: 'Hoja config_sistema no encontrada' };
+
+    var vals = shCfg.getDataRange().getValues();
+    var filasEncontradas = []; // puede haber duplicados del sistema anterior
+    for (var i = 0; i < vals.length; i++) {
+      if (String(vals[i][0] || '').trim().toLowerCase() === 'ultimas_seleccion') {
+        filasEncontradas.push(i + 1); // 1-indexed
+      }
+    }
+
+    var jsonIds = JSON.stringify(ids || []);
+    var ts      = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
+
+    if (filasEncontradas.length > 1) {
+      // Eliminar filas duplicadas de abajo hacia arriba para no desplazar índices
+      for (var d = filasEncontradas.length - 1; d >= 1; d--) {
+        shCfg.deleteRow(filasEncontradas[d]);
+      }
+    }
+
+    if (filasEncontradas.length >= 1) {
+      shCfg.getRange(filasEncontradas[0], 2).setValue(jsonIds);
+      shCfg.getRange(filasEncontradas[0], 3).setValue(ts);
+    } else {
+      shCfg.appendRow(['ultimas_seleccion', jsonIds, ts]);
+    }
+
+    return { ok: true, guardados: (ids || []).length };
+  } catch(e) {
+    return { ok: false, error: e.toString() };
+  }
+}
+
+// ========== LECTURA DE REGISTROS — SALIDAS Y CAJA ==========
+
+/**
+ * Devuelve las últimas N filas de SALIDAS (merma, consumo, vencidos).
+ * datos.limite: max registros (default 100). datos.fecha: filtrar por fecha YYYY-MM-DD (opcional).
+ */
+function getSalidasInternas(datos) {
+  try {
+    var limite = (datos && datos.limite) ? parseInt(datos.limite) : 100;
+    var filtroFecha = datos && datos.fecha ? String(datos.fecha) : null;
+    var ss = SpreadsheetApp.openById(SS_ID);
+    var sh = ss.getSheetByName('SALIDAS');
+    if (!sh) return { ok: true, registros: [] };
+    var vals = sh.getDataRange().getValues();
+    // Cols: Fecha, Hora, Producto, ID, Cantidad, Costo Unit., Precio Venta, Motivo, Observación, Vendedor
+    var registros = [];
+    for (var i = vals.length - 1; i >= 1; i--) {
+      var f = vals[i];
+      if (!f[0]) continue;
+      var fechaStr = f[0] instanceof Date
+        ? Utilities.formatDate(f[0], Session.getScriptTimeZone(), 'yyyy-MM-dd')
+        : String(f[0]).split('T')[0];
+      if (filtroFecha && fechaStr !== filtroFecha) continue;
+      registros.push({
+        fecha:     fechaStr,
+        hora:      String(f[1] || '').trim(),
+        producto:  String(f[2] || '').trim(),
+        idProd:    String(f[3] || '').trim(),
+        cantidad:  parseFloat(f[4]) || 0,
+        costo:     parseFloat(f[5]) || 0,
+        precio:    parseFloat(f[6]) || 0,
+        motivo:    String(f[7] || '').trim(),
+        obs:       String(f[8] || '').trim(),
+        vendedor:  String(f[9] || '').trim()
+      });
+      if (registros.length >= limite) break;
+    }
+    return { ok: true, registros: registros };
+  } catch(e) {
+    return { ok: false, error: e.toString() };
+  }
+}
+
+/**
+ * Devuelve las últimas N filas de CAJA_MOVIMIENTOS, filtradas por EGRESO.
+ * datos.limite: max registros (default 100). datos.fecha: filtrar por fecha (opcional).
+ */
+function getCajaEgresos(datos) {
+  try {
+    var limite = (datos && datos.limite) ? parseInt(datos.limite) : 100;
+    var filtroFecha = datos && datos.fecha ? String(datos.fecha) : null;
+    var ss = SpreadsheetApp.openById(SS_ID);
+    var sh = ss.getSheetByName('CAJA_MOVIMIENTOS');
+    if (!sh) return { ok: true, registros: [] };
+    var vals = sh.getDataRange().getValues();
+    // Cols: FECHA, HORA, TIPO, MOTIVO, MONTO, MEDIO, CATEGORIA, OBSERVACION
+    var registros = [];
+    for (var i = vals.length - 1; i >= 1; i--) {
+      var f = vals[i];
+      if (!f[0]) continue;
+      var tipo = String(f[2] || '').trim().toUpperCase();
+      if (tipo !== 'EGRESO') continue;
+      var fechaStr = f[0] instanceof Date
+        ? Utilities.formatDate(f[0], Session.getScriptTimeZone(), 'yyyy-MM-dd')
+        : String(f[0]).split('T')[0];
+      if (filtroFecha && fechaStr !== filtroFecha) continue;
+      registros.push({
+        fecha:     fechaStr,
+        hora:      String(f[1] || '').trim(),
+        tipo:      tipo,
+        motivo:    String(f[3] || '').trim(),
+        monto:     parseFloat(f[4]) || 0,
+        medio:     String(f[5] || '').trim(),
+        categoria: String(f[6] || '').trim(),
+        obs:       String(f[7] || '').trim()
+      });
+      if (registros.length >= limite) break;
+    }
+    return { ok: true, registros: registros };
+  } catch(e) {
+    return { ok: false, error: e.toString() };
   }
 }
