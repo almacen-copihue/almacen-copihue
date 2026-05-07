@@ -1,439 +1,240 @@
-# 📜 CHANGELOG — FLYER CERVECERO COPIHUE
+# 📜 CHANGELOG — ALMACÉN COPIHUE
 ## Historial Completo de Versiones
 
 **Inicio del Proyecto**: 09/03/2026  
-**Última Actualización**: 09/03/2026 12:41  
-**Sistema**: Copihue POS v111+
+**Última Actualización**: 07/05/2026  
+**Sistema**: Copihue POS · Catálogo Index · Code.gs GAS
 
 ---
 
-## 📌 ESTRUCTURA DE VERSIONES
+## 📌 ARCHIVOS DEL SISTEMA
 
-Cada versión incluye:
-- 🎯 **Cambios principales**
-- ✅ **Funcionalidades nuevas**
-- 🐛 **Bugs solucionados**
-- 🔧 **Mejoras técnicas**
-- 📊 **Impacto en conversión**
-- 📚 **Documentación**
+| Archivo | Descripción | Versión Actual |
+|---------|-------------|----------------|
+| `seba21.html` | Panel POS vendedor | v330 |
+| `index.html` | Catálogo cliente (PWA) | v133 |
+| `code.gs` | Backend Google Apps Script | — |
 
 ---
 
-# 🔴 v111.1 — CURRENT (09/03/2026)
+## 🔴 ZONA HORARIA — HISTORIAL DE BUGS Y FIXES
 
-**Status**: ✅ FUNCIONAL Y LISTO PARA PRODUCCIÓN
+> **Problema recurrente**: el parseador de horas de Google Sheets fue roto y reparado varias veces.
+> Esta sección documenta el problema de raíz para que no se repita.
 
-## 🎯 Cambios Principales
+### Cómo llegan las horas de Google Sheets
 
-### 1. Reescritura de abrirFlyerAdmin()
-**Archivo**: `venta.html` línea 4969  
-**Cambio**: async/await → Promise.then().catch()
-
-```diff
-- async function abrirFlyerAdmin() {
-+ function abrirFlyerAdmin() {
--     try {
--         const r = await fetch(...);
-+     fetch(...).then(r => r.json()).then(data => {
--         const data = await r.json();
--     } catch(e) {
-+     }).catch(e => {
--         mostrarToast('Error', 'rojo');
-+         mostrarToast('Error: ' + e.message, 'rojo');
-```
-
-**Por qué**: async/await fallaba silenciosamente sin logs visibles
-
-### 2. Eliminación de Duplicados
-**Archivo**: `venta.html`  
-**Cambio**: Eliminadas 2 funciones `_generarCanvasFlyer()` idénticas
+Cuando una celda tiene un valor de hora (ej: `3:00`), el GAS la serializa como:
 
 ```
-Antes:
-  - Línea 5018: async function _generarCanvasFlyerConFotos()
-  - Línea 5241: function _generarCanvasFlyer()
-  
-Después:
-  - Línea 5018: function _generarCanvasFlyer() [ÚNICA, CON FOTOS]
-  
-Ahorro: 190 líneas de código muerto
+"1899-12-30T06:00:00.000Z"   ← fecha epoch base de Sheets, hora en UTC
 ```
 
-### 3. Sistema de Logs Completo
-**Archivo**: `venta.html`  
-**Cambio**: Agregados console.log() en puntos críticos
+El valor UTC NO es la hora real. La hora real está en la zona horaria local del browser.
+
+### La solución correcta (index.html — referencia)
 
 ```javascript
-console.log('Datos recibidos:', data);          // Log 1
-console.log('Fotos cargadas');                  // Log 2
-console.error('Error:', e);                     // Log 3
-```
-
-**Beneficio**: Debug visible en F12 → Console
-
-### 4. Integración de Fotos de GitHub
-**Archivo**: `venta.html` líneas 4916-4960  
-**Cambio**: Sistema automático de URLs
-
-```javascript
-const GITHUB_IMAGES_BASE = 'https://raw.githubusercontent.com/...';
-function _generarURLFoto(nombreProducto) { ... }
-function _cargarImagen(src) { ... }
-```
-
-**Beneficio**: Fotos reales del catálogo automáticas
-
-## ✅ Funcionalidades Nuevas
-
-### ✨ Precarga Paralela de Imágenes
-```javascript
-let promesasCargas = _flyerProductos.map(p => {
-    const fotoURL = _generarURLFoto(p.nombre);
-    return fotoURL ? _cargarImagen(fotoURL) : Promise.resolve(null);
-});
-Promise.all(promesasCargas).then(() => {
-    // Todas las imágenes cargadas → generar canvas
-});
-```
-
-### ✨ Validación Mejorada de Datos
-```javascript
-if (!data.success || !data.productos || !data.productos.length) {
-    mostrarToast('⚠️ Sin cervezas disponibles', 'rojo');
-    return;
+// index.html _parsearValorHora() — CORRECTO
+if (s.includes('T') && s.includes('Z')) {
+    const d = new Date(s);
+    return { h: d.getHours(), m: d.getMinutes() }; // getHours() local del browser
 }
 ```
 
-### ✨ Ordenamiento Inteligente
+`d.getHours()` devuelve la hora en la zona horaria del browser (Argentina UTC-3).
+`d.getUTCHours()` devuelve UTC puro — 3 horas de desfase — bug.
+
+### Historia de intentos fallidos en seba21
+
+| Intento | Código | Resultado para "3:00" |
+|---------|--------|----------------------|
+| Original | `getUTCHours() - 3` | 4:31 ❌ |
+| Fix v329 | `getUTCHours()` directo | 7:31 ❌ |
+| Fix v330 | `getHours()` (local) | 3:00 ✅ |
+
+### Regla de oro
+
+> Siempre usar `d.getHours()` y `d.getMinutes()` para horas de Sheets.
+> Nunca `getUTCHours()`. El browser está en Argentina, `getHours()` ya convierte.
+
+---
+
+## 📌 CODE.GS — CAMBIOS RECIENTES
+
+### getUltimasSeleccion() — Fix límite por día (Mayo 2026)
+
+**Problema**: devolvía solo `{ ok, seleccion }` sin el campo `maximo`.
+El selector mostraba siempre `1de3 2de3 3de3` con 3 hardcodeado.
+
+**Fix**: el límite se lee de `config_sistema` fila "maximo ultimas unidades",
+columna del día actual (mismo patrón que `calcularOfertas`).
+
 ```javascript
-_flyerProductos.sort((a, b) => {
-    if (b.descuento !== a.descuento) return b.descuento - a.descuento;
-    return (b.rotacion || 0) - (a.rotacion || 0);
-});
-```
-Mayor descuento primero (sesgo psicológico)
+// ANTES
+return { ok: true, seleccion: ids };
 
-## 🐛 Bugs Solucionados
-
-| Bug | Síntoma | Solución |
-|-----|---------|----------|
-| Async timeout silencioso | Flyer no aparecía sin error | Cambié a .then().catch() |
-| Función duplicada no llamada | Canvas sin datos | Eliminé duplicado, renombré |
-| Sin logs de debug | No sabía dónde fallaba | Agregué 3 console.log() |
-| No validaba JSON response | Crash si API devolvía error | Validé success + productos |
-| Imágenes no precargaban | Fotos tardaban en aparecer | Implementé caché + Promise.all() |
-
-## 🔧 Mejoras Técnicas
-
-| Métrica | Antes | Después | Mejora |
-|---------|-------|---------|--------|
-| **Líneas de código** | 5476 | 5286 | -3.5% (190 líneas menos) |
-| **Errores visibles** | 0 | 3 logs | +∞ |
-| **Performance** | Lento (sin caché) | Rápido (caché) | +40% |
-| **Debuggeable** | ❌ No | ✅ Sí | +100% |
-| **Funciones duplicadas** | 2 | 0 | -100% |
-
-## 📊 Impacto Estimado en Conversión
-
-```
-Cambio anterior → +70-100%
-Cambio v111.0 → Roto (-100%)
-Cambio v111.1 → Recuperado (+70-100%)
-
-CONVERSIÓN ESPERADA CON v111.1:
-├─ Psicología visual: +70%
-├─ Fotos reales: +30-40%
-├─ Urgencia (footer): +15-20%
-├─ Descuentos escalados: +15-25%
-└─ TOTAL: +100-170% vs sin flyer
+// DESPUÉS
+var diaIdxJC = [1,2,3,4,5,6,0].indexOf(new Date().getDay());
+return { ok: true, seleccion: ids, maximo: maximo };
 ```
 
-## 📚 Documentación Nueva
+### ultimasSeleccionadasSiempre — Campo eliminado (Mayo 2026)
 
-- ✅ `README_v111.1.md` - Guía completa
-- ✅ `INFORME_VISUAL_v111.1.md` - Comparación visual antes/después
-- ✅ `FIXES_FLYER.md` - Detalles técnicos de los fixes
-- ✅ `INTEGRACION_FOTOS_FLYER.md` - Guía de fotos
-- ✅ `MEJORAS_FLYER_CERVECERO.md` - Psicología aplicada
+Una IA anterior agregó `ultimasSeleccionadasSiempre: _leerUltimasConDias_()` como
+workaround para mostrar últimas en seba21 sin importar el horario.
+**Eliminado** — el problema real era el parseH de horarios, no la lógica del GAS.
 
 ---
 
-# 🟡 v111.0 — BROKEN (09/03/2026 11:30)
+## 📌 SEBA21.HTML — HISTORIAL COMPLETO
 
-**Status**: ❌ NO FUNCIONAL (SUPERSEDED)
+### v330 — 07/05/2026 ✅
+- FIX parseH definitivo: usa `d.getHours()` (hora local del browser) igual que `index.html`
+- Antes: `getUTCHours()` devolvía 7:31 para una hora de 3:00 en planilla
+- Ahora: lee correcto en todas las horas
 
-## 🎯 Qué Pasó
+### v329 — 07/05/2026 ⚠️ parcialmente correcto
+- FIX parseH intento 2: epoch 1899-12-30 leída directo en UTC (aún incorrecto)
+- FIX cargarEstadoToggles: modo auto resuelve horario real con `_dentroDeHorario`
+- FIX `_tipoActivo`: eliminado `return true` hardcodeado
+- FIX mapa: `ultimas` agregado a `_dentroDeHorario`
 
-**Fecha de Inicio**: 09/03/2026 09:00  
-**Fecha de Error Detectado**: 09/03/2026 11:30  
-**Tiempo Sin Funcionar**: ~2.5 horas  
-**Causa**: Implementación de fotos con async/await roto
+### v328 — 07/05/2026 ✅
+- Log de versión en consola al iniciar: `🏪 Copihue POS vXXX cargado`
 
-## 🔴 Problemas Identificados
+### v327 — 07/05/2026 ❌ regresión
+- Intento fallido: `_toggleEstado = null` en auto → todas las ofertas visibles fuera de horario
+- Problema real era parseH, no la lógica de toggles
 
-### Problema 1: Async/await Fallaba
-```javascript
-async function abrirFlyerAdmin() {
-    const canvas = await _generarCanvasFlyerConFotos(...);
-}
-// ^ Espera función que no existe o falla
-```
+### v326 — 07/05/2026 ✅
+- FIX: `calcularOfertaPOS` usaba porcentajes hardcodeados para Últimas Unidades
+- Ahora usa `precioOferta` directo desde Code.gs — la planilla manda
+- DEBUG: log en cada tick del interval
 
-**Síntoma**: Botón clickeaba pero nada pasaba (error silencioso)
+### v325 — 07/05/2026 ✅
+- FIX: `getConfig` se llamaba dos veces, ambas chequeaban `data.success` pero GAS devuelve `data.ok`
+- `_getConfigCached()` centraliza la llamada, acepta `ok || success`
+- FIX INTERVAL: recarga cache si es null antes de evaluar horarios
 
-### Problema 2: Función No Existía
-```javascript
-async function abrirFlyerAdmin() {
-    const canvas = await _generarCanvasFlyerConFotos(...);
-    // ^ Esta función estaba declarada como "async function"
-    // pero se llamaba sin await
-}
-```
+### v324 — 07/05/2026 ✅
+- AUTO HORARIO: `setInterval` 60s detecta apertura y cierre sin recargar página
+- Solo actúa en tipos con modo `auto`
+- NUEVO: `alertarFiadosVencidos()` — notifica fiados vencidos al iniciar (una vez por día)
 
-### Problema 3: Código Duplicado
-```
-Línea 5018: async function _generarCanvasFlyerConFotos() { ... }
-Línea 5241: function _generarCanvasFlyer() { ... }
+### v323 — 06/05/2026 ✅
+- FIX: `_dentroDeHorario` incluye `ultimas` en el mapa
+- FIX: `cargarEstadoToggles` resuelve horario real en modo auto
+- FIX: eliminado `return true` hardcodeado en `_tipoActivo`
+- REVERT: eliminado hack `ultimasSeleccionadasSiempre` del GAS
 
-¿Cuál se usa? Confusión total
-```
+### v322 — 06/05/2026 ⚠️
+- Workaround `ultimasSeleccionadasSiempre` (luego eliminado en v323)
+- FIX VISUAL: fila de ofertas con `flex-wrap`
 
-### Problema 4: Sin Logs
-No había forma de ver dónde fallaba
+### v321 — 06/05/2026 ✅
+- TOGGLE AUTO: al volver a automático recarga el pool de ofertas
+- NOTIF: botón Limpiar en panel de notificaciones
+- UI: botón REC renombrado a FULL
 
-## 🔧 Intento de Fix
+### v320 — 06/05/2026 ✅
+- NOTIF: avisa al cargar si el pool de Últimas tiene slots libres
 
-Se intentó:
-1. ✅ Cambiar async/await
-2. ❌ Compilación fallida
-3. ❌ Funciones conflictivas
-4. ❌ Sin visibilidad de error
+### v319 — 06/05/2026 ✅
+- SELECTOR ÚLTIMAS: buscador de texto en el modal
 
-## 📸 Evidencia
+### v318 — 06/05/2026 ✅
+- ÚLTIMAS: eliminado fallback automático, solo productos seleccionados manualmente
+- Límite del día desde `config_sistema` aplicado al cargar el pool
+- SELECTOR: subtítulo `X/máx`, bloqueo al superar máximo, lee `ds.maximo` al abrir
 
-```
-Usuario: "Fl no hace nada no carga las cervezas"
+### v304 — 25/04/2026 ✅
+- FIADOS: recordatorio de deuda via Web Share API (reemplazó WhatsApp)
 
-Symptom: Botón se clickea, toast sale, pero flyer nunca aparece
-Console: Silencio (no hay error visible)
-Status: BROKEN
-```
+### v303 — 25/04/2026 ✅
+- SEGURIDAD: fotos con `createElement` en vez de `innerHTML`
+- SEGURIDAD: API key a `sessionStorage`
 
-## 📊 Impacto
+### v302 — 25/04/2026 ✅
+- WA: abre directo con `whatsapp://send`, eliminado modal intermedio
 
-- **Usuarios Afectados**: 1 almacén (Copihue)
-- **Funcionalidad**: 0% (flyer completamente no funciona)
-- **Tiempo Downtime**: ~2.5 horas
-- **Conversión**: -100% (no hay flyer que compartir)
+### v301 — 25/04/2026 ✅
+- WA BUSINESS: intent Android directo a `com.whatsapp.w4b`
 
----
+### v300 — 25/04/2026 ✅
+- FIADOS: fix botón WA flotante no pasaba el teléfono
 
-# 🟢 v110.x — ESTABLE (Anterior a 09/03/2026)
+### v299 — 25/04/2026 ✅
+- FIADO: fix dropdown en Android, teléfono no bloquea registro, modal WA siempre abre
 
-**Status**: ✅ FUNCIONAL (DEPRECATED)
+### v298 — 23/04/2026 ✅
+- FIADOS: fix desfase UTC en fechas de GAS, extracción directa del string
 
-## 📋 Características
+### v273 — 23/04/2026 ✅
+- FIADOS: normalización robusta de fechas en múltiples formatos
 
-### Funcionalidades Básicas ✅
-- [x] Carga datos de Google Sheets
-- [x] Muestra cervezas en lista
-- [x] Badges de descuento
-- [x] Precios originales y promocionales
-- [x] Botón compartir WhatsApp
-- [x] Botón descargar PNG
-- [x] Cierre horario
+### v272 — 23/04/2026 ✅
+- FIADOS COBRADOS: orden por fecha de pago más reciente
 
-### Sin Implementar ❌
-- [ ] Fotos de productos
-- [ ] Psicología visual avanzada (escala badges, glow, etc)
-- [ ] Ordenamiento inteligente
-- [ ] Caché de imágenes
-
-## 📚 Documentación
-
-Documentación de v110.x se perdió (inicio de proyecto)
+### v271 — 23/04/2026 ✅
+- FIADO: campo teléfono editable, teclado numérico, búsqueda por nombre o teléfono
+- WA BUSINESS: intent directo en Android
 
 ---
 
-## 📊 LÍNEA DE TIEMPO HISTÓRICA
+## 📌 INDEX.HTML — CAMBIOS RECIENTES
 
-```
-09/03/2026
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-09:00  ┌─ INICIO: v110.x actualización
-10:00  │  └─ Agregar fotos desde GitHub
-10:30  │    └─ Reescribir abrirFlyerAdmin() con async/await
-11:00  │     └─ Implementar _generarCanvasFlyerConFotos()
-11:30  │      └─ ❌ ERROR: Función no se ejecuta (async roto)
-       │
-11:45  ├─ DETECCIÓN: Usuario reporta "no carga"
-12:00  │  └─ Análisis de código
-12:15  │   └─ Identificar: Async + duplicados + sin logs
-12:30  │    └─ SOLUCIÓN COMPLETA v111.1
-12:45  │     └─ ✅ TESTING Y VALIDACIÓN
-       │
-13:00  └─ v111.1 PUBLICADO EN PRODUCCIÓN
-```
+### v133 — Mayo 2026 ✅
+- `_parsearValorHora()` con `d.getHours()` (hora local) — maneja ISO Sheets, fracciones y enteros
+- `_dentroDeHorarioIndex()` con mapa completo incluyendo `ultimas`
+- Horarios por columna del día actual desde `config_sistema`
+- Últimas Unidades respeta horario correctamente en todos los modos
 
 ---
 
-## 🎯 PATRÓN DE VERSIONES FUTURAS
+## 🧠 LECCIONES APRENDIDAS
 
-Cada nueva versión incluirá:
+### Zona horaria — regla definitiva
+```
+✅ d.getHours()     → hora local del browser (Argentina UTC-3) ← USAR SIEMPRE
+❌ d.getUTCHours()  → UTC puro, 3 horas adelantado ← NUNCA para horas de Sheets
+```
 
-1. **README_v[X.X].md**
-   - Guía completa
-   - Checklist de funcionalidades
-   - Troubleshooting
+### Horas de Google Sheets
+- Formato ISO del GAS: `"1899-12-30THH:MM:SS.000Z"` (epoch base de Sheets)
+- La hora UTC en ese string no corresponde a la hora real de Argentina
+- `new Date(iso).getHours()` en browser Argentina devuelve la hora correcta
 
-2. **INFORME_VISUAL_v[X.X].md**
-   - Comparación antes/después
-   - Screenshots simuladas
-   - Tests ejecutados
+### GAS — campos de respuesta
+- Code.gs usa `data.ok` (no `data.success`) en la mayoría de las acciones
+- Siempre aceptar `data.ok || data.success` para no romper silenciosamente
 
-3. **CHANGELOG.md** (este archivo)
-   - Histórico completo
-   - Todos los cambios
-   - Impacto documentado
-
-4. **venta.html**
-   - Código actualizado
-   - Comentarios explicativos
-   - Función con logs
+### Versiones
+- Regla de oro: siempre subir versión antes de entregar. Sin excepciones.
+- El log `🏪 Copihue POS vXXX cargado` permite confirmar qué está corriendo.
 
 ---
 
-## 🚀 PRÓXIMAS VERSIONES PLANIFICADAS
+## 📌 FLYER CERVECERO — HISTORIAL ORIGINAL
 
-### v111.2 (Estimado: 12/03/2026)
-```
-FEATURES:
-├─ Recorte automático de fondos en fotos
-├─ Compresión de imágenes
-├─ Tags: 🔥 TOP VENTA, 💰 MEJOR PRECIO, ⚡ LIQUIDACIÓN
-└─ Mejor caché de imágenes
+### v111.1 — 09/03/2026 ✅ FUNCIONAL
+- Reescritura `abrirFlyerAdmin()`: async/await → Promise.then().catch()
+- Eliminadas 2 funciones `_generarCanvasFlyer()` duplicadas (-190 líneas)
+- Logs en puntos críticos para debug visible
+- Sistema automático de URLs de fotos desde GitHub
+- Precarga paralela de imágenes con `Promise.all()`
+- Validación mejorada de datos de la API
 
-FIXES:
-├─ CORS en Google Drive (si es necesario)
-└─ Optimización de performance
-```
+### v111.0 — 09/03/2026 ❌ BROKEN (superseded)
+- Implementación de fotos con async/await roto
+- Función `_generarCanvasFlyerConFotos` fallaba silenciosamente
+- Superseded por v111.1
 
-### v111.3 (Estimado: 15/03/2026)
-```
-FEATURES:
-├─ QR dinámico a WhatsApp
-├─ A/B testing automático
-├─ Analytics integrado
-└─ Dark/Light mode selector
-```
-
-### v112 (Estimado: 20/03/2026)
-```
-FEATURES:
-├─ Integración Instagram/TikTok
-├─ Flyer animado (GIF)
-├─ Customización de colores
-└─ Multi-idioma (ES/EN/PT)
-```
+### v110.x — Anterior a 09/03/2026 ✅ DEPRECATED
+- Funcionalidades básicas sin fotos ni psicología visual avanzada
 
 ---
 
-## 📚 REGLA DE ORO DE VERSIONES
-
-**CADA VERSIÓN DEBE INCLUIR:**
-
-```
-✅ OBLIGATORIO:
-   1. Código funcional (venta.html)
-   2. README con cambios
-   3. INFORME VISUAL (antes/después)
-   4. Logs en console.log()
-   5. Pruebas ejecutadas
-
-⚠️ RECOMENDADO:
-   6. Screenshots de pantallas
-   7. Métricas de impacto
-   8. Checklist de validación
-   9. Troubleshooting guide
-   10. Próximos pasos
-
-📊 TRACKING:
-   - Commits al repo
-   - Timestamps exactos
-   - Estado (✅ FUNCIONAL / ❌ BROKEN / ⏳ EN PRUEBA)
-   - Impacto en conversión
-```
-
----
-
-## 🎓 LECCIONES APRENDIDAS
-
-### ✅ Lo Que Funcionó
-
-1. **Documentación Completa** → Fácil de entender cambios
-2. **Logs en Console** → Debug rápido
-3. **Promises sobre Async** → Más control
-4. **Testing Antes de Deploy** → Previne errores
-
-### ❌ Lo Que Falló
-
-1. **Async/await sin validación** → Silencioso
-2. **Código duplicado** → Confusión
-3. **Sin console.log()** → No debuggeable
-4. **Deploy sin testing** → Fue el error
-
-### 🎯 Para Futuro
-
-```
-ANTES DE CADA DEPLOY:
-1. ✅ F12 → Console limpia (sin errores rojo)
-2. ✅ Tests ejecutados (checklist)
-3. ✅ Logs visibles (console.log)
-4. ✅ Código revisado (duplicados, syntax)
-5. ✅ Documentación actualizada
-6. ✅ Screenshot de funcionalidad
-```
-
----
-
-## 📞 CONTACTO Y REPORTE
-
-Si encontrás errores en futuras versiones:
-
-1. **Abre F12** (Developer Tools)
-2. **Ve a Console**
-3. **Toma screenshot** de error
-4. **Reporta**:
-   - Versión (ej: v111.1)
-   - Qué hiciste (pasos)
-   - Qué esperabas
-   - Qué pasó
-   - Error en console
-
----
-
-## 📈 ESTADÍSTICAS DEL PROYECTO
-
-```
-Versiones Creadas:     3 (v110.x, v111.0, v111.1)
-Documentos Generados:  5
-Código Escrito:        ~5286 líneas
-Horas de Desarrollo:   4.5
-Bugs Encontrados:      1 crítico
-Bugs Solucionados:     1/1 (100%)
-Status Actual:         ✅ PRODUCTIVO
-
-Conversión Esperada:   +70-100% vs sin flyer
-Comparticiones:        Estimado +80% CTR
-Retorno de Inversión:  ∞ (herramienta automática)
-```
-
----
-
-**CHANGELOG ÚLTIMO ACTUALIZADO**: 09/03/2026 13:00  
-**PRÓXIMA ACTUALIZACIÓN ESTIMADA**: 12/03/2026
-
-**Mantenido por**: Sistema de Marketing Automático Copihue  
-**Licencia**: Uso exclusivo para Almacén Copihue  
-**Versión**: 1.0 (Changelog)
+**Última actualización**: 07/05/2026  
+**Mantenido por**: Almacén Copihue  
+**Licencia**: Uso exclusivo Almacén Copihue

@@ -53,6 +53,11 @@
   • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
     evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
 
+  v330 — 07/05/2026
+  ------------------
+  • FIX parseH: usa d.getHours() (hora local del browser) igual que index.html.
+    Antes getUTCHours() daba 7:31 en vez de 3:00 — ahora lee correcto.
+
   v329 — 07/05/2026
   ------------------
   • FIX parseH: horas ISO epoch 1899-12-30 de Sheets se leen directo en UTC (sin restar -3).
@@ -190,7 +195,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v329</title>
+    <title>Copihue — POS v330</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -6607,22 +6612,24 @@ function _dentroDeHorario(cfg, tipo, diaIdx) {
             return false;
         }
 
+        // Mismo parseador que index.html — usa getHours() local del browser (hora Argentina)
         const parseH = v => {
             if (v === null || v === undefined || v === '') return null;
-            // ISO string de Google Sheets — epoch 1899-12-30 = hora pura sin zona horaria
-            if (typeof v === 'string' && v.includes('T')) {
-                try {
-                    const d = new Date(v);
-                    // Si es época base de Sheets (1899-12-30), la hora UTC es la hora real
-                    if (v.startsWith('1899-12-30')) return d.getUTCHours() + d.getUTCMinutes() / 60;
-                    // Otro ISO: convertir a hora Argentina (UTC-3)
-                    return ((d.getUTCHours() - 3 + 24) % 24) + d.getUTCMinutes() / 60;
-                } catch(e) { return null; }
-            }
-            if (typeof v === 'number') return v > 0 && v < 1 ? v * 24 : v;
             const s = String(v).trim();
-            if (s.includes(':')) { const [h,m] = s.split(':'); return parseInt(h) + parseInt(m)/60; }
-            return parseFloat(s);
+            if (s.includes('T') && s.includes('Z')) {
+                try { const d = new Date(s); if (!isNaN(d)) return d.getHours() + d.getMinutes() / 60; } catch(e) {}
+                return null;
+            }
+            const numVal = parseFloat(s);
+            if (!s.includes(':') && !isNaN(numVal) && numVal >= 0 && numVal < 1) {
+                const totalMins = Math.round(numVal * 24 * 60);
+                return (Math.floor(totalMins / 60) % 24) + (totalMins % 60) / 60;
+            }
+            if (!s.includes(':') && !isNaN(numVal)) return Math.floor(numVal) + Math.round((numVal % 1) * 60) / 60;
+            const parts = s.split(':');
+            const h = parseInt(parts[0]);
+            const m = parts.length > 1 ? (parseInt(parts[1]) || 0) : 0;
+            return isNaN(h) ? null : h + m / 60;
         };
 
         const hIni = parseH(cfg[keyIni][diaIdx]);
@@ -8328,7 +8335,7 @@ window.t9Limpiar = function(){};
 
 // Restaurar badge de notificaciones del día al arrancar
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('%c🏪 Copihue POS v329 cargado', 'color:#4caf50;font-weight:bold;font-size:1.1em;');
+    console.log('%c🏪 Copihue POS v330 cargado', 'color:#4caf50;font-weight:bold;font-size:1.1em;');
     setTimeout(() => {
         const arr = _cargarNotifPos ? _cargarNotifPos() : [];
         const hoy = fechaArgentina(0);
