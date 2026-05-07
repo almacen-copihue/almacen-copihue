@@ -53,6 +53,16 @@
   • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
     evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
 
+  v326 — 07/05/2026
+  -----------------
+  • FIX CRÍTICO: calcularOfertaPOS recalculaba el descuento de Últimas Unidades
+    localmente con porcentajes hardcodeados, ignorando el precioOferta que ya
+    mandaba Code.gs (calculado desde la planilla). Ahora _poolIdsUltimas guarda
+    { diasParaVencer, precioOferta, precio, pct } desde getOfertas, y
+    calcularOfertaPOS usa precioOferta directamente — la planilla manda.
+    Fallback al cálculo local solo si Code.gs no manda precioOferta.
+    Resultado: precio y % en seba21 sincronizados con catálogo del cliente.
+
   v325 — 07/05/2026
   -----------------
   • FIX CRÍTICO: getConfig se llamaba DOS veces por separado (_cargarHorarioSistema
@@ -158,7 +168,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v325</title>
+    <title>Copihue — POS v326</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -6201,7 +6211,15 @@ async function cargarPoolsOfertas() {
         // Seba21 usa siempre las seleccionadas (sin restricción de horario) — el horario lo respeta index
         const ultPOS = (data.ultimasSeleccionadasSiempre || data.ultimasSeleccionadas || []);
         const maxUltimas = (data.limites && data.limites.ultimas) ? data.limites.ultimas : 3;
-        ultPOS.slice(0, maxUltimas).filter(p => p.categoria !== 'CERVEZAS').forEach(p => _poolIdsUltimas.set(Number(p.id), p.diasParaVencer !== undefined ? p.diasParaVencer : null));
+        // Guardar precio y pct de Code.gs (fuente de verdad — planilla manda)
+        ultPOS.slice(0, maxUltimas).filter(p => p.categoria !== 'CERVEZAS').forEach(p => {
+            _poolIdsUltimas.set(Number(p.id), {
+                diasParaVencer: p.diasParaVencer !== undefined ? p.diasParaVencer : null,
+                precioOferta:   p.precioOferta   != null ? p.precioOferta   : null,
+                precio:         p.precio         != null ? p.precio         : null,
+                pct:            p.pct            != null ? p.pct            : null
+            });
+        });
         const poolsVacios = _poolIdsRelampago.size === 0 && _poolIdsDestacadas.size === 0 && _poolIdsEspeciales.size === 0;
         if (poolsVacios) _construirPoolsLocalFallback();
         console.log(`✅ Pools POS: ${_poolIdsRelampago.size} rel · ${_destacadasFiltradas.size} dest · ${_poolIdsEspeciales.size} esp · ${_poolIdsUltimas.size} ult`);
@@ -6360,23 +6378,24 @@ function calcularOfertaPOS(producto, qty) {
     }
     // 1b. ÚLTIMAS UNIDADES — toggle activo (null = default on) Y producto en el pool
     else if (_tipoActivo('ultimas') && _poolIdsUltimas.has(producto.id)) {
-        // PUNTOS 3,4,5: calcularOfertaPOS — usa calcularDescuentoUltimas (fuente única)
-        let diasVenc = null;
-        if (producto.vencimiento) {
-            const partes = String(producto.vencimiento).split('-');
-            if (partes.length === 3) {
-                const vD = new Date(parseInt(partes[0]), parseInt(partes[1]) - 1, parseInt(partes[2]));
-                const hoy = new Date(); hoy.setHours(0,0,0,0);
-                diasVenc = Math.round((vD - hoy) / 86400000);
-            }
-        }
-        if (diasVenc === null) diasVenc = _poolIdsUltimas.get(producto.id);
+        const ult = _poolIdsUltimas.get(producto.id);
+        const diasVenc = (ult && ult.diasParaVencer !== undefined) ? ult.diasParaVencer : null;
 
-        const descUlt = calcularDescuentoUltimas(diasVenc, producto.relampago, producto.price);
-        r.precioUnitario = descUlt.precio;
-        r.precioTotal    = descUlt.precio * qty;
+        // Usar precio de Code.gs (planilla manda) — fallback: recalcular localmente
+        let precioUlt, pct;
+        if (ult && ult.precioOferta != null) {
+            precioUlt = ult.precioOferta;
+            pct = ult.pct != null ? ult.pct : Math.round((1 - precioUlt / producto.price) * 100);
+        } else {
+            const descUlt = calcularDescuentoUltimas(diasVenc, producto.relampago, producto.price);
+            precioUlt = descUlt.precio;
+            pct = descUlt.pct;
+        }
+
+        r.precioUnitario = precioUlt;
+        r.precioTotal    = precioUlt * qty;
         const labelDia   = diasVenc === 0 ? 'VENCE HOY' : diasVenc === 1 ? 'VENCE MAÑANA' : diasVenc !== null && diasVenc <= 3 ? `VENCE EN ${diasVenc}D` : null;
-        r.etiqueta       = labelDia ? `🏷️ -${descUlt.pct}% ${labelDia}` : `🏷️ -${descUlt.pct}% ÚLTIMAS UNIDADES`;
+        r.etiqueta       = labelDia ? `🏷️ -${pct}% ${labelDia}` : `🏷️ -${pct}% ÚLTIMAS UNIDADES`;
         r.tieneOferta    = true;
         r.tipoOferta     = 'ultimas';
     }
