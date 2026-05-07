@@ -2,7 +2,7 @@
 ## Historial Completo de Versiones
 
 **Inicio del Proyecto**: 09/03/2026  
-**Última Actualización**: 07/05/2026  
+**Última Actualización**: 07/05/2026 — v331  
 **Sistema**: Copihue POS · Catálogo Index · Code.gs GAS
 
 ---
@@ -11,7 +11,7 @@
 
 | Archivo | Descripción | Versión Actual |
 |---------|-------------|----------------|
-| `seba21.html` | Panel POS vendedor | v330 |
+| `seba21.html` | Panel POS vendedor | v331 |
 | `index.html` | Catálogo cliente (PWA) | v133 |
 | `code.gs` | Backend Google Apps Script | — |
 
@@ -88,6 +88,13 @@ workaround para mostrar últimas en seba21 sin importar el horario.
 ---
 
 ## 📌 SEBA21.HTML — HISTORIAL COMPLETO
+
+### v331 — 07/05/2026 ✅
+- FIX CRÍTICO `_tipoActivo`: en modo `auto` (estado `null`) ahora consulta `_dentroDeHorario()` con `_configCache` en tiempo real. Antes siempre devolvía `false` para `null`, cerrando todas las ofertas en modo auto.
+- FIX `cargarEstadoToggles`: modo auto guarda `null` en `_toggleEstado` (no el bool de horario). El bool de horario solo pinta el botón; `_tipoActivo` lo resuelve en tiempo real.
+- FIX `_cargarHorarioSistema`: ahora usa el mismo `parseH` robusto de `_dentroDeHorario` (soporta ISO, fracción de día, entero, string HH:MM). El split simple de antes fallaba con valores ISO de Sheets.
+- NUEVO `setInterval` 60s en `iniciarToggleOfertas`: re-evalúa tipos en modo `auto` y recarga pools al detectar apertura o cierre automático. Mismo patrón que v324.
+- MEJORA logs `cargarEstadoToggles`: muestra día de semana, valor de planilla, modo e ícono de estado (`⏰✅`/`⏰❌`/`🔒✅`/`✗❌`) para diagnóstico rápido en consola.
 
 ### v330 — 07/05/2026 ✅
 - FIX parseH definitivo: usa `d.getHours()` (hora local del browser) igual que `index.html`

@@ -53,6 +53,21 @@
   • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
     evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
 
+  v331 — 07/05/2026
+  ------------------
+  • FIX CRÍTICO _tipoActivo: en modo auto (null) ahora consulta _dentroDeHorario()
+    con la config en cache en tiempo real. Antes devolvía false siempre para null,
+    haciendo que el modo auto cerrara todas las ofertas en seba21.
+  • FIX cargarEstadoToggles: en modo auto guarda null en _toggleEstado (no bool).
+    El bool de horario solo se usa para pintar el botón; _tipoActivo lo resuelve
+    en tiempo real cada vez que se llama.
+  • FIX _cargarHorarioSistema: usa parseH robusto (ISO, fracción, entero, string)
+    igual que _dentroDeHorario, en vez de split(':')[0] que fallaba con ISO.
+  • NUEVO setInterval 60s en iniciarToggleOfertas: re-evalúa tipos en modo auto
+    y recarga pools si detecta apertura o cierre. Mismo patrón que v324.
+  • MEJORA logs cargarEstadoToggles: muestra día, valor planilla, modo e ícono
+    de estado (⏰✅/⏰❌/🔒✅/✗❌) para diagnóstico fácil en consola.
+
   v330 — 07/05/2026
   ------------------
   • FIX parseH: usa d.getHours() (hora local del browser) igual que index.html.
@@ -195,7 +210,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v330</title>
+    <title>Copihue — POS v331</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -6581,12 +6596,31 @@ async function _cargarHorarioSistema() {
     const cfg = await _getConfigCached();
     if (!cfg) return;
     const diaIdx = _diaActualIdx();
+    // Usar el mismo parseH robusto de _dentroDeHorario (ISO, fracción, entero, string)
+    const parseH = v => {
+        if (v === null || v === undefined || v === '') return null;
+        const s = String(v).trim();
+        if (s.includes('T') && s.includes('Z')) {
+            try { const d = new Date(s); if (!isNaN(d)) return d.getHours() + d.getMinutes() / 60; } catch(e) {}
+            return null;
+        }
+        const numVal = parseFloat(s);
+        if (!s.includes(':') && !isNaN(numVal) && numVal >= 0 && numVal < 1) {
+            const totalMins = Math.round(numVal * 24 * 60);
+            return (Math.floor(totalMins / 60) % 24) + (totalMins % 60) / 60;
+        }
+        if (!s.includes(':') && !isNaN(numVal)) return Math.floor(numVal) + Math.round((numVal % 1) * 60) / 60;
+        const parts = s.split(':');
+        const h = parseInt(parts[0]);
+        const m = parts.length > 1 ? (parseInt(parts[1]) || 0) : 0;
+        return isNaN(h) ? null : h + m / 60;
+    };
     const rowCi = cfg['horario|Horario cierre local'] || cfg['Horario cierre local'];
     if (rowCi) {
-        const v = rowCi[diaIdx];
-        if (v !== null && v !== undefined) {
-            const n = parseFloat(String(v).split(':')[0]);
-            if (!isNaN(n)) { _horaCierreSistema = n; console.log('🕐 HoraCierre sistema:', n); }
+        const hCie = parseH(rowCi[diaIdx]);
+        if (hCie !== null && !isNaN(hCie)) {
+            _horaCierreSistema = Math.floor(hCie);
+            console.log('🕐 HoraCierre sistema:', String(_horaCierreSistema).padStart(2,'0') + ':' + String(Math.round((hCie % 1) * 60)).padStart(2,'0'));
         }
     }
 }
@@ -6650,26 +6684,30 @@ async function cargarEstadoToggles() {
         const cfg = await _getConfigCached();
         if (!cfg) return;
         const diaIdx = _diaActualIdx();
-        console.log('🔧 cargarEstadoToggles — diaIdx:', diaIdx, '| claves cfg:', Object.keys(cfg).filter(k => k.includes('Dias') || k.includes('Hora')));
+        const diasSemana = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
+        console.log(`🔧 cargarEstadoToggles — ${diasSemana[diaIdx]} (col ${diaIdx})`);
         Object.keys(_TOGGLE_CONFIG).forEach(tipo => {
             const clave = _TOGGLE_CONFIG[tipo].clave;
             const row = cfg[tipo + '|' + clave] || cfg[clave];
             const val = row ? row[diaIdx] : null;
-            let activo;
+            let modo, estadoUI;
             if (val === 1 || val === '1') {
-                activo = true;   // 1 = forzado ON
+                modo = 'on';
+                _toggleEstado[tipo] = true;
             } else if (val === 0 || val === '0') {
-                activo = false;  // 0 = forzado OFF
+                modo = 'off';
+                _toggleEstado[tipo] = false;
             } else {
-                // 'A', null, undefined → auto: respetar horario de la planilla igual que index
-                activo = _dentroDeHorario(cfg, tipo, diaIdx);
+                // 'A', null, undefined → auto horario
+                modo = 'auto';
+                _toggleEstado[tipo] = null; // IMPORTANTE: null = auto, _tipoActivo lo resuelve en tiempo real
             }
-            const modo = (val === 1 || val === '1') ? 'on' : (val === 0 || val === '0') ? 'off' : 'auto';
-            _toggleEstado[tipo] = activo;
             _toggleModo[tipo] = modo;
-            // Pintar el botón: null (auto) = mostrar como activo con indicador de horario
-            _pintarToggle(tipo, activo === null ? true : activo);
-            console.log(`  ${tipo}: val=${JSON.stringify(val)} modo=${modo} activo=${activo ?? 'auto(siempre)'}`);
+            // En auto: mostrar el estado horario actual en el botón, pero guardar null en _toggleEstado
+            estadoUI = modo === 'auto' ? _dentroDeHorario(cfg, tipo, diaIdx) : _toggleEstado[tipo];
+            _pintarToggle(tipo, modo === 'auto' ? estadoUI : _toggleEstado[tipo]);
+            const icono = modo === 'auto' ? (estadoUI ? '⏰✅' : '⏰❌') : (modo === 'on' ? '🔒✅' : '✗❌');
+            console.log(`  ${_TOGGLE_CONFIG[tipo].emoji} ${tipo}: planilla="${val}" → modo=${modo} ${icono}`);
         });
         _guardarTogglesPersistidos();
         reporteOfertasPOS('post-toggles');
@@ -6724,19 +6762,54 @@ async function toggleOferta(tipo) {
 }
 
 // Resuelve si un tipo de oferta está activo en seba21
-// true=forzado ON, false=forzado OFF, null=auto (respetar horario del sistema)
+// true=forzado ON | false=forzado OFF | null=auto → consultar _dentroDeHorario con cache
 function _tipoActivo(tipo) {
     const estado = _toggleEstado[tipo];
     if (estado === true)  return true;
     if (estado === false) return false;
-    return false; // null = aún no resuelto
+    // null = modo auto: usar la cache del config para evaluar horario ahora mismo
+    if (_configCache) {
+        const diaIdx = _diaActualIdx();
+        return _dentroDeHorario(_configCache, tipo, diaIdx);
+    }
+    return false; // sin cache aún: conservador → no mostrar
 }
+
+// Estado anterior de auto-horario (para detectar cambios de apertura/cierre)
+const _autoHorarioUltimoEstado = {};
 
 function iniciarToggleOfertas() {
     // Mostrar estado "cargando" mientras fetch
     Object.keys(_TOGGLE_CONFIG).forEach(tipo => _pintarToggle(tipo, null));
     cargarEstadoToggles();
     _pintarToggleCervecero();
+
+    // ── Monitor automático: re-evaluar apertura/cierre cada 60s ──
+    // Solo actúa en tipos con modo 'auto' para no pisar overrides manuales
+    setInterval(async () => {
+        if (!_configCache) { _configCache = null; } // forzar recarga si perdida
+        const cfg = await _getConfigCached();
+        if (!cfg) return;
+        const diaIdx = _diaActualIdx();
+        let cambio = false;
+        Object.keys(_TOGGLE_CONFIG).forEach(tipo => {
+            if (_toggleModo[tipo] !== 'auto') return; // solo auto
+            const estaActivo = _dentroDeHorario(cfg, tipo, diaIdx);
+            // Re-pintar el botón con el estado horario actualizado
+            _pintarToggle(tipo, estaActivo);
+            // Detectar cambio de estado (apertura o cierre)
+            const estadoAnterior = _autoHorarioUltimoEstado[tipo];
+            if (estadoAnterior !== undefined && estadoAnterior !== estaActivo) {
+                cambio = true;
+                console.log(`⏰ AUTO ${tipo}: ${estadoAnterior ? 'cierre' : 'apertura'} detectado → ${estaActivo ? '✅ abierto' : '❌ cerrado'}`);
+            }
+            _autoHorarioUltimoEstado[tipo] = estaActivo;
+        });
+        if (cambio) {
+            console.log('🔄 Auto-horario: cambio detectado → recargando pools y vista');
+            cargarPoolsOfertas().then(() => _refreshResultadosBadges());
+        }
+    }, 60000);
 }
 
 // ── Jueves Cervecero override ──
@@ -8335,7 +8408,7 @@ window.t9Limpiar = function(){};
 
 // Restaurar badge de notificaciones del día al arrancar
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('%c🏪 Copihue POS v330 cargado', 'color:#4caf50;font-weight:bold;font-size:1.1em;');
+    console.log('%c🏪 Copihue POS v331 cargado', 'color:#4caf50;font-weight:bold;font-size:1.1em;');
     setTimeout(() => {
         const arr = _cargarNotifPos ? _cargarNotifPos() : [];
         const hoy = fechaArgentina(0);
