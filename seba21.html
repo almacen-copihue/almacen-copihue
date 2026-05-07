@@ -53,6 +53,14 @@
   • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
     evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
 
+  v329 — 07/05/2026
+  ------------------
+  • FIX parseH: horas ISO epoch 1899-12-30 de Sheets se leen directo en UTC (sin restar -3).
+    Antes 3:00 se leía como 4:31 — ahora lee correcto.
+  • FIX cargarEstadoToggles: modo auto resuelve horario real con _dentroDeHorario.
+  • FIX _tipoActivo: eliminado return true hardcodeado.
+  • FIX mapa: ultimas agregado a _dentroDeHorario.
+
   v328 — 07/05/2026
   ------------------
   • UI: Log de versión en consola al iniciar (para saber qué está corriendo).
@@ -182,7 +190,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v328</title>
+    <title>Copihue — POS v329</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -6584,7 +6592,8 @@ function _dentroDeHorario(cfg, tipo, diaIdx) {
         const mapa = {
             relampago:  { ini: 'Hora inicio RELAMPAGO',  cie: 'Hora cierre RELAMPAGO'  },
             destacadas: { ini: 'Hora inicio DESTACADAS', cie: 'Hora cierre DESTACADAS' },
-            especiales: { ini: 'Hora inicio ESPECIALES', cie: 'Hora cierre ESPECIALES' }
+            especiales: { ini: 'Hora inicio ESPECIALES', cie: 'Hora cierre ESPECIALES' },
+            ultimas:    { ini: 'Hora inicio ULTIMAS UNIDADES', cie: 'Hora cierre ULTIMAS UNIDADES' }
         };
         const claves = mapa[tipo];
         if (!claves) return false;
@@ -6600,10 +6609,13 @@ function _dentroDeHorario(cfg, tipo, diaIdx) {
 
         const parseH = v => {
             if (v === null || v === undefined || v === '') return null;
-            // ISO string de Google Sheets
+            // ISO string de Google Sheets — epoch 1899-12-30 = hora pura sin zona horaria
             if (typeof v === 'string' && v.includes('T')) {
                 try {
                     const d = new Date(v);
+                    // Si es época base de Sheets (1899-12-30), la hora UTC es la hora real
+                    if (v.startsWith('1899-12-30')) return d.getUTCHours() + d.getUTCMinutes() / 60;
+                    // Otro ISO: convertir a hora Argentina (UTC-3)
                     return ((d.getUTCHours() - 3 + 24) % 24) + d.getUTCMinutes() / 60;
                 } catch(e) { return null; }
             }
@@ -6642,10 +6654,8 @@ async function cargarEstadoToggles() {
             } else if (val === 0 || val === '0') {
                 activo = false;  // 0 = forzado OFF
             } else {
-                // 'A', null, undefined → auto
-                // Seba21 es panel vendedor: en auto SIEMPRE muestra (el horario lo respeta index.html)
-                // _toggleEstado = null indica "auto" → _tipoActivo() devuelve true
-                activo = null;
+                // 'A', null, undefined → auto: respetar horario de la planilla igual que index
+                activo = _dentroDeHorario(cfg, tipo, diaIdx);
             }
             const modo = (val === 1 || val === '1') ? 'on' : (val === 0 || val === '0') ? 'off' : 'auto';
             _toggleEstado[tipo] = activo;
@@ -6712,8 +6722,7 @@ function _tipoActivo(tipo) {
     const estado = _toggleEstado[tipo];
     if (estado === true)  return true;
     if (estado === false) return false;
-    // null = auto → usar _dentroDeHorario si está disponible, sino mostrar
-    return true; // seba21 es panel vendedor, en auto siempre muestra
+    return false; // null = aún no resuelto
 }
 
 function iniciarToggleOfertas() {
@@ -8319,7 +8328,7 @@ window.t9Limpiar = function(){};
 
 // Restaurar badge de notificaciones del día al arrancar
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('%c🏪 Copihue POS v328 cargado', 'color:#4caf50;font-weight:bold;font-size:1.1em;');
+    console.log('%c🏪 Copihue POS v329 cargado', 'color:#4caf50;font-weight:bold;font-size:1.1em;');
     setTimeout(() => {
         const arr = _cargarNotifPos ? _cargarNotifPos() : [];
         const hoy = fechaArgentina(0);
