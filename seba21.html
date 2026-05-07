@@ -91,6 +91,11 @@
     mínimo. Emite una sola notif en 🔔 con clientes y montos. Se dispara una
     vez por día (localStorage copihue_fiados_alertados_YYYY-MM-DD).
 
+  v324 — 06/05/2026
+  ------------------
+  • AUTO HORARIO: setInterval 60s en iniciarToggleOfertas — detecta apertura y cierre
+    automático sin recargar la página. Solo actúa en tipos con modo 'auto'.
+
   v323 — 06/05/2026
   -----------------
   • FIX LAYOUT: FILA 2 del header tenía 10 botones con flex:1 — no entraban en
@@ -6722,6 +6727,30 @@ function iniciarToggleOfertas() {
     Object.keys(_TOGGLE_CONFIG).forEach(tipo => _pintarToggle(tipo, null));
     cargarEstadoToggles();
     _pintarToggleCervecero();
+
+    // Recheck cada 60s: detecta apertura y cierre de horarios automáticamente
+    setInterval(() => {
+        // Solo re-evalúa los tipos en modo auto (no toca forzados ON/OFF)
+        const huboCAmbio = Object.keys(_TOGGLE_CONFIG).some(tipo => {
+            if (_toggleModo[tipo] !== 'auto') return false;
+            const cfg = _configCache;
+            if (!cfg) return false;
+            const diaIdx = _diaActualIdx();
+            const nuevoEstado = _dentroDeHorario(cfg, tipo, diaIdx);
+            if (nuevoEstado !== _toggleEstado[tipo]) {
+                _toggleEstado[tipo] = nuevoEstado;
+                _pintarToggle(tipo, nuevoEstado);
+                return true;
+            }
+            return false;
+        });
+        _pintarToggleCervecero();
+        if (huboCAmbio) {
+            _guardarTogglesPersistidos();
+            cargarPoolsOfertas().then(() => _refreshResultadosBadges());
+            console.log('⏰ Toggle auto: cambio de horario detectado, pools recargados');
+        }
+    }, 60000);
 }
 
 // ── Jueves Cervecero override ──
