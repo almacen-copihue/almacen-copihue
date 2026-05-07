@@ -53,6 +53,16 @@
   • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
     evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
 
+  v327 — 07/05/2026
+  -----------------
+  • FIX REGRESIÓN v325: cargarEstadoToggles ahora lee la planilla correctamente
+    (fix data.success→ok), pero al leer modo 'A' (auto) llamaba _dentroDeHorario
+    y guardaba false en _toggleEstado cuando el horario no estaba activo (ej: 2 AM).
+    Eso hacía que _tipoActivo() devolviera false y no se mostrara ninguna sección
+    de ofertas en seba21. Fix: en modo auto, _toggleEstado = null (nunca false),
+    _pintarToggle usa true para que el botón se vea activo. La restricción de
+    horario la aplica index.html, no el panel vendedor.
+
   v326 — 07/05/2026
   -----------------
   • FIX CRÍTICO: calcularOfertaPOS recalculaba el descuento de Últimas Unidades
@@ -168,7 +178,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v326</title>
+    <title>Copihue — POS v327</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -6628,14 +6638,17 @@ async function cargarEstadoToggles() {
             } else if (val === 0 || val === '0') {
                 activo = false;  // 0 = forzado OFF
             } else {
-                // 'A', null, undefined → auto horario
-                activo = _dentroDeHorario(cfg, tipo, diaIdx);
+                // 'A', null, undefined → auto
+                // Seba21 es panel vendedor: en auto SIEMPRE muestra (el horario lo respeta index.html)
+                // _toggleEstado = null indica "auto" → _tipoActivo() devuelve true
+                activo = null;
             }
             const modo = (val === 1 || val === '1') ? 'on' : (val === 0 || val === '0') ? 'off' : 'auto';
             _toggleEstado[tipo] = activo;
             _toggleModo[tipo] = modo;
-            console.log(`  ${tipo}: val=${JSON.stringify(val)} modo=${modo} activo=${activo}`);
-            _pintarToggle(tipo, activo);
+            // Pintar el botón: null (auto) = mostrar como activo con indicador de horario
+            _pintarToggle(tipo, activo === null ? true : activo);
+            console.log(`  ${tipo}: val=${JSON.stringify(val)} modo=${modo} activo=${activo ?? 'auto(siempre)'}`);
         });
         _guardarTogglesPersistidos();
         reporteOfertasPOS('post-toggles');
