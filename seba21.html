@@ -53,6 +53,10 @@
   • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
     evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
 
+  v328 — 07/05/2026
+  ------------------
+  • UI: Log de versión en consola al iniciar (para saber qué está corriendo).
+
   v327 — 07/05/2026
   -----------------
   • FIX REGRESIÓN v325: cargarEstadoToggles ahora lee la planilla correctamente
@@ -91,32 +95,12 @@
     mínimo. Emite una sola notif en 🔔 con clientes y montos. Se dispara una
     vez por día (localStorage copihue_fiados_alertados_YYYY-MM-DD).
 
-  v326 — 07/05/2026
-  ------------------
-  • DEBUG: log en cada tick del interval para diagnosticar modos y estados.
-
-  v325 — 07/05/2026
-  ------------------
-  • FIX INTERVAL: si _configCache es null al tick, lo recarga antes de evaluar horarios.
-
-  v324 — 06/05/2026
-  ------------------
-  • AUTO HORARIO: setInterval 60s en iniciarToggleOfertas — detecta apertura y cierre
-    automático sin recargar la página. Solo actúa en tipos con modo 'auto'.
-
   v323 — 06/05/2026
   -----------------
   • FIX LAYOUT: FILA 2 del header tenía 10 botones con flex:1 — no entraban en
     pantalla móvil (💸 retiro de caja y 🏷️ selector Últimas quedaban cortados).
     Solución quirúrgica: dividida en FILA 2a (🕐 ⚙️ 🔄 🔔 🛒) y
     FILA 2b (🧾 🏠 💸 📋 🏷️), 5 botones cada una.
-
-  v323 — 06/05/2026
-  ------------------
-  • FIX HORARIOS: _dentroDeHorario ahora incluye 'ultimas' en el mapa.
-  • FIX AUTO: en modo auto, cargarEstadoToggles resuelve el horario real (no hardcodea true).
-  • FIX _tipoActivo: eliminado return true hardcodeado — respeta estado resuelto.
-  • REVERT: eliminado hack ultimasSeleccionadasSiempre del GAS (ya no necesario).
 
   v322 — 06/05/2026
   ------------------
@@ -198,7 +182,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v327</title>
+    <title>Copihue — POS v328</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -6238,7 +6222,8 @@ async function cargarPoolsOfertas() {
         _destacadasFiltradas = new Set([..._poolIdsDestacadas]); // sincronizado con backend
         (data.especialesActivas || []).filter(p => p.categoria !== 'CERVEZAS').forEach(p => _poolIdsEspeciales.add(Number(p.id)));
         // Solo se usan las seleccionadas manualmente — nunca fallback automático
-        const ultPOS = (data.ultimasSeleccionadas || []);
+        // Seba21 usa siempre las seleccionadas (sin restricción de horario) — el horario lo respeta index
+        const ultPOS = (data.ultimasSeleccionadasSiempre || data.ultimasSeleccionadas || []);
         const maxUltimas = (data.limites && data.limites.ultimas) ? data.limites.ultimas : 3;
         // Guardar precio y pct de Code.gs (fuente de verdad — planilla manda)
         ultPOS.slice(0, maxUltimas).filter(p => p.categoria !== 'CERVEZAS').forEach(p => {
@@ -6599,8 +6584,7 @@ function _dentroDeHorario(cfg, tipo, diaIdx) {
         const mapa = {
             relampago:  { ini: 'Hora inicio RELAMPAGO',  cie: 'Hora cierre RELAMPAGO'  },
             destacadas: { ini: 'Hora inicio DESTACADAS', cie: 'Hora cierre DESTACADAS' },
-            especiales: { ini: 'Hora inicio ESPECIALES', cie: 'Hora cierre ESPECIALES' },
-            ultimas:    { ini: 'Hora inicio ULTIMAS UNIDADES', cie: 'Hora cierre ULTIMAS UNIDADES' }
+            especiales: { ini: 'Hora inicio ESPECIALES', cie: 'Hora cierre ESPECIALES' }
         };
         const claves = mapa[tipo];
         if (!claves) return false;
@@ -6658,8 +6642,10 @@ async function cargarEstadoToggles() {
             } else if (val === 0 || val === '0') {
                 activo = false;  // 0 = forzado OFF
             } else {
-                // 'A', null, undefined → auto: respetar horario de la planilla (igual que index)
-                activo = _dentroDeHorario(cfg, tipo, diaIdx);
+                // 'A', null, undefined → auto
+                // Seba21 es panel vendedor: en auto SIEMPRE muestra (el horario lo respeta index.html)
+                // _toggleEstado = null indica "auto" → _tipoActivo() devuelve true
+                activo = null;
             }
             const modo = (val === 1 || val === '1') ? 'on' : (val === 0 || val === '0') ? 'off' : 'auto';
             _toggleEstado[tipo] = activo;
@@ -6726,8 +6712,8 @@ function _tipoActivo(tipo) {
     const estado = _toggleEstado[tipo];
     if (estado === true)  return true;
     if (estado === false) return false;
-    // null = aún no cargado desde planilla → no mostrar hasta que cargarEstadoToggles resuelva
-    return false;
+    // null = auto → usar _dentroDeHorario si está disponible, sino mostrar
+    return true; // seba21 es panel vendedor, en auto siempre muestra
 }
 
 function iniciarToggleOfertas() {
@@ -6735,33 +6721,6 @@ function iniciarToggleOfertas() {
     Object.keys(_TOGGLE_CONFIG).forEach(tipo => _pintarToggle(tipo, null));
     cargarEstadoToggles();
     _pintarToggleCervecero();
-
-    // Recheck cada 60s: detecta apertura y cierre de horarios automáticamente
-    setInterval(async () => {
-        // Si no hay cache, recargarlo primero
-        if (!_configCache) { await _getConfigCached(); }
-        const cfg = _configCache;
-        if (!cfg) return;
-        const diaIdx = _diaActualIdx();
-        console.log('⏰ tick modos:', JSON.stringify(_toggleModo), '| estados:', JSON.stringify(_toggleEstado));
-        // Solo re-evalúa los tipos en modo auto (no toca forzados ON/OFF)
-        let huboCambio = false;
-        Object.keys(_TOGGLE_CONFIG).forEach(tipo => {
-            if (_toggleModo[tipo] !== 'auto') return;
-            const nuevoEstado = _dentroDeHorario(cfg, tipo, diaIdx);
-            if (nuevoEstado !== _toggleEstado[tipo]) {
-                console.log(`⏰ ${tipo}: ${_toggleEstado[tipo]} → ${nuevoEstado}`);
-                _toggleEstado[tipo] = nuevoEstado;
-                _pintarToggle(tipo, nuevoEstado);
-                huboCambio = true;
-            }
-        });
-        _pintarToggleCervecero();
-        if (huboCambio) {
-            _guardarTogglesPersistidos();
-            cargarPoolsOfertas().then(() => _refreshResultadosBadges());
-        }
-    }, 60000);
 }
 
 // ── Jueves Cervecero override ──
@@ -8360,6 +8319,7 @@ window.t9Limpiar = function(){};
 
 // Restaurar badge de notificaciones del día al arrancar
 document.addEventListener('DOMContentLoaded', function() {
+    console.log('%c🏪 Copihue POS v328 cargado', 'color:#4caf50;font-weight:bold;font-size:1.1em;');
     setTimeout(() => {
         const arr = _cargarNotifPos ? _cargarNotifPos() : [];
         const hoy = fechaArgentina(0);
