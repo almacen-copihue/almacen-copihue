@@ -53,6 +53,16 @@
   • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
     evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
 
+  v325 — 07/05/2026
+  -----------------
+  • FIX CRÍTICO: getConfig se llamaba DOS veces por separado (_cargarHorarioSistema
+    y cargarEstadoToggles) y ambas chequeaban data.success — si Code.gs devuelve
+    data.ok (como el resto de la app), ambas salían silenciosamente sin leer nada.
+    Solución: _getConfigCached() centraliza la llamada con cache en memoria;
+    acepta ok || success. Cache se invalida automáticamente al escribir un toggle.
+    Resultado: 1 sola llamada a getConfig por carga de página, horarios y toggles
+    leen la planilla sí o sí.
+
   v324 — 07/05/2026
   -----------------
   • NUEVO: alertarFiadosVencidos() — al iniciar, consulta listarFiados una sola
@@ -148,7 +158,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v324</title>
+    <title>Copihue — POS v325</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -6500,22 +6510,39 @@ function _pintarToggle(tipo, activo) {
 // Hora de cierre del sistema — se lee desde config_sistema
 let _horaCierreSistema = 22; // fallback mientras carga
 
-// ── Cargar horario desde config_sistema ──
-async function _cargarHorarioSistema() {
+// ── Config cache compartida — una sola llamada a getConfig por carga ──
+let _configCache = null;
+async function _getConfigCached() {
+    if (_configCache) return _configCache;
     try {
         const data = await _apiFetch('getConfig');
-        if (!data.success || !data.config) return;
-        const cfg = data.config;
-        const diaIdx = _diaActualIdx();
-        const rowCi = cfg['horario|Horario cierre local'] || cfg['Horario cierre local'];
-        if (rowCi) {
-            const v = rowCi[diaIdx];
-            if (v !== null && v !== undefined) {
-                const n = parseFloat(String(v).split(':')[0]);
-                if (!isNaN(n)) _horaCierreSistema = n;
-            }
+        const ok = data.ok || data.success;
+        if (!ok || !data.config) {
+            console.warn('⚠️ getConfig: respuesta inesperada', JSON.stringify(data).slice(0,200));
+            return null;
         }
-    } catch(e) { console.warn('⚠️ No se pudo leer horario:', e.message); }
+        _configCache = data.config;
+        console.log('📋 CONFIG cargada — claves:', Object.keys(_configCache).length);
+        return _configCache;
+    } catch(e) {
+        console.warn('⚠️ getConfig error:', e.message);
+        return null;
+    }
+}
+
+// ── Cargar horario desde config_sistema ──
+async function _cargarHorarioSistema() {
+    const cfg = await _getConfigCached();
+    if (!cfg) return;
+    const diaIdx = _diaActualIdx();
+    const rowCi = cfg['horario|Horario cierre local'] || cfg['Horario cierre local'];
+    if (rowCi) {
+        const v = rowCi[diaIdx];
+        if (v !== null && v !== undefined) {
+            const n = parseFloat(String(v).split(':')[0]);
+            if (!isNaN(n)) { _horaCierreSistema = n; console.log('🕐 HoraCierre sistema:', n); }
+        }
+    }
 }
 
 // Lee si la hora actual está dentro del rango de una sección
@@ -6568,9 +6595,8 @@ function _dentroDeHorario(cfg, tipo, diaIdx) {
 
 async function cargarEstadoToggles() {
     try {
-        const data = await _apiFetch('getConfig');
-        if (!data.success) return;
-        const cfg = data.config;
+        const cfg = await _getConfigCached();
+        if (!cfg) return;
         const diaIdx = _diaActualIdx();
         console.log('🔧 cargarEstadoToggles — diaIdx:', diaIdx, '| claves cfg:', Object.keys(cfg).filter(k => k.includes('Dias') || k.includes('Hora')));
         Object.keys(_TOGGLE_CONFIG).forEach(tipo => {
@@ -6621,7 +6647,8 @@ async function toggleOferta(tipo) {
         const datos = { seccion: tipo, clave: cfg.clave, dia: diaIdx, valor: nuevoValor };
         const url = API_URL + '?action=setConfig&data=' + encodeURIComponent(JSON.stringify(datos));
         const resp = await _apiFetchUrl('setConfig', url);
-        if (resp.success) {
+        if (resp.ok || resp.success) {
+            _configCache = null; // invalidar cache tras escribir en planilla
             _guardarTogglesPersistidos();
             const labels = { 'on': '🔒 Forzado ON', 'auto': '⏰ Automático (respeta horario)', 'off': '✗ Forzado OFF' };
             mostrarToast(cfg.emoji + ' ' + tipo + ' → ' + labels[nuevoModo], nuevoModo === 'off' ? 'rojo' : 'verde');
