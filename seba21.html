@@ -53,6 +53,21 @@
   • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
     evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
 
+  v324 — 07/05/2026
+  -----------------
+  • NUEVO: alertarFiadosVencidos() — al iniciar, consulta listarFiados una sola
+    vez (delay 4s, no frena carga). Detecta pendientes cuya fechaVencimiento
+    ya pasó; si no tienen fecha acordada, usa fecha de creación + 7 días como
+    mínimo. Emite una sola notif en 🔔 con clientes y montos. Se dispara una
+    vez por día (localStorage copihue_fiados_alertados_YYYY-MM-DD).
+
+  v323 — 06/05/2026
+  -----------------
+  • FIX LAYOUT: FILA 2 del header tenía 10 botones con flex:1 — no entraban en
+    pantalla móvil (💸 retiro de caja y 🏷️ selector Últimas quedaban cortados).
+    Solución quirúrgica: dividida en FILA 2a (🕐 ⚙️ 🔄 🔔 🛒) y
+    FILA 2b (🧾 🏠 💸 📋 🏷️), 5 botones cada una.
+
   v322 — 06/05/2026
   ------------------
   • FIX ULTIMAS AUTO: seba21 usa ultimasSeleccionadasSiempre — muestra pool sin restricción horaria.
@@ -133,7 +148,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v323</title>
+    <title>Copihue — POS v324</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -1063,7 +1078,7 @@
             <button class="btn-resumen" onclick="abrirFotos()" title="Editor de fotos" style="background:rgba(0,150,136,0.3);border-color:rgba(0,150,136,0.6);flex:1;text-align:center;">📷</button>
         </div>
 
-        <!-- FILA 2: Sistema -->
+        <!-- FILA 2a: Sistema (primera mitad) -->
         <div class="header-right" style="width:100%;justify-content:space-between;gap:4px;">
             <a href="copihue-horario.html?v=2" class="btn-resumen" title="Horario" style="background:rgba(0,188,212,0.3);border-color:rgba(0,188,212,0.6);flex:1;text-align:center;text-decoration:none;display:flex;align-items:center;justify-content:center;">🕐</a>
             <button class="btn-resumen" onclick="abrirConfigProveedores()" title="Configuración" style="background:rgba(255,193,7,0.3);border-color:rgba(255,193,7,0.6);flex:1;text-align:center;">⚙️</button>
@@ -1078,6 +1093,10 @@
                     style="background:rgba(255,152,0,0.3);border-color:rgba(255,152,0,0.6);flex:1;text-align:center;position:relative;display:flex;align-items:center;justify-content:center;">
                 🛒<span id="badgeListaCompra" style="display:none;position:absolute;top:-4px;right:-4px;background:#e65100;color:white;border-radius:50%;min-width:16px;height:16px;font-size:0.6rem;font-weight:900;align-items:center;justify-content:center;line-height:1;padding:0 2px;"></span>
             </button>
+        </div>
+
+        <!-- FILA 2b: Sistema (segunda mitad) -->
+        <div class="header-right" style="width:100%;justify-content:space-between;gap:4px;">
             <button class="btn-resumen" onclick="window.location.href='copihue-fiado.html'" title="Ver fiados" id="btnFiadoPanel"
                     style="background:rgba(230,81,0,0.3);border-color:rgba(230,81,0,0.6);flex:1;text-align:center;position:relative;display:flex;align-items:center;justify-content:center;">
                 🧾<span id="badgeFiados" style="display:none;position:absolute;top:-4px;right:-4px;background:#e65100;color:white;border-radius:50%;min-width:16px;height:16px;font-size:0.6rem;font-weight:900;align-items:center;justify-content:center;line-height:1;padding:0 2px;"></span>
@@ -1098,7 +1117,6 @@
                     style="background:rgba(183,28,28,0.3);border-color:rgba(183,28,28,0.6);flex:1;text-align:center;position:relative;display:flex;align-items:center;justify-content:center;">
                 🏷️<span id="badgeUltimas" style="display:none;position:absolute;top:-4px;right:-4px;background:#b71c1c;color:white;border-radius:50%;min-width:16px;height:16px;font-size:0.6rem;font-weight:900;align-items:center;justify-content:center;line-height:1;padding:0 2px;"></span>
             </button>
-
         </div>
 
         <!-- FILA 3: Interruptores de ofertas -->
@@ -2224,6 +2242,7 @@ async function cargarProductos() {
         setTimeout(alertarVencidosHoy, 500);
         setTimeout(procesarVencidosDeAyer, 1500); // auto-zero stock confirmados ayer
         setTimeout(verificarAlertasDelDia, 800);
+        setTimeout(alertarFiadosVencidos, 4000);  // fiados vencidos (1 llamada/día)
         programarRecordatorioCierre();
         // Recuperar carrito pendiente si existe
         setTimeout(verificarVentaPendiente, 1000);
@@ -5283,6 +5302,60 @@ async function procesarVencidosDeAyer() {
             nombresFail.join(', ') + ' · Hacelo manualmente en la planilla', '#e65100');
         console.warn('⚠️ Auto-zero falló para:', nombresFail);
     }
+}
+
+// ── Alerta de fiados vencidos ────────────────────────────────────────────────
+async function alertarFiadosVencidos() {
+    const hoyKey = fechaArgentina(0);
+    const lsKey  = 'copihue_fiados_alertados_' + hoyKey;
+    if (localStorage.getItem(lsKey)) return; // ya alertó hoy
+
+    let data;
+    try { data = await _apiFetch('listarFiados'); } catch(e) { return; }
+    if (!data || !data.ok || !data.fiados) return;
+
+    const hoy = new Date(); hoy.setHours(0,0,0,0);
+
+    const _parseFechaISO = s => {
+        if (!s) return null;
+        const str = String(s).trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+            const [y,m,d] = str.split('-').map(Number);
+            return new Date(y, m-1, d);
+        }
+        try { const d = new Date(str); return isNaN(d) ? null : d; } catch(e) { return null; }
+    };
+
+    const DIAS_DEFAULT = 7;
+    const vencidos = data.fiados.filter(f => {
+        if (f.estado === 'PAGADO') return false;
+        let limite;
+        if (f.fechaVencimiento) {
+            limite = _parseFechaISO(f.fechaVencimiento);
+        } else if (f.fecha) {
+            limite = _parseFechaISO(f.fecha);
+            if (limite) limite = new Date(limite.getTime() + DIAS_DEFAULT * 86400000);
+        }
+        if (!limite) return false;
+        limite.setHours(0,0,0,0);
+        return limite < hoy;
+    });
+
+    if (vencidos.length === 0) return;
+
+    localStorage.setItem(lsKey, '1');
+
+    const lineas = vencidos.map(f => {
+        const monto = f.total ? `$${Math.round(f.total).toLocaleString('es-AR')}` : '';
+        return `<strong>${f.cliente}</strong>${monto ? ' · ' + monto : ''}`;
+    }).join('<br>');
+
+    agregarNotifPos(
+        '🧾',
+        `Fiado${vencidos.length > 1 ? 's' : ''} vencido${vencidos.length > 1 ? 's' : ''} — ${vencidos.length} pendiente${vencidos.length > 1 ? 's' : ''}`,
+        lineas,
+        '#b71c1c'
+    );
 }
 
 function alertarVencidosHoy() {
