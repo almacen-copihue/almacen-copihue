@@ -98,6 +98,13 @@
     Solución quirúrgica: dividida en FILA 2a (🕐 ⚙️ 🔄 🔔 🛒) y
     FILA 2b (🧾 🏠 💸 📋 🏷️), 5 botones cada una.
 
+  v323 — 06/05/2026
+  ------------------
+  • FIX HORARIOS: _dentroDeHorario ahora incluye 'ultimas' en el mapa.
+  • FIX AUTO: en modo auto, cargarEstadoToggles resuelve el horario real (no hardcodea true).
+  • FIX _tipoActivo: eliminado return true hardcodeado — respeta estado resuelto.
+  • REVERT: eliminado hack ultimasSeleccionadasSiempre del GAS (ya no necesario).
+
   v322 — 06/05/2026
   ------------------
   • FIX ULTIMAS AUTO: seba21 usa ultimasSeleccionadasSiempre — muestra pool sin restricción horaria.
@@ -6218,8 +6225,7 @@ async function cargarPoolsOfertas() {
         _destacadasFiltradas = new Set([..._poolIdsDestacadas]); // sincronizado con backend
         (data.especialesActivas || []).filter(p => p.categoria !== 'CERVEZAS').forEach(p => _poolIdsEspeciales.add(Number(p.id)));
         // Solo se usan las seleccionadas manualmente — nunca fallback automático
-        // Seba21 usa siempre las seleccionadas (sin restricción de horario) — el horario lo respeta index
-        const ultPOS = (data.ultimasSeleccionadasSiempre || data.ultimasSeleccionadas || []);
+        const ultPOS = (data.ultimasSeleccionadas || []);
         const maxUltimas = (data.limites && data.limites.ultimas) ? data.limites.ultimas : 3;
         // Guardar precio y pct de Code.gs (fuente de verdad — planilla manda)
         ultPOS.slice(0, maxUltimas).filter(p => p.categoria !== 'CERVEZAS').forEach(p => {
@@ -6580,7 +6586,8 @@ function _dentroDeHorario(cfg, tipo, diaIdx) {
         const mapa = {
             relampago:  { ini: 'Hora inicio RELAMPAGO',  cie: 'Hora cierre RELAMPAGO'  },
             destacadas: { ini: 'Hora inicio DESTACADAS', cie: 'Hora cierre DESTACADAS' },
-            especiales: { ini: 'Hora inicio ESPECIALES', cie: 'Hora cierre ESPECIALES' }
+            especiales: { ini: 'Hora inicio ESPECIALES', cie: 'Hora cierre ESPECIALES' },
+            ultimas:    { ini: 'Hora inicio ULTIMAS UNIDADES', cie: 'Hora cierre ULTIMAS UNIDADES' }
         };
         const claves = mapa[tipo];
         if (!claves) return false;
@@ -6638,10 +6645,8 @@ async function cargarEstadoToggles() {
             } else if (val === 0 || val === '0') {
                 activo = false;  // 0 = forzado OFF
             } else {
-                // 'A', null, undefined → auto
-                // Seba21 es panel vendedor: en auto SIEMPRE muestra (el horario lo respeta index.html)
-                // _toggleEstado = null indica "auto" → _tipoActivo() devuelve true
-                activo = null;
+                // 'A', null, undefined → auto: respetar horario de la planilla (igual que index)
+                activo = _dentroDeHorario(cfg, tipo, diaIdx);
             }
             const modo = (val === 1 || val === '1') ? 'on' : (val === 0 || val === '0') ? 'off' : 'auto';
             _toggleEstado[tipo] = activo;
@@ -6708,8 +6713,8 @@ function _tipoActivo(tipo) {
     const estado = _toggleEstado[tipo];
     if (estado === true)  return true;
     if (estado === false) return false;
-    // null = auto → usar _dentroDeHorario si está disponible, sino mostrar
-    return true; // seba21 es panel vendedor, en auto siempre muestra
+    // null = aún no cargado desde planilla → no mostrar hasta que cargarEstadoToggles resuelva
+    return false;
 }
 
 function iniciarToggleOfertas() {
