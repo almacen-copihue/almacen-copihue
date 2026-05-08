@@ -2284,7 +2284,7 @@
 
 <script>
 // ========== VERSIÓN Y CONFIGURACIÓN ==========
-const APP_VERSION = 'copihue-index-v112';
+const APP_VERSION = 'copihue-index-v113';
 // Tag versión automático con fecha
 // versionTag se actualiza desde config_sistema (campo 'version')
 
@@ -3280,8 +3280,10 @@ const MOTOR_KEY = 'copihue_motor_activado_';
 let _motorCheckInterval = null;
 
 async function verificarAutoActivacion() {
-    const hoy = new Date();
-    const fechaHoy = hoy.toISOString().slice(0,10);
+    // Usar hora de Argentina — evita disparos incorrectos desde otras zonas
+    const _utc = new Date();
+    const hoy  = new Date(_utc.toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+    const fechaHoy = `${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}-${String(hoy.getDate()).padStart(2,'0')}`;
     const clave = MOTOR_KEY + fechaHoy;
 
     // Si ya se activó hoy, no hacer nada
@@ -4685,23 +4687,7 @@ function renderCartItems() {
     
     cartItems.innerHTML += footerHTML;
     cartTotal.textContent = '';
-    
-    // ===== BOTONES DE CANTIDAD =====
-    setTimeout(() => {
-        cartItems.querySelectorAll('.increase-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const productId = parseInt(btn.getAttribute('data-id'));
-                addToCart(productId);
-            });
-        });
-        
-        cartItems.querySelectorAll('.decrease-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const productId = parseInt(btn.getAttribute('data-id'));
-                updateCartQuantity(productId, -1);
-            });
-        });
-    }, 100);
+    // Listeners adjuntados via delegación en setupEventListeners — sin setTimeout
 }
 
 
@@ -5896,6 +5882,17 @@ function setupEventListeners() {
                 e.preventDefault();
             }
         }
+    });
+
+    // DELEGACIÓN BOTONES ± DEL CARRITO — reemplaza el setTimeout en renderCartItems
+    // Un solo listener permanente: responde inmediato sin esperar re-render
+    document.addEventListener('click', function(e) {
+        const btn = e.target.closest('.increase-btn, .decrease-btn');
+        if (!btn) return;
+        const productId = parseInt(btn.getAttribute('data-id'));
+        if (isNaN(productId)) return;
+        if (btn.classList.contains('increase-btn')) addToCart(productId);
+        else updateCartQuantity(productId, -1);
     });
 }
 
