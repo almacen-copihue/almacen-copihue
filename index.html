@@ -2284,7 +2284,7 @@
 
 <script>
 // ========== VERSIÓN Y CONFIGURACIÓN ==========
-const APP_VERSION = 'copihue-index-v113';
+const APP_VERSION = 'copihue-index-v115';
 // Tag versión automático con fecha
 // versionTag se actualiza desde config_sistema (campo 'version')
 
@@ -2394,8 +2394,11 @@ let _poolRecienLlegados = []; // Recién llegados desde Historial
 let _poolUltimasSeleccion = []; // Últimas Unidades — selección manual desde seba21
 let _limiteRecienLlegados = 12; // configurable desde config_sistema → RECIEN_LLEGADOS_LIMITE
 let _destacadasBackend = []; // IDs de destacadas rotadas del día según code.gs
-let _limiteDestacadas = 9; // configurable desde config_sistema → "máximo destacadas"
-let _limiteEspeciales = 2; // configurable desde config_sistema → "maximo especiales"
+let _limiteRelampago  = 3;  // configurable desde config_sistema → "maximo relampago"
+let _limiteDestacadas = 9;  // configurable desde config_sistema → "máximo destacadas"
+let _limiteEspeciales = 2;  // configurable desde config_sistema → "maximo especiales"
+let _limiteUltimas    = 3;  // configurable desde config_sistema → "maximo ultimas"
+let _promosActivas    = true; // configurable desde config_sistema → "OFERTA PROMOS ACTIVAS"
 let _horariosOferta = { // horarios reales leídos desde planilla
     relampago:  { inicio: null, cierre: null, modo: 'A' },
     destacadas: { inicio: null, cierre: null, modo: 'A' },
@@ -2652,6 +2655,48 @@ async function cargarConfigSistema() {
                 _limiteEspeciales = parseInt(valMaxEsp);
                 console.log('⭐ Límite especiales configurado desde planilla:', _limiteEspeciales);
             }
+        }
+
+        // Leer límite configurable de relámpago
+        const claveMaxRel = Object.keys(cfg).find(k => k.toLowerCase().includes('maximo relampago') || k.toLowerCase().includes('máximo relampago'));
+        if (claveMaxRel) {
+            const rowMaxRel = cfg[claveMaxRel];
+            const valMaxRel = rowMaxRel ? rowMaxRel[diaIdx] : null;
+            if (valMaxRel !== null && !isNaN(parseInt(valMaxRel)) && parseInt(valMaxRel) > 0) {
+                _limiteRelampago = parseInt(valMaxRel);
+                console.log('⚡ Límite relámpago configurado desde planilla:', _limiteRelampago);
+            }
+        }
+
+        // Leer límite configurable de últimas unidades
+        const claveMaxUlt = Object.keys(cfg).find(k => {
+            const kl = k.toLowerCase();
+            return kl.includes('maximo ultimas') || kl.includes('máximo ultimas');
+        });
+        if (claveMaxUlt) {
+            const rowMaxUlt = cfg[claveMaxUlt];
+            const valMaxUlt = rowMaxUlt ? rowMaxUlt[diaIdx] : null;
+            if (valMaxUlt !== null && !isNaN(parseInt(valMaxUlt)) && parseInt(valMaxUlt) > 0) {
+                _limiteUltimas = parseInt(valMaxUlt);
+                console.log('🔢 Límite últimas unidades configurado desde planilla:', _limiteUltimas);
+            }
+        }
+
+        // Leer interruptor OFERTA PROMOS ACTIVAS
+        const clavePromos = Object.keys(cfg).find(k => k.toLowerCase().includes('oferta promos') || k.toLowerCase().includes('promos activas'));
+        if (clavePromos) {
+            const rowPromos = cfg[clavePromos];
+            const valPromos = rowPromos ? rowPromos[0] : null; // columna B — valor único, no por día
+            if (valPromos !== null && valPromos !== undefined) {
+                _promosActivas = !(valPromos === 0 || valPromos === '0' || valPromos === false);
+                console.log('🛍️ PROMOS activas:', _promosActivas, '(val=' + valPromos + ')');
+            }
+        } else {
+            // No hay clave — loguear cuántas PROMOS hay con stock para visibilidad
+            const cantPromos = (typeof products !== 'undefined')
+                ? products.filter(p => p.category === 'PROMOS' && p.stockNumber > 0).length
+                : '?';
+            console.log('🛍️ PROMOS sin interruptor — activas por defecto | con stock:', cantPromos);
         }
 
         // Leer horario apertura y cierre local desde la planilla
@@ -2911,10 +2956,10 @@ function seleccionarProductosOfertas() {
             productosRelampago = poolRelampago.filter(p => _relampagoActivoBackend.includes(p.id));
             if (productosRelampago.length === 0) {
                 // Fallback: rotar localmente si el filtro no matchea
-                productosRelampago = ROTACION_SISTEMA.selectRotatedProducts(poolRelampago, 3, 'rotacion_relampago');
+                productosRelampago = ROTACION_SISTEMA.selectRotatedProducts(poolRelampago, _limiteRelampago, 'rotacion_relampago');
             }
         } else {
-            productosRelampago = ROTACION_SISTEMA.selectRotatedProducts(poolRelampago, 3, 'rotacion_relampago');
+            productosRelampago = ROTACION_SISTEMA.selectRotatedProducts(poolRelampago, _limiteRelampago, 'rotacion_relampago');
         }
         productosRelampago.forEach(p => idsEnOfertas.add(p.id));
         console.log(`⚡ Relámpago activo: ${productosRelampago.length} productos`);
@@ -3949,6 +3994,12 @@ function renderizarPromos() {
     const grid      = document.getElementById('promos-grid');
     if (!container || !grid) return;
 
+    // Interruptor desde config_sistema → "OFERTA PROMOS ACTIVAS"
+    if (!_promosActivas && !(esAdmin && modoMostrarTodasOfertas)) {
+        container.classList.add('cls-oculto'); container.style.marginBottom = '';
+        return;
+    }
+
     const lista = products.filter(p => p.category === 'PROMOS' && p.stockNumber > 0);
 
     if (!lista.length) { container.classList.add('cls-oculto'); container.style.marginBottom = ''; return; }
@@ -4005,8 +4056,7 @@ function renderizarUltimasUnidades() {
     container.classList.remove('cls-oculto');
 
     grid.innerHTML = lista.map(({ prod, diasParaVencer }) => {
-        const descPct   = prod.relampago > 0 ? prod.relampago : 10;
-        const precioDesc = Math.round(prod.price * (1 - descPct / 100));
+        const { pct: descPct, precio: precioDesc } = calcularDescuentoUltimas(diasParaVencer, prod.relampago, prod.price);
         const foto = prod.name.toLowerCase()
             .replace(/[áàä]/g,'a').replace(/[éèë]/g,'e').replace(/[íìï]/g,'i')
             .replace(/[óòö]/g,'o').replace(/[úùü]/g,'u').replace(/ñ/g,'n')
@@ -4177,6 +4227,22 @@ function renderCategories() {
 }
 
 // ========== FUNCIONES DE CÁLCULO DE OFERTAS ==========
+
+// ─── FUENTE ÚNICA DE VERDAD — DESCUENTO ÚLTIMAS UNIDADES ───────────────────
+// Regla: ≤3 días → 25% | tiene código pct → usa ese % | sin código → 10%
+// Igual que seba21 — NO duplicar lógica
+function calcularDescuentoUltimas(diasVenc, relampagoCodigo, precioBase) {
+    let pct;
+    if (diasVenc !== null && diasVenc !== undefined && diasVenc <= 3) {
+        pct = 25;
+    } else {
+        const cfg = OFERTAS_RELAMPAGO_SISTEMA[String(relampagoCodigo)];
+        pct = (cfg && cfg.tipo === 'pct' && cfg.descuento > 0) ? cfg.descuento : 10;
+    }
+    return { pct, precio: Math.round(precioBase * (1 - pct / 100)) };
+}
+// ───────────────────────────────────────────────────────────────────────────
+
 function calcularPrecioConOferta(producto, cantidad, esRelampago = false, ofertaRelampago = null) {
     if (!producto) return producto.price * cantidad;
     
@@ -4340,7 +4406,10 @@ function addToCart(productId, tipoForzado) {
     // 2b. Verificar ÚLTIMAS UNIDADES
     else if (_poolUltimasSeleccion && _poolUltimasSeleccion.some(u => Number(u.id) === productId) && validarHorario('ultimas')) {
         esOfertaUltimas = true;
-        const descPct = product.relampago > 0 ? product.relampago : 10;
+        // Buscar diasParaVencer desde el pool
+        const entradaUlt = _poolUltimasSeleccion.find(u => Number(u.id) === productId);
+        const diasVencUlt = entradaUlt ? (entradaUlt.diasParaVencer !== undefined ? entradaUlt.diasParaVencer : null) : null;
+        const { pct: descPct } = calcularDescuentoUltimas(diasVencUlt, product.relampago, product.price);
         ofertaConfig = {
             nombre:   'Últimas Unidades',
             tipo:     'pct',

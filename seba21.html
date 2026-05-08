@@ -217,7 +217,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v331</title>
+    <title>Copihue — POS v333</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2833,6 +2833,7 @@ function agregarProducto(id) {
         existente.qty++;
         const o = calcularOfertaPOS(producto, existente.qty);
         existente.price          = o.precioUnitario;
+        existente.precioTotalCalc = o.precioTotal;
         existente.precioOriginal = o.tipoOferta === 'normal' ? producto.normal : (o.tieneOferta ? producto.price : 0);
         existente.precioModificado = o.tieneOferta;
         existente.ofertaEtiqueta = o.etiqueta || null;
@@ -2851,6 +2852,7 @@ function agregarProducto(id) {
             precioOriginal: precioOrig,
             precioModificado: tieneDesc,
             qty: 1,
+            precioTotalCalc: oferta.precioTotal, // total exacto sin redondeo acumulado
             stockDisponible: producto.stock,
             vencimiento: producto.vencimiento || '',
             rotacion: producto.rotacion || 3,
@@ -2928,6 +2930,7 @@ function confirmarSelectorQty() {
     if (existente) {
         existente.qty   = qty;
         existente.price = oferta.precioUnitario;
+        existente.precioTotalCalc = oferta.precioTotal;
         existente.precioOriginal  = oferta.tipoOferta === 'normal' ? p.normal : (oferta.tieneOferta ? p.price : 0);
         existente.precioModificado = oferta.tieneOferta;
         existente.ofertaTipo   = oferta.tipoOferta || null;
@@ -2936,6 +2939,7 @@ function confirmarSelectorQty() {
         ventaActual.push({
             id: p.id, name: p.name,
             price: oferta.precioUnitario,
+            precioTotalCalc: oferta.precioTotal,
             precioOriginal: oferta.tipoOferta === 'normal' ? p.normal : (oferta.tieneOferta ? p.price : 0),
             precioModificado: oferta.tieneOferta,
             qty,
@@ -3086,7 +3090,8 @@ function _renderVentaCompleta(ligero) {
         // ── Calcular precios y ahorro ──────────────────────────────
         const tieneOferta  = item.precioModificado && item.precioOriginal > 0 && item.precioOriginal > item.price;
         const precioUnit   = item.price;
-        const subtotal     = Math.round(precioUnit * item.qty);
+        // NxM: usar precioTotalCalc si existe (evita desvíos por redondeo de unitario promedio)
+        const subtotal     = item.precioTotalCalc != null ? item.precioTotalCalc : Math.round(precioUnit * item.qty);
         const ahorroTotal  = tieneOferta ? Math.round(item.precioOriginal * item.qty - subtotal) : 0;
 
         // ── Texto de fórmula según tipo ────────────────────────────
@@ -3323,6 +3328,7 @@ function _modalQty(idx, delta) {
     if (p && !item.esPeso) {
         const oferta = calcularOfertaPOS(p, newQty);
         item.price = oferta.precioUnitario || p.price;
+        item.precioTotalCalc = oferta.precioTotal;
         item.ofertaEtiqueta = oferta.etiqueta || null;
     }
     renderVenta(true);
@@ -6222,7 +6228,10 @@ const _poolIdsDestacadas = new Set();
 const _poolIdsEspeciales = new Set();
 const _poolIdsUltimas    = new Map(); // id → diasParaVencer
 const _poolCervecero     = new Map(); // id → { descuento, precioPromo }
-let _limiteDestacadas    = 9;
+let _limiteRelampago     = 3; // configurable desde GAS → limites.relampago
+let _limiteDestacadas    = 9; // configurable desde GAS → limites.destacadas
+let _limiteEspeciales    = 2; // configurable desde GAS → limites.especiales
+let _limiteUltimas       = 3; // configurable desde GAS → limites.ultimas
 let _destacadasFiltradas = new Set();
 
 // ========== FALLBACK LOCAL DE POOLS ==========
@@ -6250,7 +6259,12 @@ async function cargarPoolsOfertas() {
         const data = await _apiFetch('getOfertas');
         if (!data.success) { _construirPoolsLocalFallback(); reporteOfertasPOS('post-pools'); _refreshResultadosBadges(); return; }
         _poolIdsRelampago.clear(); _poolIdsDestacadas.clear(); _poolIdsEspeciales.clear(); _poolIdsUltimas.clear();
-        if (data.limites && data.limites.destacadas) _limiteDestacadas = data.limites.destacadas;
+        if (data.limites) {
+            if (data.limites.destacadas) { _limiteDestacadas = data.limites.destacadas; console.log('🔥 Límite destacadas (GAS):', _limiteDestacadas); }
+            if (data.limites.relampago)  { _limiteRelampago  = data.limites.relampago;  console.log('⚡ Límite relámpago (GAS):', _limiteRelampago);  }
+            if (data.limites.especiales) { _limiteEspeciales = data.limites.especiales; console.log('⭐ Límite especiales (GAS):', _limiteEspeciales); }
+            if (data.limites.ultimas)    { _limiteUltimas    = data.limites.ultimas;                                                                  }
+        }
         (data.relampagoActivo   || []).forEach(p => _poolIdsRelampago.add(Number(p.id)));
         // Destacadas: code.gs ya aplicó la rotación y el límite — usar directo
         (data.destacadasActivas || []).filter(p => p.categoria !== 'CERVEZAS').forEach(p => _poolIdsDestacadas.add(Number(p.id)));
@@ -6259,9 +6273,8 @@ async function cargarPoolsOfertas() {
         // Solo se usan las seleccionadas manualmente — nunca fallback automático
         // Seba21 usa siempre las seleccionadas (sin restricción de horario) — el horario lo respeta index
         const ultPOS = (data.ultimasSeleccionadasSiempre || data.ultimasSeleccionadas || []);
-        const maxUltimas = (data.limites && data.limites.ultimas) ? data.limites.ultimas : 3;
         // Guardar precio y pct de Code.gs (fuente de verdad — planilla manda)
-        ultPOS.slice(0, maxUltimas).filter(p => p.categoria !== 'CERVEZAS').forEach(p => {
+        ultPOS.slice(0, _limiteUltimas).filter(p => p.categoria !== 'CERVEZAS').forEach(p => {
             _poolIdsUltimas.set(Number(p.id), {
                 diasParaVencer: p.diasParaVencer !== undefined ? p.diasParaVencer : null,
                 precioOferta:   p.precioOferta   != null ? p.precioOferta   : null,
@@ -6272,9 +6285,9 @@ async function cargarPoolsOfertas() {
         const poolsVacios = _poolIdsRelampago.size === 0 && _poolIdsDestacadas.size === 0 && _poolIdsEspeciales.size === 0;
         if (poolsVacios) _construirPoolsLocalFallback();
         console.log(`✅ Pools POS: ${_poolIdsRelampago.size} rel · ${_destacadasFiltradas.size} dest · ${_poolIdsEspeciales.size} esp · ${_poolIdsUltimas.size} ult`);
-        if (maxUltimas > 0 && _poolIdsUltimas.size < maxUltimas) {
+        if (_limiteUltimas > 0 && _poolIdsUltimas.size < _limiteUltimas) {
             agregarNotifPos('🏷️', 'Últimas Unidades',
-                `${_poolIdsUltimas.size} de ${maxUltimas} slots ocupados — abrí el selector para completar`,
+                `${_poolIdsUltimas.size} de ${_limiteUltimas} slots ocupados — abrí el selector para completar`,
                 '#e65100');
         }
         reporteOfertasPOS('post-pools');
@@ -8561,7 +8574,7 @@ window.t9Limpiar = function(){};
 
 // Restaurar badge de notificaciones del día al arrancar
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('%c🏪 Copihue POS v331 cargado', 'color:#4caf50;font-weight:bold;font-size:1.1em;');
+    console.log('%c🏪 Copihue POS v333 cargado', 'color:#4caf50;font-weight:bold;font-size:1.1em;');
     setTimeout(() => {
         const arr = _cargarNotifPos ? _cargarNotifPos() : [];
         const hoy = fechaArgentina(0);
