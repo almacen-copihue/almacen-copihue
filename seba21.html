@@ -53,6 +53,16 @@
   • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
     evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
 
+  v340 — 10/05/2026
+  ------------------
+  • HERRAMIENTAS HUB: eliminado _HERRAMIENTAS_FALLBACK hardcodeado por completo.
+    Fuente única: hoja HERRAMIENTAS de la planilla vía getHerramientas.
+  • HERRAMIENTAS HUB: cache TTL 5 minutos. Antes _hCargadas era permanente:
+    si la planilla cambiaba, el modal mostraba la lista vieja hasta reload.
+    Ahora refresca solo en cada apertura si pasaron más de 5 min.
+  • HERRAMIENTAS HUB: íconos robustos — fallback a 🔧 si el campo viene vacío
+    o con espacios.
+
   v339 — 10/05/2026
   ------------------
   • FIX TDZ _configCache: "Cannot access before initialization" — let _configCache
@@ -285,7 +295,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v339</title>
+    <title>Copihue — POS v340</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -7356,23 +7366,10 @@ cargarProductos().then(() => {
 // Lista de fallback — se usa si GAS no responde.
 // Para administrar dinámicamente: crear hoja HERRAMIENTAS en la planilla
 // con columnas A=NOMBRE B=URL C=ICONO D=DESCRIPCION E=ACTIVO F=ORDEN
-const _HERRAMIENTAS_FALLBACK = [
-  { nombre:'Reportes',       url:'copihue-reportes.html',         icono:'📊', descripcion:'Ventas y estadísticas', activo:true  },
-  { nombre:'Fiados',         url:'copihue-fiado.html',            icono:'🧾', descripcion:'Gestión de fiados',     activo:true  },
-  { nombre:'Herramientas',   url:'copihue-herramientas.html',     icono:'🔧', descripcion:'Panel de herramientas', activo:true  },
-  { nombre:'Horario',        url:'copihue-horario.html?v=2',      icono:'🕐', descripcion:'Horario del negocio',   activo:true  },
-  { nombre:'Publicador',     url:'copihue-publicador.html',       icono:'📤', descripcion:'Publicar productos',    activo:true  },
-  { nombre:'Fotos',          url:'copihue-fotos.html',            icono:'📷', descripcion:'Galería de fotos',      activo:true  },
-  { nombre:'Editor Fotos',   url:'copihue-editor-de-fotos.html',  icono:'🖼️', descripcion:'Editar imágenes',      activo:true  },
-  { nombre:'Flyer',          url:'copihue-flyer.html',            icono:'📢', descripcion:'Crear volantes',        activo:true  },
-  { nombre:'Dinero',         url:'copihue-dinero.html',           icono:'💰', descripcion:'Control de caja',       activo:true  },
-  { nombre:'Ingreso',        url:'copihue-ingreso.html',          icono:'📦', descripcion:'Ingreso mercadería',    activo:true  },
-  { nombre:'Tareas',         url:'copihue-tareas.html',           icono:'✅', descripcion:'Lista de tareas',       activo:true  },
-  { nombre:'Pub. HTML',      url:'copihue-publicador-html.html',  icono:'🌐', descripcion:'Publicar HTML',         activo:true  },
-  { nombre:'PS2 Carátulas',  url:'copihue-ps2-caratulas.html',    icono:'🎮', descripcion:'Carátulas PS2',         activo:true  },
-];
 
-let _hCargadas = false;
+// TTL 5 minutos — refresca automáticamente cuando cambia la planilla
+let _hTimestamp = 0;
+const _H_TTL = 5 * 60 * 1000;
 
 function cerrarHerramientas() {
   document.getElementById('modalHerramientas').style.display = 'none';
@@ -7380,28 +7377,38 @@ function cerrarHerramientas() {
 
 async function abrirHerramientas() {
   document.getElementById('modalHerramientas').style.display = 'flex';
-  if (!_hCargadas) await _recargarHerramientas();
+  const stale = (Date.now() - _hTimestamp) > _H_TTL;
+  if (stale) await _recargarHerramientas();
 }
 
 async function _recargarHerramientas() {
   const grid = document.getElementById('hGrid');
   const sub  = document.getElementById('hSubtitle');
-  grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:#555;padding:24px;font-size:0.82rem;"><div style="font-size:1.8rem;margin-bottom:6px;">⏳</div>Cargando...</div>';
-  sub.textContent = 'Cargando...';
+  grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:#555;padding:24px;font-size:0.82rem;"><div style="font-size:1.8rem;margin-bottom:6px;">⏳</div>Cargando desde planilla...</div>';
+  sub.textContent = 'Conectando...';
 
-  let lista = null;
   try {
     const r = await fetch(API_URL + '?action=getHerramientas&t=' + Date.now(), { cache: 'no-store' });
     const d = await r.json();
     if (d.ok && Array.isArray(d.herramientas) && d.herramientas.length > 0) {
-      lista = d.herramientas;
+      _hTimestamp = Date.now();
+      _renderHerramientas(d.herramientas);
+    } else {
+      _hError('Sin herramientas en planilla', 'Verificar hoja HERRAMIENTAS en Sheets');
     }
-  } catch(e) {}
+  } catch(e) {
+    _hError('Sin conexión con el servidor', 'Revisá conexión y tocá Recargar');
+  }
+}
 
-  if (!lista) lista = _HERRAMIENTAS_FALLBACK;
-
-  _hCargadas = true;
-  _renderHerramientas(lista);
+function _hError(titulo, subtitulo) {
+  document.getElementById('hGrid').innerHTML =
+    `<div style="grid-column:1/-1;text-align:center;padding:28px;">
+      <div style="font-size:2rem;margin-bottom:8px;">⚠️</div>
+      <div style="color:#e57373;font-size:0.82rem;font-weight:700;">${titulo}</div>
+      <div style="color:#666;font-size:0.72rem;margin-top:4px;">${subtitulo}</div>
+    </div>`;
+  document.getElementById('hSubtitle').textContent = 'Error al cargar';
 }
 
 function _renderHerramientas(lista) {
@@ -7409,20 +7416,20 @@ function _renderHerramientas(lista) {
   const sub  = document.getElementById('hSubtitle');
   const activas   = lista.filter(h => h.activo !== false);
   const inactivas = lista.filter(h => h.activo === false);
-  sub.textContent = activas.length + ' herramientas' + (inactivas.length ? ' · ' + inactivas.length + ' inactivas' : '');
+  sub.textContent = activas.length + ' herramientas' +
+    (inactivas.length ? ' · ' + inactivas.length + ' inactivas' : '');
 
   let html = '';
   for (const h of activas) {
+    const icono = h.icono && h.icono.trim() ? h.icono.trim() : '🔧';
     html += `
       <a href="${h.url}" style="text-decoration:none;">
         <div style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);
                     border-radius:14px;padding:12px 8px;text-align:center;cursor:pointer;
                     transition:background 0.15s;display:flex;flex-direction:column;align-items:center;gap:5px;"
-             onmouseenter="this.style.background='rgba(255,255,255,0.12)'"
-             onmouseleave="this.style.background='rgba(255,255,255,0.06)'"
-             ontouchstart="this.style.background='rgba(255,255,255,0.14)'"
+             ontouchstart="this.style.background='rgba(255,255,255,0.16)'"
              ontouchend="this.style.background='rgba(255,255,255,0.06)'">
-          <div style="font-size:1.6rem;line-height:1;">${h.icono || '🔧'}</div>
+          <div style="font-size:1.6rem;line-height:1;">${icono}</div>
           <div style="color:#fff;font-size:0.7rem;font-weight:800;line-height:1.2;">${h.nombre}</div>
           ${h.descripcion ? `<div style="color:#888;font-size:0.58rem;line-height:1.2;">${h.descripcion}</div>` : ''}
         </div>
@@ -7434,11 +7441,12 @@ function _renderHerramientas(lista) {
                         margin-top:4px;padding-top:10px;display:grid;
                         grid-template-columns:repeat(3,1fr);gap:8px;">`;
     for (const h of inactivas) {
+      const icono = h.icono && h.icono.trim() ? h.icono.trim() : '🔧';
       html += `
         <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);
-                    border-radius:12px;padding:10px 6px;text-align:center;opacity:0.4;
+                    border-radius:12px;padding:10px 6px;text-align:center;opacity:0.35;
                     display:flex;flex-direction:column;align-items:center;gap:4px;">
-          <div style="font-size:1.3rem;">${h.icono || '🔧'}</div>
+          <div style="font-size:1.3rem;">${icono}</div>
           <div style="color:#777;font-size:0.65rem;font-weight:700;">${h.nombre}</div>
         </div>`;
     }
@@ -8727,7 +8735,7 @@ window.t9Limpiar = function(){};
 
 // Restaurar badge de notificaciones del día al arrancar
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('%c🏪 Copihue POS v339 cargado', 'color:#4caf50;font-weight:bold;font-size:1.1em;');
+    console.log('%c🏪 Copihue POS v340 cargado', 'color:#4caf50;font-weight:bold;font-size:1.1em;');
     setTimeout(() => {
         const arr = _cargarNotifPos ? _cargarNotifPos() : [];
         const hoy = fechaArgentina(0);
