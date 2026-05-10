@@ -53,6 +53,16 @@
   • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
     evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
 
+  v336 — 09/05/2026
+  ------------------
+  • PERF swipe carrito (modal confirmación): _bindSwipeConfirmacion usaba
+    forEach → 3 listeners por fila, re-adjuntados en cada _reRenderModal().
+    Con 5 items, cada swipe acumulaba más closures que Android no liberaba
+    de inmediato → GC freeze progresivo, peor en el último item.
+    Fix: listener delegado en #confirmDetalle (mismo patrón que swipe de
+    resultados). dataset.swipeDelegate garantiza instalación única.
+    _reRenderModal ya no llama _bindSwipeConfirmacion.
+
   v335 — 09/05/2026
   ------------------
   • FIX badge desync (mostraba 1 al agregar 2): badgeFoto en cardHTML no tenía
@@ -245,7 +255,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v335</title>
+    <title>Copihue — POS v336</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3370,43 +3380,49 @@ function _reRenderModal() {
     window._descuentoRedondeo = 0;
     el.innerHTML = _buildDetalleModalHTML();
     actualizarTotalConRedondeo();
-    _bindSwipeConfirmacion(); // re-attachar swipe a las nuevas filas
+    // swipe delegado en el contenedor — no necesita re-attacharse
 }
 
-// ── Swipe izquierda en filas del modal: resta 1 (no borra directamente) ──
+// ── Swipe izquierda delegado — un solo listener en el contenedor ──
+// Instalado una vez en abrirConfirmacion(), no se re-adjunta en cada render.
+let _swipeConfSX = 0, _swipeConfSY = 0, _swipeConfFila = null, _swipeConfDir = false;
+const _SWIPE_CONF_UMBRAL = 40, _SWIPE_CONF_LOCK = 10, _SWIPE_CONF_RATIO = 1.3;
+
 function _bindSwipeConfirmacion() {
-    const filas = document.querySelectorAll('.confirm-fila-editable');
-    filas.forEach(fila => {
-        let sx = 0, sy = 0, activo = false, dirLocked = false;
-        const UMBRAL = 40, LOCK = 10, RATIO = 1.3;
+    const contenedor = document.getElementById('confirmDetalle');
+    if (!contenedor || contenedor.dataset.swipeDelegate) return; // instalar solo una vez
+    contenedor.dataset.swipeDelegate = '1';
 
-        fila.addEventListener('touchstart', function(e) {
-            sx = e.touches[0].clientX;
-            sy = e.touches[0].clientY;
-            activo = true; dirLocked = false;
-        }, { passive: true });
+    contenedor.addEventListener('touchstart', function(e) {
+        const fila = e.target.closest('.confirm-fila-editable');
+        if (!fila) { _swipeConfFila = null; return; }
+        _swipeConfSX = e.touches[0].clientX;
+        _swipeConfSY = e.touches[0].clientY;
+        _swipeConfFila = fila;
+        _swipeConfDir = false;
+    }, { passive: true });
 
-        fila.addEventListener('touchmove', function(e) {
-            if (!activo || dirLocked) return;
-            const dx = Math.abs(e.touches[0].clientX - sx);
-            const dy = Math.abs(e.touches[0].clientY - sy);
-            if (dx < LOCK && dy < LOCK) return;
-            if (dx > dy * RATIO) { dirLocked = true; }        // horizontal → swipe
-            else                  { activo = false; dirLocked = true; } // vertical → scroll
-        }, { passive: true });
+    contenedor.addEventListener('touchmove', function(e) {
+        if (!_swipeConfFila || _swipeConfDir) return;
+        const dx = Math.abs(e.touches[0].clientX - _swipeConfSX);
+        const dy = Math.abs(e.touches[0].clientY - _swipeConfSY);
+        if (dx < _SWIPE_CONF_LOCK && dy < _SWIPE_CONF_LOCK) return;
+        if (dx > dy * _SWIPE_CONF_RATIO) { _swipeConfDir = true; }   // horizontal
+        else { _swipeConfFila = null; _swipeConfDir = true; }         // vertical → scroll
+    }, { passive: true });
 
-        fila.addEventListener('touchend', function(e) {
-            if (!activo) return;
-            activo = false;
-            const dx = e.changedTouches[0].clientX - sx;
-            const dy = e.changedTouches[0].clientY - sy;
-            if (Math.abs(dx) < UMBRAL) return;
-            if (Math.abs(dx) < Math.abs(dy) * RATIO) return;
-            if (dx > 0) return; // solo izquierda
-            const idx = parseInt(fila.dataset.idx);
-            if (!isNaN(idx)) _modalQty(idx, -1); // resta 1, nunca borra directo
-        }, { passive: true });
-    });
+    contenedor.addEventListener('touchend', function(e) {
+        if (!_swipeConfFila) return;
+        const fila = _swipeConfFila;
+        _swipeConfFila = null;
+        const dx = e.changedTouches[0].clientX - _swipeConfSX;
+        const dy = e.changedTouches[0].clientY - _swipeConfSY;
+        if (Math.abs(dx) < _SWIPE_CONF_UMBRAL) return;
+        if (Math.abs(dx) < Math.abs(dy) * _SWIPE_CONF_RATIO) return;
+        if (dx > 0) return; // solo izquierda
+        const idx = parseInt(fila.dataset.idx);
+        if (!isNaN(idx)) _modalQty(idx, -1);
+    }, { passive: true });
 }
 
 function abrirConfirmacion() {
