@@ -53,6 +53,22 @@
   • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
     evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
 
+  v334 — 09/05/2026
+  ------------------
+  • PERF buscarAjuste: debounce 120ms en oninput — antes corría scoreBusqueda
+    contra todos los productos en cada keystroke, bloqueando el hilo en Android.
+  • PERF seleccionarAjuste: grid de categorías se construye una sola vez (cache
+    en dataset.built). Antes reconstruía innerHTML completo + iteraba todos los
+    productos en cada selección.
+  • PERF selAjusteCategoria: eliminado querySelectorAll+forEach para desmarcar.
+    Ahora guarda referencia directa al botón activo (_ajusteCatBtnActivo).
+  • PERF _dentroDeHorario: cache por minuto — cero llamadas Intl API en renders
+    repetidos del mismo minuto. Elimina freeze acumulativo en sesiones largas.
+  • PERF swipe listeners: delegación al contenedor en lugar de un listener por
+    card. Evita acumulación de closures tras horas de uso.
+  • FIX cambiarCantidad qty→0: eliminada manipulación DOM manual duplicada;
+    _refreshResultadosBadges ya lo hace al final.
+
   v331 — 07/05/2026
   ------------------
   • FIX CRÍTICO _tipoActivo: en modo auto (null) ahora consulta _dentroDeHorario()
@@ -217,7 +233,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v333</title>
+    <title>Copihue — POS v334</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2631,31 +2647,39 @@ function renderResultados(results, term = '') {
 
     contenedor.innerHTML = html;
 
-    // Swipe derecha → historial del producto
-    contenedor.querySelectorAll('.resultado-item').forEach(card => {
-        let sx = 0, sy = 0, activo = false;
-        const UMBRAL = 50, RATIO = 1.5;
-        card.addEventListener('touchstart', e => {
-            sx = e.touches[0].clientX;
-            sy = e.touches[0].clientY;
-            activo = true;
-        }, { passive: true });
-        card.addEventListener('touchend', e => {
-            if (!activo) return;
-            activo = false;
-            const dx = e.changedTouches[0].clientX - sx;
-            const dy = e.changedTouches[0].clientY - sy;
-            if (dx < UMBRAL) return;                          // solo derecha
-            if (Math.abs(dy) > Math.abs(dx) / RATIO) return; // no vertical
-            const id = parseInt(card.dataset.prodId);
-            if (!isNaN(id)) { event.stopPropagation(); abrirInfoProd(id); }
-        }, { passive: true });
-    });
+    // Swipe delegado — un listener en el contenedor, no uno por card
+    _instalarSwipeDelegate(contenedor);
 
     contenedor.querySelectorAll('button[data-prod-id]').forEach(btn => {
         let timer = null;
         // long-press removido
     });
+}
+
+// Swipe delegado: instalado una sola vez, reutilizado entre renders
+let _swipeSX = 0, _swipeSY = 0, _swipeTarget = null;
+const _SWIPE_UMBRAL = 50, _SWIPE_RATIO = 1.5;
+function _instalarSwipeDelegate(contenedor) {
+    if (contenedor.dataset.swipeDelegate) return;
+    contenedor.dataset.swipeDelegate = '1';
+    contenedor.addEventListener('touchstart', e => {
+        const card = e.target.closest('.resultado-item');
+        if (!card) { _swipeTarget = null; return; }
+        _swipeSX = e.touches[0].clientX;
+        _swipeSY = e.touches[0].clientY;
+        _swipeTarget = card;
+    }, { passive: true });
+    contenedor.addEventListener('touchend', e => {
+        if (!_swipeTarget) return;
+        const dx = e.changedTouches[0].clientX - _swipeSX;
+        const dy = e.changedTouches[0].clientY - _swipeSY;
+        const card = _swipeTarget;
+        _swipeTarget = null;
+        if (dx < _SWIPE_UMBRAL) return;
+        if (Math.abs(dy) > Math.abs(dx) / _SWIPE_RATIO) return;
+        const id = parseInt(card.dataset.prodId);
+        if (!isNaN(id)) abrirInfoProd(id);
+    }, { passive: true });
 }
 
 function buscar(term) {
@@ -2969,26 +2993,7 @@ function cambiarCantidad(id, delta) {
     const nuevaCant = item.qty + delta;
     if (nuevaCant <= 0) {
         ventaActual = ventaActual.filter(i => String(i.id) !== String(id));
-        // Limpiar badge quirúrgico ANTES de renderVenta ligero
-        const numId = typeof id === 'string' && id.startsWith('peso_') ? null : Number(id);
-        if (numId) {
-            const card = document.querySelector(`.resultado-item[data-prod-id="${numId}"]`);
-            if (card) {
-                const badge = card.querySelector('[data-badge]');
-                if (badge) badge.remove();
-                card.style.background = 'white';
-                card.style.borderLeft = '3px solid transparent';
-                // Desktop: ocultar botón − ya que no está en carrito
-                if (!MOBILE) {
-                    const btnMinus = card.querySelector('button[title="Quitar una unidad"]');
-                    if (btnMinus) btnMinus.style.display = 'none';
-                }
-                // Limpiar total
-                const totalDiv = card.querySelector('[data-total]');
-                if (totalDiv) totalDiv.remove();
-            }
-        }
-        renderVenta(true); // ligero — no rehace el scroll
+        renderVenta(true); // ligero — _refreshResultadosBadges al final limpia badge/color/total
     } else if (nuevaCant > item.stockDisponible) {
         mostrarToast(`⚠️ Stock máximo: ${item.stockDisponible}`, 'rojo');
         return;
@@ -4858,7 +4863,12 @@ function cerrarAjuste() {
     document.getElementById('modalAjuste').classList.remove('open');
 }
 
+let _buscarAjusteTimer = null;
 function buscarAjuste() {
+    clearTimeout(_buscarAjusteTimer);
+    _buscarAjusteTimer = setTimeout(_buscarAjusteExec, 120);
+}
+function _buscarAjusteExec() {
     const q = document.getElementById('ajusteQ').value.trim();
     const div = document.getElementById('ajusteResultados');
     document.getElementById('ajustePanel').style.display = 'none';
@@ -4910,24 +4920,32 @@ function seleccionarAjuste(id) {
     // Categoría actual
     ajusteCategoriaSeleccionada = p.category || '';
     document.getElementById('ajusteCategoria').value = ajusteCategoriaSeleccionada;
-    const catsDePlanilla = [...new Set(productos.map(pr => pr.category).filter(Boolean))];
-    const todasCats = [...new Set([...CATEGORIAS, ...catsDePlanilla])].sort();
+    // Grid de categorías: construir solo si está vacío (cache en DOM)
     const grid = document.getElementById('ajusteCatGrid');
+    if (grid && !grid.dataset.built) {
+        const catsDePlanilla = [...new Set(productos.map(pr => pr.category).filter(Boolean))];
+        const todasCats = [...new Set([...CATEGORIAS, ...catsDePlanilla])].sort();
+        grid.innerHTML = todasCats.map(cat =>
+            `<button class="cat-btn" onclick="selAjusteCategoria('${cat}')" id="ajCatBtn_${cat.replace(/\s/g,'_')}">${cat}</button>`
+        ).join('');
+        grid.dataset.built = '1';
+    }
+    // Marcar activo sin reconstruir
     if (grid) {
-        grid.innerHTML = todasCats.map(cat => {
-            const activo = cat === ajusteCategoriaSeleccionada ? ' activo' : '';
-            return `<button class="cat-btn${activo}" onclick="selAjusteCategoria('${cat}')" id="ajCatBtn_${cat.replace(/\s/g,'_')}">${cat}</button>`;
-        }).join('');
+        grid.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('activo'));
+        const btnActivo = document.getElementById('ajCatBtn_' + ajusteCategoriaSeleccionada.replace(/\s/g,'_'));
+        if (btnActivo) btnActivo.classList.add('activo');
     }
     document.getElementById('ajustePanel').style.display = 'block';
 }
 
+let _ajusteCatBtnActivo = null; // referencia directa al botón activo — evita querySelectorAll
 function selAjusteCategoria(cat) {
     ajusteCategoriaSeleccionada = cat;
     document.getElementById('ajusteCategoria').value = cat;
-    document.querySelectorAll('#ajusteCatGrid .cat-btn').forEach(b => b.classList.remove('activo'));
+    if (_ajusteCatBtnActivo) _ajusteCatBtnActivo.classList.remove('activo');
     const btn = document.getElementById('ajCatBtn_' + cat.replace(/\s/g,'_'));
-    if (btn) btn.classList.add('activo');
+    if (btn) { btn.classList.add('activo'); _ajusteCatBtnActivo = btn; }
 }
 
 function cambiarAjuste(delta) {
@@ -6646,8 +6664,13 @@ async function _cargarHorarioSistema() {
 }
 
 // Lee si la hora actual está dentro del rango de una sección
+// Cache por minuto — evita new Date()+Intl API cientos de veces por render
+const _horarioCache = {};
 function _dentroDeHorario(cfg, tipo, diaIdx) {
     try {
+        const _now = new Date();
+        const ckey = tipo + '-' + diaIdx + '-' + _now.getHours() + '-' + _now.getMinutes();
+        if (ckey in _horarioCache) return _horarioCache[ckey];
         const mapa = {
             relampago:  { ini: 'Hora inicio RELAMPAGO',  cie: 'Hora cierre RELAMPAGO'  },
             destacadas: { ini: 'Hora inicio DESTACADAS', cie: 'Hora cierre DESTACADAS' },
@@ -6694,8 +6717,8 @@ function _dentroDeHorario(cfg, tipo, diaIdx) {
         const arg = new Date(ahora.toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
         const horaActual = arg.getHours() + arg.getMinutes() / 60;
         const activo = hCie > hIni ? (horaActual >= hIni && horaActual < hCie) : (horaActual >= hIni || horaActual < hCie);
-        console.log(`🕐 POS ${tipo}: ${String(Math.floor(hIni)).padStart(2,'0')}:${String(Math.round((hIni%1)*60)).padStart(2,'0')} → ${String(Math.floor(hCie)).padStart(2,'0')}:${String(Math.round((hCie%1)*60)).padStart(2,'0')} | ahora ${arg.getHours()}:${String(arg.getMinutes()).padStart(2,'0')} → ${activo ? '✅' : '❌'}`);
-        return activo;
+        console.log(`🕐 POS ${tipo} [cache]: ${String(Math.floor(hIni)).padStart(2,'0')}:${String(Math.round((hIni%1)*60)).padStart(2,'0')}→${String(Math.floor(hCie)).padStart(2,'0')}:${String(Math.round((hCie%1)*60)).padStart(2,'0')} | ${arg.getHours()}:${String(arg.getMinutes()).padStart(2,'0')} → ${activo ? '✅' : '❌'}`);
+        return (_horarioCache[ckey] = activo);
     } catch(e) { console.warn('_dentroDeHorario error:', e); return false; }
 }
 
