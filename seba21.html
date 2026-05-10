@@ -53,6 +53,14 @@
   • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
     evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
 
+  v337 — 09/05/2026
+  ------------------
+  • PERF _modalQty: eliminado _reRenderModal() en cada cambio de cantidad.
+    Reemplazado por _patchFilaModal(idx) — actualiza solo qty+subtotal+total
+    de la fila afectada sin reconstruir el HTML completo del modal.
+    _reRenderModal() solo se llama al borrar (cambia estructura e índices).
+    Con 5 items: pasa de 5 reconstrucciones DOM a 5 updates quirúrgicos.
+
   v336 — 09/05/2026
   ------------------
   • PERF swipe carrito (modal confirmación): _bindSwipeConfirmacion usaba
@@ -255,7 +263,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v336</title>
+    <title>Copihue — POS v337</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3360,7 +3368,7 @@ function _modalQty(idx, delta) {
     }
     renderVenta(true);
     _guardarCarritoDiferido();
-    _reRenderModal();
+    _patchFilaModal(idx); // quirúrgico: solo actualiza qty+subtotal de esta fila
 }
 
 function _modalDel(idx) {
@@ -3369,7 +3377,46 @@ function _modalDel(idx) {
     renderVenta(true);
     _guardarCarritoDiferido();
     if (ventaActual.length === 0) { cerrarConfirm(); return; }
-    _reRenderModal();
+    _reRenderModal(); // necesario: cambia estructura e índices
+}
+
+// Actualización quirúrgica de una fila del modal — sin reconstruir todo el HTML
+function _patchFilaModal(idx) {
+    const el = document.getElementById('confirmDetalle');
+    if (!el) return;
+    const fila = el.querySelector(`.confirm-fila-editable[data-idx="${idx}"]`);
+    if (!fila) { _reRenderModal(); return; } // fallback si no encuentra la fila
+
+    const item = ventaActual[idx];
+    if (!item) { _reRenderModal(); return; }
+
+    // Actualizar qty en el span central del control
+    const spans = fila.querySelectorAll('div[onclick] span');
+    if (spans.length) {
+        // El span de qty es el del medio (entre − y +)
+        for (const sp of spans) {
+            const txt = sp.textContent.trim();
+            if (/^\d+$/.test(txt)) { sp.textContent = item.qty; break; }
+        }
+    }
+
+    // Actualizar subtotal
+    const subtotal = item.precioTotalCalc != null
+        ? item.precioTotalCalc
+        : Math.round(item.price * item.qty);
+    const precioSpans = fila.querySelectorAll('span[style*="font-weight:700"], span[style*="font-weight:800"]');
+    for (const sp of precioSpans) {
+        if (sp.textContent.startsWith('$')) {
+            sp.textContent = '$' + subtotal.toLocaleString('es-AR');
+            break;
+        }
+    }
+
+    // Actualizar total general
+    const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
+    window._totalConRedondeo = total;
+    const totalRow = el.querySelector('.confirm-total-row span:last-child');
+    if (totalRow) totalRow.textContent = '$' + total.toLocaleString('es-AR');
 }
 
 function _reRenderModal() {
