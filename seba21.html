@@ -53,6 +53,18 @@
   • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
     evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
 
+  v339 — 10/05/2026
+  ------------------
+  • FIX TDZ _configCache: "Cannot access before initialization" — let _configCache
+    declarado en línea ~6730, llamado desde _cargarHorarioSistema() en línea 6136.
+    Con let, la variable está en TDZ hasta que el parser llega a la declaración.
+    Fix: mover declaración antes de _horaCierreSistema (zona de estado global).
+    Consecuencia: getOfertas ya no cae al fallback local en cada carga.
+  • PERF _modalQty: eliminado renderVenta(true) del path hot — el modal
+    gestiona su propio total; no necesita repintar FABs/totales detrás.
+  • PERF _modalDel: renderVenta(true) solo cuando el carrito queda vacío
+    (necesario para ocultar FABs). Con items restantes: sin repaint de fondo.
+
   v338 — 09/05/2026
   ------------------
   • PERF _modalDel: eliminado _reRenderModal() (innerHTML completo que fuerza
@@ -273,7 +285,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v338</title>
+    <title>Copihue — POS v339</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2286,7 +2298,8 @@ function desactivarGuardiaAtras() {} // no-op
 
 
 let productos = [];
-let ventaActual = []; // [{id, name, price, qty, stockDisponible}]
+let ventaActual = [];
+let _configCache = null;     // cache compartida — TDZ-safe: debe declararse antes de _cargarHorarioSistema() // [{id, name, price, qty, stockDisponible}]
 let metodoPagoActual = 'efectivo'; // efectivo | posnet | transferencia | qr
 
 // ========== CARGA DE PRODUCTOS ==========
@@ -3376,7 +3389,7 @@ function _modalQty(idx, delta) {
         item.precioTotalCalc = oferta.precioTotal;
         item.ofertaEtiqueta = oferta.etiqueta || null;
     }
-    renderVenta(true);
+    // Sin renderVenta — el modal gestiona su propio display, no tocar elementos detrás
     _guardarCarritoDiferido();
     _patchFilaModal(idx); // quirúrgico: solo actualiza qty+subtotal de esta fila
 }
@@ -3384,9 +3397,12 @@ function _modalQty(idx, delta) {
 function _modalDel(idx) {
     if (idx < 0 || idx >= ventaActual.length) return;
     ventaActual.splice(idx, 1);
-    renderVenta(true);
     _guardarCarritoDiferido();
-    if (ventaActual.length === 0) { cerrarConfirm(); return; }
+    if (ventaActual.length === 0) {
+        renderVenta(true); // necesario: oculta FABs y limpia totales al vaciar carrito
+        cerrarConfirm();
+        return;
+    }
 
     // Quirúrgico: borrar solo la fila del DOM y reindexar, sin innerHTML completo
     const el = document.getElementById('confirmDetalle');
@@ -6724,7 +6740,7 @@ function _pintarToggle(tipo, activo) {
 let _horaCierreSistema = 22; // fallback mientras carga
 
 // ── Config cache compartida — una sola llamada a getConfig por carga ──
-let _configCache = null;
+// (declaración movida al bloque de estado global — ver arriba)
 async function _getConfigCached() {
     if (_configCache) return _configCache;
     try {
@@ -8711,7 +8727,7 @@ window.t9Limpiar = function(){};
 
 // Restaurar badge de notificaciones del día al arrancar
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('%c🏪 Copihue POS v338 cargado', 'color:#4caf50;font-weight:bold;font-size:1.1em;');
+    console.log('%c🏪 Copihue POS v339 cargado', 'color:#4caf50;font-weight:bold;font-size:1.1em;');
     setTimeout(() => {
         const arr = _cargarNotifPos ? _cargarNotifPos() : [];
         const hoy = fechaArgentina(0);
