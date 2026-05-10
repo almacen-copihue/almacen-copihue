@@ -53,6 +53,16 @@
   • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
     evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
 
+  v338 — 09/05/2026
+  ------------------
+  • PERF _modalDel: eliminado _reRenderModal() (innerHTML completo que fuerza
+    layout+paint síncrono en Android — fuente real de los ~2s de lag).
+    Reemplazado por cirugía DOM directa:
+    1. fila.remove() — borra solo el nodo eliminado
+    2. querySelectorAll + reindex data-idx y onclick en filas posteriores
+    3. Actualiza solo el span del total
+    Ningún innerHTML, ningún repaint de toda la lista.
+
   v337 — 09/05/2026
   ------------------
   • PERF _modalQty: eliminado _reRenderModal() en cada cambio de cantidad.
@@ -263,7 +273,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v337</title>
+    <title>Copihue — POS v338</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3377,7 +3387,36 @@ function _modalDel(idx) {
     renderVenta(true);
     _guardarCarritoDiferido();
     if (ventaActual.length === 0) { cerrarConfirm(); return; }
-    _reRenderModal(); // necesario: cambia estructura e índices
+
+    // Quirúrgico: borrar solo la fila del DOM y reindexar, sin innerHTML completo
+    const el = document.getElementById('confirmDetalle');
+    if (!el) { _reRenderModal(); return; }
+
+    // 1. Borrar la fila eliminada
+    const filaElim = el.querySelector(`.confirm-fila-editable[data-idx="${idx}"]`);
+    if (!filaElim) { _reRenderModal(); return; } // fallback
+    filaElim.remove();
+
+    // 2. Reindexar filas que vienen después
+    el.querySelectorAll('.confirm-fila-editable').forEach(fila => {
+        const fi = parseInt(fila.dataset.idx);
+        if (fi > idx) {
+            const nuevoIdx = fi - 1;
+            fila.dataset.idx = nuevoIdx;
+            // Actualizar los onclick inline que usan el índice
+            fila.setAttribute('onclick', `_modalQty(${nuevoIdx},1)`);
+            const btnMinus = fila.querySelector(`button[onclick="_modalQty(${fi},-1)"]`);
+            const btnPlus  = fila.querySelector(`button[onclick="_modalQty(${fi},1)"]`);
+            if (btnMinus) btnMinus.setAttribute('onclick', `_modalQty(${nuevoIdx},-1)`);
+            if (btnPlus)  btnPlus.setAttribute('onclick',  `_modalQty(${nuevoIdx},1)`);
+        }
+    });
+
+    // 3. Actualizar total en la fila de total
+    const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
+    window._totalConRedondeo = total;
+    const totalRow = el.querySelector('.confirm-total-row span:last-child');
+    if (totalRow) totalRow.textContent = '$' + total.toLocaleString('es-AR');
 }
 
 // Actualización quirúrgica de una fila del modal — sin reconstruir todo el HTML
