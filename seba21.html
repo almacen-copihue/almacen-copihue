@@ -53,6 +53,18 @@
   • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
     evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
 
+  v335 — 09/05/2026
+  ------------------
+  • FIX badge desync (mostraba 1 al agregar 2): badgeFoto en cardHTML no tenía
+    data-badge, por lo que _refreshResultadosBadges no lo encontraba y creaba
+    un segundo badge superpuesto. El viejo (sin atributo) quedaba visible con
+    el número anterior. Fix: agregar data-badge="1" al template de badgeFoto.
+  • FIX quitar lento / freeze al borrar el último: cambiarCantidad y
+    agregarProducto llamaban guardarCarritoPendiente() directo (localStorage
+    síncrono en el hilo principal). Reemplazado por _guardarCarritoDiferido()
+    — la escritura se hace 300ms después del último cambio, sin bloquear el
+    render ni el touch feedback.
+
   v334 — 09/05/2026
   ------------------
   • PERF buscarAjuste: debounce 120ms en oninput — antes corría scoreBusqueda
@@ -233,7 +245,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v334</title>
+    <title>Copihue — POS v335</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2529,7 +2541,7 @@ function renderResultados(results, term = '') {
 
         const badgeQtyLabel = esPesoCard ? `${qty}g` : qty;
         const badgeFoto = qty > 0
-            ? `<div style="position:absolute;top:-5px;left:-5px;
+            ? `<div data-badge="1" style="position:absolute;top:-5px;left:-5px;
                            background:#e53935;color:white;border-radius:10px;
                            width:${esPesoCard?'28px':'20px'};height:20px;font-size:0.6rem;font-weight:900;
                            display:flex;align-items:center;justify-content:center;
@@ -2889,7 +2901,7 @@ function agregarProducto(id) {
     }
 
     renderVenta(true); // ligero: solo panel y totales
-    guardarCarritoPendiente();
+    _guardarCarritoDiferido(); // async — no bloquea el hilo en Android
     _refreshResultadosBadges(id); // quirúrgico: solo el card tocado
 }
 
@@ -3011,7 +3023,7 @@ function cambiarCantidad(id, delta) {
         item.qty = nuevaCant;
         renderVenta(true); // ligero: solo actualiza panel y totales
     }
-    guardarCarritoPendiente();
+    _guardarCarritoDiferido(); // async — no bloquea el hilo en Android
     _refreshResultadosBadges(typeof id === 'string' && id.startsWith('peso_') ? null : Number(id));
 }
 
