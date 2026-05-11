@@ -573,59 +573,6 @@ function renderApp(){
     '<button class="chip chip-limpiar" onclick="deselTodo()">✕ Limpiar</button>'+
   '</div>';
 
-  // Sección fiados por cliente (con estado real de la hoja FIADOS)
-  const fiadosMap={}; // telefono → {nombre, estado peor, total, metodoKey}
-  // Primero acumular desde raw.fiados (datos reales con estado)
-  if(raw && raw.fiados && raw.fiados.length){
-    raw.fiados.forEach(f=>{
-      const key=f.telefono||f.cliente;
-      if(!fiadosMap[key]) fiadosMap[key]={nombre:f.cliente,telefono:f.telefono,estado:'PAGADO',total:0,metodos:new Set()};
-      const r=fiadosMap[key];
-      r.total+=f.total||0;
-      // estado peor: VENCIDO > PENDIENTE > PAGADO
-      if(f.estado==='VENCIDO') r.estado='VENCIDO';
-      else if(f.estado==='PENDIENTE'&&r.estado!=='VENCIDO') r.estado='PENDIENTE';
-    });
-  }
-  // También incluir los que aparecen en metodos (por si no están en raw.fiados)
-  metodos.filter(m=>esFiadoCliente(m)).forEach(m=>{
-    // extraer teléfono del string "FIADO | ◆ NOMBRE · TEL"
-    const telMatch=m.match(/[\d]{9,}/);
-    const tel=telMatch?telMatch[0]:'';
-    if(!fiadosMap[tel]){
-      const nomMatch=m.match(/[◆♦]\s*([^·]+)/);
-      const nom=nomMatch?nomMatch[1].trim():m;
-      fiadosMap[tel]={nombre:nom,telefono:tel,estado:'PENDIENTE',total:0,metodos:new Set()};
-    }
-    fiadosMap[tel].metodos.add(m);
-  });
-  const fiadosArr=Object.values(fiadosMap).sort((a,b)=>{
-    const ord={VENCIDO:0,PENDIENTE:1,PAGADO:2};
-    return(ord[a.estado]??3)-(ord[b.estado]??3);
-  });
-  const fiadosVisibles=showTodosFiados?fiadosArr:fiadosArr.slice(0,3);
-  const fCls={PAGADO:'chip-fia-pag',PENDIENTE:'chip-fia-pen',VENCIDO:'chip-fia-vec'};
-  const fIco={PAGADO:'✅',PENDIENTE:'⏳',VENCIDO:'🚨'};
-  // Chips de fiado: al hacer click activan el método correspondiente en el filtro
-  const fiadoChipsH=fiadosVisibles.map(f=>{
-    // buscar el metodo exacto en metodos[] que corresponde a este cliente
-    const mKey=[...( f.metodos&&f.metodos.size?f.metodos:new Set(metodos.filter(m=>{const t=m.match(/[\d]{9,}/);return t&&t[0]===f.telefono;})))][0]||'';
-    const activo=mKey&&metActivos.has(mKey);
-    return'<button class="chip '+(fCls[f.estado]||'chip-fia-pen')+(activo?' activo':'')+'" onclick="'+(mKey?'togMet(\''+mKey+'\')':'')+'">'+
-      fIco[f.estado]+' '+(f.nombre||'Sin nombre').substring(0,22)+
-      (f.total>0?' · '+fmt(f.total):'')+'</button>';
-  }).join('');
-  const fiadoWrapH='<div style="margin-top:4px">'+
-    '<div style="font-size:.65rem;font-weight:700;color:var(--gris);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">'+
-      '🧾 Fiados ('+fiadosArr.length+') '+
-      '<span style="font-weight:400;color:#aaa">· ✅pagado ⏳pendiente 🚨vencido</span>'+
-    '</div>'+
-    '<div class="chips-wrap">'+fiadoChipsH+'</div>'+
-    (fiadosArr.length>3?
-      '<button class="fiados-toggle" onclick="showTodosFiados=!showTodosFiados;renderApp()">'+
-        (showTodosFiados?'▲ Ver menos':'▼ Ver todos los '+fiadosArr.length)+
-      '</button>':'')+'</div>';
-
   // Filtros vendedor
   const fVendH=vendedores.length>1?
     '<div class="lbl">Vendedor</div><div class="chips-wrap">'+
@@ -1040,7 +987,6 @@ function renderApp(){
         // Filtros método y vendedor
         (vendedores.length>1?'<div class="lbl">Vendedor</div>'+fVendH:'')+
         '<div class="lbl">Método de pago</div>'+fMetH+
-        (fiadosArr.length?fiadoWrapH:'')+
 
       '</div>'+
     '</div>'+
