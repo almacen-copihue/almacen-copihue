@@ -20,8 +20,7 @@ body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(
 .hb-green{background:linear-gradient(135deg,#003a00,#006400);color:#aaffaa}
 .hb-ghost{background:transparent;border:1px solid var(--border);color:var(--silver)}
 .hb-orange{background:transparent;border:1px solid #ff6622;color:#ff8844}
-#pzone{position:relative;z-index:1;flex-shrink:0;overflow:hidden;background:#000a1a;display:flex;align-items:center;justify-content:center;padding:5px;border-bottom:2px solid var(--border);cursor:zoom-in;max-height:36vh}
-#pzone.zoomed{cursor:zoom-out;overflow:auto;justify-content:flex-start;align-items:flex-start;max-height:54vh}
+#pzone{position:relative;z-index:1;flex-shrink:0;overflow:hidden;background:#000a1a;display:flex;align-items:center;justify-content:center;padding:5px;border-bottom:2px solid var(--border)}
 #coverCanvas{display:block;box-shadow:0 0 25px rgba(0,112,209,.5);border:1px solid var(--border);flex-shrink:0}
 .guide{position:absolute;top:0;bottom:0;width:0;border-left:1px dashed rgba(0,200,255,.3);pointer-events:none}
 #tabs-bar{position:relative;z-index:10;display:flex;overflow-x:auto;background:var(--panel);border-bottom:1px solid var(--border);flex-shrink:0;scrollbar-width:none}
@@ -72,6 +71,26 @@ textarea{resize:vertical;font-size:.83rem}
 .upbox .ufn{font-size:.63rem;color:var(--glow);margin-top:2px;word-break:break-all}
 .uthumb{width:100%;height:52px;object-fit:cover;border-radius:4px;border:1px solid var(--border);display:none;margin-top:5px}
 .uclear{display:inline-block;font-size:.62rem;color:#5070a0;cursor:pointer;text-decoration:underline;margin-top:3px;padding:2px 0}
+/* size controls */
+.sz-row{display:flex;align-items:center;gap:6px;margin:5px 0;background:#040b18;border:1px solid var(--border);border-radius:4px;padding:5px 8px}
+.sz-label{font-size:.72rem;color:#8ab0d0;font-weight:600;flex:1;min-width:0}
+.sz-btn{width:28px;height:28px;flex-shrink:0;background:#0a1830;border:1px solid var(--border);color:var(--glow);font-size:1.1rem;border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;touch-action:manipulation;line-height:1}
+.sz-btn:active{background:rgba(0,170,255,.2);border-color:var(--glow)}
+.sz-val{font-family:'Share Tech Mono',monospace;font-size:.65rem;color:var(--glow);min-width:70px;text-align:center}
+
+/* ── CROP EDITOR MODAL ── */
+#cropModal{display:none;position:fixed;inset:0;z-index:100;background:rgba(0,0,10,.96);flex-direction:column}
+#cropModal.open{display:flex}
+#cropHdr{padding:10px 14px;background:#000c1f;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+#cropHdr h2{font-family:'Orbitron',sans-serif;font-size:.8rem;letter-spacing:2px;color:var(--glow)}
+#cropHdr .hint{font-size:.65rem;color:#5080a0;margin-top:2px}
+.cropbtns{display:flex;gap:8px}
+#cropStage{flex:1;overflow:hidden;position:relative;background:#000;touch-action:none;cursor:grab}
+#cropStage.dragging{cursor:grabbing}
+#cropImg{position:absolute;transform-origin:0 0;will-change:transform;user-select:none;-webkit-user-select:none;pointer-events:none}
+/* overlay showing the back panel crop area */
+#cropOverlay{position:absolute;inset:0;pointer-events:none}
+#cropBox{position:absolute;border:2px solid rgba(0,200,255,.8);box-shadow:0 0 0 9999px rgba(0,0,0,.55);pointer-events:none}
 @media print{
   *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
   body{display:block;background:#fff;height:auto;overflow:visible}
@@ -94,7 +113,7 @@ textarea{resize:vertical;font-size:.83rem}
   </div>
 </div>
 
-<div id="pzone" onclick="toggleZoom()">
+<div id="pzone">
   <canvas id="coverCanvas"></canvas>
   <div class="guide" id="g1"></div>
   <div class="guide" id="g2"></div>
@@ -121,6 +140,21 @@ textarea{resize:vertical;font-size:.83rem}
     <select id="players" onchange="renderCover()">
       <option>1-2 Players</option><option>1 Player</option><option>1-4 Players</option><option>1-8 Players</option>
     </select>
+
+    <div class="sdiv">TAMAÑOS DE TEXTO EN TRASERA</div>
+    <div class="sz-row">
+      <div class="sz-label">Título trasera</div>
+      <button class="sz-btn" onclick="adjFont('titleBack',-3)">−</button>
+      <span class="sz-val" id="lbl_titleBack">—</span>
+      <button class="sz-btn" onclick="adjFont('titleBack',3)">+</button>
+    </div>
+    <div class="sz-row">
+      <div class="sz-label">Descripción</div>
+      <button class="sz-btn" onclick="adjFont('desc',-8)">−</button>
+      <span class="sz-val" id="lbl_desc">—</span>
+      <button class="sz-btn" onclick="adjFont('desc',8)">+</button>
+    </div>
+
     <div class="sdiv">DESCRIPCIÓN</div>
     <div class="lbl">Género → rellenar automático:</div>
     <div class="genres" id="genreButtons"></div>
@@ -147,6 +181,7 @@ textarea{resize:vertical;font-size:.83rem}
     </div>
     <img class="uthumb" id="bThumb">
     <span class="uclear" onclick="clearImg('backImg','bThumb','bName')">✕ Quitar</span>
+    <span class="uclear" style="margin-left:10px;color:var(--glow)" onclick="if(imgs.backImg)openCropEditor(imgs.backImg)">✂️ Re-encuadrar</span>
 
     <div class="sdiv">MODO TRASERA</div>
     <div class="chips" id="backModeChips">
@@ -178,11 +213,17 @@ textarea{resize:vertical;font-size:.83rem}
     </div>
 
     <div class="sdiv">FOTO INFERIOR (recorte de carátula real)</div>
-    <div style="font-size:.7rem;color:#5080a0;margin-bottom:5px">Se inserta en tamaño original en la franja de abajo — reemplaza el strip de info generado</div>
+    <div style="font-size:.7rem;color:#5080a0;margin-bottom:5px">Se inserta en la franja inferior — reemplaza el strip generado si está cargada</div>
     <div class="shot-slot" style="aspect-ratio:4/1;width:100%">
       <input type="file" id="sh3" accept="image/*" onchange="loadShot(3,this)">
       <img id="shi3"><div class="snum">4 — FRANJA INFERIOR</div><div class="sico">🖼</div>
       <div class="sclear" id="scl3" onclick="event.stopPropagation();clearShot(3)">✕</div>
+    </div>
+    <div class="sz-row" style="margin-top:8px">
+      <div class="sz-label">Opacidad foto inf.</div>
+      <button class="sz-btn" onclick="adjShot4Opacity(-15)">−</button>
+      <span class="sz-val" id="lbl_shot4op">100%</span>
+      <button class="sz-btn" onclick="adjShot4Opacity(15)">+</button>
     </div>
 
     <div class="sdiv">TOGGLES FRANJA INFERIOR</div>
@@ -282,6 +323,24 @@ textarea{resize:vertical;font-size:.83rem}
 
 </div>
 
+<!-- CROP MODAL -->
+<div id="cropModal">
+  <div id="cropHdr">
+    <div>
+      <h2>✂️ ENCUADRAR IMAGEN TRASERA</h2>
+      <div class="hint">Pellizca para zoom · Arrastrá para mover · El recuadro azul = área de la trasera</div>
+    </div>
+    <div class="cropbtns">
+      <button class="hb hb-blue" onclick="cropConfirm()">✓ USAR</button>
+      <button class="hb hb-ghost" onclick="cropCancel()">✕ CANCELAR</button>
+    </div>
+  </div>
+  <div id="cropStage">
+    <img id="cropImg" src="">
+    <div id="cropOverlay"><div id="cropBox"></div></div>
+  </div>
+</div>
+
 <script>
 const MM=11.811;
 const W_BACK=Math.round(130*MM),W_SPINE=Math.round(14*MM),W_FRONT=Math.round(129*MM);
@@ -316,20 +375,204 @@ Object.entries(GENRES).forEach(([k,v])=>{
 
 function showTab(id,el){document.querySelectorAll('.tp').forEach(t=>t.classList.remove('active'));document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));document.getElementById(id).classList.add('active');el.classList.add('active');}
 
-let zoomed=false;
-function getBaseW(){const availH=window.innerHeight-56-40-160-10;return Math.min(availH*W_TOTAL/H,window.innerWidth-10);}
-function applySize(w){canvas.style.width=Math.round(w)+'px';canvas.style.height=Math.round(w*H/W_TOTAL)+'px';document.getElementById('pzone').style.maxHeight=zoomed?'54vh':'36vh';document.getElementById('g1').style.left=(W_BACK/W_TOTAL*100).toFixed(2)+'%';document.getElementById('g2').style.left=((W_BACK+W_SPINE)/W_TOTAL*100).toFixed(2)+'%';}
-function toggleZoom(){zoomed=!zoomed;document.getElementById('pzone').classList.toggle('zoomed',zoomed);applySize(zoomed?W_TOTAL/2.2:getBaseW());}
-applySize(getBaseW());
-window.addEventListener('resize',()=>{if(!zoomed)applySize(getBaseW());});
+// ── Fixed preview size (no zoom, fills available width) ───────
+function applySize(){
+  const w=Math.min(window.innerWidth-12, 900);
+  canvas.style.width=Math.round(w)+'px';
+  canvas.style.height=Math.round(w*H/W_TOTAL)+'px';
+  document.getElementById('g1').style.left=(W_BACK/W_TOTAL*100).toFixed(2)+'%';
+  document.getElementById('g2').style.left=((W_BACK+W_SPINE)/W_TOTAL*100).toFixed(2)+'%';
+}
+applySize();
+window.addEventListener('resize',applySize);
+
+// ── Font size controls ─────────────────────────────────────────
+// titleFontPx: base = 22*MM/10 * 8, step 3px canvas px
+// descFontPx:  base = 13*MM/10 + 20px extra, step 8px canvas px
+const FONT_SIZES={
+  titleBack: Math.round(22*MM/10)*8,   // huge title on back
+  desc:      Math.round(13*MM/10)+20,  // description on back (base + 20px)
+};
+function adjFont(key,delta){FONT_SIZES[key]=Math.max(10,FONT_SIZES[key]+delta);updateFontLabels();renderCover();}
+function updateFontLabels(){
+  const tpx=FONT_SIZES.titleBack,dpx=FONT_SIZES.desc;
+  const tEl=document.getElementById('lbl_titleBack'),dEl=document.getElementById('lbl_desc');
+  if(tEl)tEl.textContent=Math.round(tpx/MM*10*100)/100+'mm ('+tpx+'px)';
+  if(dEl)dEl.textContent=Math.round(dpx/MM*10*100)/100+'mm ('+dpx+'px)';
+}
 
 const imgs={frontImg:null,backImg:null};
 const shots=[null,null,null,null];
 
-function loadImg(id,tid,nid){const f=document.getElementById(id).files[0];if(!f)return;const r=new FileReader();r.onload=e=>{const i=new Image();i.onload=()=>{imgs[id]=i;const t=document.getElementById(tid);t.src=e.target.result;t.style.display='block';document.getElementById(nid).textContent=f.name;renderCover();};i.src=e.target.result;};r.readAsDataURL(f);}
-function clearImg(id,tid,nid){imgs[id]=null;document.getElementById(tid).style.display='none';document.getElementById(nid).textContent='';document.getElementById(id).value='';renderCover();}
+// ── Back image crop state ─────────────────────────────────────
+// backCrop: { offsetX, offsetY, scale } — how to draw backImg onto the canvas
+const backCrop={offsetX:0,offsetY:0,scale:1};
+let _cropRawImg=null; // the raw Image object being cropped
+
+function openCropEditor(img){
+  _cropRawImg=img;
+  const modal=document.getElementById('cropModal');
+  const stage=document.getElementById('cropStage');
+  const cimg=document.getElementById('cropImg');
+  modal.classList.add('open');
+
+  // Set image
+  cimg.src=img.src;
+  cimg.onload=()=>initCrop(stage,cimg,img);
+  if(cimg.complete) initCrop(stage,cimg,img);
+}
+
+function initCrop(stage,cimg,img){
+  const sw=stage.clientWidth, sh=stage.clientHeight;
+  // Aspect ratio of the back panel on canvas: W_BACK x H
+  // We show the back panel crop box centered in stage
+  const panelAspect=W_BACK/H;
+  let boxW,boxH;
+  if(sw/sh>panelAspect){ boxH=sh*0.88; boxW=boxH*panelAspect; }
+  else{ boxW=sw*0.88; boxH=boxW/panelAspect; }
+  const boxX=(sw-boxW)/2, boxY=(sh-boxH)/2;
+
+  // Position the crop box overlay
+  const box=document.getElementById('cropBox');
+  box.style.left=boxX+'px'; box.style.top=boxY+'px';
+  box.style.width=boxW+'px'; box.style.height=boxH+'px';
+
+  // Fit the image to fill the crop box initially
+  const fitScale=Math.max(boxW/img.width, boxH/img.height);
+  let sc=fitScale;
+  let tx=boxX+(boxW-img.width*sc)/2;
+  let ty=boxY+(boxH-img.height*sc)/2;
+
+  applyTransform(cimg,tx,ty,sc);
+
+  // ── Touch & mouse gestures ────────────────────────────────
+  let lastDist=0, lastMidX=0, lastMidY=0;
+  let dragging=false, lastX=0, lastY=0;
+
+  function getTouches(e){ return e.touches||[]; }
+
+  stage.addEventListener('touchstart',e=>{
+    e.preventDefault();
+    const t=getTouches(e);
+    if(t.length===1){ dragging=true; lastX=t[0].clientX; lastY=t[0].clientY; }
+    if(t.length===2){
+      dragging=false;
+      lastDist=Math.hypot(t[1].clientX-t[0].clientX,t[1].clientY-t[0].clientY);
+      lastMidX=(t[0].clientX+t[1].clientX)/2;
+      lastMidY=(t[0].clientY+t[1].clientY)/2;
+    }
+  },{passive:false});
+
+  stage.addEventListener('touchmove',e=>{
+    e.preventDefault();
+    const t=getTouches(e);
+    const rect=stage.getBoundingClientRect();
+    if(t.length===1&&dragging){
+      const dx=t[0].clientX-lastX, dy=t[0].clientY-lastY;
+      tx+=dx; ty+=dy;
+      lastX=t[0].clientX; lastY=t[0].clientY;
+      applyTransform(cimg,tx,ty,sc);
+    }
+    if(t.length===2){
+      const dist=Math.hypot(t[1].clientX-t[0].clientX,t[1].clientY-t[0].clientY);
+      const midX=(t[0].clientX+t[1].clientX)/2 - rect.left;
+      const midY=(t[0].clientY+t[1].clientY)/2 - rect.top;
+      const delta=dist/lastDist;
+      // zoom around midpoint
+      tx=midX-(midX-tx)*delta;
+      ty=midY-(midY-ty)*delta;
+      sc=Math.max(fitScale*0.3, Math.min(sc*delta, fitScale*8));
+      lastDist=dist; lastMidX=midX; lastMidY=midY;
+      applyTransform(cimg,tx,ty,sc);
+    }
+  },{passive:false});
+
+  stage.addEventListener('touchend',e=>{ dragging=false; });
+
+  // Mouse support (desktop)
+  stage.addEventListener('mousedown',e=>{ dragging=true; lastX=e.clientX; lastY=e.clientY; stage.classList.add('dragging'); });
+  stage.addEventListener('mousemove',e=>{ if(!dragging)return; tx+=e.clientX-lastX; ty+=e.clientY-lastY; lastX=e.clientX; lastY=e.clientY; applyTransform(cimg,tx,ty,sc); });
+  stage.addEventListener('mouseup',()=>{ dragging=false; stage.classList.remove('dragging'); });
+  stage.addEventListener('wheel',e=>{ e.preventDefault(); const f=e.deltaY<0?1.1:0.9; const mx=e.offsetX,my=e.offsetY; tx=mx-(mx-tx)*f; ty=my-(my-ty)*f; sc=Math.max(fitScale*0.3,Math.min(sc*f,fitScale*8)); applyTransform(cimg,tx,ty,sc); },{passive:false});
+
+  // Store refs for confirm
+  stage._getState=()=>({tx,ty,sc,boxX,boxY,boxW,boxH});
+}
+
+function applyTransform(el,tx,ty,sc){
+  el.style.transform=`translate(${tx}px,${ty}px) scale(${sc})`;
+}
+
+function cropConfirm(){
+  const stage=document.getElementById('cropStage');
+  if(!stage._getState||!_cropRawImg){ cropCancel(); return; }
+  const {tx,ty,sc,boxX,boxY,boxW,boxH}=stage._getState();
+  // Convert screen crop box to image coords
+  // Image pixel at screen pos (boxX,boxY): ((boxX-tx)/sc, (boxY-ty)/sc)
+  const imgX=(boxX-tx)/sc, imgY=(boxY-ty)/sc;
+  const imgW=boxW/sc, imgH=boxH/sc;
+  // Store as normalized crop (0..1 of original image)
+  backCrop.offsetX=imgX;
+  backCrop.offsetY=imgY;
+  backCrop.scale=sc; // not needed directly
+  backCrop.sx=imgX; backCrop.sy=imgY;
+  backCrop.sw=imgW; backCrop.sh=imgH;
+  backCrop.hasCrop=true;
+  imgs.backImg=_cropRawImg;
+  cropCancel();
+  renderCover();
+}
+
+function cropCancel(){
+  document.getElementById('cropModal').classList.remove('open');
+  // Remove old listeners by cloning stage
+  const old=document.getElementById('cropStage');
+  const fresh=old.cloneNode(true);
+  fresh._getState=null;
+  old.parentNode.replaceChild(fresh,old);
+  // Re-attach crop img ref
+}
+
+function loadImg(id,tid,nid){
+  const f=document.getElementById(id).files[0];if(!f)return;
+  const r=new FileReader();
+  r.onload=e=>{
+    const i=new Image();
+    i.onload=()=>{
+      if(id==='backImg'){
+        // Show thumb
+        const t=document.getElementById(tid);t.src=e.target.result;t.style.display='block';
+        document.getElementById(nid).textContent=f.name;
+        backCrop.hasCrop=false; // reset crop
+        openCropEditor(i);
+      } else {
+        imgs[id]=i;
+        const t=document.getElementById(tid);t.src=e.target.result;t.style.display='block';
+        document.getElementById(nid).textContent=f.name;
+        renderCover();
+      }
+    };
+    i.src=e.target.result;
+  };
+  r.readAsDataURL(f);
+}
+function clearImg(id,tid,nid){
+  imgs[id]=null;
+  if(id==='backImg') backCrop.hasCrop=false;
+  document.getElementById(tid).style.display='none';
+  document.getElementById(nid).textContent='';
+  document.getElementById(id).value='';
+  renderCover();
+}
 function loadShot(idx,input){const f=input.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{const i=new Image();i.onload=()=>{shots[idx]=i;const im=document.getElementById('shi'+idx);im.src=e.target.result;im.style.display='block';document.querySelectorAll('.shot-slot')[idx].querySelector('.sico').style.display='none';document.getElementById('scl'+idx).style.display='block';renderCover();};i.src=e.target.result;};r.readAsDataURL(f);}
 function clearShot(idx){shots[idx]=null;const im=document.getElementById('shi'+idx);im.src='';im.style.display='none';document.querySelectorAll('.shot-slot')[idx].querySelector('.sico').style.display='';document.getElementById('scl'+idx).style.display='none';document.getElementById('sh'+idx).value='';renderCover();}
+
+let shot4Opacity=100; // 0-100
+function adjShot4Opacity(delta){
+  shot4Opacity=Math.max(0,Math.min(100,shot4Opacity+delta));
+  document.getElementById('lbl_shot4op').textContent=shot4Opacity+'%';
+  renderCover();
+}
 
 function selChip(gid,el){document.querySelectorAll('#'+gid+' .chip').forEach(c=>c.classList.remove('on'));el.classList.add('on');renderCover();}
 function chipVal(gid){const o=document.querySelector('#'+gid+' .chip.on');return o?o.dataset.v:'none';}
@@ -484,6 +727,17 @@ function drawInfoStrip(BX,stripY,stripH,genre,showLogos,showBarcode,showRating,s
   ctx.textBaseline='alphabetic';ctx.textAlign='left';
 }
 
+// Draw back image using crop coords if available, else coverFit
+function drawBackImg(x,y,w,h){
+  const img=imgs.backImg;if(!img)return;
+  if(backCrop.hasCrop&&backCrop.sw>0){
+    // Draw the cropped region
+    ctx.drawImage(img, backCrop.sx, backCrop.sy, backCrop.sw, backCrop.sh, x, y, w, h);
+  } else {
+    coverFit(img,x,y,w,h);
+  }
+}
+
 // ── RENDER ────────────────────────────────────────────────────
 function renderCover(){
   const title   =document.getElementById('gameTitle').value||'TÍTULO DEL JUEGO';
@@ -515,12 +769,12 @@ function renderCover(){
   const BX=0;
 
   if(backMode==='clean'&&imgs.backImg){
-    coverFit(imgs.backImg,BX,0,W_BACK,H);
+    drawBackImg(BX,0,W_BACK,H);
   } else {
     // ── Background ──
     if(imgs.backImg){
-      coverFit(imgs.backImg,BX,0,W_BACK,H);
-      if(backMode==='overlay') {ctx.fillStyle='rgba(0,0,0,.35)';ctx.fillRect(BX,0,W_BACK,H);}
+      drawBackImg(BX,0,W_BACK,H);
+      if(backMode==='overlay'){ctx.fillStyle='rgba(0,0,0,.35)';ctx.fillRect(BX,0,W_BACK,H);}
     } else {
       const g=ctx.createLinearGradient(BX,0,BX,H);
       g.addColorStop(0,'#000c24');g.addColorStop(.5,'#001640');g.addColorStop(1,'#000010');
@@ -538,92 +792,91 @@ function renderCover(){
     const upperH=stripY;
 
     // ── HUGE TITLE at very top ──
-    // 8× bigger than before = fills space, user sees how much it takes
-    const titleFontPx=Math.round(22*MM/10)*8; // huge
-    ctx.save();
+    const titleFontPx=FONT_SIZES.titleBack;
+    const titleBarH=Math.round(titleFontPx*1.25);
     ctx.fillStyle='rgba(0,0,0,.55)';
-    ctx.fillRect(BX,0,W_BACK,Math.round(titleFontPx*1.3));
+    ctx.fillRect(BX,0,W_BACK,titleBarH);
     ctx.fillStyle='#fff';
     ctx.font=`bold ${titleFontPx}px Arial`;
     ctx.textAlign='left';ctx.textBaseline='top';
-    // scale down to fit width if needed
-    let tscale=1;
     const tmeasure=ctx.measureText(title.toUpperCase());
-    if(tmeasure.width>W_BACK-28) tscale=(W_BACK-28)/tmeasure.width;
-    ctx.save();
-    ctx.translate(BX+14,8);
-    ctx.scale(tscale,1);
-    ctx.fillText(title.toUpperCase(),0,0);
-    ctx.restore();
-    const titleBarH=Math.round(titleFontPx*1.25);
-    ctx.restore();
+    const tscale=tmeasure.width>W_BACK-28?(W_BACK-28)/tmeasure.width:1;
+    ctx.save();ctx.translate(BX+14,8);ctx.scale(tscale,1);ctx.fillText(title.toUpperCase(),0,0);ctx.restore();
 
-    // Description below title (compact, 2 lines)
+    // Description below title
+    const descFontPx=FONT_SIZES.desc;
+    const descLineH=Math.round(descFontPx*1.3);
+    let descBlockH=0;
     if(showDesc){
-      ctx.fillStyle='rgba(0,0,0,.4)';
-      ctx.fillRect(BX,titleBarH,W_BACK,Math.round(38*MM/10));
-      ctx.fillStyle='rgba(200,220,240,.88)';
-      ctx.font=`${Math.round(13*MM/10)}px Arial`;
+      // measure lines to get actual height
+      const tempLines=[];const words=desc.split(' ');let line='';
+      const maxW=W_BACK-28;
+      ctx.font=`${descFontPx}px Arial`;
+      for(const w of words){const t=line+w+' ';if(ctx.measureText(t).width>maxW&&line){tempLines.push(line.trim());line=w+' ';}else line=t;}
+      if(line)tempLines.push(line.trim());
+      const clampedLines=tempLines.slice(0,4);
+      descBlockH=clampedLines.length*descLineH+16;
+      ctx.fillStyle='rgba(0,0,0,.45)';
+      ctx.fillRect(BX,titleBarH,W_BACK,descBlockH);
+      ctx.fillStyle='rgba(200,220,240,.9)';
       ctx.textAlign='left';ctx.textBaseline='alphabetic';
-      wrapText(desc,BX+14,titleBarH+Math.round(15*MM/10),W_BACK-28,Math.round(17*MM/10),2);
+      clampedLines.forEach((l,i)=>ctx.fillText(l,BX+14,titleBarH+descFontPx+i*descLineH+4));
     }
 
-    // ── SCREENSHOTS: original size, centered in their slot ──
-    // Slot area starts below title+desc, ends at stripY
-    const shotAreaY=titleBarH+Math.round((showDesc?40:4)*MM/10);
-    const shotAreaH=upperH-shotAreaY;
+    // ── SCREENSHOTS: each slot height = photo's natural height (capped to available) ──
+    const shotAreaY=titleBarH+descBlockH+4;
     const gap=Math.round(5*MM/10);
     const slotW=Math.round((W_BACK-28-gap*2)/3);
+    // Slot height = tallest loaded photo's natural height, capped at space before stripY
+    const maxAvailH=stripY-shotAreaY-4;
+    let slotH=Math.round(slotW*0.65); // default if no photos
+    for(let i=0;i<3;i++){
+      if(shots[i]) slotH=Math.min(maxAvailH,Math.max(slotH,shots[i].height));
+    }
+    slotH=Math.min(slotH,maxAvailH);
 
-    // Helper: draw image at ORIGINAL size, centered+clipped inside slot
-    function drawOriginalSize(img,slotX,slotY,slotW2,slotH){
+    function drawOriginalSize(img,slotX,slotY,slotW2,slotH2){
       if(!img)return;
       ctx.save();
-      // black background for the slot
-      ctx.fillStyle='#000';ctx.fillRect(slotX,slotY,slotW2,slotH);
-      // center the image at its natural size (no scaling)
+      ctx.fillStyle='#000';ctx.fillRect(slotX,slotY,slotW2,slotH2);
       const dx=slotX+(slotW2-img.width)/2;
-      const dy=slotY+(slotH-img.height)/2;
-      // clip to slot bounds
-      ctx.beginPath();ctx.rect(slotX,slotY,slotW2,slotH);ctx.clip();
+      const dy=slotY+(slotH2-img.height)/2;
+      ctx.beginPath();ctx.rect(slotX,slotY,slotW2,slotH2);ctx.clip();
       ctx.drawImage(img,dx,dy);
       ctx.restore();
-      // border
       ctx.strokeStyle='rgba(120,170,255,.5)';ctx.lineWidth=1.5;
-      ctx.strokeRect(slotX,slotY,slotW2,slotH);
+      ctx.strokeRect(slotX,slotY,slotW2,slotH2);
     }
 
-    // Draw 3 slots top
     for(let i=0;i<3;i++){
       const slotX=BX+14+i*(slotW+gap);
       if(shots[i]){
-        drawOriginalSize(shots[i],slotX,shotAreaY,slotW,shotAreaH);
+        drawOriginalSize(shots[i],slotX,shotAreaY,slotW,slotH);
       } else {
         ctx.fillStyle='rgba(0,25,65,.6)';ctx.strokeStyle='rgba(50,90,180,.2)';ctx.lineWidth=1.5;
-        ctx.fillRect(slotX,shotAreaY,slotW,shotAreaH);ctx.strokeRect(slotX,shotAreaY,slotW,shotAreaH);
+        ctx.fillRect(slotX,shotAreaY,slotW,slotH);ctx.strokeRect(slotX,shotAreaY,slotW,slotH);
         ctx.fillStyle='rgba(50,90,180,.4)';ctx.font=`${Math.round(10*MM/10)}px Arial`;
         ctx.textAlign='center';ctx.textBaseline='middle';
-        ctx.fillText(`SCREENSHOT ${i+1}`,slotX+slotW/2,shotAreaY+shotAreaH/2);
+        ctx.fillText(`SCREENSHOT ${i+1}`,slotX+slotW/2,shotAreaY+slotH/2);
         ctx.textAlign='left';ctx.textBaseline='alphabetic';
       }
     }
 
-    // ── BOTTOM: shot4 (franja inferior real) OR generated info strip ──
+    // ── BOTTOM: shot4 with opacity OR generated strip ──
     if(shots[3]){
-      // Draw shot4 at original size, centered horizontally, top-aligned in strip zone
       ctx.fillStyle='#000';ctx.fillRect(BX,stripY,W_BACK,stripH);
       const img4=shots[3];
+      const op=shot4Opacity/100;
+      ctx.save();
+      ctx.globalAlpha=op;
+      ctx.beginPath();ctx.rect(BX,stripY,W_BACK,stripH);ctx.clip();
       const dx4=BX+(W_BACK-img4.width)/2;
       const dy4=stripY+(stripH-img4.height)/2;
-      ctx.save();
-      ctx.beginPath();ctx.rect(BX,stripY,W_BACK,stripH);ctx.clip();
       ctx.drawImage(img4,dx4,dy4);
       ctx.restore();
-      // thin top border to separate
       ctx.strokeStyle='rgba(100,140,200,.3)';ctx.lineWidth=1;
       ctx.beginPath();ctx.moveTo(BX,stripY);ctx.lineTo(BX+W_BACK,stripY);ctx.stroke();
     } else {
-      // Generated info strip
       drawInfoStrip(BX,stripY,stripH,currentGenre,showLogos,showBarcode,showRating2,showLegal,rating,title);
     }
   }
@@ -685,7 +938,7 @@ function renderCover(){
 
 function forceRender(){ctx.clearRect(0,0,W_TOTAL,H);setTimeout(renderCover,30);}
 function downloadPNG(){const a=document.createElement('a');a.download=`caratula-ps2-${(document.getElementById('gameTitle').value||'juego').replace(/\s+/g,'-')}.png`;a.href=canvas.toDataURL('image/png');a.click();}
-function init(){ctx.clearRect(0,0,W_TOTAL,H);if(document.fonts&&document.fonts.ready){document.fonts.ready.then(()=>{renderCover();setTimeout(renderCover,500);});}else{renderCover();setTimeout(renderCover,700);}}
+function init(){ctx.clearRect(0,0,W_TOTAL,H);updateFontLabels();if(document.fonts&&document.fonts.ready){document.fonts.ready.then(()=>{renderCover();setTimeout(renderCover,500);});}else{renderCover();setTimeout(renderCover,700);}}
 if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',init);}else{init();}
 window.addEventListener('load',()=>setTimeout(renderCover,300));
 </script>
