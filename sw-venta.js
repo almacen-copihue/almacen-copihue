@@ -1,5 +1,5 @@
 // ========== SERVICE WORKER — COPIHUE PUNTO DE VENTA ==========
-const VERSION = 'copihue-venta-v59';
+const VERSION = 'copihue-venta-v60';
 const CACHE_ESTATICO = [
     '/venta.html',
     '/seba21.html',
@@ -38,7 +38,7 @@ self.addEventListener('activate', event => {
     );
 });
 
-// FETCH — estrategia: red primero, cache como respaldo
+// FETCH — estrategia según tipo de recurso
 self.addEventListener('fetch', event => {
     const url = new URL(event.request.url);
 
@@ -46,7 +46,6 @@ self.addEventListener('fetch', event => {
     if (url.hostname.includes('script.google.com')) {
         event.respondWith(
             fetch(event.request).catch(() => {
-                // Sin internet — devolver respuesta de error amigable
                 return new Response(JSON.stringify({
                     error: true,
                     offline: true,
@@ -59,27 +58,43 @@ self.addEventListener('fetch', event => {
         return;
     }
 
-    // Archivos estáticos — cache primero, red como respaldo
-    if (event.request.method === 'GET') {
+    if (event.request.method !== 'GET') return;
+
+    // seba21.html y venta.html — Network First:
+    // Siempre intentar la red; el cache es solo fallback sin conexión.
+    // Así cada deploy se refleja en la próxima carga, sin necesitar doble recarga.
+    const esHTML = url.pathname.endsWith('.html') || url.pathname === '/' || url.pathname.endsWith('/');
+    if (esHTML) {
         event.respondWith(
-            caches.match(event.request).then(cached => {
-                if (cached) {
-                    // Devolver cache y actualizar en segundo plano
-                    fetch(event.request).then(response => {
-                        if (response && response.status === 200) {
-                            caches.open(VERSION).then(cache => {
-                                cache.put(event.request, response);
-                            });
-                        }
-                    }).catch(() => {});
-                    return cached;
-                }
-                // No está en cache — ir a la red
-                return fetch(event.request).catch(() => {
-                    // Sin internet y sin cache — devolver venta.html del cache
-                    return caches.match('/venta.html');
-                });
-            })
+            fetch(event.request)
+                .then(response => {
+                    if (response && response.status === 200) {
+                        // Actualizar cache con la versión nueva (para offline)
+                        const clone = response.clone();
+                        caches.open(VERSION).then(cache => cache.put(event.request, clone));
+                    }
+                    return response;
+                })
+                .catch(() => {
+                    // Sin red — servir desde cache (modo offline)
+                    return caches.match(event.request)
+                        .then(cached => cached || caches.match('/venta.html'));
+                })
         );
+        return;
     }
+
+    // Todo lo demás (manifest, íconos, imágenes) — Cache First, red como respaldo
+    event.respondWith(
+        caches.match(event.request).then(cached => {
+            if (cached) return cached;
+            return fetch(event.request).then(response => {
+                if (response && response.status === 200) {
+                    const clone = response.clone();
+                    caches.open(VERSION).then(cache => cache.put(event.request, clone));
+                }
+                return response;
+            }).catch(() => caches.match('/venta.html'));
+        })
+    );
 });
