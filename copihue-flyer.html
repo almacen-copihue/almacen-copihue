@@ -568,14 +568,23 @@ function wrap(ctx,text,x,y,maxW,lh,maxL){
 }
 
 // Cache de imágenes para el canvas (resolución completa)
+// crossOrigin='anonymous' es OBLIGATORIO para que toDataURL/toBlob no fallen por CORS
 const _imgCache={};
 function loadImg(nombre){
   const src=imgSrc(nombre);
   if(_imgCache[src]) return _imgCache[src];
   _imgCache[src]=new Promise(res=>{
     const img=new Image();
+    img.crossOrigin='anonymous';
     img.onload=()=>res(img);
-    img.onerror=()=>res(null);
+    img.onerror=()=>{
+      // Reintento sin crossOrigin (para casos donde el server no manda header CORS)
+      // En ese caso el canvas quedará tainted pero al menos se ve la imagen
+      const img2=new Image();
+      img2.onload=()=>res(img2);
+      img2.onerror=()=>res(null);
+      img2.src=src+'?nc='+Date.now(); // cache bust para evitar versión sin CORS del cache
+    };
     img.src=src;
   });
   return _imgCache[src];
@@ -792,25 +801,54 @@ async function generarFlyer(){
 // ── EXPORTAR ───────────────────────────────────────────────────────────────────
 function descargar(){
   if(!_cvFin){alert('Generá el flyer primero');return;}
-  const a=document.createElement('a');
-  a.download='copihue-flyer-'+_modo+'-'+Date.now()+'.jpg';
-  a.href=_cvFin.toDataURL('image/jpeg',.93);
-  a.click();
+  // toBlob + createObjectURL funciona en móvil; toDataURL puede fallar en canvas grandes
+  _cvFin.toBlob(blob=>{
+    if(!blob){alert('No se pudo generar el archivo');return;}
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;
+    a.download='copihue-flyer-'+_modo+'-'+Date.now()+'.jpg';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url),3000);
+  },'image/jpeg',.93);
 }
 
 async function compartirWA(){
   if(!_cvFin){alert('Generá el flyer primero');return;}
-  _cvFin.toBlob(async blob=>{
+  ld(true,'Preparando imagen...');
+  try{
+    const blob=await new Promise((res,rej)=>_cvFin.toBlob(b=>b?res(b):rej(new Error('toBlob falló')),'image/jpeg',.93));
+    ld(false);
     const file=new File([blob],'copihue-flyer.jpg',{type:'image/jpeg'});
+
+    // Web Share API (Android Chrome, Safari iOS 15+)
     if(navigator.share&&navigator.canShare&&navigator.canShare({files:[file]})){
-      await navigator.share({files:[file],title:'Flyer '+_emp.nombre,
-        text:'🏷️ ¡Ofertas en '+_emp.nombre+'!\n'+(_emp.web?'🛒 '+_emp.web:'')});
-    } else {
-      const a=document.createElement('a');a.href=_cvFin.toDataURL('image/jpeg',.93);
-      a.download='copihue-flyer.jpg';a.click();
-      if(_emp.telefono) setTimeout(()=>window.open('https://wa.me/'+_emp.telefono,'_blank'),400);
+      await navigator.share({
+        files:[file],
+        title:'Flyer '+_emp.nombre,
+        text:'🏷️ ¡Ofertas en '+_emp.nombre+'!\n'+(_emp.web?'🛒 '+_emp.web:'')
+      });
+      return;
     }
-  },'image/jpeg',.93);
+
+    // Fallback: descargar + abrir WhatsApp web
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url; a.download='copihue-flyer.jpg';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url),3000);
+    // Abrir WhatsApp para que peguen la imagen manualmente
+    const waUrl=_emp.telefono
+      ?'https://wa.me/'+_emp.telefono
+      :'https://web.whatsapp.com/';
+    setTimeout(()=>window.open(waUrl,'_blank'),800);
+  }catch(e){
+    ld(false);
+    // Si compartir fue cancelado por el usuario no es error real
+    if(e.name!=='AbortError') alert('No se pudo compartir: '+e.message);
+  }
 }
 
 // ── INIT ───────────────────────────────────────────────────────────────────────
