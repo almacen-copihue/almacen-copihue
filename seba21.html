@@ -8167,26 +8167,35 @@ async function compartirFlyerAdminWA() {
       <button onclick="lcFiltrar('todos')"   id="lcFTodos"   class="lc-chip activo">Todos</button>
       <button onclick="lcFiltrar('urgente')" id="lcFUrgente" class="lc-chip">🔴 Urgentes</button>
       <button onclick="lcFiltrar('normal')"  id="lcFNormal"  class="lc-chip">🟢 Normal</button>
+      <div style="margin-left:auto;display:flex;gap:4px;">
+        <button onclick="lcSeleccionarTodos()"   id="lcBtnSelTodos"   style="font-size:0.7rem;padding:4px 10px;border:1.5px solid #1565c0;border-radius:20px;background:white;color:#1565c0;font-weight:700;cursor:pointer;">☑ Todos</button>
+        <button onclick="lcDeseleccionarTodos()" id="lcBtnDeselTodos" style="font-size:0.7rem;padding:4px 10px;border:1.5px solid #bbb;border-radius:20px;background:white;color:#888;font-weight:700;cursor:pointer;">☐ Ninguno</button>
+      </div>
     </div>
 
     <!-- Lista de items -->
-    <div id="lcCuerpo" style="padding:10px 12px 100px;"></div>
+    <div id="lcCuerpo" style="padding:10px 12px 120px;"></div>
 
     <!-- Footer sticky -->
-    <div style="position:sticky;bottom:0;background:white;border-top:1.5px solid #eee;padding:10px 16px;display:flex;gap:8px;">
-      <button onclick="lcCopiarTexto()" style="flex:1;background:#1565c0;color:white;border:none;border-radius:12px;padding:12px;font-weight:700;font-size:0.88rem;cursor:pointer;">📋 Copiar texto</button>
-      <button onclick="lcCompartirWA()" style="flex:1;background:#25d366;color:white;border:none;border-radius:12px;padding:12px;font-weight:700;font-size:0.88rem;cursor:pointer;">📲 Compartir WA</button>
-      <button onclick="cerrarListaCompra()" style="background:#f0f0f0;color:#555;border:none;border-radius:12px;padding:12px 18px;font-weight:600;cursor:pointer;">Cerrar</button>
+    <div style="position:sticky;bottom:0;background:white;border-top:1.5px solid #eee;padding:10px 16px;">
+      <!-- Indicador de selección -->
+      <div id="lcBadgeSeleccion" style="display:none;margin-bottom:8px;padding:6px 12px;background:#e3f2fd;border-radius:10px;font-size:0.75rem;font-weight:700;color:#1565c0;text-align:center;"></div>
+      <!-- Botones -->
+      <div style="display:flex;gap:8px;">
+        <button onclick="lcCopiarTexto()" style="flex:1;background:#1565c0;color:white;border:none;border-radius:12px;padding:12px;font-weight:700;font-size:0.88rem;cursor:pointer;">📋 Copiar</button>
+        <button onclick="lcCompartirWA()" style="flex:1;background:#25d366;color:white;border:none;border-radius:12px;padding:12px;font-weight:700;font-size:0.88rem;cursor:pointer;">📲 Enviar WA</button>
+        <button onclick="cerrarListaCompra()" style="background:#f0f0f0;color:#555;border:none;border-radius:12px;padding:12px 18px;font-weight:600;cursor:pointer;">✕</button>
+      </div>
     </div>
-  </div>
-</div>
 
 <script>
 // ── LISTA DE COMPRA ───────────────────────────────────────────
 var _lcItems = [];
 var _lcFiltroActivo = 'todos';
+var _lcSeleccionados = new Set(); // índices de _lcItems seleccionados para el mensaje WA
 
 async function abrirListaCompra() {
+  _lcSeleccionados.clear();
   document.getElementById('modalListaCompra').style.display = 'block';
   document.getElementById('lcSubtitulo').textContent = 'Cargando desde Sheets...';
   document.getElementById('lcResumen').style.display = 'none';
@@ -8247,13 +8256,18 @@ function lcRenderizar(filtro) {
 
   if (!items.length) {
     document.getElementById('lcCuerpo').innerHTML = '<div style="text-align:center;padding:40px;color:#aaa;">Sin productos en esta categoría</div>';
+    _lcActualizarBadgeSeleccion();
     return;
   }
 
   var html = '';
   var urgenciaActual = -1;
 
-  items.forEach(function(it) {
+  items.forEach(function(it, idx) {
+    // Índice real en _lcItems (para selección correcta con filtros activos)
+    var idxReal = _lcItems.indexOf(it);
+    var sel = _lcSeleccionados.has(idxReal);
+
     // Separador de sección
     if (it.urgencia !== urgenciaActual) {
       urgenciaActual = it.urgencia;
@@ -8271,7 +8285,10 @@ function lcRenderizar(filtro) {
     var esUrgente = it.urgencia <= 2;
     var esPiso    = it.urgencia === 0;
     var esPausado = it.pausado === true;
-    var cardClass = esPiso ? 'lc-card piso' : (esUrgente ? 'lc-card urgente' : 'lc-card');
+
+    // Borde y fondo según selección y urgencia
+    var borderColor = sel ? '#1565c0' : (esPiso ? '#ffcc02' : (esUrgente ? '#ef9a9a' : '#e0e0e0'));
+    var bgColor     = sel ? '#e3f2fd' : (esPiso ? '#fffde7' : (esUrgente ? '#fff8f8' : '#fff'));
 
     var diasTxt = (it.diasStock !== null) ? it.diasStock + 'd stock' : 'sin historial';
     var provTxt = it.proveedor ? '<span style="font-size:0.65rem;color:#888;">📦 ' + it.proveedor + '</span>' : '';
@@ -8283,18 +8300,26 @@ function lcRenderizar(filtro) {
 
     var opacidad = esPausado ? 'opacity:0.5;' : '';
 
-    // Buscar id del producto para el botón
     var prodRef = productos.find(function(p){ return p.name === it.nombre; });
     var prodId  = prodRef ? prodRef.id : null;
     var btnPausarHtml = prodId !== null
-      ? '<button onclick="lcTogglePausado(' + prodId + ', this)" '
+      ? '<button onclick="event.stopPropagation();lcTogglePausado(' + prodId + ', this)" '
         + 'style="margin-top:6px;width:100%;padding:5px 0;border:1px solid #ccc;border-radius:8px;background:white;'
         + 'font-size:0.7rem;color:#607d8b;cursor:pointer;">'
         + (esPausado ? '▶️ Reactivar' : 'Marcar inactivo')
         + '</button>'
       : '';
 
-    html += '<div class="' + cardClass + '" style="' + opacidad + '">'
+    // Checkbox visual
+    var chkHtml = '<div style="flex-shrink:0;font-size:1.3rem;color:' + (sel ? '#1565c0' : '#ccc') + ';padding-right:4px;">'
+      + (sel ? '☑' : '☐')
+      + '</div>';
+
+    html += '<div class="lc-card" '
+      + 'data-idx="' + idxReal + '" '
+      + 'onclick="lcToggleSeleccion(' + idxReal + ')" '
+      + 'style="cursor:pointer;border-color:' + borderColor + ';background:' + bgColor + ';' + opacidad + '">'
+      + chkHtml
       + '<div style="flex:1;min-width:0;">'
       +   '<div style="font-size:0.82rem;font-weight:700;color:#222;line-height:1.3;margin-bottom:3px;">' + it.nombre + '</div>'
       +   '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'
@@ -8316,7 +8341,7 @@ function lcRenderizar(filtro) {
       + '</div>'
       // ── Historial últimas compras por proveedor (dentro del card, flex-basis:100%) ──
       + (it.historialPrecios && it.historialPrecios.length > 0
-          ? '<div style="flex-basis:100%;margin-top:2px;padding:6px 8px;background:#f0f4ff;border-radius:8px;display:flex;gap:6px;">'
+          ? '<div style="flex-basis:100%;margin-top:2px;padding:6px 8px;background:#f0f4ff;border-radius:8px;display:flex;gap:6px;" onclick="event.stopPropagation()">'
             + it.historialPrecios.map(function(hp) {
                 return '<div style="flex:1;background:white;border:1px solid #dce3f5;border-radius:8px;padding:5px 7px;text-align:center;min-width:0;">'
                   + '<div style="font-size:0.6rem;color:#555;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + hp.proveedor + '">' + hp.proveedor + '</div>'
@@ -8331,6 +8356,57 @@ function lcRenderizar(filtro) {
   });
 
   document.getElementById('lcCuerpo').innerHTML = html;
+  _lcActualizarBadgeSeleccion();
+}
+
+// ── Selección individual ──────────────────────────────────────
+function lcToggleSeleccion(idxReal) {
+  if (_lcSeleccionados.has(idxReal)) {
+    _lcSeleccionados.delete(idxReal);
+  } else {
+    _lcSeleccionados.add(idxReal);
+  }
+  // Actualizar solo la card tocada sin rerenderizar todo
+  var card = document.querySelector('[data-idx="' + idxReal + '"]');
+  if (card) {
+    var sel = _lcSeleccionados.has(idxReal);
+    var it  = _lcItems[idxReal];
+    var esPiso    = it && it.urgencia === 0;
+    var esUrgente = it && it.urgencia <= 2;
+    card.style.borderColor = sel ? '#1565c0' : (esPiso ? '#ffcc02' : (esUrgente ? '#ef9a9a' : '#e0e0e0'));
+    card.style.background  = sel ? '#e3f2fd' : (esPiso ? '#fffde7' : (esUrgente ? '#fff8f8' : '#fff'));
+    var chk = card.querySelector('div[style*="flex-shrink:0"]');
+    if (chk) { chk.style.color = sel ? '#1565c0' : '#ccc'; chk.textContent = sel ? '☑' : '☐'; }
+  }
+  _lcActualizarBadgeSeleccion();
+}
+
+function lcSeleccionarTodos() {
+  _lcItems.forEach(function(_, i) { _lcSeleccionados.add(i); });
+  lcRenderizar(_lcFiltroActivo);
+}
+
+function lcDeseleccionarTodos() {
+  _lcSeleccionados.clear();
+  lcRenderizar(_lcFiltroActivo);
+}
+
+function _lcActualizarBadgeSeleccion() {
+  var badge = document.getElementById('lcBadgeSeleccion');
+  if (!badge) return;
+  var n = _lcSeleccionados.size;
+  if (n === 0) {
+    badge.style.display = 'none';
+  } else {
+    badge.style.display = 'block';
+    var total = 0;
+    _lcSeleccionados.forEach(function(i) {
+      var it = _lcItems[i];
+      if (it && it.costo > 0) total += it.costo * it.cantidad;
+    });
+    badge.textContent = n + ' seleccionado' + (n !== 1 ? 's' : '')
+      + (total > 0 ? ' · $' + Math.round(total).toLocaleString('es-AR') + ' est.' : '');
+  }
 }
 
 async function lcTogglePausado(id, btn) {
@@ -8367,28 +8443,56 @@ async function lcTogglePausado(id, btn) {
   });
 }
 
-function lcCopiarTexto() {
-  if (!_lcItems.length) return;
+// ── Helper: ítems activos para el mensaje (seleccionados si hay, todos si no) ──
+function _lcItemsParaMensaje() {
+  if (_lcSeleccionados.size > 0) {
+    return Array.from(_lcSeleccionados).map(function(i) { return _lcItems[i]; }).filter(Boolean);
+  }
+  return _lcItems.filter(function(it){ return it.urgencia !== 99; }); // excluir pausados si no hay selección
+}
 
-  var texto = '🛒 Lista de compra — ' + new Date().toLocaleDateString('es-AR') + '\n\n';
-
-  var grupos = {};
-  _lcItems.forEach(function(it) {
-    var g = it.urgencia <= 2 ? '⚠️ URGENTES' : '📋 NORMAL';
-    if (!grupos[g]) grupos[g] = [];
-    var costoTxt = it.costo > 0
-      ? ' — $' + Math.round(it.costo * it.cantidad).toLocaleString('es-AR')
-      : '';
-    grupos[g].push('• ' + it.nombre + ' x' + it.cantidad
-      + (it.proveedor ? ' (' + it.proveedor + ')' : '')
-      + costoTxt);
+// ── Agrupar por proveedor ─────────────────────────────────────
+function _lcAgruparPorProveedor(items) {
+  var grupos = {}; // proveedor → { items:[], historial:{} }
+  items.forEach(function(it) {
+    var prov = (it.proveedor || 'Sin proveedor').trim();
+    if (!grupos[prov]) grupos[prov] = { items: [], historialRef: {} };
+    grupos[prov].items.push(it);
+    // Guardar referencia de precios históricos por producto para el mensaje
+    if (it.historialPrecios && it.historialPrecios.length > 0) {
+      grupos[prov].historialRef[it.nombre] = it.historialPrecios;
+    }
   });
+  return grupos;
+}
 
-  var totalCosto = _lcItems.reduce(function(s,it){ return s + (it.costo > 0 ? it.costo * it.cantidad : 0); }, 0);
-  var sinCosto   = _lcItems.filter(function(it){ return it.costo <= 0; }).length;
+function lcCopiarTexto() {
+  var items = _lcItemsParaMensaje();
+  if (!items.length) { mostrarToast('⚠️ No hay ítems para copiar', 'naranja'); return; }
 
-  Object.keys(grupos).forEach(function(g) {
-    texto += g + '\n' + grupos[g].join('\n') + '\n\n';
+  var grupos = _lcAgruparPorProveedor(items);
+  var totalCosto = 0;
+  var sinCosto = 0;
+  var texto = '🛒 Lista de compra — ' + new Date().toLocaleDateString('es-AR') + '\n';
+  if (_lcSeleccionados.size > 0) texto += '(' + items.length + ' seleccionados)\n';
+  texto += '\n';
+
+  Object.keys(grupos).sort().forEach(function(prov) {
+    var g = grupos[prov];
+    texto += '📦 ' + prov.toUpperCase() + '\n';
+    g.items.forEach(function(it) {
+      var costoLinea = it.costo > 0 ? ' — $' + Math.round(it.costo * it.cantidad).toLocaleString('es-AR') : '';
+      // Referencia de último precio pagado al mismo proveedor
+      var refPrecio = '';
+      if (it.historialPrecios) {
+        var histProv = it.historialPrecios.find(function(hp){ return hp.proveedor.trim().toUpperCase() === prov.toUpperCase(); });
+        if (histProv) refPrecio = ' [último $' + histProv.costo.toLocaleString('es-AR') + ' · ' + (histProv.fecha||'') + ']';
+      }
+      texto += '  • ' + it.nombre + ' x' + it.cantidad + costoLinea + refPrecio + '\n';
+      if (it.costo > 0) totalCosto += it.costo * it.cantidad;
+      else sinCosto++;
+    });
+    texto += '\n';
   });
 
   texto += '💰 Total estimado: $' + Math.round(totalCosto).toLocaleString('es-AR');
@@ -8398,44 +8502,45 @@ function lcCopiarTexto() {
     mostrarToast('✅ Lista copiada al portapapeles', 'verde');
   }).catch(function() {
     var ta = document.createElement('textarea');
-    ta.value = texto;
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
+    ta.value = texto; document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
     mostrarToast('✅ Lista copiada', 'verde');
   });
 }
 
 function lcCompartirWA() {
-  if (!_lcItems.length) return;
+  var items = _lcItemsParaMensaje();
+  if (!items.length) { mostrarToast('⚠️ No hay ítems para enviar', 'naranja'); return; }
 
-  var texto = '🛒 *Lista de compra Almacén Copihue*\n';
-  texto += new Date().toLocaleDateString('es-AR') + '\n\n';
+  var grupos = _lcAgruparPorProveedor(items);
+  var totalCosto = 0;
+  var sinCosto = 0;
 
-  var urgentes = _lcItems.filter(function(it){ return it.urgencia <= 2; });
-  var normales  = _lcItems.filter(function(it){ return it.urgencia > 2; });
+  var texto = '🛒 *Lista de compra — Almacén Copihue*\n';
+  texto += new Date().toLocaleDateString('es-AR');
+  if (_lcSeleccionados.size > 0) texto += ' · ' + items.length + ' seleccionados';
+  texto += '\n\n';
 
-  if (urgentes.length) {
-    texto += '⚠️ *URGENTES*\n';
-    urgentes.forEach(function(it){
-      var costoTxt = it.costo > 0 ? ' — $' + Math.round(it.costo * it.cantidad).toLocaleString('es-AR') : '';
-      texto += '• ' + it.nombre + ' — pedir x' + it.cantidad + costoTxt + '\n';
+  Object.keys(grupos).sort().forEach(function(prov) {
+    var g = grupos[prov];
+    texto += '📦 *' + prov.toUpperCase() + '*\n';
+    g.items.forEach(function(it) {
+      var esUrg = it.urgencia <= 2;
+      var urgTag = esUrg ? ' 🔴' : '';
+      var costoLinea = it.costo > 0 ? ' — $' + Math.round(it.costo * it.cantidad).toLocaleString('es-AR') : '';
+      // Referencia de precio histórico al mismo proveedor
+      var refPrecio = '';
+      if (it.historialPrecios) {
+        var histProv = it.historialPrecios.find(function(hp){ return hp.proveedor.trim().toUpperCase() === prov.toUpperCase(); });
+        if (histProv) refPrecio = ' _(últ. $' + histProv.costo.toLocaleString('es-AR') + ')_';
+      }
+      texto += '• ' + it.nombre + ' x' + it.cantidad + urgTag + costoLinea + refPrecio + '\n';
+      if (it.costo > 0) totalCosto += it.costo * it.cantidad;
+      else sinCosto++;
     });
     texto += '\n';
-  }
+  });
 
-  if (normales.length) {
-    texto += '📋 *NORMAL*\n';
-    normales.forEach(function(it){
-      var costoTxt = it.costo > 0 ? ' — $' + Math.round(it.costo * it.cantidad).toLocaleString('es-AR') : '';
-      texto += '• ' + it.nombre + ' — pedir x' + it.cantidad + costoTxt + '\n';
-    });
-    texto += '\n';
-  }
-
-  var totalCosto = _lcItems.reduce(function(s,it){ return s + (it.costo > 0 ? it.costo * it.cantidad : 0); }, 0);
-  var sinCosto   = _lcItems.filter(function(it){ return it.costo <= 0; }).length;
   texto += '💰 *Total estimado: $' + Math.round(totalCosto).toLocaleString('es-AR') + '*';
   if (sinCosto > 0) texto += ' _(' + sinCosto + ' sin precio costo)_';
 
