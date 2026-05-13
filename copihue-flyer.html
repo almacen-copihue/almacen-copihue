@@ -464,108 +464,181 @@ function extraerEmpresa(cfg){
   $('infoWeb').textContent       = _emp.web||'—';
 }
 
+// ── SISTEMA DE OFERTAS (misma lógica que index.html) ─────────────────────────
+// Tabla idéntica a OFERTAS_RELAMPAGO_SISTEMA del catálogo
+const ORS = {
+  '1': {nombre:'2x1',   tipo:'nxm', cantidad:2, pagas:1,   eslogan:'Llevás 2, pagás 1'},
+  '2': {nombre:'3x2',   tipo:'nxm', cantidad:3, pagas:2,   eslogan:'Llevás 3, pagás 2'},
+  '3': {nombre:'4x3',   tipo:'nxm', cantidad:4, pagas:3,   eslogan:'Llevás 4, pagás 3'},
+  '4': {nombre:'5x4',   tipo:'nxm', cantidad:5, pagas:4,   eslogan:'Llevás 5, pagás 4'},
+  '5': {nombre:'6x5',   tipo:'nxm', cantidad:6, pagas:5,   eslogan:'Llevás 6, pagás 5'},
+  '6': {nombre:'7x6',   tipo:'nxm', cantidad:7, pagas:6,   eslogan:'Llevás 7, pagás 6'},
+  '10':{nombre:'2da50', tipo:'2da50',cantidad:2, pagas:1.5, eslogan:'2DA UNIDAD 50% OFF'},
+  '11':{nombre:'10off', tipo:'pct', descuento:10, eslogan:'10% DE DESCUENTO HOY'},
+  '12':{nombre:'15off', tipo:'pct', descuento:15, eslogan:'15% DE DESCUENTO HOY'},
+  '13':{nombre:'20off', tipo:'pct', descuento:20, eslogan:'20% DE DESCUENTO HOY'},
+  '14':{nombre:'25off', tipo:'pct', descuento:25, eslogan:'25% DE DESCUENTO HOY'},
+};
+
+// Calcula precio oferta y etiqueta badge para un producto relámpago
+// Idéntico al render del index.html
+function calcRel(p){
+  const codigo = String(p.rel);
+  const oferta = ORS[codigo];
+  if(!oferta) return {po:p.price, et:'OFERTA', pct:0, eslogan:''};
+
+  if(oferta.tipo==='pct'){
+    const po = Math.round(p.price*(1-oferta.descuento/100));
+    return {po, et:'-'+oferta.descuento+'%', pct:oferta.descuento, eslogan:oferta.eslogan};
+  }
+  if(oferta.tipo==='2da50'){
+    // Precio efectivo por unidad tomando de a 2: (precio + precio*0.5)/2
+    const po = Math.round(p.price*0.75); // precio promedio pagado por unidad
+    return {po, et:'2DA 50%', pct:25, eslogan:oferta.eslogan, nxm:oferta};
+  }
+  // NxM: precio unitario sin cambio, el ahorro es por ciclo
+  const pct = Math.round((oferta.cantidad-oferta.pagas)/oferta.cantidad*100);
+  return {po:p.price, et:oferta.nombre.toUpperCase(), pct, eslogan:oferta.eslogan, nxm:oferta};
+}
+
+// Calcula badge para destacadas (p.des = % de descuento directo)
+function calcDes(p){
+  const pct = p.des; // % directo en la columna
+  const po  = Math.round(p.price*(1-pct/100));
+  return {po, et:pct+'% OFF', pct, eslogan:pct+'% OFF hoy'};
+}
+
+// Especiales: siempre -10%
+function calcEsp(p){
+  const po = Math.round(p.price*0.9);
+  return {po, et:'ESPECIAL -10%', pct:10, eslogan:'Precio especial'};
+}
+
+// Promos: usa normal vs price
+function calcPro(p){
+  const pct = Math.round((1-p.price/Math.max(p.normal,1))*100);
+  return {po:p.price, et:'PROMO -'+pct+'%', pct, eslogan:'Precio rebajado'};
+}
+
 function normProds(arr){
   return arr.map((p,i)=>({
-    id:      Number(p.id||i+1),
-    name:    String(p.name||p.nombre||'Producto '+i).trim(),
-    price:   parseInt(p.price)||0,
-    normal:  parseInt(p.normal)||parseInt(p.price)||0,
-    cat:     String(p.category||p.categoria||'').trim().toUpperCase(),
-    stock:   parseInt(p.stock)||parseInt(p.stockNumber)||0,
-    rel:     parseInt(p.relampago)||0,
-    des:     parseInt(p.destacada)||0,
-    esp:     parseInt(p.especial)||0,
+    id:     Number(p.id||i+1),
+    name:   String(p.name||p.nombre||'Producto '+i).trim(),
+    price:  parseInt(p.price)||0,
+    normal: parseInt(p.normal)||parseInt(p.price)||0,
+    cat:    String(p.category||p.categoria||'').trim().toUpperCase(),
+    stock:  parseInt(p.stock)||parseInt(p.stockNumber)||0,
+    rel:    parseInt(p.relampago)||0,
+    des:    parseInt(p.destacada)||0,
+    esp:    parseInt(p.especial)||0,
   }));
 }
 
 function construirPools(){
-  // IDs activos del backend (filtrados por horario)
-  const toSet = arr => arr ? new Set((arr).map(p=>Number(p.id||p))) : null;
-  const idRel = toSet(_of.relampagoActivo);
-  const idDes = toSet(_of.destacadasActivas);
-  const idUlt = toSet(_of.ultimasSeleccionadas);
+  // IDs activos del backend — mismos que usa el catálogo
+  const toIds = arr => arr ? new Set(arr.map(p=>Number(p.id||p))) : null;
+  const idRel = toIds(_of.relampagoActivo);
+  const idDes = toIds(_of.destacadasActivas);
+  const idUlt = toIds(_of.ultimasSeleccionadas);
 
-  function mkRel(p){
-    const d=p.rel;
-    let pr=p.price,et='';
-    if(d>=1&&d<=9){
-      // Intentar tomar precio del backend si existe
-      const bp=(_of.relampagoActivo||[]).find(x=>Number(x.id)===p.id);
-      pr=bp&&bp.priceOff?bp.priceOff:Math.round(p.price*(1-1/(d+1)));
-      et=d+'x'+(d-1);
-    } else if(d===10){pr=Math.round(p.price*.5);et='2da 50%';}
-    else if(d>=11){const pct=[10,15,20,25,30][d-11]||10;pr=Math.round(p.price*(1-pct/100));et='-'+pct+'%';}
-    return{...p,po:pr,et,pct:Math.round((1-pr/Math.max(p.price,1))*100)};
-  }
+  // ── RELÁMPAGO ──
+  // Pool planilla: relampago>0, stock>0, codigo válido en ORS
+  const relPlanilla = _prods.filter(p=>p.rel>0 && p.stock>0 && ORS[String(p.rel)]);
+  // Activos según horario (backend): subset del pool
+  const relActivos  = idRel && idRel.size>0
+    ? relPlanilla.filter(p=>idRel.has(p.id))
+    : [];
+  // Para el flyer: si hay activos del horario los usamos; si no, mostramos TODOS del pool
+  // (el usuario puede hacer el flyer antes de activar)
+  const relFuente   = relActivos.length>0 ? relActivos : relPlanilla;
+  _pools.relampago  = relFuente.map(p=>({...p,...calcRel(p), _activo: idRel ? idRel.has(p.id) : true}));
 
-  // RELAMPAGO — si hay activos del backend, usar esos; sino, todos los que tienen rel>0
-  const relEnPlanilla = _prods.filter(p=>p.rel>0);
-  _pools.relampago = idRel && idRel.size>0
-    ? relEnPlanilla.filter(p=>idRel.has(p.id)).map(mkRel)
-    : relEnPlanilla.map(mkRel);  // pool completo de planilla si backend vacío
+  // Pool completo (para el modo manual, incluye TODOS sin filtro horario)
+  _pools._relTodos  = relPlanilla.map(p=>({...p,...calcRel(p), _activo: idRel ? idRel.has(p.id) : true}));
 
-  // DESTACADAS
-  const desEnPlanilla = _prods.filter(p=>p.des>0);
-  _pools.destacadas = idDes && idDes.size>0
-    ? desEnPlanilla.filter(p=>idDes.has(p.id)).map(p=>({...p,po:p.price,et:'DEST.',pct:0}))
-    : desEnPlanilla.map(p=>({...p,po:p.price,et:'DEST.',pct:0}));
+  // ── DESTACADAS ──
+  // p.des = % de descuento directo (columna H en la planilla)
+  const desPlanilla = _prods.filter(p=>p.des>0 && p.stock>0);
+  const desActivos  = idDes && idDes.size>0
+    ? desPlanilla.filter(p=>idDes.has(p.id))
+    : [];
+  const desFuente   = desActivos.length>0 ? desActivos : desPlanilla;
+  _pools.destacadas = desFuente.map(p=>({...p,...calcDes(p), _activo: idDes ? idDes.has(p.id) : true}));
+  _pools._desTodas  = desPlanilla.map(p=>({...p,...calcDes(p), _activo: idDes ? idDes.has(p.id) : true}));
 
-  // ESPECIALES
-  _pools.especiales = _prods.filter(p=>p.esp===1)
-    .map(p=>({...p,po:p.price,et:'ESP.',pct:0}));
+  // ── ESPECIALES ──
+  // especial===1, siempre -10%
+  _pools.especiales = _prods.filter(p=>p.esp===1 && p.stock>0)
+    .map(p=>({...p,...calcEsp(p), _activo:true}));
 
-  // PROMOS
-  _pools.promos = _prods.filter(p=>p.cat==='PROMOS'&&p.normal>p.price&&p.stock>0)
-    .map(p=>({...p,po:p.price,et:'PROMO',pct:Math.round((1-p.price/Math.max(p.normal,1))*100)}));
+  // ── PROMOS ──
+  // categoria PROMOS, normal>price (precio normal está en col K del catálogo = p.normal)
+  _pools.promos = _prods.filter(p=>p.cat==='PROMOS' && p.normal>p.price && p.stock>0)
+    .map(p=>({...p,...calcPro(p), _activo:true}));
 
-  // ULTIMAS
-  const ultEnPlanilla = _prods.filter(p=>p.rel>0&&p.stock>0&&p.stock<5);
-  _pools.ultimas = idUlt && idUlt.size>0
-    ? _prods.filter(p=>idUlt.has(p.id)).map(p=>({...p,po:p.price,et:'ÚLTIMAS',pct:0}))
-    : ultEnPlanilla.map(p=>({...p,po:p.price,et:'ÚLTIMAS',pct:0}));
+  // ── ÚLTIMAS UNIDADES ──
+  // Si el backend las mandó, usarlas; sino productos con relampago>0 y stock<5
+  const ultActivos = idUlt && idUlt.size>0
+    ? _prods.filter(p=>idUlt.has(p.id)).map(p=>({...p,...calcRel(p), _activo:true}))
+    : _prods.filter(p=>p.rel>0 && p.stock>0 && p.stock<5).map(p=>({...p,...calcRel(p), _activo:true}));
+  _pools.ultimas = ultActivos;
 
-  // CERVECERO
-  _pools.cervecero = (_cerv.productos||[]).map(p=>({
-    id:Number(p.id||0),name:String(p.nombre||p.name||''),
-    price:parseInt(p.precio||p.price)||0,normal:parseInt(p.precio||p.price)||0,stock:99,
-    rel:0,des:0,esp:0,cat:'',
-    po:p.precioPromo>0?p.precioPromo:(parseInt(p.precio||p.price)||0),
-    et:'CERV.',pct:p.precio>0&&p.precioPromo>0?Math.round((1-p.precioPromo/p.precio)*100):0
-  }));
+  // ── CERVECERO ──
+  _pools.cervecero = (_cerv.productos||[]).map(p=>{
+    const precio  = parseInt(p.precio||p.price)||0;
+    const promoP  = parseInt(p.precioPromo)||0;
+    const po      = promoP>0 ? promoP : precio;
+    const pct     = precio>0&&promoP>0 ? Math.round((1-promoP/precio)*100) : 0;
+    return {
+      id:Number(p.id||0), name:String(p.nombre||p.name||''), price:precio,
+      normal:precio, stock:99, rel:0, des:0, esp:0, cat:'CERVEZAS',
+      po, et:pct>0?'-'+pct+'%':'CERV.', pct, _activo:true
+    };
+  });
 
-  // MANUAL — unión de todos sin duplicados
+  // ── MANUAL ──
+  // TODOS los productos con alguna oferta en planilla, sin importar horario
+  // Usa los pools completos (_relTodos, _desTodas) para no filtrar por horario
   const seen=new Set(); _pools.manual=[];
-  [..._pools.relampago,..._pools.destacadas,..._pools.especiales,..._pools.promos,..._pools.ultimas]
+  [...(_pools._relTodos||[]),...(_pools._desTodas||[]),
+   ..._pools.especiales,..._pools.promos,..._pools.ultimas,..._pools.cervecero]
     .forEach(p=>{if(!seen.has(p.id)){seen.add(p.id);_pools.manual.push(p);}});
 }
 
 function actualizarDiag(){
-  const nRel = _prods.filter(p=>p.rel>0).length;
-  const nDes = _prods.filter(p=>p.des>0).length;
+  const nRelPlan = (_pools._relTodos||[]).length;
+  const nDesPlan = (_pools._desTodas||[]).length;
+  const relHorario = _pools.relampago.length;
+  const desHorario = _pools.destacadas.length;
   diagSet([
-    {cls:_prods.length>0?'ok':'off',      lbl:'Productos cargados',             cnt:_prods.length},
-    {cls:_pools.relampago.length>0?'ok':nRel>0?'warn':'off',
-      lbl:'Relámpago'+(_pools.relampago.length<nRel?' (fuera de horario)':''), cnt:_pools.relampago.length+(_pools.relampago.length<nRel?' / '+nRel+' en planilla':'')},
-    {cls:_pools.destacadas.length>0?'ok':nDes>0?'warn':'off',
-      lbl:'Destacadas'+(_pools.destacadas.length<nDes?' (fuera de horario)':''),cnt:_pools.destacadas.length+(_pools.destacadas.length<nDes?' / '+nDes+' en planilla':'')},
-    {cls:_pools.especiales.length>0?'ok':'off', lbl:'Especiales',               cnt:_pools.especiales.length},
-    {cls:_pools.promos.length>0?'ok':'off',     lbl:'Promos activas',            cnt:_pools.promos.length},
-    {cls:_pools.ultimas.length>0?'ok':'warn',   lbl:'Últimas unidades',          cnt:_pools.ultimas.length},
+    {cls:_prods.length>0?'ok':'off', lbl:'Productos cargados', cnt:_prods.length},
+    {cls:relHorario>0?'ok':nRelPlan>0?'warn':'off',
+      lbl:'Relámpago'+(relHorario<nRelPlan?' ('+relHorario+' activos)':''),
+      cnt:relHorario<nRelPlan ? relHorario+' / '+nRelPlan+' en planilla' : relHorario},
+    {cls:desHorario>0?'ok':nDesPlan>0?'warn':'off',
+      lbl:'Destacadas'+(desHorario<nDesPlan?' ('+desHorario+' activos)':''),
+      cnt:desHorario<nDesPlan ? desHorario+' / '+nDesPlan+' en planilla' : desHorario},
+    {cls:_pools.especiales.length>0?'ok':'off', lbl:'Especiales', cnt:_pools.especiales.length},
+    {cls:_pools.promos.length>0?'ok':'off',     lbl:'Promos',     cnt:_pools.promos.length},
+    {cls:_pools.ultimas.length>0?'ok':'warn',   lbl:'Últimas',    cnt:_pools.ultimas.length},
     {cls:_pools.cervecero.length>0?'ok':'warn',
-      lbl:'Cervecero'+(_cerv.modoActivo==='1'?' (FORZADO)':_cerv.modoActivo==='0'?' (APAGADO)':' (auto)'),
+      lbl:'Cervecero'+(_cerv.modoActivo==='1'?' FORZADO':_cerv.modoActivo==='0'?' APAGADO':' auto'),
       cnt:_pools.cervecero.length},
+    {cls:'ok', lbl:'Manual (todas las ofertas)', cnt:_pools.manual.length},
   ]);
 }
 
 function actualizarBadges(){
   Object.entries(_pools).forEach(([m,pool])=>{
+    if(m.startsWith('_')) return; // ignorar pools internos _relTodos, _desTodas
     const el=$('cnt-'+m); const btn=document.querySelector(`[data-modo="${m}"]`);
-    if(!el||!btn)return;
+    if(!el||!btn) return;
     el.textContent=pool.length;
     btn.classList.toggle('hp',pool.length>0);
   });
 }
 
+// ── MODO ──────────────────────────────────────────────────────────────────────
 // ── MODO ──────────────────────────────────────────────────────────────────────
 function setModo(modo,btn){
   _modo=modo; _sel.clear();
