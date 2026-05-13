@@ -6418,7 +6418,7 @@ function _construirPoolsLocalFallback() {
     _poolIdsRelampago.clear(); _poolIdsDestacadas.clear(); _poolIdsEspeciales.clear();
     productos.forEach(prod => {
         if (!prod || prod.stock <= 0) return;
-        if (prod.categoria === 'CERVEZAS') return; // solo van a poolCervecero
+        if (prod.category === 'CERVEZAS') return; // solo van a poolCervecero
         const rel = prod.relampago;
         if (rel && rel !== '0' && rel !== 0) {
             const key = String(rel);
@@ -6459,10 +6459,14 @@ async function cargarPoolsOfertas() {
                 pct:            p.pct            != null ? p.pct            : null
             });
         });
-        const poolsVacios = _poolIdsRelampago.size === 0 && _poolIdsDestacadas.size === 0 && _poolIdsEspeciales.size === 0;
-        if (poolsVacios) _construirPoolsLocalFallback();
+        // GAS respondió bien → los pools vacíos son intencionales (horario cerrado, sin ofertas del día).
+        // NO disparar el fallback local: mostraría TODO sin filtro ni límite.
         console.log(`✅ Pools POS: ${_poolIdsRelampago.size} rel · ${_destacadasFiltradas.size} dest · ${_poolIdsEspeciales.size} esp · ${_poolIdsUltimas.size} ult`);
-        if (_limiteUltimas > 0 && _poolIdsUltimas.size < _limiteUltimas) {
+
+        // Notif Últimas: solo 1 vez por día, y solo si _limiteUltimas ya llegó de GAS
+        const _hoyKeyUlt = 'copihue_uu_notif_' + fechaArgentina();
+        if (_limiteUltimas > 0 && _poolIdsUltimas.size < _limiteUltimas && !localStorage.getItem(_hoyKeyUlt)) {
+            localStorage.setItem(_hoyKeyUlt, '1');
             agregarNotifPos('🏷️', 'Últimas Unidades',
                 `${_poolIdsUltimas.size} de ${_limiteUltimas} slots ocupados — abrí el selector para completar`,
                 '#e65100');
@@ -9225,6 +9229,7 @@ async function ultiGuardar() {
         if (!d.ok) throw new Error(d.error);
 
         // Actualizar pool local en seba21
+        // Limpiamos y poblamos con null — precios reales llegan del refresh silencioso abajo
         _poolIdsUltimas.clear();
         ids.forEach(id => _poolIdsUltimas.set(id, null));
 
@@ -9234,6 +9239,10 @@ async function ultiGuardar() {
 
         mostrarToast(`✅ ${ids.length} producto${ids.length !== 1 ? 's' : ''} en Últimas Unidades`, 'verde');
         document.getElementById('modalUltimas').style.display='none';
+
+        // Refrescar pools en segundo plano para obtener precioOferta/pct reales de GAS
+        // (no bloquea — el carrito ya usa los ids correctos aunque los precios lleguen en ~2s)
+        setTimeout(() => cargarPoolsOfertas(), 300);
     } catch(e) {
         mostrarToast('❌ Error al guardar: ' + e.message, 'rojo');
     } finally {
