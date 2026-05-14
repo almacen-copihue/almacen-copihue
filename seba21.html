@@ -53,6 +53,20 @@
   • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
     evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
 
+  v346 — 13/05/2026
+  • FIX CRÍTICO: _fmtFecha() extraída de _renderPanelFiados() al scope de módulo.
+    Era función local y _actualizarBarraCobro() + _enviarWASeleccionados() la llamaban
+    desde fuera → ReferenceError silencioso → barra inferior del panel fiados no aparecía,
+    botón Cobrar inasequible y la fila de botones no funcionaba.
+  • FIX CRÍTICO: _procesarVentaFiado() ahora propaga el error de guardarFiado()
+    en lugar de tragarlo con console.warn. Si falla la planilla, confirmarFiado()
+    muestra el error al usuario (antes: venta y fiado no aparecían en planilla sin aviso).
+  • FIX: cerrarModalFiado() ahora resetea _fiadoEnProceso y fiadoAlertaSinTel.
+    Antes quedaba el guard activo y el próximo intento de confirmarFiado() retornaba
+    silenciosamente sin hacer nada.
+  • FIX: cerrarConfirm() ya no resetea _fiadoEnProceso si el modal fiado está abierto,
+    evitando matar el guard mientras confirmarFiado() está procesando.
+
   v345 — 13/05/2026
   ------------------
   • REVERT FIX v344 #2: cerrarConfirm() antes de abrirModalFiado() era
@@ -354,7 +368,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v345</title>
+    <title>Copihue — POS v346</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3882,8 +3896,11 @@ function cerrarConfirm() {
     document.getElementById('modalConfirm').classList.remove('open');
     // Restaurar FABs si hay items en el carrito
     if (MOBILE && ventaActual.length > 0) document.getElementById('fabStack').style.display = 'flex';
-    // Safety: liberar cualquier guard de venta colgado
-    window._fiadoEnProceso = false;
+    // Safety: liberar guard de fiado solo si el modal de fiado no está abierto
+    // (si está abierto, el guard lo controla confirmarFiado/cerrarModalFiado)
+    const modalFiadoActivo = document.getElementById('modalFiado') &&
+                             document.getElementById('modalFiado').style.display !== 'none';
+    if (!modalFiadoActivo) window._fiadoEnProceso = false;
     // Desactivar atajos de teclado
     document.removeEventListener('keydown', _keyHandlerConfirm);
     const btnTicket = document.getElementById('btnTicketWA');
@@ -9487,6 +9504,25 @@ function cerrarPanelFiados() {
     document.getElementById('modalPanelFiados').style.display = 'none';
 }
 
+// Formatea fecha del servidor a DD/MM/YYYY — parser robusto (módulo, accesible desde todos los helpers de fiados)
+function _fmtFecha(fechaStr) {
+    if (!fechaStr) return '—';
+    const str = String(fechaStr).trim();
+    let ts = 0;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+        const [y,m,d] = str.split('-').map(Number);
+        ts = new Date(y, m-1, d).getTime();
+    } else if (/^\d{2}\/\d{2}\/\d{4}$/.test(str)) {
+        const [d,m,y] = str.split('/').map(Number);
+        ts = new Date(y, m-1, d).getTime();
+    } else {
+        const d = new Date(str);
+        ts = isNaN(d) ? 0 : d.getTime();
+    }
+    if (!ts) return str;
+    return new Date(ts).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
 function _renderPanelFiados() {
     const hoy = new Date(); hoy.setHours(0,0,0,0);
     const pendientes = _fiadosPendientes.filter(f => f.estado !== 'PAGADO').sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
@@ -9525,25 +9561,6 @@ function _renderPanelFiados() {
         } else {
             badge.style.display = 'none';
         }
-    }
-
-    // Formatea fecha del servidor a DD/MM/YYYY — parser robusto igual que el sort
-    function _fmtFecha(fechaStr) {
-        if (!fechaStr) return '—';
-        const str = String(fechaStr).trim();
-        let ts = 0;
-        if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
-            const [y,m,d] = str.split('-').map(Number);
-            ts = new Date(y, m-1, d).getTime();
-        } else if (/^\d{2}\/\d{2}\/\d{4}$/.test(str)) {
-            const [d,m,y] = str.split('/').map(Number);
-            ts = new Date(y, m-1, d).getTime();
-        } else {
-            const d = new Date(str);
-            ts = isNaN(d) ? 0 : d.getTime();
-        }
-        if (!ts) return str;
-        return new Date(ts).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
     }
 
     function _renderTarjeta(f, i, esPendiente) {
@@ -10133,6 +10150,9 @@ async function confirmarSalidaInterna() {
 function cerrarModalFiado() {
     document.getElementById('modalFiado').style.display = 'none';
     document.getElementById('fiadoClienteDropdown').style.display = 'none';
+    document.getElementById('fiadoAlertaSinTel').style.display = 'none';
+    // Liberar guard para que un próximo intento de confirmarFiado() no quede bloqueado
+    window._fiadoEnProceso = false;
     seleccionarMetodo('efectivo');
 }
 
@@ -10436,15 +10456,22 @@ async function _procesarVentaFiado(datosFiado, itemsSnapshot) {
         const resp = await _apiFetchUrl('vender', url);
         stockOk = resp.success === true;
         ticketNum = resp.ticket || resp.numeroTicket || null;
-    } catch(e) { console.warn('⚠️ Error venta fiado:', e); }
+    } catch(e) {
+        // La venta en planilla falló — igual continuamos para guardar el fiado y el historial local
+        console.warn('⚠️ Error venta fiado (stock/planilla):', e);
+    }
 
     datosFiado.ticket = ticketNum;
 
-    // 2. Guardar en hoja FIADOS
+    // 2. Guardar en hoja FIADOS (crítico — propaga el error para que confirmarFiado lo capture)
     try {
         const url2 = API_URL + '?action=guardarFiado&data=' + encodeURIComponent(JSON.stringify(datosFiado));
-        await _apiFetchUrl('guardarFiado', url2);
-    } catch(e) { console.warn('⚠️ Error guardar fiado:', e); }
+        const r2 = await _apiFetchUrl('guardarFiado', url2);
+        if (!r2 || !r2.success) throw new Error(r2?.mensaje || 'Error al guardar fiado en planilla');
+    } catch(e) {
+        // Propagar — confirmarFiado() mostrará el error al usuario
+        throw new Error('No se pudo registrar el fiado: ' + e.message);
+    }
 
     // 3. Guardar historial local (usando snapshot)
     guardarVentaDia({ items: itemsSnapshot, total, hora, stockRebajado: stockOk, metodoPago: 'FIADO' });
