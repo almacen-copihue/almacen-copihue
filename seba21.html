@@ -53,6 +53,76 @@
   • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
     evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
 
+  v347 — 14/05/2026
+  • FIX URGENTE: abrirModalFiado() ya no llama listarClientes en cada apertura.
+    Clientes se precargan al arrancar (3s delay) y se cachean por 5 minutos.
+    El modal fiado abre instantáneo sin esperar a GAS — elimina el problema
+    de "no hace nada" cuando GAS está frío al arrancar.
+    Si el caché está vigente, cero llamadas a GAS al abrir el modal.
+
+  v346 — 13/05/2026
+  • FIX CRÍTICO: _fmtFecha() extraída de _renderPanelFiados() al scope de módulo.
+    Era función local y _actualizarBarraCobro() + _enviarWASeleccionados() la llamaban
+    desde fuera → ReferenceError silencioso → barra inferior del panel fiados no aparecía,
+    botón Cobrar inasequible y la fila de botones no funcionaba.
+  • FIX CRÍTICO: _procesarVentaFiado() ahora propaga el error de guardarFiado()
+    en lugar de tragarlo con console.warn. Si falla la planilla, confirmarFiado()
+    muestra el error al usuario (antes: venta y fiado no aparecían en planilla sin aviso).
+  • FIX: cerrarModalFiado() ahora resetea _fiadoEnProceso y fiadoAlertaSinTel.
+    Antes quedaba el guard activo y el próximo intento de confirmarFiado() retornaba
+    silenciosamente sin hacer nada.
+  • FIX: cerrarConfirm() ya no resetea _fiadoEnProceso si el modal fiado está abierto,
+    evitando matar el guard mientras confirmarFiado() está procesando.
+
+  v345 — 13/05/2026
+  ------------------
+  • REVERT FIX v344 #2: cerrarConfirm() antes de abrirModalFiado() era
+    incorrecto. El confirm modal debe quedar abierto de fondo (z-index:1000)
+    mientras el fiado modal abre encima (z-index:5000). Con cerrarConfirm
+    primero el carrito quedaba visible y el usuario creía que "saltaba al
+    carrito". Restaurado a comportamiento original.
+  • FIX toolbar bloqueada: modalPanelFiados (inset:0, z-index:5000) cubría
+    toda la pantalla incluyendo la toolbar. Si el usuario no encontraba el
+    botón ✕, todos los botones de la toolbar quedaban inaccesibles detrás
+    del overlay oscuro. Fix: onclick en el div externo del panel cierra al
+    tocar el fondo oscuro (patrón estándar tap-outside-to-close).
+
+  v344 — 13/05/2026
+  ------------------
+  • FIX CRÍTICO btnFiadoPanel: el botón 🧾 de la toolbar navegaba a
+    copihue-fiado.html en lugar de abrir abrirPanelFiados().
+    El panel de fiados y todos sus botones eran inaccesibles desde seba21.
+  • FIX CRÍTICO venta modo fiado: confirmarVenta() abría modalFiado sin
+    cerrar modalConfirm primero. El overlay y _keyHandlerConfirm quedaban
+    activos e interferían con el modal de fiado.
+    Fix: cerrarConfirm() antes de abrirModalFiado().
+
+  v343 — 12/05/2026
+  ------------------
+  • FIX CRÍTICO pools: _construirPoolsLocalFallback usaba prod.categoria en vez de
+    prod.category — cervezas no se excluían del fallback.
+  • FIX CRÍTICO pools: fallback local ya no se dispara cuando GAS responde OK pero
+    pools están vacíos por horario (relampago/especiales off). Solo se activa en catch.
+    Antes, fuera de horario seba21 mostraba TODO el inventario con ofertas sin filtro.
+  • FIX notif Últimas Unidades: guardia por día (localStorage copihue_uu_notif_FECHA)
+    para no disparar la notif en cada carga de página.
+  • FIX ultiGuardar: después de guardar lanza cargarPoolsOfertas() silencioso para
+    obtener precioOferta/pct reales de GAS (antes quedaba null → precio desincronizado).
+  • LISTA COMPRA: selección de ítems por toque (☑/☐ por card, borde azul).
+    Botones ☑ Todos / ☐ Ninguno en barra de filtros.
+    Badge de selección con total estimado sobre los botones de acción.
+    Mensajes WA y Copiar ahora agrupan por proveedor con referencia de último precio
+    pagado. Sin selección: comportamiento anterior (todos los ítems, sin pausados).
+
+  v342 — 10/05/2026
+  ------------------
+  • FIX lista compra: chips de historial de precios estaban fuera del card
+    (concatenados después del </div> de cierre). Fix: flex-wrap:wrap en
+    .lc-card + historialPrecios con flex-basis:100% dentro del card.
+  • UX: fondo azul claro (#f0f4ff) para el bloque de chips — más legible.
+  • UX: nombre proveedor en chip sin max-width fija — usa todo el espacio
+    disponible con overflow:ellipsis proporcional.
+
   v341 — 10/05/2026
   ------------------
   • LISTA COMPRA: historial de precios por proveedor. Cada item muestra
@@ -305,7 +375,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v341</title>
+    <title>Copihue — POS v347</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -1254,7 +1324,7 @@
 
         <!-- FILA 2b: Sistema (segunda mitad) -->
         <div class="header-right" style="width:100%;justify-content:space-between;gap:4px;">
-            <button class="btn-resumen" onclick="window.location.href='copihue-fiado.html'" title="Ver fiados" id="btnFiadoPanel"
+            <button class="btn-resumen" onclick="abrirPanelFiados()" title="Ver fiados" id="btnFiadoPanel"
                     style="background:rgba(230,81,0,0.3);border-color:rgba(230,81,0,0.6);flex:1;text-align:center;position:relative;display:flex;align-items:center;justify-content:center;">
                 🧾<span id="badgeFiados" style="display:none;position:absolute;top:-4px;right:-4px;background:#e65100;color:white;border-radius:50%;min-width:16px;height:16px;font-size:0.6rem;font-weight:900;align-items:center;justify-content:center;line-height:1;padding:0 2px;"></span>
             </button>
@@ -3833,8 +3903,11 @@ function cerrarConfirm() {
     document.getElementById('modalConfirm').classList.remove('open');
     // Restaurar FABs si hay items en el carrito
     if (MOBILE && ventaActual.length > 0) document.getElementById('fabStack').style.display = 'flex';
-    // Safety: liberar cualquier guard de venta colgado
-    window._fiadoEnProceso = false;
+    // Safety: liberar guard de fiado solo si el modal de fiado no está abierto
+    // (si está abierto, el guard lo controla confirmarFiado/cerrarModalFiado)
+    const modalFiadoActivo = document.getElementById('modalFiado') &&
+                             document.getElementById('modalFiado').style.display !== 'none';
+    if (!modalFiadoActivo) window._fiadoEnProceso = false;
     // Desactivar atajos de teclado
     document.removeEventListener('keydown', _keyHandlerConfirm);
     const btnTicket = document.getElementById('btnTicketWA');
@@ -6409,7 +6482,7 @@ function _construirPoolsLocalFallback() {
     _poolIdsRelampago.clear(); _poolIdsDestacadas.clear(); _poolIdsEspeciales.clear();
     productos.forEach(prod => {
         if (!prod || prod.stock <= 0) return;
-        if (prod.categoria === 'CERVEZAS') return; // solo van a poolCervecero
+        if (prod.category === 'CERVEZAS') return; // solo van a poolCervecero
         const rel = prod.relampago;
         if (rel && rel !== '0' && rel !== 0) {
             const key = String(rel);
@@ -6450,10 +6523,14 @@ async function cargarPoolsOfertas() {
                 pct:            p.pct            != null ? p.pct            : null
             });
         });
-        const poolsVacios = _poolIdsRelampago.size === 0 && _poolIdsDestacadas.size === 0 && _poolIdsEspeciales.size === 0;
-        if (poolsVacios) _construirPoolsLocalFallback();
+        // GAS respondió bien → los pools vacíos son intencionales (horario cerrado, sin ofertas del día).
+        // NO disparar el fallback local: mostraría TODO sin filtro ni límite.
         console.log(`✅ Pools POS: ${_poolIdsRelampago.size} rel · ${_destacadasFiltradas.size} dest · ${_poolIdsEspeciales.size} esp · ${_poolIdsUltimas.size} ult`);
-        if (_limiteUltimas > 0 && _poolIdsUltimas.size < _limiteUltimas) {
+
+        // Notif Últimas: solo 1 vez por día, y solo si _limiteUltimas ya llegó de GAS
+        const _hoyKeyUlt = 'copihue_uu_notif_' + fechaArgentina();
+        if (_limiteUltimas > 0 && _poolIdsUltimas.size < _limiteUltimas && !localStorage.getItem(_hoyKeyUlt)) {
+            localStorage.setItem(_hoyKeyUlt, '1');
             agregarNotifPos('🏷️', 'Últimas Unidades',
                 `${_poolIdsUltimas.size} de ${_limiteUltimas} slots ocupados — abrí el selector para completar`,
                 '#e65100');
@@ -8087,6 +8164,7 @@ async function compartirFlyerAdminWA() {
   padding: 10px 12px;
   margin-bottom: 8px;
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: 10px;
 }
@@ -8153,26 +8231,35 @@ async function compartirFlyerAdminWA() {
       <button onclick="lcFiltrar('todos')"   id="lcFTodos"   class="lc-chip activo">Todos</button>
       <button onclick="lcFiltrar('urgente')" id="lcFUrgente" class="lc-chip">🔴 Urgentes</button>
       <button onclick="lcFiltrar('normal')"  id="lcFNormal"  class="lc-chip">🟢 Normal</button>
+      <div style="margin-left:auto;display:flex;gap:4px;">
+        <button onclick="lcSeleccionarTodos()"   id="lcBtnSelTodos"   style="font-size:0.7rem;padding:4px 10px;border:1.5px solid #1565c0;border-radius:20px;background:white;color:#1565c0;font-weight:700;cursor:pointer;">☑ Todos</button>
+        <button onclick="lcDeseleccionarTodos()" id="lcBtnDeselTodos" style="font-size:0.7rem;padding:4px 10px;border:1.5px solid #bbb;border-radius:20px;background:white;color:#888;font-weight:700;cursor:pointer;">☐ Ninguno</button>
+      </div>
     </div>
 
     <!-- Lista de items -->
-    <div id="lcCuerpo" style="padding:10px 12px 100px;"></div>
+    <div id="lcCuerpo" style="padding:10px 12px 120px;"></div>
 
     <!-- Footer sticky -->
-    <div style="position:sticky;bottom:0;background:white;border-top:1.5px solid #eee;padding:10px 16px;display:flex;gap:8px;">
-      <button onclick="lcCopiarTexto()" style="flex:1;background:#1565c0;color:white;border:none;border-radius:12px;padding:12px;font-weight:700;font-size:0.88rem;cursor:pointer;">📋 Copiar texto</button>
-      <button onclick="lcCompartirWA()" style="flex:1;background:#25d366;color:white;border:none;border-radius:12px;padding:12px;font-weight:700;font-size:0.88rem;cursor:pointer;">📲 Compartir WA</button>
-      <button onclick="cerrarListaCompra()" style="background:#f0f0f0;color:#555;border:none;border-radius:12px;padding:12px 18px;font-weight:600;cursor:pointer;">Cerrar</button>
+    <div style="position:sticky;bottom:0;background:white;border-top:1.5px solid #eee;padding:10px 16px;">
+      <!-- Indicador de selección -->
+      <div id="lcBadgeSeleccion" style="display:none;margin-bottom:8px;padding:6px 12px;background:#e3f2fd;border-radius:10px;font-size:0.75rem;font-weight:700;color:#1565c0;text-align:center;"></div>
+      <!-- Botones -->
+      <div style="display:flex;gap:8px;">
+        <button onclick="lcCopiarTexto()" style="flex:1;background:#1565c0;color:white;border:none;border-radius:12px;padding:12px;font-weight:700;font-size:0.88rem;cursor:pointer;">📋 Copiar</button>
+        <button onclick="lcCompartirWA()" style="flex:1;background:#25d366;color:white;border:none;border-radius:12px;padding:12px;font-weight:700;font-size:0.88rem;cursor:pointer;">📲 Enviar WA</button>
+        <button onclick="cerrarListaCompra()" style="background:#f0f0f0;color:#555;border:none;border-radius:12px;padding:12px 18px;font-weight:600;cursor:pointer;">✕</button>
+      </div>
     </div>
-  </div>
-</div>
 
 <script>
 // ── LISTA DE COMPRA ───────────────────────────────────────────
 var _lcItems = [];
 var _lcFiltroActivo = 'todos';
+var _lcSeleccionados = new Set(); // índices de _lcItems seleccionados para el mensaje WA
 
 async function abrirListaCompra() {
+  _lcSeleccionados.clear();
   document.getElementById('modalListaCompra').style.display = 'block';
   document.getElementById('lcSubtitulo').textContent = 'Cargando desde Sheets...';
   document.getElementById('lcResumen').style.display = 'none';
@@ -8233,13 +8320,18 @@ function lcRenderizar(filtro) {
 
   if (!items.length) {
     document.getElementById('lcCuerpo').innerHTML = '<div style="text-align:center;padding:40px;color:#aaa;">Sin productos en esta categoría</div>';
+    _lcActualizarBadgeSeleccion();
     return;
   }
 
   var html = '';
   var urgenciaActual = -1;
 
-  items.forEach(function(it) {
+  items.forEach(function(it, idx) {
+    // Índice real en _lcItems (para selección correcta con filtros activos)
+    var idxReal = _lcItems.indexOf(it);
+    var sel = _lcSeleccionados.has(idxReal);
+
     // Separador de sección
     if (it.urgencia !== urgenciaActual) {
       urgenciaActual = it.urgencia;
@@ -8257,7 +8349,10 @@ function lcRenderizar(filtro) {
     var esUrgente = it.urgencia <= 2;
     var esPiso    = it.urgencia === 0;
     var esPausado = it.pausado === true;
-    var cardClass = esPiso ? 'lc-card piso' : (esUrgente ? 'lc-card urgente' : 'lc-card');
+
+    // Borde y fondo según selección y urgencia
+    var borderColor = sel ? '#1565c0' : (esPiso ? '#ffcc02' : (esUrgente ? '#ef9a9a' : '#e0e0e0'));
+    var bgColor     = sel ? '#e3f2fd' : (esPiso ? '#fffde7' : (esUrgente ? '#fff8f8' : '#fff'));
 
     var diasTxt = (it.diasStock !== null) ? it.diasStock + 'd stock' : 'sin historial';
     var provTxt = it.proveedor ? '<span style="font-size:0.65rem;color:#888;">📦 ' + it.proveedor + '</span>' : '';
@@ -8269,18 +8364,26 @@ function lcRenderizar(filtro) {
 
     var opacidad = esPausado ? 'opacity:0.5;' : '';
 
-    // Buscar id del producto para el botón
     var prodRef = productos.find(function(p){ return p.name === it.nombre; });
     var prodId  = prodRef ? prodRef.id : null;
     var btnPausarHtml = prodId !== null
-      ? '<button onclick="lcTogglePausado(' + prodId + ', this)" '
+      ? '<button onclick="event.stopPropagation();lcTogglePausado(' + prodId + ', this)" '
         + 'style="margin-top:6px;width:100%;padding:5px 0;border:1px solid #ccc;border-radius:8px;background:white;'
         + 'font-size:0.7rem;color:#607d8b;cursor:pointer;">'
         + (esPausado ? '▶️ Reactivar' : 'Marcar inactivo')
         + '</button>'
       : '';
 
-    html += '<div class="' + cardClass + '" style="' + opacidad + '">'
+    // Checkbox visual
+    var chkHtml = '<div style="flex-shrink:0;font-size:1.3rem;color:' + (sel ? '#1565c0' : '#ccc') + ';padding-right:4px;">'
+      + (sel ? '☑' : '☐')
+      + '</div>';
+
+    html += '<div class="lc-card" '
+      + 'data-idx="' + idxReal + '" '
+      + 'onclick="lcToggleSeleccion(' + idxReal + ')" '
+      + 'style="cursor:pointer;border-color:' + borderColor + ';background:' + bgColor + ';' + opacidad + '">'
+      + chkHtml
       + '<div style="flex:1;min-width:0;">'
       +   '<div style="font-size:0.82rem;font-weight:700;color:#222;line-height:1.3;margin-bottom:3px;">' + it.nombre + '</div>'
       +   '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'
@@ -8300,23 +8403,74 @@ function lcRenderizar(filtro) {
               + '<div style="font-size:0.6rem;color:#aaa;">ref. venta: $' + it.precio.toLocaleString('es-AR') + '</div>'
           )
       + '</div>'
-      + '</div>'
-      // ── Historial últimas compras por proveedor ──
+      // ── Historial últimas compras por proveedor (dentro del card, flex-basis:100%) ──
       + (it.historialPrecios && it.historialPrecios.length > 0
-          ? '<div style="margin-top:6px;padding:6px 8px;background:#f5f5f5;border-radius:8px;display:flex;flex-wrap:wrap;gap:5px;">'
+          ? '<div style="flex-basis:100%;margin-top:2px;padding:6px 8px;background:#f0f4ff;border-radius:8px;display:flex;gap:6px;" onclick="event.stopPropagation()">'
             + it.historialPrecios.map(function(hp) {
-                return '<div style="flex:1;min-width:90px;background:white;border:1px solid #e0e0e0;border-radius:6px;padding:4px 6px;text-align:center;">'
-                  + '<div style="font-size:0.58rem;color:#888;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:90px;" title="' + hp.proveedor + '">' + hp.proveedor + '</div>'
-                  + '<div style="font-size:0.78rem;font-weight:900;color:#1565c0;">$' + hp.costo.toLocaleString('es-AR') + '</div>'
-                  + (hp.fecha ? '<div style="font-size:0.55rem;color:#aaa;">' + hp.fecha + '</div>' : '')
+                return '<div style="flex:1;background:white;border:1px solid #dce3f5;border-radius:8px;padding:5px 7px;text-align:center;min-width:0;">'
+                  + '<div style="font-size:0.6rem;color:#555;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + hp.proveedor + '">' + hp.proveedor + '</div>'
+                  + '<div style="font-size:0.82rem;font-weight:900;color:#1565c0;">$' + hp.costo.toLocaleString('es-AR') + '</div>'
+                  + (hp.fecha ? '<div style="font-size:0.58rem;color:#aaa;">' + hp.fecha + '</div>' : '')
                   + '</div>';
               }).join('')
             + '</div>'
           : ''
-        );
+        )
+      + '</div>';
   });
 
   document.getElementById('lcCuerpo').innerHTML = html;
+  _lcActualizarBadgeSeleccion();
+}
+
+// ── Selección individual ──────────────────────────────────────
+function lcToggleSeleccion(idxReal) {
+  if (_lcSeleccionados.has(idxReal)) {
+    _lcSeleccionados.delete(idxReal);
+  } else {
+    _lcSeleccionados.add(idxReal);
+  }
+  // Actualizar solo la card tocada sin rerenderizar todo
+  var card = document.querySelector('[data-idx="' + idxReal + '"]');
+  if (card) {
+    var sel = _lcSeleccionados.has(idxReal);
+    var it  = _lcItems[idxReal];
+    var esPiso    = it && it.urgencia === 0;
+    var esUrgente = it && it.urgencia <= 2;
+    card.style.borderColor = sel ? '#1565c0' : (esPiso ? '#ffcc02' : (esUrgente ? '#ef9a9a' : '#e0e0e0'));
+    card.style.background  = sel ? '#e3f2fd' : (esPiso ? '#fffde7' : (esUrgente ? '#fff8f8' : '#fff'));
+    var chk = card.querySelector('div[style*="flex-shrink:0"]');
+    if (chk) { chk.style.color = sel ? '#1565c0' : '#ccc'; chk.textContent = sel ? '☑' : '☐'; }
+  }
+  _lcActualizarBadgeSeleccion();
+}
+
+function lcSeleccionarTodos() {
+  _lcItems.forEach(function(_, i) { _lcSeleccionados.add(i); });
+  lcRenderizar(_lcFiltroActivo);
+}
+
+function lcDeseleccionarTodos() {
+  _lcSeleccionados.clear();
+  lcRenderizar(_lcFiltroActivo);
+}
+
+function _lcActualizarBadgeSeleccion() {
+  var badge = document.getElementById('lcBadgeSeleccion');
+  if (!badge) return;
+  var n = _lcSeleccionados.size;
+  if (n === 0) {
+    badge.style.display = 'none';
+  } else {
+    badge.style.display = 'block';
+    var total = 0;
+    _lcSeleccionados.forEach(function(i) {
+      var it = _lcItems[i];
+      if (it && it.costo > 0) total += it.costo * it.cantidad;
+    });
+    badge.textContent = n + ' seleccionado' + (n !== 1 ? 's' : '')
+      + (total > 0 ? ' · $' + Math.round(total).toLocaleString('es-AR') + ' est.' : '');
+  }
 }
 
 async function lcTogglePausado(id, btn) {
@@ -8353,28 +8507,56 @@ async function lcTogglePausado(id, btn) {
   });
 }
 
-function lcCopiarTexto() {
-  if (!_lcItems.length) return;
+// ── Helper: ítems activos para el mensaje (seleccionados si hay, todos si no) ──
+function _lcItemsParaMensaje() {
+  if (_lcSeleccionados.size > 0) {
+    return Array.from(_lcSeleccionados).map(function(i) { return _lcItems[i]; }).filter(Boolean);
+  }
+  return _lcItems.filter(function(it){ return it.urgencia !== 99; }); // excluir pausados si no hay selección
+}
 
-  var texto = '🛒 Lista de compra — ' + new Date().toLocaleDateString('es-AR') + '\n\n';
-
-  var grupos = {};
-  _lcItems.forEach(function(it) {
-    var g = it.urgencia <= 2 ? '⚠️ URGENTES' : '📋 NORMAL';
-    if (!grupos[g]) grupos[g] = [];
-    var costoTxt = it.costo > 0
-      ? ' — $' + Math.round(it.costo * it.cantidad).toLocaleString('es-AR')
-      : '';
-    grupos[g].push('• ' + it.nombre + ' x' + it.cantidad
-      + (it.proveedor ? ' (' + it.proveedor + ')' : '')
-      + costoTxt);
+// ── Agrupar por proveedor ─────────────────────────────────────
+function _lcAgruparPorProveedor(items) {
+  var grupos = {}; // proveedor → { items:[], historial:{} }
+  items.forEach(function(it) {
+    var prov = (it.proveedor || 'Sin proveedor').trim();
+    if (!grupos[prov]) grupos[prov] = { items: [], historialRef: {} };
+    grupos[prov].items.push(it);
+    // Guardar referencia de precios históricos por producto para el mensaje
+    if (it.historialPrecios && it.historialPrecios.length > 0) {
+      grupos[prov].historialRef[it.nombre] = it.historialPrecios;
+    }
   });
+  return grupos;
+}
 
-  var totalCosto = _lcItems.reduce(function(s,it){ return s + (it.costo > 0 ? it.costo * it.cantidad : 0); }, 0);
-  var sinCosto   = _lcItems.filter(function(it){ return it.costo <= 0; }).length;
+function lcCopiarTexto() {
+  var items = _lcItemsParaMensaje();
+  if (!items.length) { mostrarToast('⚠️ No hay ítems para copiar', 'naranja'); return; }
 
-  Object.keys(grupos).forEach(function(g) {
-    texto += g + '\n' + grupos[g].join('\n') + '\n\n';
+  var grupos = _lcAgruparPorProveedor(items);
+  var totalCosto = 0;
+  var sinCosto = 0;
+  var texto = '🛒 Lista de compra — ' + new Date().toLocaleDateString('es-AR') + '\n';
+  if (_lcSeleccionados.size > 0) texto += '(' + items.length + ' seleccionados)\n';
+  texto += '\n';
+
+  Object.keys(grupos).sort().forEach(function(prov) {
+    var g = grupos[prov];
+    texto += '📦 ' + prov.toUpperCase() + '\n';
+    g.items.forEach(function(it) {
+      var costoLinea = it.costo > 0 ? ' — $' + Math.round(it.costo * it.cantidad).toLocaleString('es-AR') : '';
+      // Referencia de último precio pagado al mismo proveedor
+      var refPrecio = '';
+      if (it.historialPrecios) {
+        var histProv = it.historialPrecios.find(function(hp){ return hp.proveedor.trim().toUpperCase() === prov.toUpperCase(); });
+        if (histProv) refPrecio = ' [último $' + histProv.costo.toLocaleString('es-AR') + ' · ' + (histProv.fecha||'') + ']';
+      }
+      texto += '  • ' + it.nombre + ' x' + it.cantidad + costoLinea + refPrecio + '\n';
+      if (it.costo > 0) totalCosto += it.costo * it.cantidad;
+      else sinCosto++;
+    });
+    texto += '\n';
   });
 
   texto += '💰 Total estimado: $' + Math.round(totalCosto).toLocaleString('es-AR');
@@ -8384,44 +8566,45 @@ function lcCopiarTexto() {
     mostrarToast('✅ Lista copiada al portapapeles', 'verde');
   }).catch(function() {
     var ta = document.createElement('textarea');
-    ta.value = texto;
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
+    ta.value = texto; document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
     mostrarToast('✅ Lista copiada', 'verde');
   });
 }
 
 function lcCompartirWA() {
-  if (!_lcItems.length) return;
+  var items = _lcItemsParaMensaje();
+  if (!items.length) { mostrarToast('⚠️ No hay ítems para enviar', 'naranja'); return; }
 
-  var texto = '🛒 *Lista de compra Almacén Copihue*\n';
-  texto += new Date().toLocaleDateString('es-AR') + '\n\n';
+  var grupos = _lcAgruparPorProveedor(items);
+  var totalCosto = 0;
+  var sinCosto = 0;
 
-  var urgentes = _lcItems.filter(function(it){ return it.urgencia <= 2; });
-  var normales  = _lcItems.filter(function(it){ return it.urgencia > 2; });
+  var texto = '🛒 *Lista de compra — Almacén Copihue*\n';
+  texto += new Date().toLocaleDateString('es-AR');
+  if (_lcSeleccionados.size > 0) texto += ' · ' + items.length + ' seleccionados';
+  texto += '\n\n';
 
-  if (urgentes.length) {
-    texto += '⚠️ *URGENTES*\n';
-    urgentes.forEach(function(it){
-      var costoTxt = it.costo > 0 ? ' — $' + Math.round(it.costo * it.cantidad).toLocaleString('es-AR') : '';
-      texto += '• ' + it.nombre + ' — pedir x' + it.cantidad + costoTxt + '\n';
+  Object.keys(grupos).sort().forEach(function(prov) {
+    var g = grupos[prov];
+    texto += '📦 *' + prov.toUpperCase() + '*\n';
+    g.items.forEach(function(it) {
+      var esUrg = it.urgencia <= 2;
+      var urgTag = esUrg ? ' 🔴' : '';
+      var costoLinea = it.costo > 0 ? ' — $' + Math.round(it.costo * it.cantidad).toLocaleString('es-AR') : '';
+      // Referencia de precio histórico al mismo proveedor
+      var refPrecio = '';
+      if (it.historialPrecios) {
+        var histProv = it.historialPrecios.find(function(hp){ return hp.proveedor.trim().toUpperCase() === prov.toUpperCase(); });
+        if (histProv) refPrecio = ' _(últ. $' + histProv.costo.toLocaleString('es-AR') + ')_';
+      }
+      texto += '• ' + it.nombre + ' x' + it.cantidad + urgTag + costoLinea + refPrecio + '\n';
+      if (it.costo > 0) totalCosto += it.costo * it.cantidad;
+      else sinCosto++;
     });
     texto += '\n';
-  }
+  });
 
-  if (normales.length) {
-    texto += '📋 *NORMAL*\n';
-    normales.forEach(function(it){
-      var costoTxt = it.costo > 0 ? ' — $' + Math.round(it.costo * it.cantidad).toLocaleString('es-AR') : '';
-      texto += '• ' + it.nombre + ' — pedir x' + it.cantidad + costoTxt + '\n';
-    });
-    texto += '\n';
-  }
-
-  var totalCosto = _lcItems.reduce(function(s,it){ return s + (it.costo > 0 ? it.costo * it.cantidad : 0); }, 0);
-  var sinCosto   = _lcItems.filter(function(it){ return it.costo <= 0; }).length;
   texto += '💰 *Total estimado: $' + Math.round(totalCosto).toLocaleString('es-AR') + '*';
   if (sinCosto > 0) texto += ' _(' + sinCosto + ' sin precio costo)_';
 
@@ -8628,7 +8811,7 @@ abrirNuevoProducto = function() {
   </div>
 </div>
 
-<div id="modalPanelFiados" style="display:none;position:fixed;inset:0;z-index:5000;background:rgba(0,0,0,0.7);align-items:flex-end;justify-content:center;">
+<div id="modalPanelFiados" onclick="if(event.target===this)cerrarPanelFiados()" style="display:none;position:fixed;inset:0;z-index:5000;background:rgba(0,0,0,0.7);align-items:flex-end;justify-content:center;">
   <div style="background:white;border-radius:18px 18px 0 0;width:100%;max-width:600px;max-height:90vh;display:flex;flex-direction:column;position:relative;">
     <!-- Header -->
     <div style="padding:16px 20px 12px;border-bottom:1px solid #eee;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
@@ -8758,7 +8941,9 @@ window.t9Limpiar = function(){};
 
 // Restaurar badge de notificaciones del día al arrancar
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('%c🏪 Copihue POS v341 cargado', 'color:#4caf50;font-weight:bold;font-size:1.1em;');
+    console.log('%c🏪 Copihue POS v346 cargado', 'color:#4caf50;font-weight:bold;font-size:1.1em;');
+    // Precarga clientes en background — modal fiado abre instantáneo
+    setTimeout(_precargarClientes, 3000);
     setTimeout(() => {
         const arr = _cargarNotifPos ? _cargarNotifPos() : [];
         const hoy = fechaArgentina(0);
@@ -9215,6 +9400,7 @@ async function ultiGuardar() {
         if (!d.ok) throw new Error(d.error);
 
         // Actualizar pool local en seba21
+        // Limpiamos y poblamos con null — precios reales llegan del refresh silencioso abajo
         _poolIdsUltimas.clear();
         ids.forEach(id => _poolIdsUltimas.set(id, null));
 
@@ -9224,6 +9410,10 @@ async function ultiGuardar() {
 
         mostrarToast(`✅ ${ids.length} producto${ids.length !== 1 ? 's' : ''} en Últimas Unidades`, 'verde');
         document.getElementById('modalUltimas').style.display='none';
+
+        // Refrescar pools en segundo plano para obtener precioOferta/pct reales de GAS
+        // (no bloquea — el carrito ya usa los ids correctos aunque los precios lleguen en ~2s)
+        setTimeout(() => cargarPoolsOfertas(), 300);
     } catch(e) {
         mostrarToast('❌ Error al guardar: ' + e.message, 'rojo');
     } finally {
@@ -9323,6 +9513,25 @@ function cerrarPanelFiados() {
     document.getElementById('modalPanelFiados').style.display = 'none';
 }
 
+// Formatea fecha del servidor a DD/MM/YYYY — parser robusto (módulo, accesible desde todos los helpers de fiados)
+function _fmtFecha(fechaStr) {
+    if (!fechaStr) return '—';
+    const str = String(fechaStr).trim();
+    let ts = 0;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+        const [y,m,d] = str.split('-').map(Number);
+        ts = new Date(y, m-1, d).getTime();
+    } else if (/^\d{2}\/\d{2}\/\d{4}$/.test(str)) {
+        const [d,m,y] = str.split('/').map(Number);
+        ts = new Date(y, m-1, d).getTime();
+    } else {
+        const d = new Date(str);
+        ts = isNaN(d) ? 0 : d.getTime();
+    }
+    if (!ts) return str;
+    return new Date(ts).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
 function _renderPanelFiados() {
     const hoy = new Date(); hoy.setHours(0,0,0,0);
     const pendientes = _fiadosPendientes.filter(f => f.estado !== 'PAGADO').sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
@@ -9361,25 +9570,6 @@ function _renderPanelFiados() {
         } else {
             badge.style.display = 'none';
         }
-    }
-
-    // Formatea fecha del servidor a DD/MM/YYYY — parser robusto igual que el sort
-    function _fmtFecha(fechaStr) {
-        if (!fechaStr) return '—';
-        const str = String(fechaStr).trim();
-        let ts = 0;
-        if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
-            const [y,m,d] = str.split('-').map(Number);
-            ts = new Date(y, m-1, d).getTime();
-        } else if (/^\d{2}\/\d{2}\/\d{4}$/.test(str)) {
-            const [d,m,y] = str.split('/').map(Number);
-            ts = new Date(y, m-1, d).getTime();
-        } else {
-            const d = new Date(str);
-            ts = isNaN(d) ? 0 : d.getTime();
-        }
-        if (!ts) return str;
-        return new Date(ts).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
     }
 
     function _renderTarjeta(f, i, esPendiente) {
@@ -9969,11 +10159,30 @@ async function confirmarSalidaInterna() {
 function cerrarModalFiado() {
     document.getElementById('modalFiado').style.display = 'none';
     document.getElementById('fiadoClienteDropdown').style.display = 'none';
+    document.getElementById('fiadoAlertaSinTel').style.display = 'none';
+    // Liberar guard para que un próximo intento de confirmarFiado() no quede bloqueado
+    window._fiadoEnProceso = false;
     seleccionarMetodo('efectivo');
 }
 
 // ── Caché de clientes para el modal fiado ──
 var _fiadoClientesCache = null;
+var _fiadoClientesCacheTs = 0;  // timestamp última carga exitosa
+const _CLIENTES_TTL = 5 * 60 * 1000; // 5 minutos
+
+// Precarga clientes al arrancar — así el modal fiado abre instantáneo
+async function _precargarClientes() {
+    try {
+        const data = await _apiFetch('listarClientes');
+        if (data.ok && Array.isArray(data.clientes) && data.clientes.length > 0) {
+            _fiadoClientesCache = data.clientes;
+            _fiadoClientesCacheTs = Date.now();
+            console.log('👥 Clientes cargados:', data.clientes.length);
+        }
+    } catch(e) {
+        console.warn('⚠️ Precarga clientes falló (se reintenta al abrir modal):', e.message);
+    }
+}
 
 async function abrirModalFiado() {
     const total = window._totalConRedondeo || ventaActual.reduce((s,i) => s + i.price * i.qty, 0);
@@ -9992,21 +10201,25 @@ async function abrirModalFiado() {
     document.getElementById('fiadoAlertaDeuda').style.display = 'none';
     document.getElementById('fiadoClienteDropdown').style.display = 'none';
     _fiadoDatosCliente = null;
-    // Mostrar modal
+    // Mostrar modal ANTES de cargar clientes — el modal abre instantáneo
     const modal = document.getElementById('modalFiado');
     modal.style.display = 'flex';
-    // No hacer focus automático — en Android abre el teclado innecesariamente
-    // Cargar clientes frescos desde el GAS siempre
-    try {
-        const data = await _apiFetch('listarClientes');
-        if (data.ok && Array.isArray(data.clientes) && data.clientes.length > 0) {
-            _fiadoClientesCache = data.clientes;
-            console.log('👥 Clientes cargados:', data.clientes.length);
+    // Cargar clientes solo si el caché está vencido (>5 min) o vacío
+    const ahora = Date.now();
+    const cacheVigente = _fiadoClientesCache && _fiadoClientesCache.length > 0 &&
+                         (ahora - _fiadoClientesCacheTs) < _CLIENTES_TTL;
+    if (!cacheVigente) {
+        try {
+            const data = await _apiFetch('listarClientes');
+            if (data.ok && Array.isArray(data.clientes) && data.clientes.length > 0) {
+                _fiadoClientesCache = data.clientes;
+                _fiadoClientesCacheTs = Date.now();
+                console.log('👥 Clientes actualizados:', data.clientes.length);
+            }
+        } catch(e) {
+            if (!_fiadoClientesCache) _fiadoClientesCache = [];
+            console.warn('⚠️ Sin conexión, usando caché de clientes:', (_fiadoClientesCache||[]).length);
         }
-    } catch(e) {
-        // Sin conexión: usar caché si existe
-        if (!_fiadoClientesCache) _fiadoClientesCache = [];
-        console.warn('⚠️ Sin conexión, usando caché de clientes:', (_fiadoClientesCache||[]).length);
     }
 }
 
@@ -10272,15 +10485,22 @@ async function _procesarVentaFiado(datosFiado, itemsSnapshot) {
         const resp = await _apiFetchUrl('vender', url);
         stockOk = resp.success === true;
         ticketNum = resp.ticket || resp.numeroTicket || null;
-    } catch(e) { console.warn('⚠️ Error venta fiado:', e); }
+    } catch(e) {
+        // La venta en planilla falló — igual continuamos para guardar el fiado y el historial local
+        console.warn('⚠️ Error venta fiado (stock/planilla):', e);
+    }
 
     datosFiado.ticket = ticketNum;
 
-    // 2. Guardar en hoja FIADOS
+    // 2. Guardar en hoja FIADOS (crítico — propaga el error para que confirmarFiado lo capture)
     try {
         const url2 = API_URL + '?action=guardarFiado&data=' + encodeURIComponent(JSON.stringify(datosFiado));
-        await _apiFetchUrl('guardarFiado', url2);
-    } catch(e) { console.warn('⚠️ Error guardar fiado:', e); }
+        const r2 = await _apiFetchUrl('guardarFiado', url2);
+        if (!r2 || !r2.success) throw new Error(r2?.mensaje || 'Error al guardar fiado en planilla');
+    } catch(e) {
+        // Propagar — confirmarFiado() mostrará el error al usuario
+        throw new Error('No se pudo registrar el fiado: ' + e.message);
+    }
 
     // 3. Guardar historial local (usando snapshot)
     guardarVentaDia({ items: itemsSnapshot, total, hora, stockRebajado: stockOk, metodoPago: 'FIADO' });
