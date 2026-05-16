@@ -165,6 +165,18 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
   .ctrl{width:100%;min-width:0;border-right:none;border-bottom:1px solid var(--bdr);}
 }
 
+/* LOG LINES */
+.ll{display:flex;align-items:baseline;gap:5px;padding:1px 0;line-height:1.4;}
+.ll-ico{flex-shrink:0;font-size:.75rem;}
+.ll-txt{flex:1;word-break:break-word;}
+.ll-tag{font-size:.55rem;padding:1px 4px;border-radius:3px;font-weight:700;flex-shrink:0;
+  font-family:var(--mono);}
+.ll-ok{background:#e8f5e9;color:#2e7d32;}
+.ll-off{background:#ffebee;color:#c62828;}
+.ll-warn{background:#fff3e0;color:#e65100;}
+.ll-info{background:#e3f2fd;color:#1565c0;}
+.ll-sep{height:1px;background:var(--bdr2);margin:2px 0;}
+
 /* ── EDITOR DE PRECIO POR PRODUCTO ── */
 .editor-precio{
   background:var(--bg2);border:1.5px solid var(--bdr);border-radius:var(--rs);
@@ -209,7 +221,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
   <div class="h-brand">
     <div class="h-icon">🖼</div>
     <div>
-      <div class="h-title">Copihue Flyer</div>
+      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v4.1</span></div>
       <div class="h-sub">Generador para redes sociales</div>
     </div>
   </div>
@@ -223,10 +235,20 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 
   <div class="ctrl">
 
-    <!-- DIAGNÓSTICO -->
+    <!-- DIAGNÓSTICO + LOG -->
     <div class="diag">
-      <div class="diag-t">📡 Ofertas de hoy</div>
+      <div class="diag-t" onclick="toggleLog()" style="cursor:pointer;user-select:none">
+        📡 Ofertas de hoy
+        <span id="logToggleIco" style="margin-left:auto;font-size:.7rem;opacity:.5">▼ log</span>
+      </div>
       <div id="diagRows"><div class="dr"><div class="dd"></div><span>Esperando datos...</span></div></div>
+      <div id="logPanel" style="display:none;margin-top:8px;border-top:1px dashed var(--bdr);padding-top:7px;">
+        <div style="font-size:.6rem;font-weight:700;color:var(--ts);letter-spacing:.07em;text-transform:uppercase;margin-bottom:4px;">
+          Log de lectura — config_sistema
+        </div>
+        <div id="logLines" style="font-family:var(--mono);font-size:.6rem;color:var(--tm);
+          display:flex;flex-direction:column;gap:2px;max-height:220px;overflow-y:auto;"></div>
+      </div>
     </div>
 
     <!-- MODO -->
@@ -340,6 +362,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
+const VERSION = 'v4.1';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -390,6 +413,7 @@ let _cand  = [];
 let _sel   = new Set();
 let _cvFin = null;   // canvas final (SCALE_OUT×)
 let _overrides = {};       // { [id]: {price, po, et, pct} } — edición manual
+let _cfgRaw    = {};       // copia de config_sistema para el log
 let _editingId = null;     // ID del producto abierto en el editor
 
 // ── UTILS ─────────────────────────────────────────────────────────────────────
@@ -606,18 +630,18 @@ function construirPools(){
 }
 
 function actualizarDiag(){
-  const nRelPlan = (_pools._relTodos||[]).length;
-  const nDesPlan = (_pools._desTodas||[]).length;
-  const relHorario = _pools.relampago.length;
-  const desHorario = _pools.destacadas.length;
+  const nRelPlan  = (_pools._relTodos||[]).length;
+  const nDesPlan  = (_pools._desTodas||[]).length;
+  const relHorario= _pools.relampago.length;
+  const desHorario= _pools.destacadas.length;
   diagSet([
     {cls:_prods.length>0?'ok':'off', lbl:'Productos cargados', cnt:_prods.length},
     {cls:relHorario>0?'ok':nRelPlan>0?'warn':'off',
       lbl:'Relámpago'+(relHorario<nRelPlan?' ('+relHorario+' activos)':''),
-      cnt:relHorario<nRelPlan ? relHorario+' / '+nRelPlan+' en planilla' : relHorario},
+      cnt:relHorario<nRelPlan?relHorario+' / '+nRelPlan+' en planilla':relHorario},
     {cls:desHorario>0?'ok':nDesPlan>0?'warn':'off',
       lbl:'Destacadas'+(desHorario<nDesPlan?' ('+desHorario+' activos)':''),
-      cnt:desHorario<nDesPlan ? desHorario+' / '+nDesPlan+' en planilla' : desHorario},
+      cnt:desHorario<nDesPlan?desHorario+' / '+nDesPlan+' en planilla':desHorario},
     {cls:_pools.especiales.length>0?'ok':'off', lbl:'Especiales', cnt:_pools.especiales.length},
     {cls:_pools.promos.length>0?'ok':'off',     lbl:'Promos',     cnt:_pools.promos.length},
     {cls:_pools.ultimas.length>0?'ok':'warn',   lbl:'Últimas',    cnt:_pools.ultimas.length},
@@ -626,6 +650,172 @@ function actualizarDiag(){
       cnt:_pools.cervecero.length},
     {cls:'ok', lbl:'Manual (todas las ofertas)', cnt:_pools.manual.length},
   ]);
+  // Generar log detallado igual al index.html
+  generarLog();
+}
+
+// ── LOG DETALLADO — idéntico al index.html ────────────────────────────────────
+let _logHtml = '';
+
+function logLine(ico, txt, tag='', tagCls='ll-info'){
+  _logHtml += `<div class="ll"><span class="ll-ico">${ico}</span><span class="ll-txt">${txt}</span>${tag?`<span class="ll-tag ${tagCls}">${tag}</span>`:''}</div>`;
+}
+function logSep(){ _logHtml += '<div class="ll-sep"></div>'; }
+
+function generarLog(){
+  _logHtml = '';
+  const nrm = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  const cfg = _cfgRaw||{};
+
+  // ── Día actual ──
+  const DIAS_JS = [1,2,3,4,5,6,0]; // Lun-Dom
+  const diaIdx  = DIAS_JS.indexOf(new Date().getDay());
+  const diaNom  = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][new Date().getDay()];
+  const ahora   = new Date();
+  const horaStr = ahora.getHours().toString().padStart(2,'0')+':'+ahora.getMinutes().toString().padStart(2,'0');
+
+  logLine('📅', `<b>${diaNom}</b> col ${diaIdx} · ahora <b>${horaStr}</b>`);
+  logSep();
+
+  // ── Horario local ──
+  const fkCfg = k => { const t=nrm(k); return Object.keys(cfg).find(x=>nrm(x).replace(/^.*\|/,'')===t||nrm(x)===t)||null; };
+  const getVal = k => { const key=fkCfg(k); return key&&cfg[key]?cfg[key][diaIdx]:'—'; };
+
+  const apertura = getVal('horario apertura local');
+  const cierre   = getVal('horario cierre local');
+  logLine('🏪', `Horario local: <b>${apertura}</b> → <b>${cierre}</b>`);
+  logSep();
+
+  // ── Ofertas con horario — exactamente como index.html ──
+  const tiposOferta = [
+    { id:'relampago',  lbl:'Relámpago ⚡',  kDias:'Dias ofertas RELAMPAGO',         kIni:'hora inicio relampago',        kCie:'hora cierre relampago',       pool:_pools.relampago,  todos:_pools._relTodos||[]},
+    { id:'destacadas', lbl:'Destacadas 🔥', kDias:'Dias ofertas DESTACADAS',        kIni:'hora inicio destacadas',       kCie:'hora cierre destacadas',      pool:_pools.destacadas, todos:_pools._desTodas||[]},
+    { id:'especiales', lbl:'Especiales ⭐', kDias:'Dias ofertas ESPECIALES',        kIni:'hora inicio especiales',       kCie:'hora cierre especiales',      pool:_pools.especiales, todos:_pools.especiales},
+    { id:'ultimas',    lbl:'Últimas 🎯',    kDias:'Dias ofertas ULTIMAS UNIDADES',  kIni:'hora inicio ultimas unidades', kCie:'hora cierre ultimas unidades', pool:_pools.ultimas,    todos:_pools.ultimas},
+  ];
+
+  tiposOferta.forEach(t => {
+    const kDiasKey = fkCfg(t.kDias);
+    const kIniKey  = fkCfg(t.kIni);
+    const kCieKey  = fkCfg(t.kCie);
+    const diasRow  = kDiasKey&&cfg[kDiasKey] ? cfg[kDiasKey] : null;
+    const val      = diasRow ? diasRow[diaIdx] : null;
+    const ini      = kIniKey&&cfg[kIniKey] ? _parseHoraLog(cfg[kIniKey][diaIdx]) : '—';
+    const cie      = kCieKey&&cfg[kCieKey] ? _parseHoraLog(cfg[kCieKey][diaIdx]) : '—';
+
+    // Determinar modo (misma lógica que index.html)
+    let modo, activo;
+    if(val===1||val==='1'||val===true)        { activo=true;  modo='forzado ON'; }
+    else if(val===0||val==='0'||val===false)   { activo=false; modo='forzado OFF'; }
+    else if(diasRow===null)                    { activo=false; modo='sin config'; }
+    else {
+      // Auto: verificar horario
+      const {enHorario} = _checkHorario(cfg, t.id, diaIdx);
+      activo = enHorario;
+      modo   = 'auto · '+ini+'→'+cie;
+    }
+
+    const ico       = activo ? '🟢' : '🔴';
+    const tag       = activo ? 'ACTIVO' : 'INACTIVO';
+    const tagCls    = activo ? 'll-ok' : 'll-off';
+    const nAct      = t.pool.length;
+    const nTot      = t.todos.length;
+    const cuentaStr = nAct===nTot ? nAct+' productos' : nAct+' activos / '+nTot+' total';
+    logLine(ico, `<b>${t.lbl}</b> · ${modo}`, tag, tagCls);
+    logLine('',  `horario: ${ini} → ${cie} · ${cuentaStr}`, '', '');
+    logSep();
+  });
+
+  // ── Promos ──
+  const pk = fkCfg('oferta promos')||fkCfg('promos activas');
+  const pv = pk&&cfg[pk] ? cfg[pk][0] : null;
+  const pon= pv!==0&&pv!=='0'&&pv!==false&&pv!==null;
+  logLine(pon?'🟢':'🔴', `<b>Promos</b> · ${pon?'activas':'inactivas'}`, pon?'ACTIVO':'INACT.', pon?'ll-ok':'ll-off');
+  logLine('', _pools.promos.length+' productos con promo activa','','');
+  logSep();
+
+  // ── Cervecero ──
+  const modoC = _cerv.modoActivo||'A';
+  const cIni  = _cerv.horaInicio||'18:00';
+  const cCie  = _cerv.horaCierre||'22:00';
+  const cIco  = modoC==='1'?'🟢':modoC==='0'?'🔴':'🟡';
+  const cTag  = modoC==='1'?'FORZADO':modoC==='0'?'APAGADO':'AUTO';
+  const cCls  = modoC==='1'?'ll-ok':modoC==='0'?'ll-off':'ll-warn';
+  logLine(cIco, `<b>Cervecero 🍺</b> · ${cTag}`, cTag, cCls);
+  logLine('', `horario: ${cIni} → ${cCie} · ${_pools.cervecero.length} productos`,'','');
+  logSep();
+
+  // ── Límites ──
+  const lims = [
+    {k:'maximo relampago',  def:3},
+    {k:'maximo destacadas', def:9},
+    {k:'maximo especiales', def:2},
+    {k:'maximo ultimas',    def:3},
+  ];
+  const limsStr = lims.map(l=>{
+    const key=fkCfg(l.k);
+    const v=key&&cfg[key]?cfg[key][0]:l.def;
+    return l.k.replace('maximo ','')+':'+v;
+  }).join(' | ');
+  logLine('📏', 'Límites: '+limsStr);
+  logSep();
+
+  // ── Timestamp ──
+  logLine('🕐', 'Leído: '+ahora.toLocaleTimeString('es-AR'));
+
+  // Inyectar en el DOM
+  const el = document.getElementById('logLines');
+  if(el) el.innerHTML = _logHtml;
+}
+
+// Parsea valor de hora del GAS a string HH:MM (igual que _parsearValorHora del index)
+function _parseHoraLog(v){
+  if(v===null||v===undefined||v==='') return '—';
+  const s=String(v).trim();
+  if(s.includes('T')&&s.includes('Z')){const d=new Date(s);if(!isNaN(d))return d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0');}
+  if(/^0\.\d+$/.test(s)){const m=Math.round(parseFloat(s)*1440);return Math.floor(m/60).toString().padStart(2,'0')+':'+(m%60).toString().padStart(2,'0');}
+  if(/^\d{1,2}:\d{2}$/.test(s)) return s.length===4?'0'+s:s;
+  if(/^\d{1,2}$/.test(s)) return s.padStart(2,'0')+':00';
+  return s;
+}
+
+// Verifica si estamos dentro del horario para un tipo de oferta (igual que _dentroDeHorarioIndex)
+function _checkHorario(cfg, tipo, diaIdx){
+  try{
+    const nrm=s=>s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    const mapas={
+      relampago: {ini:'hora inicio relampago',       cie:'hora cierre relampago'},
+      destacadas:{ini:'hora inicio destacadas',      cie:'hora cierre destacadas'},
+      especiales:{ini:'hora inicio especiales',      cie:'hora cierre especiales'},
+      ultimas:   {ini:'hora inicio ultimas unidades',cie:'hora cierre ultimas unidades'},
+    };
+    const m=mapas[tipo]; if(!m) return {enHorario:false};
+    const fk=k=>Object.keys(cfg).find(x=>nrm(x).replace(/^.*\|/,'')===nrm(k)||nrm(x)===nrm(k));
+    const kI=fk(m.ini), kC=fk(m.cie);
+    if(!kI||!kC) return {enHorario:false};
+    const vI=cfg[kI]?.[diaIdx], vC=cfg[kC]?.[diaIdx];
+    const ph=_horaAMin(_parseHoraLog(vI)), pc=_horaAMin(_parseHoraLog(vC));
+    if(!ph||!pc) return {enHorario:false};
+    const ahora=new Date();
+    const haMin=ahora.getHours()*60+ahora.getMinutes();
+    const enHorario=haMin>=ph&&haMin<pc;
+    return {enHorario};
+  }catch(e){return {enHorario:false};}
+}
+
+function _horaAMin(str){
+  if(!str||str==='—') return null;
+  const p=str.split(':');
+  if(p.length<2) return null;
+  return parseInt(p[0])*60+parseInt(p[1]);
+}
+
+function toggleLog(){
+  const p=document.getElementById('logPanel');
+  const ico=document.getElementById('logToggleIco');
+  const open=p.style.display==='none';
+  p.style.display=open?'block':'none';
+  ico.textContent=open?'▲ log':'▼ log';
 }
 
 function actualizarBadges(){
@@ -1095,6 +1285,9 @@ async function compartirWA(){
 // ── INIT ───────────────────────────────────────────────────────────────────────
 $('cfgMax').addEventListener('change',()=>{ if(_prods.length>0) poblarCandidatos(); });
 $('cfgFormato').addEventListener('change',()=>{ /* solo afecta al generar */ });
+// Mostrar versión
+const _vEl=document.getElementById('badgeVer');
+if(_vEl)_vEl.textContent=VERSION;
 recargar();
 </script>
 </body>
