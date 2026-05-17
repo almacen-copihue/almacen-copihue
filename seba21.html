@@ -55,16 +55,12 @@
 
   v349 — 17/05/2026
   ------------------
-  • PERF: cambiarCantidad qty→0 ahora es instantáneo — eliminación quirúrgica del
-    DOM con fade-out (0.15s) sin llamar a renderVenta(). Nueva función
-    _patchPanelLateral() reindexа filas existentes y actualiza total sin
-    reconstruir HTML. Badge del producto tocado se actualiza solo en el card
-    específico sin _refreshResultadosBadges() completo.
-  • MEJORA: logs de consola reorganizados — sección DETALLE DE OFERTAS con
-    separadores visuales, logs técnicos silenciados, formato legible para operador.
-  • FIX: fallback local de pools al timeout GAS ahora vacía todos los pools en
-    vez de construirlos sin límites ni horarios — evita mostrar ofertas
-    descontroladas cuando la planilla no responde.
+  • PERF: cambiarCantidad qty→0 instantáneo — DOM quirúrgico + _patchPanelLateral()
+  • PERF: _refreshResultadosBadges desktop ya no hace renderResultados completo —
+    actualización quirúrgica del card igual que mobile. Elimina el freeze de
+    ~2000ms al quitar productos en el scroll de 741 items.
+  • FIX: fallback GAS timeout vacía pools en vez de construirlos sin límites.
+  • MEJORA: logs de consola reorganizados y simplificados.
 
   v348 — 15/05/2026
   • FIX: _fmtFecha() extraída al scope de módulo — antes era local dentro de
@@ -2851,17 +2847,7 @@ function esPorPeso(producto) {
 }
 
 function _refreshResultadosBadges(idActualizado) {
-    // Desktop con zoom puede desincronizar el DOM — siempre refresh completo
-    if (!MOBILE) {
-        const termActual = document.getElementById('buscador').value.trim();
-        const contenedor = document.getElementById('resultados');
-        const scrollPos = contenedor ? contenedor.scrollTop : 0;
-        if (termActual.length >= 1) renderResultados(buscarProductos(termActual), termActual);
-        else renderResultados(_sortProductos(productos, new Set(ventaActual.map(i => i.esPeso ? i.idOriginal : i.id))));
-        if (contenedor) contenedor.scrollTop = scrollPos;
-        return;
-    }
-
+    // Si hay un ID específico — actualización quirúrgica (mobile y desktop)
     if (idActualizado != null) {
         const item = ventaActual.find(i => (i.esPeso ? i.idOriginal : i.id) === idActualizado);
         const qty = item ? item.qty : 0;
@@ -2869,7 +2855,7 @@ function _refreshResultadosBadges(idActualizado) {
 
         const card = document.querySelector(`.resultado-item[data-prod-id="${idActualizado}"]`);
         if (!card) {
-            // Card no encontrado — diferir refresh para no bloquear el hilo durante el touch
+            // Card fuera del viewport — diferir refresh sin bloquear el hilo
             requestAnimationFrame(() => {
                 const termActual = document.getElementById('buscador').value.trim();
                 const contenedor = document.getElementById('resultados');
@@ -2881,7 +2867,7 @@ function _refreshResultadosBadges(idActualizado) {
             return;
         }
 
-        // Actualización quirúrgica del badge de cantidad
+        // Actualización quirúrgica del badge
         const imgWrap = card.querySelector('div[style*="position:relative"]');
         if (imgWrap) {
             let badge = imgWrap.querySelector('[data-badge]');
@@ -2899,14 +2885,12 @@ function _refreshResultadosBadges(idActualizado) {
                 badge.remove();
             }
         }
-        card.style.background  = qty > 0 ? '#f1f8e9' : 'white';
+        card.style.background = qty > 0 ? '#f1f8e9' : 'white';
         card.style.borderLeft  = qty > 0 ? '3px solid #43a047' : '3px solid transparent';
 
-        // Mostrar/ocultar botón − sin re-render
         const btnMinus = card.querySelector(`[data-minus="${idActualizado}"]`);
         if (btnMinus) btnMinus.style.visibility = qty > 0 ? 'visible' : 'hidden';
 
-        // Actualizar total del card
         const p = productos.find(pr => pr.id === idActualizado);
         const totalDiv = card.querySelector('[data-total]');
         if (p && qty > 0) {
@@ -3102,71 +3086,14 @@ function confirmarSelectorQty() {
     mostrarToast(`✅ ${label}${p.name.substring(0,25)} ×${qty}`, oferta.tieneOferta ? 'naranja' : 'verde');
 }
 
-// Actualiza panel lateral sin reconstruir HTML — solo reindexar y actualizar totales
-function _patchPanelLateral() {
-    const contenedor = document.getElementById('itemsVenta');
-    if (!contenedor) return;
-    const filas = contenedor.querySelectorAll('.item-venta');
-    filas.forEach((fila, nuevoIdx) => {
-        fila.dataset.idx = nuevoIdx;
-        const item = ventaActual[nuevoIdx];
-        if (!item) return;
-        const spanCant = fila.querySelector('.item-cant');
-        if (spanCant) spanCant.textContent = item.qty;
-        const subtotalSpan = fila.querySelector('.item-subtotal');
-        if (subtotalSpan) subtotalSpan.textContent = '$' + (item.price * item.qty).toLocaleString('es-AR');
-    });
-    const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
-    const totalMonto = document.getElementById('totalMonto');
-    if (totalMonto) totalMonto.textContent = '$' + total.toLocaleString('es-AR');
-    // Actualizar FAB cobrar en mobile
-    if (MOBILE) {
-        const btnCobrar = document.getElementById('btnCobrarTotal');
-        if (btnCobrar) btnCobrar.textContent = '$' + Math.round(total).toLocaleString('es-AR');
-    }
-}
-
 function cambiarCantidad(id, delta) {
     const item = ventaActual.find(i => String(i.id) === String(id));
     if (!item) return;
 
     const nuevaCant = item.qty + delta;
     if (nuevaCant <= 0) {
-        const idx = ventaActual.findIndex(i => String(i.id) === String(id));
-        if (idx === -1) return;
-        const filaPanel = document.querySelector(`.item-venta[data-idx="${idx}"]`);
-        if (filaPanel) {
-            filaPanel.style.transition = 'opacity 0.15s';
-            filaPanel.style.opacity = '0';
-            setTimeout(() => {
-                ventaActual.splice(idx, 1);
-                if (ventaActual.length === 0) {
-                    renderVenta(); // carrito vacío — render completo para mostrar estado vacío
-                } else {
-                    _patchPanelLateral();
-                }
-                _guardarCarritoDiferido();
-                // Actualizar solo el badge del producto quitado
-                const prodId = typeof id === 'string' && id.startsWith('peso_') ? null : Number(id);
-                if (prodId) {
-                    const card = document.querySelector(`.resultado-item[data-prod-id="${prodId}"]`);
-                    if (card) {
-                        const badge = card.querySelector('[data-badge]');
-                        if (badge) badge.remove();
-                        card.classList.remove('en-carrito');
-                    }
-                }
-            }, 150);
-        } else {
-            ventaActual.splice(idx, 1);
-            if (ventaActual.length === 0) {
-                renderVenta();
-            } else {
-                _patchPanelLateral();
-            }
-            _guardarCarritoDiferido();
-        }
-        return;
+        ventaActual = ventaActual.filter(i => String(i.id) !== String(id));
+        renderVenta(true); // ligero — _refreshResultadosBadges al final limpia badge/color/total
     } else if (nuevaCant > item.stockDisponible) {
         mostrarToast(`⚠️ Stock máximo: ${item.stockDisponible}`, 'rojo');
         return;
@@ -3185,8 +3112,7 @@ function cambiarCantidad(id, delta) {
         renderVenta(true); // ligero: solo actualiza panel y totales
     }
     _guardarCarritoDiferido(); // async — no bloquea el hilo en Android
-    // _refreshResultadosBadges(typeof id === 'string' && id.startsWith('peso_') ? null : Number(id));
-// Eliminado: causa refresh innecesario del scroll de productos
+    _refreshResultadosBadges(typeof id === 'string' && id.startsWith('peso_') ? null : Number(id));
 }
 
 function limpiarVenta() {
