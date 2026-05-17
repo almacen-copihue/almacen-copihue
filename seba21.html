@@ -53,6 +53,19 @@
   • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
     evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
 
+  v349 — 17/05/2026
+  ------------------
+  • PERF: cambiarCantidad qty→0 ahora es instantáneo — eliminación quirúrgica del
+    DOM con fade-out (0.15s) sin llamar a renderVenta(). Nueva función
+    _patchPanelLateral() reindexа filas existentes y actualiza total sin
+    reconstruir HTML. Badge del producto tocado se actualiza solo en el card
+    específico sin _refreshResultadosBadges() completo.
+  • MEJORA: logs de consola reorganizados — sección DETALLE DE OFERTAS con
+    separadores visuales, logs técnicos silenciados, formato legible para operador.
+  • FIX: fallback local de pools al timeout GAS ahora vacía todos los pools en
+    vez de construirlos sin límites ni horarios — evita mostrar ofertas
+    descontroladas cuando la planilla no responde.
+
   v348 — 15/05/2026
   • FIX: _fmtFecha() extraída al scope de módulo — antes era local dentro de
     _renderPanelFiados(), por lo que _actualizarBarraCobro() lanzaba ReferenceError
@@ -326,7 +339,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v348</title>
+    <title>Copihue — POS v349</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3089,14 +3102,71 @@ function confirmarSelectorQty() {
     mostrarToast(`✅ ${label}${p.name.substring(0,25)} ×${qty}`, oferta.tieneOferta ? 'naranja' : 'verde');
 }
 
+// Actualiza panel lateral sin reconstruir HTML — solo reindexar y actualizar totales
+function _patchPanelLateral() {
+    const contenedor = document.getElementById('itemsVenta');
+    if (!contenedor) return;
+    const filas = contenedor.querySelectorAll('.item-venta');
+    filas.forEach((fila, nuevoIdx) => {
+        fila.dataset.idx = nuevoIdx;
+        const item = ventaActual[nuevoIdx];
+        if (!item) return;
+        const spanCant = fila.querySelector('.item-cant');
+        if (spanCant) spanCant.textContent = item.qty;
+        const subtotalSpan = fila.querySelector('.item-subtotal');
+        if (subtotalSpan) subtotalSpan.textContent = '$' + (item.price * item.qty).toLocaleString('es-AR');
+    });
+    const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
+    const totalMonto = document.getElementById('totalMonto');
+    if (totalMonto) totalMonto.textContent = '$' + total.toLocaleString('es-AR');
+    // Actualizar FAB cobrar en mobile
+    if (MOBILE) {
+        const btnCobrar = document.getElementById('btnCobrarTotal');
+        if (btnCobrar) btnCobrar.textContent = '$' + Math.round(total).toLocaleString('es-AR');
+    }
+}
+
 function cambiarCantidad(id, delta) {
     const item = ventaActual.find(i => String(i.id) === String(id));
     if (!item) return;
 
     const nuevaCant = item.qty + delta;
     if (nuevaCant <= 0) {
-        ventaActual = ventaActual.filter(i => String(i.id) !== String(id));
-        renderVenta(true); // ligero — _refreshResultadosBadges al final limpia badge/color/total
+        const idx = ventaActual.findIndex(i => String(i.id) === String(id));
+        if (idx === -1) return;
+        const filaPanel = document.querySelector(`.item-venta[data-idx="${idx}"]`);
+        if (filaPanel) {
+            filaPanel.style.transition = 'opacity 0.15s';
+            filaPanel.style.opacity = '0';
+            setTimeout(() => {
+                ventaActual.splice(idx, 1);
+                if (ventaActual.length === 0) {
+                    renderVenta(); // carrito vacío — render completo para mostrar estado vacío
+                } else {
+                    _patchPanelLateral();
+                }
+                _guardarCarritoDiferido();
+                // Actualizar solo el badge del producto quitado
+                const prodId = typeof id === 'string' && id.startsWith('peso_') ? null : Number(id);
+                if (prodId) {
+                    const card = document.querySelector(`.resultado-item[data-prod-id="${prodId}"]`);
+                    if (card) {
+                        const badge = card.querySelector('[data-badge]');
+                        if (badge) badge.remove();
+                        card.classList.remove('en-carrito');
+                    }
+                }
+            }, 150);
+        } else {
+            ventaActual.splice(idx, 1);
+            if (ventaActual.length === 0) {
+                renderVenta();
+            } else {
+                _patchPanelLateral();
+            }
+            _guardarCarritoDiferido();
+        }
+        return;
     } else if (nuevaCant > item.stockDisponible) {
         mostrarToast(`⚠️ Stock máximo: ${item.stockDisponible}`, 'rojo');
         return;
@@ -3938,7 +4008,7 @@ function getVentasHoy() {
             const todas = [...ventasArg, ...ventasUtc];
             localStorage.setItem(keyArg, JSON.stringify(todas));
             localStorage.removeItem(keyUtc);
-            console.log('📦 Migradas', ventasUtc.length, 'ventas de key UTC a ARG');
+            // console.log('📦 Migradas', ventasUtc.length, 'ventas de key UTC a ARG');
             return todas;
         }
     }
@@ -3992,7 +4062,7 @@ function _selectRotatedProducts(pool, visibleCount, storageKey) {
     for (let i = 0; i < visibleCount; i++) {
         selected.push(pool[(startIndex + i) % pool.length]);
     }
-    console.log(`🔄 Rotación ${storageKey}: fecha=${dateKey} set=${setNumber} inicio=${startIndex} → ${selected.length} productos`);
+    // console.log(`🔄 Rotación ${storageKey}: fecha=${dateKey} set=${setNumber} inicio=${startIndex} → ${selected.length} productos`);
     return selected;
 }
 
@@ -4045,6 +4115,7 @@ function _sortProductos(lista, idsEnCarrito) {
 
 function reporteOfertasPOS(origen = 'manual') {
     console.group(`📊 REPORTE OFERTAS POS [${origen}]`);
+    console.log('\n⚙️ ═══ ESTADO OFERTAS ═══');
     console.log('🔘 Toggles:', {
         relampago:  _toggleEstado?.relampago,
         destacadas: _toggleEstado?.destacadas,
@@ -4066,11 +4137,8 @@ function reporteOfertasPOS(origen = 'manual') {
             return p ? `${id}:${p.name.substring(0, 20)}` : String(id);
         });
     };
-    console.log('🔍 Preview pools:');
-    console.log('  ⚡ REL:',  previewPool(_poolIdsRelampago));
-    console.log('  🔥 DEST:', previewPool(_destacadasFiltradas));
-    console.log('  ⭐ ESP:',  previewPool(_poolIdsEspeciales));
-    console.log('  🏷️ ULT:',  previewPool(_poolIdsUltimas));
+    // preview pools — descomentar para debug
+    // console.log('🔍 Preview pools: REL/DEST/ESP/ULT');
     if (!productos || productos.length === 0) {
         console.warn('⚠️ productos aún no cargados');
         console.groupEnd();
@@ -4091,11 +4159,13 @@ function reporteOfertasPOS(origen = 'manual') {
     });
     const totalActivos = activos.relampago.length + activos.destacadas.length
                        + activos.especiales.length + activos.ultimas.length;
-    console.log(`✅ Activos reales: ${totalActivos} / ${productos.filter(p => p.stock > 0).length} con stock`);
-    console.log('⚡ Relámpago activos:',  activos.relampago.length,  activos.relampago.slice(0, 5));
-    console.log('🔥 Destacadas activas:', activos.destacadas.length, activos.destacadas.slice(0, 5));
-    console.log('⭐ Especiales activas:', activos.especiales.length, activos.especiales.slice(0, 5));
-    console.log('🏷️ Últimas activas:',   activos.ultimas.length,    activos.ultimas.slice(0, 5));
+    console.log(
+        `\n✅ OFERTAS ACTIVAS — ${totalActivos} productos en oferta` +
+        `\n   ⚡ Relámpago  — ${activos.relampago.length} activos` +
+        `\n   🔥 Destacadas — ${activos.destacadas.length} activas` +
+        `\n   🌙 Especiales — ${activos.especiales.length} activas` +
+        `\n   🏷️ Últimas    — ${activos.ultimas.length} activas`
+    );
     console.groupEnd();
 }
 
@@ -6462,9 +6532,9 @@ async function cargarPoolsOfertas() {
         if (!data.success) { _construirPoolsLocalFallback(); reporteOfertasPOS('post-pools'); _refreshResultadosBadges(); return; }
         _poolIdsRelampago.clear(); _poolIdsDestacadas.clear(); _poolIdsEspeciales.clear(); _poolIdsUltimas.clear();
         if (data.limites) {
-            if (data.limites.destacadas) { _limiteDestacadas = data.limites.destacadas; console.log('🔥 Límite destacadas (GAS):', _limiteDestacadas); }
-            if (data.limites.relampago)  { _limiteRelampago  = data.limites.relampago;  console.log('⚡ Límite relámpago (GAS):', _limiteRelampago);  }
-            if (data.limites.especiales) { _limiteEspeciales = data.limites.especiales; console.log('⭐ Límite especiales (GAS):', _limiteEspeciales); }
+            if (data.limites.destacadas) { _limiteDestacadas = data.limites.destacadas; }
+            if (data.limites.relampago)  { _limiteRelampago  = data.limites.relampago;  }
+            if (data.limites.especiales) { _limiteEspeciales = data.limites.especiales; }
             if (data.limites.ultimas)    { _limiteUltimas    = data.limites.ultimas;                                                                  }
         }
         (data.relampagoActivo   || []).forEach(p => _poolIdsRelampago.add(Number(p.id)));
@@ -6486,7 +6556,14 @@ async function cargarPoolsOfertas() {
         });
         // GAS respondió bien → los pools vacíos son intencionales (horario cerrado, sin ofertas del día).
         // NO disparar el fallback local: mostraría TODO sin filtro ni límite.
-        console.log(`✅ Pools POS: ${_poolIdsRelampago.size} rel · ${_destacadasFiltradas.size} dest · ${_poolIdsEspeciales.size} esp · ${_poolIdsUltimas.size} ult`);
+        console.log(
+            '\n📊 ═══ POOLS POS ═══' +
+            `\n   ⚡ Relámpago  — ${_poolIdsRelampago.size} productos` +
+            `\n   🔥 Destacadas — ${_destacadasFiltradas.size} productos` +
+            `\n   🌙 Especiales — ${_poolIdsEspeciales.size} productos` +
+            `\n   🏷️ Últimas    — ${_poolIdsUltimas.size} productos` +
+            '\n═══════════════════'
+        );
 
         // Notif Últimas: solo 1 vez por día, y solo si _limiteUltimas ya llegó de GAS
         const _hoyKeyUlt = 'copihue_uu_notif_' + fechaArgentina();
@@ -6512,7 +6589,7 @@ async function cargarPoolsOfertas() {
                 const local = productos.find(lp => lp.name.trim().toUpperCase() === p.nombre.trim().toUpperCase());
                 if (local) _poolCervecero.set(local.id, { descuento: p.descuento, precioPromo: p.precioPromo, esGancho: p.esGancho });
             });
-            console.log(`🍺 Pool cervecero: ${_poolCervecero.size} cervezas`);
+            // console.log(`🍺 Pool cervecero: ${_poolCervecero.size} cervezas`);
         }
     } catch(e) {
         console.warn('⚠️ No se pudo cargar pool cervecero:', e.message);
@@ -6809,7 +6886,7 @@ async function _getConfigCached() {
             return null;
         }
         _configCache = data.config;
-        console.log('📋 CONFIG cargada — claves:', Object.keys(_configCache).length);
+        // console.log('📋 CONFIG cargada — claves:', Object.keys(_configCache).length);
         return _configCache;
     } catch(e) {
         console.warn('⚠️ getConfig error:', e.message);
@@ -6916,7 +6993,7 @@ async function cargarEstadoToggles() {
         if (!cfg) return;
         const diaIdx = _diaActualIdx();
         const diasSemana = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
-        console.log(`🔧 cargarEstadoToggles — ${diasSemana[diaIdx]} (col ${diaIdx})`);
+        console.log(`\n⚙️ Cargando estado ofertas — ${diasSemana[diaIdx]}`);
         Object.keys(_TOGGLE_CONFIG).forEach(tipo => {
             const clave = _TOGGLE_CONFIG[tipo].clave;
             const row = cfg[tipo + '|' + clave] || cfg[clave];
@@ -7037,7 +7114,7 @@ function iniciarToggleOfertas() {
             _autoHorarioUltimoEstado[tipo] = estaActivo;
         });
         if (cambio) {
-            console.log('🔄 Auto-horario: cambio detectado → recargando pools y vista');
+            // console.log('🔄 Auto-horario: cambio detectado → recargando pools y vista');
             cargarPoolsOfertas().then(() => _refreshResultadosBadges());
         }
     }, 60000);
@@ -8797,7 +8874,7 @@ window.t9Limpiar = function(){};
 
 // Restaurar badge de notificaciones del día al arrancar
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('%c🏪 Copihue POS v348 cargado', 'color:#4caf50;font-weight:bold;font-size:1.1em;');
+    console.log('%c🏪 COPIHUE POS — Sistema listo', 'color:#4caf50;font-weight:bold;font-size:1.2em;');
     setTimeout(_precargarClientes, 3000); // precarga clientes en background
     setTimeout(() => {
         const arr = _cargarNotifPos ? _cargarNotifPos() : [];
@@ -10032,7 +10109,7 @@ async function _precargarClientes() {
         if (data.ok && Array.isArray(data.clientes) && data.clientes.length > 0) {
             _fiadoClientesCache = data.clientes;
             _fiadoClientesCacheTs = Date.now();
-            console.log('👥 Clientes precargados:', data.clientes.length);
+            // console.log('👥 Clientes precargados:', data.clientes.length);
         }
     } catch(e) {
         console.warn('⚠️ Precarga clientes falló:', e.message);
@@ -10068,7 +10145,7 @@ async function abrirModalFiado() {
             if (data.ok && Array.isArray(data.clientes) && data.clientes.length > 0) {
                 _fiadoClientesCache = data.clientes;
                 _fiadoClientesCacheTs = Date.now();
-                console.log('👥 Clientes actualizados:', data.clientes.length);
+                // console.log('👥 Clientes actualizados:', data.clientes.length);
             }
         } catch(e) {
             if (!_fiadoClientesCache) _fiadoClientesCache = [];
