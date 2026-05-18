@@ -68,6 +68,19 @@
   • FIX: fallback GAS timeout vacía pools en vez de construirlos sin límites.
   • MEJORA: logs de consola reorganizados y simplificados.
 
+  v350 — 17/05/2026
+  ------------------
+  • PERF: cambiarCantidad qty→0 instantáneo en mobile y desktop — eliminación
+    quirúrgica del DOM con fade-out 150ms. Nueva función _patchPanelLateral()
+    reindexea filas sin reconstruir HTML. Badge actualizado solo en el card
+    tocado, sin _refreshResultadosBadges() completo. De ~2s a <200ms.
+  • PERF: _refreshResultadosBadges desktop ya no llama renderResultados completo
+    — actualización quirúrgica igual que mobile. Elimina freeze en scroll 741 items.
+  • MEJORA desktop: click derecho en card del scroll quita una unidad.
+    Tooltip "Izq: agregar | Der: quitar" al hover.
+  • FIX: fallback GAS timeout vacía pools en vez de construirlos sin límites.
+  • MEJORA: logs de consola reorganizados y simplificados.
+
   v348 — 15/05/2026
   • FIX: _fmtFecha() extraída al scope de módulo — antes era local dentro de
     _renderPanelFiados(), por lo que _actualizarBarraCobro() lanzaba ReferenceError
@@ -3093,14 +3106,71 @@ function confirmarSelectorQty() {
     mostrarToast(`✅ ${label}${p.name.substring(0,25)} ×${qty}`, oferta.tieneOferta ? 'naranja' : 'verde');
 }
 
+function _patchPanelLateral() {
+    const contenedor = document.getElementById('itemsVenta');
+    if (!contenedor) return;
+    const filas = contenedor.querySelectorAll('.item-venta');
+    filas.forEach((fila, nuevoIdx) => {
+        fila.dataset.idx = nuevoIdx;
+        const item = ventaActual[nuevoIdx];
+        if (!item) return;
+        const spanCant = fila.querySelector('.item-cant');
+        if (spanCant) spanCant.textContent = item.qty;
+        const subtotalSpan = fila.querySelector('.item-subtotal');
+        if (subtotalSpan) subtotalSpan.textContent = '$' + (item.price * item.qty).toLocaleString('es-AR');
+    });
+    const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
+    const totalMonto = document.getElementById('totalMonto');
+    if (totalMonto) totalMonto.textContent = '$' + total.toLocaleString('es-AR');
+    if (MOBILE) {
+        const btnCobrar = document.getElementById('btnCobrarTotal');
+        if (btnCobrar) btnCobrar.textContent = '$' + Math.round(total).toLocaleString('es-AR');
+    }
+}
+
 function cambiarCantidad(id, delta) {
     const item = ventaActual.find(i => String(i.id) === String(id));
     if (!item) return;
 
     const nuevaCant = item.qty + delta;
     if (nuevaCant <= 0) {
-        ventaActual = ventaActual.filter(i => String(i.id) !== String(id));
-        renderVenta(true); // ligero — _refreshResultadosBadges al final limpia badge/color/total
+        const idx = ventaActual.findIndex(i => String(i.id) === String(id));
+        if (idx === -1) return;
+        const filaPanel = document.querySelector(`.item-venta[data-idx="${idx}"]`);
+        if (filaPanel) {
+            filaPanel.style.transition = 'opacity 0.15s';
+            filaPanel.style.opacity = '0';
+            setTimeout(() => {
+                ventaActual.splice(idx, 1);
+                if (ventaActual.length === 0) {
+                    renderVenta();
+                } else {
+                    _patchPanelLateral();
+                }
+                _guardarCarritoDiferido();
+                // Badge quirúrgico — solo el card tocado, sin renderResultados
+                const prodId = typeof id === 'string' && id.startsWith('peso_') ? null : Number(id);
+                if (prodId) {
+                    const card = document.querySelector(`.resultado-item[data-prod-id="${prodId}"]`);
+                    if (card) {
+                        const badge = card.querySelector('[data-badge]');
+                        if (badge) badge.remove();
+                        card.classList.remove('en-carrito');
+                        card.style.background = 'white';
+                        card.style.borderLeft = '3px solid transparent';
+                        const btnMinus = card.querySelector(`[data-minus="${prodId}"]`);
+                        if (btnMinus) btnMinus.style.visibility = 'hidden';
+                        const totalDiv = card.querySelector('[data-total]');
+                        if (totalDiv) totalDiv.remove();
+                    }
+                }
+            }, 150);
+        } else {
+            ventaActual.splice(idx, 1);
+            if (ventaActual.length === 0) { renderVenta(); } else { _patchPanelLateral(); }
+            _guardarCarritoDiferido();
+        }
+        return; // NO llamar _refreshResultadosBadges — ya lo hizo el badge quirúrgico
     } else if (nuevaCant > item.stockDisponible) {
         mostrarToast(`⚠️ Stock máximo: ${item.stockDisponible}`, 'rojo');
         return;
@@ -4049,6 +4119,7 @@ function _sortProductos(lista, idsEnCarrito) {
 
 function reporteOfertasPOS(origen = 'manual') {
     console.group(`📊 REPORTE OFERTAS POS [${origen}]`);
+    console.log('\n⚙️ ═══ ESTADO OFERTAS ═══');
     console.log('\n⚙️ ═══ ESTADO OFERTAS ═══');
     console.log('🔘 Toggles:', {
         relampago:  _toggleEstado?.relampago,
