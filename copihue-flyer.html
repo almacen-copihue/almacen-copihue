@@ -230,7 +230,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
   <div class="h-brand">
     <div class="h-icon">🖼</div>
     <div>
-      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v4.4</span></div>
+      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v4.5</span></div>
       <div class="h-sub">Generador para redes sociales</div>
     </div>
   </div>
@@ -372,7 +372,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-const VERSION = 'v4.4';
+const VERSION = 'v4.5';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -417,17 +417,17 @@ const OFERTA_COLORES = {
 // Tipo de oferta por producto individual (para badge correcto)
 // ORS[rel].tipo = 'nxm'|'pct'|'2da50'
 function getOfertaTipo(p){
-  if(p.cat==='PROMOS')    return 'promos';
-  if(p.cat==='CERVEZAS')  return 'cervecero';
+  if(p.cat==='PROMOS')   return 'promos';
+  if(p.cat==='CERVEZAS') return 'cervecero';
   if(p.rel>0){
     const o=ORS[String(p.rel)];
     if(!o) return 'relampago';
-    if(o.tipo==='nxm')   return 'relampago_nxm';   // 2x1, 3x2, etc
-    if(o.tipo==='2da50') return 'relampago_2da50';  // 2da 50%
-    if(o.tipo==='pct')   return 'relampago_pct';    // -10%, -15%, etc
+    if(o.tipo==='nxm')   return 'relampago_nxm';
+    if(o.tipo==='2da50') return 'relampago_2da50';
+    if(o.tipo==='pct')   return 'relampago_pct';
     return 'relampago';
   }
-  if(p.des>0)  return 'destacadas';
+  if(p.des>0)   return 'destacadas';
   if(p.esp===1) return 'especiales';
   return 'manual';
 }
@@ -448,13 +448,18 @@ function getBadgeLabel(p){
   const ov=_overrides[p.id];
   if(ov) return ov.et||'OFERTA';
   const tipo=getOfertaTipo(p);
-  if(tipo==='relampago_nxm')  return p.et;   // "2x1", "3x2", etc
-  if(tipo==='relampago_2da50')return '2DA 50%';
-  if(tipo==='relampago_pct')  return p.et;   // "-10%", etc
-  if(tipo==='promos')         return 'PROMO -'+p.pct+'%';
-  if(tipo==='destacadas')     return p.et;
-  if(tipo==='especiales')     return 'ESPECIAL';
-  if(tipo==='cervecero')      return p.et||'CERV.';
+  // Relámpago NxM: "2x1", "3x2", "4x3", etc
+  if(tipo==='relampago_nxm'){
+    const o=ORS[String(p.rel)]; return o?o.nombre.toUpperCase():p.et;
+  }
+  if(tipo==='relampago_2da50') return '2DA 50%';
+  if(tipo==='relampago_pct'){
+    const o=ORS[String(p.rel)]; return o?'-'+o.descuento+'%':p.et;
+  }
+  if(tipo==='promos')    return 'PROMO -'+p.pct+'%';
+  if(tipo==='destacadas')return '-'+p.des+'% OFF';
+  if(tipo==='especiales')return '-10%';          // siempre -10% en especiales
+  if(tipo==='cervecero') return p.pct>0?'-'+p.pct+'%':'CERV.';
   return p.et||'OFERTA';
 }
 
@@ -611,10 +616,13 @@ function calcDes(p){
   return {po, et:pct+'% OFF', pct, eslogan:pct+'% OFF hoy'};
 }
 
-// Especiales: siempre -10%
+// Especiales: -10% por defecto (configurable si el GAS manda precio)
 function calcEsp(p){
-  const po = Math.round(p.price*0.9);
-  return {po, et:'ESPECIAL -10%', pct:10, eslogan:'Precio especial'};
+  // El GAS puede mandar el precio ya calculado en especialesActivas
+  // Si no, aplicamos -10% que es el valor por defecto del catálogo
+  const po  = Math.round(p.price*0.9);
+  const pct = 10;
+  return {po, et:'-10%', pct, eslogan:'Precio especial -10%'};
 }
 
 // Promos: usa normal vs price
@@ -701,13 +709,16 @@ function construirPools(){
   // El GAS manda especialesActivas con los IDs seleccionados por rotación (igual que relámpago)
   const idEsp       = new Set((_of.especialesActivas||[]).map(p=>Number(p.id)));
   const espPlanilla = _prods.filter(p=>p.esp===1&&p.stock>0).map(p=>({...p,...calcEsp(p)}));
+  // espActivos = los que el GAS eligió por rotación
   const espActivos  = idEsp.size>0
     ? espPlanilla.filter(p=>idEsp.has(p.id))
-    : espPlanilla.slice(0, _limites.especiales); // fallback: primeros N según límite
+    : []; // sin IDs del GAS → vacío (fuera de horario)
   const espEnHor    = enHorario('especiales');
-  // Respetar límite de config_sistema
-  _pools.especiales = espEnHor ? espActivos.slice(0,_limites.especiales) : espActivos.slice(0,_limites.especiales);
-  _pools._espActivos= espEnHor ? _pools.especiales : [];
+  // Pool para el modo "especiales": activos del GAS si hay horario, todos si no
+  const espPool     = espActivos.length>0 ? espActivos : espPlanilla.slice(0,_limites.especiales);
+  _pools.especiales = espPool.slice(0, _limites.especiales);
+  // _espActivos = los realmente activos en este momento según horario
+  _pools._espActivos= (espEnHor && espActivos.length>0) ? espActivos.slice(0,_limites.especiales) : [];
   _pools._espTodas  = espPlanilla;
 
   // ── PROMOS ────────────────────────────────────────────────────────────────
@@ -775,9 +786,11 @@ function actualizarDiag(){
     {cls:nDesAct>0?'ok':nDesPlan>0?'warn':'off',
       lbl:'🔥 Destacadas',
       cnt:nDesAct>0?nDesAct+' activos / '+nDesPlan+' en planilla':nDesPlan+' en planilla (fuera de horario)'},
-    {cls:nEspAct>0?'ok':_pools.especiales.length>0?'warn':'off',
+    {cls:nEspAct>0?'ok':(_pools._espTodas||[]).length>0?'warn':'off',
       lbl:'⭐ Especiales',
-      cnt:nEspAct>0?nEspAct+' activos / '+_pools.especiales.length+' total':_pools.especiales.length+' (fuera de horario)'},
+      cnt:nEspAct>0
+        ? nEspAct+' activos / '+(_pools._espTodas||[]).length+' en planilla'
+        : (_pools._espTodas||[]).length+' en planilla ('+_pools.especiales.length+' en pool)'},
     {cls:promosOn&&_pools.promos.length>0?'ok':_pools.promos.length>0?'warn':'off',
       lbl:'🏷️ Promos '+(promosOn?'(ON)':'(OFF — desactivadas en config)'),
       cnt:_pools.promos.length},
