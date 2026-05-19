@@ -221,7 +221,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
   <div class="h-brand">
     <div class="h-icon">🖼</div>
     <div>
-      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v4.2</span></div>
+      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v4.3</span></div>
       <div class="h-sub">Generador para redes sociales</div>
     </div>
   </div>
@@ -363,7 +363,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-const VERSION = 'v4.2';
+const VERSION = 'v4.3';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -391,6 +391,18 @@ const PAL = {
     txt:'#f0f0f0',sub:'#aaa',ten:'#666',bdr:'#333',ln:'#2e7d32',btxt:'#111'},
   naranja:{ bg:'#fff8f2',card:'#fff',card2:'#fff3e0',ac:'#e65100',ac2:'#2e7d32',
     txt:'#1a0e00',sub:'#7a4a20',ten:'#c0906a',bdr:'#ffe0cc',ln:'#ff8f00',btxt:'#fff'}
+};
+
+// Colores de acento por modo — para el header del canvas
+const MODO_BADGE = {
+  relampago:  {emoji:'⚡', label:'RELÁMPAGO',      color:'#e53935', bg:'#ffebee'},
+  destacadas: {emoji:'🔥', label:'DESTACADAS',      color:'#ef6c00', bg:'#fff3e0'},
+  especiales: {emoji:'⭐', label:'ESPECIALES',      color:'#1565c0', bg:'#e3f2fd'},
+  promos:     {emoji:'🏷️', label:'PROMOS',         color:'#6a1b9a', bg:'#f3e5f5'},
+  ultimas:    {emoji:'🎯', label:'ÚLTIMAS UND.',    color:'#f57f17', bg:'#fff8e1'},
+  cervecero:  {emoji:'🍺', label:'JUEVES CERV.',   color:'#1a237e', bg:'#e8eaf6'},
+  combinado:  {emoji:'🌟', label:'COMBINADAS',      color:'#2e7d32', bg:'#e8f5e9'},
+  manual:     {emoji:'🏷️', label:'OFERTAS',        color:'#2e7d32', bg:'#e8f5e9'},
 };
 
 const MODO_HDR = {
@@ -622,12 +634,17 @@ function construirPools(){
   _pools._desActivos= desActivos;
 
   // ── ESPECIALES ────────────────────────────────────────────────────────────
-  // Especiales no tienen rotación backend — el GAS no manda IDs para ellas
-  // Solo validar horario
+  // El GAS manda especialesActivas con los IDs seleccionados por rotación (igual que relámpago)
+  const idEsp       = new Set((_of.especialesActivas||[]).map(p=>Number(p.id)));
   const espPlanilla = _prods.filter(p=>p.esp===1&&p.stock>0).map(p=>({...p,...calcEsp(p)}));
+  const espActivos  = idEsp.size>0
+    ? espPlanilla.filter(p=>idEsp.has(p.id))
+    : espPlanilla.slice(0, _limites.especiales); // fallback: primeros N según límite
   const espEnHor    = enHorario('especiales');
-  _pools.especiales = espPlanilla; // siempre mostrar todas, el horario solo determina badge "activo"
-  _pools._espActivos= espEnHor ? espPlanilla : [];
+  // Respetar límite de config_sistema
+  _pools.especiales = espEnHor ? espActivos.slice(0,_limites.especiales) : espActivos.slice(0,_limites.especiales);
+  _pools._espActivos= espEnHor ? _pools.especiales : [];
+  _pools._espTodas  = espPlanilla;
 
   // ── PROMOS ────────────────────────────────────────────────────────────────
   // PROMOS: categoria===PROMOS, normal>price, stock>0
@@ -1079,15 +1096,78 @@ function drawBg(ctx,W,H,pk){
   const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,c1);g.addColorStop(1,c2);
   ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
 }
-function drawHdr(ctx,W,info,P,y0=0){
-  ctx.fillStyle=P.ac;ctx.fillRect(0,y0,W,5);
-  ctx.font='bold 26px "Syne",sans-serif';ctx.fillStyle=P.ac;ctx.textAlign='center';
-  ctx.fillText(info.t,W/2,y0+42);
-  ctx.font='13px "DM Sans",sans-serif';ctx.fillStyle=P.sub;
-  ctx.fillText(info.s,W/2,y0+60);
-  ctx.strokeStyle=P.ln;ctx.lineWidth=1.5;
-  ctx.beginPath();ctx.moveTo(16,y0+70);ctx.lineTo(W-16,y0+70);ctx.stroke();
-  return y0+80;
+function drawHdr(ctx,W,info,P,y0=0,prods){
+  // Franja superior del color del modo
+  const badge = MODO_BADGE[_modo]||MODO_BADGE.manual;
+  ctx.fillStyle=badge.color; ctx.fillRect(0,y0,W,5);
+
+  // Título fijo: "OFERTAS" grande + nombre empresa pequeño
+  ctx.textAlign='center';
+  ctx.font='bold 28px "Syne",sans-serif';
+  ctx.fillStyle=badge.color;
+  ctx.fillText('OFERTAS COPIHUE', W/2, y0+40);
+
+  ctx.font='11px "DM Sans",sans-serif';
+  ctx.fillStyle=P.sub;
+  ctx.fillText(_emp.nombre+' · '+(_emp.ciudad||_emp.direccion||''), W/2, y0+56);
+
+  // Badges de categorías presentes en los productos del flyer
+  // Cuenta cuántos de cada tipo hay en prods
+  const catCounts = {};
+  if(prods){
+    prods.forEach(p=>{
+      let cat='manual';
+      if(p.rel>0)  cat='relampago';
+      else if(p.des>0) cat='destacadas';
+      else if(p.esp===1) cat='especiales';
+      else if(p.cat==='PROMOS') cat='promos';
+      else if(p.cat==='CERVEZAS') cat='cervecero';
+      catCounts[cat]=(catCounts[cat]||0)+1;
+    });
+  } else {
+    catCounts[_modo]=1;
+  }
+
+  // Dibujar badges horizontales centrados
+  const cats = Object.keys(catCounts).filter(c=>MODO_BADGE[c]);
+  if(cats.length>0){
+    const PAD_B=10, GAP_B=6, H_B=20, R_B=10;
+    // Medir ancho total
+    ctx.font='bold 10px "DM Sans",sans-serif';
+    const widths = cats.map(c=>{
+      const b=MODO_BADGE[c];
+      return ctx.measureText(b.emoji+' '+b.label+(catCounts[c]>1?' ('+catCounts[c]+')':'')).width+PAD_B*2;
+    });
+    const totalW = widths.reduce((a,b)=>a+b,0)+GAP_B*(cats.length-1);
+    let bx = (W-totalW)/2;
+    const by = y0+64;
+
+    cats.forEach((c,i)=>{
+      const b=MODO_BADGE[c];
+      const bw=widths[i];
+      const lbl=b.emoji+' '+b.label+(catCounts[c]>1?' ('+catCounts[c]+')':'');
+      // Badge background
+      ctx.fillStyle=b.bg;
+      ctx.beginPath();
+      ctx.roundRect(bx,by,bw,H_B,R_B);
+      ctx.fill();
+      // Badge border
+      ctx.strokeStyle=b.color+'66'; ctx.lineWidth=1;
+      ctx.beginPath(); ctx.roundRect(bx,by,bw,H_B,R_B); ctx.stroke();
+      // Badge text
+      ctx.fillStyle=b.color;
+      ctx.font='bold 9px "DM Sans",sans-serif';
+      ctx.textAlign='center';
+      ctx.fillText(lbl, bx+bw/2, by+13);
+      bx+=bw+GAP_B;
+    });
+  }
+
+  // Línea separadora
+  const lineY = y0+(cats.length>0?91:70);
+  ctx.strokeStyle=P.ln; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(14,lineY); ctx.lineTo(W-14,lineY); ctx.stroke();
+  return lineY+8; // startY contenido
 }
 function drawFtr(ctx,W,H,P){
   const fy=H-46;
@@ -1168,7 +1248,7 @@ async function dibujarGrid(prods,pk){
   const H=82+ROWS*CH+(ROWS-1)*GAP+PAD+52;
   const{cv,ctx}=mkCv(W,H);
   drawBg(ctx,W,H,pk);
-  const sy=drawHdr(ctx,W,MODO_HDR[_modo]||MODO_HDR.manual,P);
+  const sy=drawHdr(ctx,W,MODO_HDR[_modo]||MODO_HDR.manual,P,0,prods);
   await Promise.all(prods.map((p,i)=>{
     const col=i%COLS,row=Math.floor(i/COLS);
     return drawCard(ctx,p,PAD+col*(CW+GAP),sy+row*(CH+GAP),CW,CH,FH,P,pk);
@@ -1183,12 +1263,11 @@ async function dibujarLista(prods,pk){
   const{cv,ctx}=mkCv(W,H);
   drawBg(ctx,W,H,pk);
   const info=MODO_HDR[_modo]||MODO_HDR.manual;
-  ctx.fillStyle=P.ac;ctx.font='bold 23px "Syne",sans-serif';ctx.textAlign='center';ctx.fillText(info.t,W/2,38);
-  ctx.fillStyle=P.sub;ctx.font='12px "DM Sans",sans-serif';ctx.fillText(info.s,W/2,56);
-  ctx.strokeStyle=P.ln;ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(10,64);ctx.lineTo(W-10,64);ctx.stroke();
+  const _listaSy = drawHdr(ctx,W,MODO_HDR[_modo]||MODO_HDR.manual,P,0,prods);
+  const HDR2=_listaSy;
   await Promise.all(prods.map(async(p,i)=>{
     const ov=_overrides[p.id],price=ov?ov.price:p.price,po=ov?ov.po:p.po,pct=ov?ov.pct:p.pct,et=ov?ov.et:p.et;
-    const y=HDR+i*ROW;
+    const y=HDR2+i*ROW;
     ctx.fillStyle=i%2===0?'rgba(0,0,0,.02)':'rgba(0,0,0,0)';ctx.fillRect(0,y,W,ROW);
     ctx.fillStyle=P.ac;ctx.fillRect(0,y,4,ROW);
     const FOTO=50;
