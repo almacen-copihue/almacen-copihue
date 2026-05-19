@@ -230,7 +230,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
   <div class="h-brand">
     <div class="h-icon">🖼</div>
     <div>
-      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v4.6</span></div>
+      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v4.8</span></div>
       <div class="h-sub">Generador para redes sociales</div>
     </div>
   </div>
@@ -372,7 +372,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-const VERSION = 'v4.6';
+const VERSION = 'v4.8';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -631,6 +631,36 @@ function calcPro(p){
   return {po:p.price, et:'PROMO -'+pct+'%', pct, eslogan:'Precio rebajado'};
 }
 
+// Últimas unidades — idéntico a calcularDescuentoUltimas del index.html
+// diasVenc<=3 → -25%, sino usa código relámpago del producto
+function calcUltimas(p, diasParaVencer){
+  let pct;
+  if(diasParaVencer!==null&&diasParaVencer!==undefined&&diasParaVencer<=3){
+    pct=25;
+  } else {
+    const cfg=ORS[String(p.rel)];
+    pct=(cfg&&cfg.tipo==='pct'&&cfg.descuento>0)?cfg.descuento:10;
+  }
+  const po=Math.round(p.price*(1-pct/100));
+  const diasLabel=diasParaVencer!==null&&diasParaVencer!==undefined
+    ?(diasParaVencer===0?'⚠️ Vence hoy':'Vence en '+diasParaVencer+'d'):'';
+  return {po, et:'ÚLTIMAS -'+pct+'%', pct, diasLabel};
+}
+
+// Rotación local simple — usa fecha del día como índice
+// Replica el efecto de ROTACION_SISTEMA sin acceso al localStorage del catálogo
+function rotarPool(pool, n, tipo){
+  if(pool.length<=n) return pool.slice();
+  // Seed basado en fecha del día (cambia cada día como en el catálogo)
+  const hoy=new Date();
+  const seed=hoy.getFullYear()*10000+((hoy.getMonth()+1)*100)+hoy.getDate();
+  // Índice de inicio rotante
+  const inicio=(seed*(tipo==='especiales'?7:tipo==='relampago'?3:5))%pool.length;
+  const res=[];
+  for(let i=0;i<n&&i<pool.length;i++) res.push(pool[(inicio+i)%pool.length]);
+  return res;
+}
+
 function extraerLimites(cfg){
   const nrm=s=>s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
   const get=k=>{
@@ -660,87 +690,58 @@ function normProds(arr){
 }
 
 function construirPools(){
-  // Misma lógica que index.html:
-  // _of.relampagoActivo  = array de {id,...} ya rotados por el GAS (los X del día)
-  // _of.destacadasActivas = idem
-  // _of.horariosOferta   = {relampago:{inicio,cierre,activo}, destacadas:{...}, especiales:{...}}
-  // _of.ultimasSeleccionadas = array de productos seleccionados
+  // ── Respuesta exacta de calcularOfertas() (GAS v8.3) ──
+  // _of.relampagoActivo       → N rotados activos (vacío si horario off)
+  // _of.relampagoPool         → todos los candidatos sin filtro horario
+  // _of.destacadasActivas     → N rotadas activas (vacío si horario off)
+  // _of.destacadasPool        → todos los candidatos
+  // _of.especialesActivas     → N rotadas activas (vacío si horario off)
+  // _of.ultimasSeleccionadas       → seleccionadas SOLO si horario on
+  // _of.ultimasSeleccionadasSiempre→ siempre, sin importar horario
+  // _of.horariosOferta        → {relampago,destacadas,especiales,ultimas} con .activo (boolean)
+  // _of.limites               → {relampago,especiales,destacadas} desde config_sistema
+
+  // Actualizar límites desde la respuesta del GAS (más preciso que config_sistema)
+  if(_of.limites){
+    if(_of.limites.relampago)  _limites.relampago  = _of.limites.relampago;
+    if(_of.limites.especiales) _limites.especiales = _of.limites.especiales;
+    if(_of.limites.destacadas) _limites.destacadas = _of.limites.destacadas;
+  }
 
   const hor = _of.horariosOferta || {};
 
-  // Helper: ¿está activo el horario para este tipo?
-  // Idéntico a validarHorario del index — lee horariosOferta del GAS
-  // horariosOferta.tipo.activo puede ser: true/false, 1/0, '1'/'0', 'A' (auto)
-  function enHorario(tipo){
-    const h = hor[tipo];
-    if(!h) return false;
-    // Forzado OFF
-    if(h.activo===false||h.activo===0||h.activo==='0') return false;
-    // Forzado ON
-    if(h.activo===true||h.activo===1||h.activo==='1') return true;
-    // Modo AUTO ('A', undefined, null, o cualquier otro valor)
-    // El GAS ya hizo el cálculo de días/horario y mandó activo=true/false
-    // Si llegó aquí con 'A' o similar, verificamos la hora actual contra inicio/cierre
-    // inicio y cierre pueden venir como fracción decimal (0.791 = 19:00) o HH:MM
-    const parseHorFrac = v => {
-      if(v===null||v===undefined) return null;
-      const s=String(v).trim();
-      // Fracción decimal (formato interno de Sheets)
-      if(/^0\.\d+$/.test(s)||(/^\d+\.\d+$/.test(s)&&parseFloat(s)<1)){
-        const m=Math.round(parseFloat(s)*1440);
-        return m;
-      }
-      return _horaAMin(_parseHoraLog(s));
-    };
-    const ini=parseHorFrac(h.inicio);
-    const cie=parseHorFrac(h.cierre);
-    if(ini===null||cie===null) return false;
-    const now=new Date();
-    const m=now.getHours()*60+now.getMinutes();
-    return m>=ini&&m<cie;
-  }
-
-  // IDs elegidos por el backend (ya rotados)
-  const idRel = new Set((_of.relampagoActivo||[]).map(p=>Number(p.id)));
-  const idDes = new Set((_of.destacadasActivas||[]).map(p=>Number(p.id)));
-  const idUlt = new Set((_of.ultimasSeleccionadas||[]).map(p=>Number(p.id)));
-
   // ── RELÁMPAGO ─────────────────────────────────────────────────────────────
-  // Pool planilla: rel>0, stock>0, codigo en ORS
-  const relPlanilla = _prods.filter(p=>p.rel>0&&p.stock>0&&ORS[String(p.rel)]).map(p=>({...p,...calcRel(p)}));
-  // Activos del día = los que el GAS eligió (ya rotados)
-  const relActivos  = idRel.size>0 ? relPlanilla.filter(p=>idRel.has(p.id)) : [];
-  // Para el modo auto: si hay horario activo mostrar los elegidos; si no, pool completo
-  _pools.relampago  = enHorario('relampago') && relActivos.length>0 ? relActivos : relActivos.length>0 ? relActivos : relPlanilla;
-  _pools._relTodos  = relPlanilla;
-  _pools._relActivos= relActivos; // los realmente activos según horario
+  // relampagoActivo = ya rotados y filtrados por horario
+  // relampagoPool   = todos los candidatos (para el flyer aunque esté fuera de horario)
+  _pools._relActivos = _of.relampagoActivo  || [];
+  _pools._relTodos   = _of.relampagoPool    || _pools._relActivos;
+
+  // Para el modo relámpago: si hay activos, mostrarlos; sino el pool completo
+  const relFuente = _pools._relActivos.length > 0 ? _pools._relActivos : _pools._relTodos;
+  _pools.relampago = relFuente.map(p => normOfertaProducto(p, 'relampago'));
 
   // ── DESTACADAS ────────────────────────────────────────────────────────────
-  const desPlanilla = _prods.filter(p=>p.des>0&&p.stock>0).map(p=>({...p,...calcDes(p)}));
-  const desActivos  = idDes.size>0 ? desPlanilla.filter(p=>idDes.has(p.id)) : [];
-  _pools.destacadas = enHorario('destacadas') && desActivos.length>0 ? desActivos : desActivos.length>0 ? desActivos : desPlanilla;
-  _pools._desTodas  = desPlanilla;
-  _pools._desActivos= desActivos;
+  _pools._desActivos = _of.destacadasActivas || [];
+  _pools._desTodas   = _of.destacadasPool    || _pools._desActivos;
+
+  const desFuente = _pools._desActivos.length > 0 ? _pools._desActivos : _pools._desTodas;
+  _pools.destacadas = desFuente.map(p => normOfertaProducto(p, 'destacadas'));
 
   // ── ESPECIALES ────────────────────────────────────────────────────────────
-  // El GAS manda especialesActivas con los IDs seleccionados por rotación (igual que relámpago)
-  const idEsp       = new Set((_of.especialesActivas||[]).map(p=>Number(p.id)));
-  const espPlanilla = _prods.filter(p=>p.esp===1&&p.stock>0).map(p=>({...p,...calcEsp(p)}));
-  // espActivos = los que el GAS eligió por rotación
-  const espActivos  = idEsp.size>0
-    ? espPlanilla.filter(p=>idEsp.has(p.id))
-    : []; // sin IDs del GAS → vacío (fuera de horario)
-  const espEnHor    = enHorario('especiales');
-  // Pool para el modo "especiales": activos del GAS si hay horario, todos si no
-  const espPool     = espActivos.length>0 ? espActivos : espPlanilla.slice(0,_limites.especiales);
-  _pools.especiales = espPool.slice(0, _limites.especiales);
-  // _espActivos = los realmente activos en este momento según horario
-  _pools._espActivos= (espEnHor && espActivos.length>0) ? espActivos.slice(0,_limites.especiales) : [];
-  _pools._espTodas  = espPlanilla;
+  // El GAS ya hace la rotación — especialesActivas viene vacío si horario off
+  _pools._espActivos = _of.especialesActivas || [];
+  // Para el pool del flyer: si están activas usarlas, sino buscar en _prods
+  const espFuente = _pools._espActivos.length > 0
+    ? _pools._espActivos
+    : _prods.filter(p=>p.esp===1&&p.stock>0).slice(0,_limites.especiales);
+  _pools.especiales = espFuente.map(p => {
+    // normOfertaProducto o calcEsp según origen
+    if(p.id&&p.nombre&&p.precio) return normOfertaProducto(p,'especiales');
+    return {...p, ...calcEsp(p)};
+  });
+  _pools._espTodas = _prods.filter(p=>p.esp===1&&p.stock>0).map(p=>({...p,...calcEsp(p)}));
 
   // ── PROMOS ────────────────────────────────────────────────────────────────
-  // PROMOS: categoria===PROMOS, normal>price, stock>0
-  // El "activo" lo determina el campo OFERTA PROMOS ACTIVAS de config_sistema
   const promosOn = (() => {
     if(!_cfgRaw) return true;
     const nrm=s=>s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
@@ -748,14 +749,26 @@ function construirPools(){
     const v=k?_cfgRaw[k]?.[0]:null;
     return v!==0&&v!=='0'&&v!==false&&v!==null;
   })();
-  _pools.promos     = _prods.filter(p=>p.cat==='PROMOS'&&p.normal>p.price&&p.stock>0).map(p=>({...p,...calcPro(p)}));
-  _pools._promosOn  = promosOn; // flag para el log y el badge
+  _pools.promos    = _prods.filter(p=>p.cat==='PROMOS'&&p.normal>p.price&&p.stock>0).map(p=>({...p,...calcPro(p)}));
+  _pools._promosOn = promosOn;
 
   // ── ÚLTIMAS UNIDADES ─────────────────────────────────────────────────────
-  // El GAS ya seleccionó las últimas — usar esos IDs directos
-  _pools.ultimas = idUlt.size>0
-    ? _prods.filter(p=>idUlt.has(p.id)).map(p=>({...p,...calcRel(p),et:'ÚLTIMAS',pct:0}))
-    : _prods.filter(p=>p.rel>0&&p.stock>0&&p.stock<5).map(p=>({...p,...calcRel(p),et:'ÚLTIMAS',pct:0}));
+  // ultimasSeleccionadasSiempre = siempre disponible para el flyer
+  // ultimasSeleccionadas        = solo si horario activo
+  const ultSrc = _of.ultimasSeleccionadasSiempre || _of.ultimasSeleccionadas || [];
+  if(ultSrc.length > 0){
+    _pools.ultimas = ultSrc.map(u=>{
+      const p = _prods.find(x=>x.id===Number(u.id));
+      if(!p||p.stock<=0) return null;
+      const calc = calcUltimas(p, u.diasParaVencer);
+      return {...p, ...calc};
+    }).filter(Boolean);
+  } else {
+    // Fallback: productos con stock bajo
+    _pools.ultimas = _prods
+      .filter(p=>p.rel>0&&p.stock>0&&p.stock<5)
+      .map(p=>({...p,...calcUltimas(p,null)}));
+  }
 
   // ── CERVECERO ────────────────────────────────────────────────────────────
   _pools.cervecero = (_cerv.productos||[]).map(p=>{
@@ -763,60 +776,89 @@ function construirPools(){
     const promoP=parseInt(p.precioPromo)||0;
     const po=promoP>0?promoP:precio;
     const pct=precio>0&&promoP>0?Math.round((1-promoP/precio)*100):0;
-    return {id:Number(p.id||0),name:String(p.nombre||p.name||''),price:precio,
-      normal:precio,stock:99,rel:0,des:0,esp:0,cat:'CERVEZAS',
-      po,et:pct>0?'-'+pct+'%':'CERV.',pct,_activo:true};
+    return {id:Number(p.id||0), name:String(p.nombre||p.name||''),
+      price:precio, normal:precio, stock:99, rel:0, des:0, esp:0, cat:'CERVEZAS',
+      po, et:pct>0?'-'+pct+'%':'CERV.', pct, _activo:true};
   });
 
-  // ── MANUAL ───────────────────────────────────────────────────────────────
-  // TODOS los que tienen alguna oferta en planilla, sin filtro de horario
-  const seen=new Set(); _pools.manual=[];
-  [..._pools._relTodos,..._pools._desTodas,..._pools.especiales,..._pools.promos,..._pools.ultimas,..._pools.cervecero]
-    .forEach(p=>{if(!seen.has(p.id)){seen.add(p.id);_pools.manual.push(p);}});
-
-  // ── COMBINADO — "3 categorías principales" ────────────────────────────────
-  // Toma los activos de cada tipo respetando el límite configurado
+  // ── COMBINADO — 3 categorías ──────────────────────────────────────────────
   const seen2=new Set(); _pools.combinado=[];
-  const srcComb=[
-    ..._pools.relampago.slice(0,_limites.relampago),
-    ..._pools.destacadas.slice(0,_limites.destacadas),
-    ..._pools.especiales.slice(0,_limites.especiales),
-  ];
-  srcComb.forEach(p=>{if(!seen2.has(p.id)){seen2.add(p.id);_pools.combinado.push(p);}});
+  [..._pools.relampago.slice(0,_limites.relampago),
+   ..._pools.destacadas.slice(0,_limites.destacadas),
+   ..._pools.especiales.slice(0,_limites.especiales)]
+    .forEach(p=>{if(p&&!seen2.has(p.id)){seen2.add(p.id);_pools.combinado.push(p);}});
+
+  // ── MANUAL — todas las ofertas sin filtro horario ─────────────────────────
+  const seen=new Set(); _pools.manual=[];
+  [..._pools._relTodos.map(p=>normOfertaProducto(p,'relampago')),
+   ..._pools._desTodas.map(p=>normOfertaProducto(p,'destacadas')),
+   ..._pools._espTodas,
+   ..._pools.promos,
+   ...(_of.ultimasSeleccionadasSiempre||[]).map(u=>{
+     const p=_prods.find(x=>x.id===Number(u.id));
+     return p?{...p,...calcUltimas(p,u.diasParaVencer)}:null;
+   }).filter(Boolean),
+   ..._pools.cervecero]
+    .forEach(p=>{if(p&&!seen.has(p.id)){seen.add(p.id);_pools.manual.push(p);}});
+}
+
+// Normaliza un producto que viene del GAS (tiene .nombre/.precio) al formato del flyer
+function normOfertaProducto(gasP, tipo){
+  // El GAS devuelve {id, nombre, precio, relampago, destacada, especial, stock, ...}
+  const id    = Number(gasP.id||0);
+  const name  = String(gasP.nombre||gasP.name||'').trim();
+  const price = parseInt(gasP.precio||gasP.price)||0;
+  const normal= parseInt(gasP.normal||gasP.precio||gasP.price)||0;
+  const stock = parseInt(gasP.stock)||0;
+  const rel   = parseInt(gasP.relampago)||0;
+  const des   = parseInt(gasP.destacada)||0;
+  const esp   = parseInt(gasP.especial)||0;
+  const cat   = String(gasP.categoria||gasP.category||'').trim().toUpperCase();
+  const base  = {id,name,price,normal,stock,rel,des,esp,cat};
+
+  if(tipo==='relampago') return {...base,...calcRel(base)};
+  if(tipo==='destacadas')return {...base,...calcDes(base)};
+  if(tipo==='especiales')return {...base,...calcEsp(base)};
+  return base;
 }
 
 function actualizarDiag(){
-  const nRelPlan   = (_pools._relTodos||[]).length;
-  const nRelAct    = (_pools._relActivos||[]).length;
-  const nDesPlan   = (_pools._desTodas||[]).length;
-  const nDesAct    = (_pools._desActivos||[]).length;
-  const nEspAct    = (_pools._espActivos||[]).length;
-  const promosOn   = _pools._promosOn!==false;
-  const cervModo   = _cerv.modoActivo||'A';
+  const hor      = _of.horariosOferta||{};
+  const relOn    = hor.relampago  ? hor.relampago.activo  : false;
+  const desOn    = hor.destacadas ? hor.destacadas.activo : false;
+  const espOn    = hor.especiales ? hor.especiales.activo : false;
+  const ultOn    = hor.ultimas    ? hor.ultimas.activo    : false;
+  const nRelAct  = (_pools._relActivos||[]).length;
+  const nRelTot  = (_pools._relTodos||[]).length;
+  const nDesAct  = (_pools._desActivos||[]).length;
+  const nDesTot  = (_pools._desTodas||[]).length;
+  const nEspAct  = (_pools._espActivos||[]).length;
+  const nEspTot  = (_pools._espTodas||[]).length;
+  const promosOn = _pools._promosOn!==false;
+  const cervModo = _cerv.modoActivo||'A';
 
   diagSet([
     {cls:_prods.length>0?'ok':'off',
       lbl:'Productos cargados', cnt:_prods.length},
-    {cls:nRelAct>0?'ok':nRelPlan>0?'warn':'off',
-      lbl:'⚡ Relámpago',
-      cnt:nRelAct>0?nRelAct+' activos / '+nRelPlan+' en planilla':nRelPlan+' en planilla (fuera de horario)'},
-    {cls:nDesAct>0?'ok':nDesPlan>0?'warn':'off',
-      lbl:'🔥 Destacadas',
-      cnt:nDesAct>0?nDesAct+' activos / '+nDesPlan+' en planilla':nDesPlan+' en planilla (fuera de horario)'},
-    {cls:nEspAct>0?'ok':(_pools._espTodas||[]).length>0?'warn':'off',
-      lbl:'⭐ Especiales',
-      cnt:nEspAct>0
-        ? nEspAct+' activos / '+(_pools._espTodas||[]).length+' en planilla'
-        : (_pools._espTodas||[]).length+' en planilla ('+_pools.especiales.length+' en pool)'},
-    {cls:promosOn&&_pools.promos.length>0?'ok':_pools.promos.length>0?'warn':'off',
-      lbl:'🏷️ Promos '+(promosOn?'(ON)':'(OFF — desactivadas en config)'),
+    {cls:(relOn&&nRelAct>0)?'ok':nRelTot>0?'warn':'off',
+      lbl:'⚡ Relámpago '+(relOn?'(ACTIVO)':'(fuera de horario)'),
+      cnt:nRelAct+' activos / '+nRelTot+' en planilla'},
+    {cls:(desOn&&nDesAct>0)?'ok':nDesTot>0?'warn':'off',
+      lbl:'🔥 Destacadas '+(desOn?'(ACTIVO)':'(fuera de horario)'),
+      cnt:nDesAct+' activos / '+nDesTot+' en planilla'},
+    {cls:(espOn&&nEspAct>0)?'ok':nEspTot>0?'warn':'off',
+      lbl:'⭐ Especiales '+(espOn?'(ACTIVO)':'(fuera de horario)'),
+      cnt:nEspAct+' activos / '+nEspTot+' en planilla'},
+    {cls:(promosOn&&_pools.promos.length>0)?'ok':_pools.promos.length>0?'warn':'off',
+      lbl:'🏷️ Promos '+(promosOn?'(ON)':'(OFF — config)'),
       cnt:_pools.promos.length},
     {cls:_pools.ultimas.length>0?'ok':'warn',
-      lbl:'🎯 Últimas unidades', cnt:_pools.ultimas.length},
+      lbl:'🎯 Últimas '+(ultOn?'(ACTIVO)':'(sin horario activo)'),
+      cnt:_pools.ultimas.length},
     {cls:_pools.cervecero.length>0?'ok':'warn',
-      lbl:'🍺 Cervecero '+(cervModo==='1'?'FORZADO ON':cervModo==='0'?'APAGADO':'auto'),
+      lbl:'🍺 Cervecero '+(cervModo==='1'?'FORZADO':cervModo==='0'?'APAGADO':'auto'),
       cnt:_pools.cervecero.length},
-    {cls:'ok',
+    {cls:_pools.combinado.length>0?'ok':'warn',
       lbl:'🗂️ Combinado (3 categ.)', cnt:_pools.combinado.length},
     {cls:'ok',
       lbl:'✏️ Manual (todas)', cnt:_pools.manual.length},
