@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Config Ofertas — Almacén Copihue</title>
+<title>Config Ofertas v2 — Almacén Copihue</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@600;700;800&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -242,6 +242,26 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 @keyframes rot{to{transform:rotate(360deg)}}
 .spin-lbl{font-family:var(--disp);font-size:.82rem;color:var(--txt-m);font-weight:600;}
 
+/* ── PIN OVERLAY ── */
+.pin-overlay{display:none;position:fixed;inset:0;background:rgba(23,37,23,.82);
+  backdrop-filter:blur(6px);z-index:600;align-items:center;justify-content:center;}
+.pin-card{background:var(--sur);border-radius:var(--r);padding:32px 28px;
+  box-shadow:var(--sh-lg);text-align:center;width:100%;max-width:320px;
+  border-top:4px solid var(--p);}
+.pin-icon{font-size:2.2rem;margin-bottom:10px;}
+.pin-title{font-family:var(--disp);font-size:1.05rem;font-weight:800;color:var(--pd);margin-bottom:4px;}
+.pin-sub{font-size:.75rem;color:var(--txt-s);margin-bottom:20px;}
+.pin-input{width:100%;font-family:var(--mono);font-size:1.6rem;text-align:center;letter-spacing:.3em;
+  border:2px solid var(--bdr);border-radius:var(--rs);padding:10px;color:var(--txt);
+  background:var(--bg);outline:none;transition:border-color .18s;margin-bottom:12px;}
+.pin-input:focus{border-color:var(--p);}
+.pin-btn{width:100%;background:var(--p);color:#fff;border:none;border-radius:var(--rs);
+  padding:11px;font-family:var(--disp);font-size:.9rem;font-weight:700;cursor:pointer;
+  transition:background .18s;letter-spacing:.03em;}
+.pin-btn:hover{background:var(--pd);}
+.pin-error{font-size:.75rem;color:#c62828;font-weight:600;margin-top:8px;
+  display:none;animation:blink .3s;}
+
 /* ── RESPONSIVE ── */
 @media(max-width:640px){
   .grid,.horario-grid{grid-template-columns:1fr;}
@@ -258,6 +278,19 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 
 <div class="overlay" id="ov"><div class="spin"></div><div class="spin-lbl" id="ov-txt">Cargando...</div></div>
 <div class="toast" id="toast"></div>
+
+<!-- PIN OVERLAY -->
+<div class="pin-overlay" id="pin-overlay">
+  <div class="pin-card">
+    <div class="pin-icon">🔒</div>
+    <div class="pin-title">Acceso restringido</div>
+    <div class="pin-sub">Ingresá el PIN de configuración</div>
+    <input class="pin-input" id="pin-input" type="password" maxlength="8"
+      inputmode="numeric" placeholder="····" autocomplete="off">
+    <button class="pin-btn" id="pin-btn">Ingresar</button>
+    <div class="pin-error" id="pin-error">❌ PIN incorrecto</div>
+  </div>
+</div>
 
 <header>
   <div class="h-left">
@@ -281,17 +314,6 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
     <div class="s-dot" id="sdot"></div>
     <div class="s-txt" id="stxt">Sin conectar — ingresá la URL del GAS</div>
     <div class="s-time" id="stime"></div>
-  </div>
-
-  <!-- GAS URL -->
-  <div class="gas-box">
-    <label>URL Google Apps Script (GAS)</label>
-    <div class="gas-row">
-      <input class="gas-input" id="gasUrl" type="text"
-        placeholder="https://script.google.com/macros/s/…/exec"
-        autocomplete="off" spellcheck="false">
-      <button class="btn-connect" id="btnC">Conectar</button>
-    </div>
   </div>
 
   <!-- TABS -->
@@ -405,7 +427,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 const DIAS   = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
 const DIA_JS = [1,2,3,4,5,6,0];
 const TODAY  = DIA_JS.indexOf(new Date().getDay());
-const GAS_KEY = 'cop_gas_url';
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
 
 const OFERTAS = [
   { id:'relampago',  lbl:'Relámpago ⚡',       c:'#e53935', bg:'#fff5f5',
@@ -433,9 +455,9 @@ const EMP_FIELDS = [
   'title','descripcion','version'
 ];
 
-let GAS_URL = '';
 let cfg     = {};   // working copy of config
 let dirty   = false;
+let unlocked = false; // PIN check
 
 // ── UTILS ────────────────────────────────────────────────────────────────────
 const $  = id => document.getElementById(id);
@@ -878,23 +900,27 @@ function buildEmpresa() {
 
 // ── LOAD FROM GAS ─────────────────────────────────────────────────────────────
 async function loadConfig() {
-  if (!GAS_URL) { toast('Ingresá la URL del GAS primero', 'warn'); return; }
   setLoading(true, 'Cargando desde planilla...');
   setStatus('load', 'Conectando...');
   try {
     const r = await fetch(GAS_URL + '?action=getConfig&t=' + Date.now(), { redirect: 'follow' });
     const data = await r.json();
-    if (!data.success || !data.config) throw new Error('El GAS no devolvió config válida');
+    if (!(data.ok || data.success) || !data.config) throw new Error('El GAS no devolvió config válida');
     cfg = JSON.parse(JSON.stringify(data.config));
-    buildCards();
-    buildHorario();
-    buildGlobales();
-    buildEmpresa();
     dirty = false;
     $('upip').classList.remove('on');
     $('btnS').disabled = true;
-    setStatus('ok', 'Conectado — datos actualizados');
-    toast('Configuración cargada ✓');
+    setStatus('ok', 'Conectado');
+    // PIN check: busca 'admin_pin' en cfg
+    const pinKey = Object.keys(cfg).find(k => k.toLowerCase().replace(/^.*\|/, '') === 'admin_pin');
+    const pinVal = pinKey ? String(cfg[pinKey][0] || '').trim() : '';
+    if (pinVal && !unlocked) {
+      showPinOverlay(pinVal);
+    } else {
+      buildAll();
+      setStatus('ok', 'Conectado — datos actualizados');
+      toast('Configuración cargada ✓');
+    }
   } catch(e) {
     setStatus('err', 'Error: ' + e.message);
     toast('No se pudo conectar: ' + e.message, 'err', 6000);
@@ -948,7 +974,7 @@ async function saveConfig() {
       body: JSON.stringify({ action: 'setConfig', config: payload })
     });
     const data = await res.json();
-    if (data.success === false) throw new Error(data.error || 'Error desconocido del GAS');
+    if (!(data.ok || data.success)) throw new Error(data.error || data.mensaje || 'Error desconocido del GAS');
 
     dirty = false;
     $('upip').classList.remove('on');
@@ -963,45 +989,47 @@ async function saveConfig() {
   }
 }
 
+// ── BUILD ALL ─────────────────────────────────────────────────────────────────
+function buildAll() {
+  buildCards();
+  buildHorario();
+  buildGlobales();
+  buildEmpresa();
+}
+
+// ── PIN OVERLAY ───────────────────────────────────────────────────────────────
+function showPinOverlay(correctPin) {
+  const ov = $('pin-overlay');
+  ov.style.display = 'flex';
+  $('pin-input').value = '';
+  setTimeout(() => $('pin-input').focus(), 80);
+
+  function tryPin() {
+    if ($('pin-input').value.trim() === correctPin) {
+      unlocked = true;
+      ov.style.display = 'none';
+      buildAll();
+      setStatus('ok', 'Conectado — datos actualizados');
+      toast('Configuración cargada ✓');
+    } else {
+      $('pin-input').value = '';
+      const err = $('pin-error');
+      err.style.display = 'block';
+      setTimeout(() => { err.style.display = 'none'; }, 2000);
+      $('pin-input').focus();
+    }
+  }
+
+  $('pin-btn').onclick = tryPin;
+  $('pin-input').onkeydown = e => { if (e.key === 'Enter') tryPin(); };
+}
+
 // ── INIT ──────────────────────────────────────────────────────────────────────
 function init() {
-  const saved = localStorage.getItem(GAS_KEY) || '';
-  if (saved) { $('gasUrl').value = saved; GAS_URL = saved; }
-
-  $('btnC').addEventListener('click', () => {
-    const url = $('gasUrl').value.trim();
-    if (!url) { toast('Ingresá la URL primero', 'warn'); return; }
-    GAS_URL = url;
-    localStorage.setItem(GAS_KEY, url);
-    loadConfig();
-  });
-  $('gasUrl').addEventListener('keydown', e => { if (e.key==='Enter') $('btnC').click(); });
   $('btnR').addEventListener('click', loadConfig);
   $('btnS').addEventListener('click', saveConfig);
   window.addEventListener('beforeunload', e => { if (dirty) { e.preventDefault(); e.returnValue=''; } });
-
-  if (GAS_URL) {
-    loadConfig();
-  } else {
-    // Build preview with defaults
-    OFERTAS.forEach(o => {
-      cfg[o.kDias] = Array(7).fill('A');
-      cfg[o.kIni]  = Array(7).fill('');
-      cfg[o.kCie]  = Array(7).fill('');
-      cfg[o.kMax]  = [o.defMax];
-    });
-    cfg['horario|Horario apertura local'] = Array(7).fill('11:00');
-    cfg['horario|Horario cierre local']   = Array(7).fill('22:00');
-    cfg['OFERTA PROMOS ACTIVAS']          = [1];
-    cfg['jueves cervecero']               = ['A'];
-    cfg['hora inicio cervecero']          = ['18:00'];
-    cfg['hora cierre cervecero']          = ['22:00'];
-    buildCards();
-    buildHorario();
-    buildGlobales();
-    buildEmpresa();
-    setStatus('', 'Sin conectar — ingresá la URL del GAS');
-  }
+  loadConfig();
 }
 
 init();
