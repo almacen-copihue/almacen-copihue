@@ -230,7 +230,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
   <div class="h-brand">
     <div class="h-icon">🖼</div>
     <div>
-      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v5.0</span></div>
+      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v5.1</span></div>
       <div class="h-sub">Generador para redes sociales</div>
     </div>
   </div>
@@ -372,13 +372,28 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-const VERSION = 'v5.0';
+const VERSION = 'v5.1';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
 const SCALE_OUT = 2;
 
 // ── FUNCIÓN EXACTA DEL CATÁLOGO ───────────────────────────────────────────────
+function corto(s, maxChars){
+  maxChars = maxChars || 28;
+  // Eliminar medidas del final pero conservar el nombre del producto
+  var sinMed = s.replace(/\d+\s*(gr|kg|ml|l|cc|un?|x\d+)/gi,'').replace(/\s+/g,' ').trim();
+  if(sinMed.length <= maxChars) return sinMed;
+  // Cortar por palabras sin romper
+  var words = sinMed.split(' '), out = '';
+  for(var i=0;i<words.length;i++){
+    var candidate = out ? out+' '+words[i] : words[i];
+    if(candidate.length > maxChars) break;
+    out = candidate;
+  }
+  return out || sinMed.slice(0, maxChars);
+}
+
 function simplificarNombre(nombre) {
   return nombre
     .toLowerCase()
@@ -1362,31 +1377,69 @@ async function drawCard(ctx,p,cx,cy,CW,CH,FH,P,pk){
     ctx.fillText(_badgeLbl, bx+bw/2, by+13.5);
   }
 
-  // Nombre (2 líneas máx)
-  ctx.fillStyle=P.txt;ctx.textAlign='center';
-  ctx.font='bold 12px "DM Sans",sans-serif';
-  wrap(ctx,p.name,cx+CW/2,cy+FH+13,CW-10,14,2);
+  // ── Zona de texto: nombre + precios ──────────────────────────────────────
+  const textZoneY = cy+FH+4;
+  const textZoneH = CH-FH-4;  // altura disponible para texto
 
-  // Precio tachado
-  if(po<price){
-    ctx.fillStyle=P.ten;ctx.font='10px "DM Mono",sans-serif';
-    const t='$'+fmt(price),tw=ctx.measureText(t).width,px=cx+CW/2;
-    ctx.fillText(t,px,cy+FH+34);
-    ctx.strokeStyle=P.ten;ctx.lineWidth=1;
-    ctx.beginPath();ctx.moveTo(px-tw/2,cy+FH+31);ctx.lineTo(px+tw/2,cy+FH+31);ctx.stroke();
-  }
+  // Nombre — centrado, máx 2 líneas, fuente adaptada al ancho de card
+  const nomFontSize = CW<80?9:CW<110?10:11;
+  ctx.fillStyle=P.txt; ctx.textAlign='center';
+  ctx.font=`bold ${nomFontSize}px "DM Sans",sans-serif`;
+  const nomCorto=corto(p.name, CW<90?16:CW<120?20:26);
+  wrap(ctx,nomCorto,cx+CW/2,textZoneY+nomFontSize,CW-8,nomFontSize+2,2);
 
-  // Precio oferta — 2da50 muestra precio unitario + aclaración
-  const _is2da = getOfertaTipo(p)==='relampago_2da50' && !_overrides[p.id];
-  if(_is2da){
-    const _po2da = Math.round(p.price*0.75);
-    ctx.fillStyle=P.ac;ctx.font='bold 15px "DM Sans",sans-serif';ctx.textAlign='center';
-    ctx.fillText('$'+fmt(_po2da)+' c/u',cx+CW/2,cy+CH-16);
-    ctx.fillStyle=P.sub;ctx.font='9px "DM Sans",sans-serif';
-    ctx.fillText('llevando 2',cx+CW/2,cy+CH-5);
+  // ── Layout de precios: tachado arriba-izquierda, final abajo-derecha ─────
+  // Zona de precios empieza a 2/3 de la zona de texto
+  const priceAreaY = textZoneY + Math.floor(textZoneH*0.52);
+  const is2da = getOfertaTipo(p)==='relampago_2da50' && !_overrides[p.id];
+
+  if(po<price && !is2da){
+    // Precio tachado — pequeño, alineado a la izquierda de la card
+    ctx.fillStyle=P.ten;
+    const taFont=CW<100?'8px':'9px';
+    ctx.font=taFont+' "DM Mono",sans-serif';
+    ctx.textAlign='left';
+    const taTxt='$'+fmt(price);
+    const taTxtX=cx+6;
+    const taTxtY=priceAreaY+9;
+    ctx.fillText(taTxt,taTxtX,taTxtY);
+    // Línea de tachado
+    const taW=ctx.measureText(taTxt).width;
+    ctx.strokeStyle=P.ten; ctx.lineWidth=0.9;
+    ctx.beginPath();ctx.moveTo(taTxtX,taTxtY-3);ctx.lineTo(taTxtX+taW,taTxtY-3);ctx.stroke();
+
+    // Precio final — grande, alineado a la derecha
+    const pfFontSize=CW<90?13:CW<120?15:17;
+    ctx.fillStyle=P.ac;
+    ctx.font=`bold ${pfFontSize}px "DM Sans",sans-serif`;
+    ctx.textAlign='right';
+    ctx.fillText('$'+fmt(po),cx+CW-5,priceAreaY+pfFontSize+2);
+
+  } else if(is2da){
+    // 2DA 50%: precio por unidad llevando 2
+    const po2da=Math.round(p.price*0.75);
+    // Tachado pequeño izquierda
+    ctx.fillStyle=P.ten; ctx.font='8px "DM Mono",sans-serif'; ctx.textAlign='left';
+    const ta2='$'+fmt(p.price);
+    const ta2X=cx+6, ta2Y=priceAreaY+9;
+    ctx.fillText(ta2,ta2X,ta2Y);
+    const ta2W=ctx.measureText(ta2).width;
+    ctx.strokeStyle=P.ten; ctx.lineWidth=0.9;
+    ctx.beginPath();ctx.moveTo(ta2X,ta2Y-3);ctx.lineTo(ta2X+ta2W,ta2Y-3);ctx.stroke();
+    // Precio final derecha
+    const pf2Size=CW<90?12:CW<120?14:16;
+    ctx.fillStyle=P.ac; ctx.font=`bold ${pf2Size}px "DM Sans",sans-serif`; ctx.textAlign='right';
+    ctx.fillText('$'+fmt(po2da)+' c/u',cx+CW-5,priceAreaY+pf2Size+2);
+    // "llevando 2" pequeño debajo del precio
+    ctx.fillStyle=P.sub; ctx.font='7px "DM Sans",sans-serif'; ctx.textAlign='right';
+    ctx.fillText('llevando 2',cx+CW-5,priceAreaY+pf2Size+12);
+
   } else {
-    ctx.fillStyle=P.ac;ctx.font='bold 16px "DM Sans",sans-serif';ctx.textAlign='center';
-    ctx.fillText('$'+fmt(po),cx+CW/2,cy+CH-8);
+    // Sin descuento — precio centrado
+    const pfFontSize=CW<90?13:CW<120?15:17;
+    ctx.fillStyle=P.ac; ctx.font=`bold ${pfFontSize}px "DM Sans",sans-serif`;
+    ctx.textAlign='center';
+    ctx.fillText('$'+fmt(po),cx+CW/2,priceAreaY+pfFontSize+2);
   }
 }
 
