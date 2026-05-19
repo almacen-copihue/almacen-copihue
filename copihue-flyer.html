@@ -230,7 +230,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
   <div class="h-brand">
     <div class="h-icon">🖼</div>
     <div>
-      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v4.5</span></div>
+      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v4.6</span></div>
       <div class="h-sub">Generador para redes sociales</div>
     </div>
   </div>
@@ -372,7 +372,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-const VERSION = 'v4.5';
+const VERSION = 'v4.6';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -668,16 +668,33 @@ function construirPools(){
 
   const hor = _of.horariosOferta || {};
 
-  // Helper: ¿está activo el horario para este tipo? (igual que validarHorario del index)
+  // Helper: ¿está activo el horario para este tipo?
+  // Idéntico a validarHorario del index — lee horariosOferta del GAS
+  // horariosOferta.tipo.activo puede ser: true/false, 1/0, '1'/'0', 'A' (auto)
   function enHorario(tipo){
     const h = hor[tipo];
     if(!h) return false;
+    // Forzado OFF
     if(h.activo===false||h.activo===0||h.activo==='0') return false;
+    // Forzado ON
     if(h.activo===true||h.activo===1||h.activo==='1') return true;
-    // AUTO — verificar hora actual
-    const ini=_horaAMin(_parseHoraLog(h.inicio));
-    const cie=_horaAMin(_parseHoraLog(h.cierre));
-    if(!ini||!cie) return false;
+    // Modo AUTO ('A', undefined, null, o cualquier otro valor)
+    // El GAS ya hizo el cálculo de días/horario y mandó activo=true/false
+    // Si llegó aquí con 'A' o similar, verificamos la hora actual contra inicio/cierre
+    // inicio y cierre pueden venir como fracción decimal (0.791 = 19:00) o HH:MM
+    const parseHorFrac = v => {
+      if(v===null||v===undefined) return null;
+      const s=String(v).trim();
+      // Fracción decimal (formato interno de Sheets)
+      if(/^0\.\d+$/.test(s)||(/^\d+\.\d+$/.test(s)&&parseFloat(s)<1)){
+        const m=Math.round(parseFloat(s)*1440);
+        return m;
+      }
+      return _horaAMin(_parseHoraLog(s));
+    };
+    const ini=parseHorFrac(h.inicio);
+    const cie=parseHorFrac(h.cierre);
+    if(ini===null||cie===null) return false;
     const now=new Date();
     const m=now.getHours()*60+now.getMinutes();
     return m>=ini&&m<cie;
