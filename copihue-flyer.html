@@ -230,7 +230,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
   <div class="h-brand">
     <div class="h-icon">🖼</div>
     <div>
-      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v4.8</span></div>
+      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v4.9</span></div>
       <div class="h-sub">Generador para redes sociales</div>
     </div>
   </div>
@@ -372,7 +372,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-const VERSION = 'v4.8';
+const VERSION = 'v4.9';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -452,7 +452,11 @@ function getBadgeLabel(p){
   if(tipo==='relampago_nxm'){
     const o=ORS[String(p.rel)]; return o?o.nombre.toUpperCase():p.et;
   }
-  if(tipo==='relampago_2da50') return '2DA 50%';
+  if(tipo==='relampago_2da50'){
+    // Mostrar precio por unidad llevando 2
+    const precio2da = Math.round(p.price*0.75);
+    return 'LLV.2: $'+precio2da.toLocaleString('es-AR')+' c/u';
+  }
   if(tipo==='relampago_pct'){
     const o=ORS[String(p.rel)]; return o?'-'+o.descuento+'%':p.et;
   }
@@ -735,9 +739,9 @@ function construirPools(){
     ? _pools._espActivos
     : _prods.filter(p=>p.esp===1&&p.stock>0).slice(0,_limites.especiales);
   _pools.especiales = espFuente.map(p => {
-    // normOfertaProducto o calcEsp según origen
-    if(p.id&&p.nombre&&p.precio) return normOfertaProducto(p,'especiales');
-    return {...p, ...calcEsp(p)};
+    // normOfertaProducto o calcEsp según origen — forzar esp=1 siempre
+    const base = p.id&&p.nombre&&p.precio ? normOfertaProducto(p,'especiales') : {...p,...calcEsp(p)};
+    return {...base, esp:1}; // garantizar que getOfertaTipo lo identifique como especial
   });
   _pools._espTodas = _prods.filter(p=>p.esp===1&&p.stock>0).map(p=>({...p,...calcEsp(p)}));
 
@@ -812,7 +816,7 @@ function normOfertaProducto(gasP, tipo){
   const stock = parseInt(gasP.stock)||0;
   const rel   = parseInt(gasP.relampago)||0;
   const des   = parseInt(gasP.destacada)||0;
-  const esp   = parseInt(gasP.especial)||0;
+  const esp   = parseInt(gasP.especial)||parseInt(gasP.esp)||0;
   const cat   = String(gasP.categoria||gasP.category||'').trim().toUpperCase();
   const base  = {id,name,price,normal,stock,rel,des,esp,cat};
 
@@ -1076,9 +1080,13 @@ function renderCandidatos(){
     const otCls=tipo.startsWith('relampago')||tipo==='cervecero'?'ot-rel':
                 tipo==='destacadas'?'ot-des':tipo==='especiales'?'ot-esp':
                 tipo==='promos'?'ot-pro':'ot-rel';
-    const prLabel=displayPo<displayP
-      ?`<s style="opacity:.4">$${fmt(displayP)}</s> <b>$${fmt(displayPo)}</b>`
-      :`<b>$${fmt(displayP)}</b>`;
+    const ov2=_overrides[p.id];
+    const is2da = getOfertaTipo(p)==='relampago_2da50' && !ov2;
+    const prLabel = is2da
+      ? `<s style="opacity:.4">$${fmt(displayP)}</s> <b>$${fmt(Math.round(displayP*0.75))}</b> c/u llevando 2`
+      : displayPo<displayP
+        ? `<s style="opacity:.4">$${fmt(displayP)}</s> <b>$${fmt(displayPo)}</b>`
+        : `<b>$${fmt(displayP)}</b>`;
     // Badge con color oficial
     const badgeBg=oc.hex, badgeTxt=oc.txt, badgeBdr=oc.bdr;
     return `<div class="pi${s?' sel':''}${edited?' edited':''} ${otCls}" onclick="clickProd(${p.id},this,event)">
@@ -1376,9 +1384,18 @@ async function drawCard(ctx,p,cx,cy,CW,CH,FH,P,pk){
     ctx.beginPath();ctx.moveTo(px-tw/2,cy+FH+31);ctx.lineTo(px+tw/2,cy+FH+31);ctx.stroke();
   }
 
-  // Precio oferta
-  ctx.fillStyle=P.ac;ctx.font='bold 16px "DM Sans",sans-serif';ctx.textAlign='center';
-  ctx.fillText('$'+fmt(po),cx+CW/2,cy+CH-8);
+  // Precio oferta — 2da50 muestra precio unitario + aclaración
+  const _is2da = getOfertaTipo(p)==='relampago_2da50' && !_overrides[p.id];
+  if(_is2da){
+    const _po2da = Math.round(p.price*0.75);
+    ctx.fillStyle=P.ac;ctx.font='bold 15px "DM Sans",sans-serif';ctx.textAlign='center';
+    ctx.fillText('$'+fmt(_po2da)+' c/u',cx+CW/2,cy+CH-16);
+    ctx.fillStyle=P.sub;ctx.font='9px "DM Sans",sans-serif';
+    ctx.fillText('llevando 2',cx+CW/2,cy+CH-5);
+  } else {
+    ctx.fillStyle=P.ac;ctx.font='bold 16px "DM Sans",sans-serif';ctx.textAlign='center';
+    ctx.fillText('$'+fmt(po),cx+CW/2,cy+CH-8);
+  }
 }
 
 // ── FORMATOS ──────────────────────────────────────────────────────────────────
