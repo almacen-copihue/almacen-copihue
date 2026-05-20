@@ -263,6 +263,12 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 .pin-error{font-size:.75rem;color:#c62828;font-weight:600;margin-top:8px;
   display:none;animation:blink .3s;}
 
+.auto-pill{border:2px solid #aaa;border-radius:20px;background:#f5f5f5;color:#888;
+  font-family:var(--mono);font-size:.75rem;font-weight:800;cursor:pointer;
+  padding:3px 10px;line-height:1;transition:all .18s;letter-spacing:.04em;white-space:nowrap;}
+.auto-pill.all-auto{border-color:var(--p);background:rgba(46,125,50,.1);color:var(--pd);}
+.auto-pill:hover{border-color:var(--p);color:var(--pd);background:rgba(46,125,50,.07);}
+
 /* ── RESPONSIVE ── */
 @media(max-width:640px){
   .grid,.horario-grid{grid-template-columns:1fr;}
@@ -558,7 +564,8 @@ function buildCards() {
     const ini  = kI ? (cfg[kI] || Array(7).fill(''))  : Array(7).fill('');
     const cie  = kC ? (cfg[kC] || Array(7).fill(''))  : Array(7).fill('');
     const maxArr = kM ? (cfg[kM] || Array(7).fill(of.defMax)) : Array(7).fill(of.defMax);
-    const anyOn = dias.some(v => v===1||v==='1'||v===true);
+    const anyOn  = dias.some(v => v===1||v==='1'||v===true);
+    const allAuto = dias.every(v => decodeDia(v) === 'A');
 
     const card = document.createElement('div');
     card.className = 'card';
@@ -567,8 +574,9 @@ function buildCards() {
       <div class="card-head" style="background:${of.bg}">
         <span class="oc-badge" style="background:${of.c}">${of.id.toUpperCase()}</span>
         <span class="oc-name">${of.lbl}</span>
+        <button class="auto-pill${allAuto?' all-auto':''}" id="auto-${of.id}" title="Poner todos los días en AUTO">⚙ AUTO</button>
         <div class="pill">
-          <span class="pill-lbl" id="gl-lbl-${of.id}">${anyOn?'ACTIVO':'—'}</span>
+          <span class="pill-lbl" id="gl-lbl-${of.id}">${anyOn?'ACTIVO':allAuto?'AUTO':'—'}</span>
           <label class="sw">
             <input type="checkbox" id="gl-${of.id}" ${anyOn?'checked':''}>
             <div class="sw-track"></div>
@@ -699,15 +707,45 @@ function buildCards() {
       markDirty();
     });
   });
+
+  // Events: AUTO piloto button
+  OFERTAS.forEach(of => {
+    const btn = $('auto-'+of.id);
+    if (!btn) return;
+    btn.addEventListener('click', function() {
+      const key = fk(of.kDias) || of.kDias;
+      if (!cfg[key]) cfg[key] = Array(7).fill('A');
+      cfg[key] = Array(7).fill('A');
+      document.querySelectorAll(`[data-role="ds"][data-offer="${of.id}"]`).forEach(sel => {
+        sel.value = 'A';
+        const wrap = sel.closest('.ds');
+        wrap.dataset.val = 'A';
+        wrap.querySelector('.ds-face').textContent = 'AUTO';
+        const day = sel.dataset.day;
+        document.querySelectorAll(
+          `[data-offer="${of.id}"][data-day="${day}"][data-role="ini"],
+           [data-offer="${of.id}"][data-day="${day}"][data-role="cie"],
+           [data-offer="${of.id}"][data-day="${day}"][data-role="max"]`)
+          .forEach(el => el.disabled = false);
+      });
+      btn.classList.add('all-auto');
+      syncGl(of.id);
+      markDirty();
+    });
+  });
 }
 
 function syncGl(offerId) {
   const of = OFERTAS.find(o => o.id === offerId);
   const key = fk(of.kDias);
   if (!key) return;
-  const anyOn = (cfg[key]||[]).some(v => v===1||v==='1'||v===true);
+  const vals = cfg[key] || [];
+  const anyOn  = vals.some(v => v===1||v==='1'||v===true);
+  const allAuto = vals.every(v => decodeDia(v) === 'A');
   $('gl-'+offerId).checked = anyOn;
-  $('gl-lbl-'+offerId).textContent = anyOn ? 'ACTIVO' : '—';
+  $('gl-lbl-'+offerId).textContent = anyOn ? 'ACTIVO' : allAuto ? 'AUTO' : '—';
+  const btn = $('auto-'+offerId);
+  if (btn) btn.classList.toggle('all-auto', allAuto);
 }
 
 // ── BUILD HORARIO LOCAL ───────────────────────────────────────────────────────
@@ -917,6 +955,14 @@ async function loadConfig() {
     const data = await r.json();
     if (!(data.ok || data.success) || !data.config) throw new Error('El GAS no devolvió config válida');
     cfg = JSON.parse(JSON.stringify(data.config));
+    // Normalizar todos los valores de hora — Sheets puede devolver ISO dates para celdas de tiempo
+    const TIME_KEYS = ['hora inicio','hora cierre','horario apertura','horario cierre'];
+    for (const key of Object.keys(cfg)) {
+      const kn = key.toLowerCase().replace(/^.*\|/,'');
+      if (TIME_KEYS.some(t => kn.includes(t))) {
+        cfg[key] = (cfg[key] || []).map(v => ph(v));
+      }
+    }
     dirty = false;
     $('upip').classList.remove('on');
     $('btnS').disabled = true;
