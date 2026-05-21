@@ -230,7 +230,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
   <div class="h-brand">
     <div class="h-icon">🖼</div>
     <div>
-      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v5.5</span></div>
+      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v5.6</span></div>
       <div class="h-sub">Generador para redes sociales</div>
     </div>
   </div>
@@ -372,7 +372,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-const VERSION = 'v5.5';
+const VERSION = 'v5.6';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -729,32 +729,35 @@ function construirPools(){
   // ── RELÁMPAGO ─────────────────────────────────────────────────────────────
   // relampagoActivo = ya rotados y filtrados por horario
   // relampagoPool   = todos los candidatos (para el flyer aunque esté fuera de horario)
-  _pools._relActivos = _of.relampagoActivo  || [];
-  _pools._relTodos   = _of.relampagoPool    || _pools._relActivos;
-
-  // Para el modo relámpago: si hay activos, mostrarlos; sino el pool completo
-  const relFuente = _pools._relActivos.length > 0 ? _pools._relActivos : _pools._relTodos;
-  _pools.relampago = relFuente.map(p => normOfertaProducto(p, 'relampago'));
+  // Relámpago: activos del GAS (ya rotados y filtrados por horario)
+  // relampagoPool = todos los candidatos sin filtro horario (para referencia)
+  _pools._relActivos = (_of.relampagoActivo||[]).map(p=>normOfertaProducto(p,'relampago'));
+  _pools._relTodos   = (_of.relampagoPool||_of.relampagoActivo||[]).map(p=>normOfertaProducto(p,'relampago'));
+  // Pool del flyer = activos si los hay, pool completo si horario off pero hay candidatos
+  // (permite hacer flyer anticipado aunque el horario no haya arrancado)
+  _pools.relampago = _pools._relActivos.length > 0
+    ? _pools._relActivos
+    : _pools._relTodos;
 
   // ── DESTACADAS ────────────────────────────────────────────────────────────
-  _pools._desActivos = _of.destacadasActivas || [];
-  _pools._desTodas   = _of.destacadasPool    || _pools._desActivos;
-
-  const desFuente = _pools._desActivos.length > 0 ? _pools._desActivos : _pools._desTodas;
-  _pools.destacadas = desFuente.map(p => normOfertaProducto(p, 'destacadas'));
+  // Destacadas: activos del GAS
+  _pools._desActivos = (_of.destacadasActivas||[]).map(p=>normOfertaProducto(p,'destacadas'));
+  _pools._desTodas   = (_of.destacadasPool||_of.destacadasActivas||[]).map(p=>normOfertaProducto(p,'destacadas'));
+  _pools.destacadas  = _pools._desActivos.length > 0
+    ? _pools._desActivos
+    : _pools._desTodas;
 
   // ── ESPECIALES ────────────────────────────────────────────────────────────
   // El GAS ya hace la rotación — especialesActivas viene vacío si horario off
-  _pools._espActivos = _of.especialesActivas || [];
-  // Para el pool del flyer: si están activas usarlas, sino buscar en _prods
-  const espFuente = _pools._espActivos.length > 0
-    ? _pools._espActivos
-    : _prods.filter(p=>p.esp===1&&p.stock>0).slice(0,_limites.especiales);
-  _pools.especiales = espFuente.map(p => {
-    // normOfertaProducto o calcEsp según origen — forzar esp=1 siempre
-    const base = p.id&&p.nombre&&p.precio ? normOfertaProducto(p,'especiales') : {...p,...calcEsp(p)};
-    return {...base, esp:1}; // garantizar que getOfertaTipo lo identifique como especial
-  });
+  // Especiales: el GAS manda especialesActivas ya rotados
+  // Si viene vacío = ofertas off = pool vacío (NO fallback a planilla)
+  _pools._espActivos = (_of.especialesActivas||[]).length > 0
+    ? (_of.especialesActivas).map(p=>({...normOfertaProducto(p,'especiales'), esp:1}))
+    : [];
+  // Pool del flyer = activos si hay, vacío si no hay
+  // (el usuario elige modo especiales sabiendo que están off)
+  _pools.especiales = _pools._espActivos;
+  // _espTodas = todos en planilla, solo para referencia en log/diag
   _pools._espTodas = _prods.filter(p=>p.esp===1&&p.stock>0).map(p=>({...p,...calcEsp(p)}));
 
   // ── PROMOS ────────────────────────────────────────────────────────────────
