@@ -230,7 +230,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
   <div class="h-brand">
     <div class="h-icon">🖼</div>
     <div>
-      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v5.3</span></div>
+      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v5.4</span></div>
       <div class="h-sub">Generador para redes sociales</div>
     </div>
   </div>
@@ -372,7 +372,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-const VERSION = 'v5.3';
+const VERSION = 'v5.4';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -1359,9 +1359,19 @@ async function drawCard(ctx,p,cx,cy,CW,CH,FH,P,pk){
   const img=await loadImg(p.name);
   if(img){
     ctx.save();rr(ctx,cx+5,cy+5,CW-10,FH-2,7);ctx.clip();
-    const iw=img.naturalWidth||img.width,ih=img.naturalHeight||img.height;
-    const sc=Math.min((CW-10)/iw,(FH-2)/ih);
-    ctx.drawImage(img,cx+5+(CW-10-iw*sc)/2,cy+5+(FH-2-ih*sc)/2,iw*sc,ih*sc);
+    const iw=img.naturalWidth||img.width, ih=img.naturalHeight||img.height;
+    const areaW=CW-10, areaH=FH-2;
+    // Cover: escalar para llenar el área sin dejar espacio vacío
+    // Luego centrar — elimina el aire encima de productos con fondo transparente
+    const scCover=Math.max(areaW/iw, areaH/ih);
+    const scContain=Math.min(areaW/iw, areaH/ih);
+    // Si la imagen es casi cuadrada usar cover; si muy vertical/horizontal, contain
+    // para no cortar el producto
+    const ratio=Math.max(iw,ih)/Math.min(iw,ih);
+    const sc = ratio<1.6 ? scCover*0.92 : scContain; // cuadradas→casi-cover, rectangulares→contain
+    const dx=cx+5+(areaW-iw*sc)/2;
+    const dy=cy+5+(areaH-ih*sc)/2;
+    ctx.drawImage(img,dx,dy,iw*sc,ih*sc);
     ctx.restore();
   } else {
     ctx.fillStyle=P.card2;rr(ctx,cx+5,cy+5,CW-10,FH-2,7);ctx.fill();
@@ -1398,92 +1408,100 @@ async function drawCard(ctx,p,cx,cy,CW,CH,FH,P,pk){
   }
 
   // ── Zona de texto ─────────────────────────────────────────────────────────
-  const tzY = cy+FH+3;
+  const tzY  = cy+FH+3;
   const tzH  = CH-FH-3;
-
-  // Tamaños relativos según ancho de card
-  const sz    = CW<85?'xs':CW<110?'sm':'md';
-  const nomFs = {xs:8, sm:10, md:11}[sz];
-  const ahoFs = {xs:13,sm:15, md:17}[sz];       // AHORA — 100% (subido)
-  const antFs = Math.round(ahoFs*0.75);           // ANTES — 75% (más legible)
-  const proFs = Math.round(ahoFs*0.72);           // promo — 72% (más visible)
-
-  // ── NOMBRE centrado, máx 2 líneas ─────────────────────────────────────────
-  ctx.fillStyle=P.txt; ctx.textAlign='center';
-  ctx.font='bold '+nomFs+'px "DM Sans",sans-serif';
-  wrap(ctx, corto(p.name, sz==='xs'?14:sz==='sm'?20:26),
-       cx+CW/2, tzY+nomFs+1, CW-8, nomFs+2, 2);
-
-  // ── LÍNEA DIVISORIA sutil entre nombre y precios ──────────────────────────
   const tipo2 = getOfertaTipo(p);
   const is2da = tipo2==='relampago_2da50' && !_overrides[p.id];
   const isNxM = tipo2==='relampago_nxm'  && !_overrides[p.id];
   const hasDisc = po < price;
 
-  // Altura del bloque de precios: 2 líneas base + 1 si hay promo
-  const promoLines = (is2da||isNxM) ? 1 : 0;
-  const blkH = antFs + 3 + ahoFs + (promoLines ? proFs+3 : 0);
-  // Anclar el bloque al fondo de la card con padding fijo
-  const blkBot = cy+CH-5;
-  const blkY   = blkBot - blkH;
+  // Tamaños relativos según ancho de card
+  const sz    = CW<85?'xs':CW<110?'sm':'md';
+  const nomFs = {xs:8, sm:10, md:11}[sz];
+  const ahoFs = {xs:13,sm:15, md:17}[sz];      // AHORA  — 100%
+  const antFs = Math.round(ahoFs*0.62);          // ANTES  — 62% (tenue, no compite)
+  const proFs = Math.round(ahoFs*0.70);          // promo  — 70% (visible, secundario)
 
-  // Línea divisoria justo encima del bloque
-  ctx.strokeStyle='rgba(180,210,180,0.55)'; ctx.lineWidth=0.8;
+  // Altura total del bloque de precios
+  const promoLines = hasDisc && (is2da||isNxM) ? 1 : 0;
+  const blkH = hasDisc
+    ? antFs+2 + ahoFs+1 + (promoLines ? proFs+2 : 0)
+    : ahoFs;
+  const PAD_BOT = 6;
+  const blkBot  = cy+CH-PAD_BOT;
+  const blkY    = blkBot-blkH;        // bloque siempre anclado al fondo
+
+  // ── 1. NOMBRE — arriba de la línea, margen claro ─────────────────────────
+  // Calcular cuánto espacio tiene el nombre ANTES de la línea
+  const nomMaxY = blkY - 8;           // 8px de aire sobre la línea
+  ctx.fillStyle=P.txt; ctx.textAlign='center';
+  ctx.font='bold '+nomFs+'px "DM Sans",sans-serif';
+  const nomLines2 = nomMaxY - (tzY+nomFs) > nomFs+2 ? 2 : 1; // 2 líneas si cabe
+  wrap(ctx, corto(p.name, sz==='xs'?14:sz==='sm'?20:26),
+       cx+CW/2, tzY+nomFs+1, CW-8, nomFs+2, nomLines2);
+
+  // ── 2. LÍNEA DIVISORIA — entre nombre y precios, nunca sobre el texto ────
+  ctx.strokeStyle='rgba(160,200,160,0.5)'; ctx.lineWidth=0.8;
   ctx.beginPath();ctx.moveTo(cx+6,blkY-4);ctx.lineTo(cx+CW-6,blkY-4);ctx.stroke();
 
+  // ── 3. BLOQUE DE PRECIOS ─────────────────────────────────────────────────
   if(hasDisc){
-    // ── ANTES: color gris-verde oscurecido, 75% tamaño, tachado nítido ──
-    const antColor='#5a7a5a';   // gris-verde más oscuro — legible sin competir
+    // ANTES — 62% tamaño, gris-verde tenue, tachado fino
+    // Solo color y tachado lo distinguen, NO el tamaño
+    const antColor='#7a9a7a';         // más tenue — presente pero no grita
     ctx.fillStyle=antColor;
     ctx.font=antFs+'px "DM Mono",sans-serif';
     ctx.textAlign='left';
-    const antTxt='ANTES  $'+fmt(price);
-    ctx.fillText(antTxt, cx+5, blkY+antFs-1);
-    // Tachado 1.2px — más visible
+    const antTxt='$'+fmt(price);
+    const antX=cx+5, antY=blkY+antFs;
+    ctx.fillText(antTxt, antX, antY);
+    // Tachado 1px
     const antW=ctx.measureText(antTxt).width;
-    ctx.strokeStyle=antColor; ctx.lineWidth=1.2;
+    ctx.strokeStyle=antColor; ctx.lineWidth=1;
     ctx.beginPath();
-    ctx.moveTo(cx+5, blkY+antFs-1-Math.round(antFs*0.38));
-    ctx.lineTo(cx+5+antW, blkY+antFs-1-Math.round(antFs*0.38));
+    ctx.moveTo(antX, antY-Math.round(antFs*0.4));
+    ctx.lineTo(antX+antW, antY-Math.round(antFs*0.4));
     ctx.stroke();
 
-    // ── AHORA: "AHORA" semibold + precio extrabold ───────────────────────
-    const ahoY = blkY+antFs+3+ahoFs-1;
-    // "AHORA " en semibold (600)
+    // AHORA — "AHORA" en 600, precio en bold más grande (distintos pesos)
+    const ahoY = blkY+antFs+2+ahoFs;
     ctx.fillStyle=P.ac;
+    // "AHORA " — semibold, mismo tamaño que ANTES para no pesar doble
     ctx.font='600 '+antFs+'px "DM Sans",sans-serif';
     ctx.textAlign='left';
-    const ahoLabel='AHORA ';
-    ctx.fillText(ahoLabel, cx+5, ahoY);
-    // Precio en extrabold — más grande y pesado
-    const ahoLblW=ctx.measureText(ahoLabel).width;
+    const ahoLbl='AHORA ';
+    ctx.fillText(ahoLbl, cx+5, ahoY);
+    // Número — extrabold, ahoFs (el grande)
+    const lblW=ctx.measureText(ahoLbl).width;
     ctx.font='bold '+ahoFs+'px "DM Sans",sans-serif';
-    ctx.fillText('$'+fmt(po), cx+5+ahoLblW, ahoY);
+    ctx.fillText('$'+fmt(po), cx+5+lblW, ahoY);
 
-    // ── PROMO LINE: más grande, semibold, verde medio ─────────────────────
-    if(is2da){
-      const po2da=Math.round(p.price*0.75);
+    // PROMO — verde medio, 70%, semibold
+    if(promoLines){
       ctx.fillStyle='#2e7d32';
       ctx.font='600 '+proFs+'px "DM Sans",sans-serif';
       ctx.textAlign='left';
-      ctx.fillText('2ª ud → $'+fmt(po2da)+' c/u', cx+5, ahoY+proFs+3);
-
-    } else if(isNxM && ORS[String(p.rel)]){
-      const o=ORS[String(p.rel)];
-      const pUni=Math.round(price*o.pagas/o.cantidad);
-      ctx.fillStyle='#2e7d32';
-      ctx.font='600 '+proFs+'px "DM Sans",sans-serif';
-      ctx.textAlign='left';
-      ctx.fillText(o.nombre.toUpperCase()+' → $'+fmt(pUni)+' c/u', cx+5, ahoY+proFs+3);
+      if(is2da){
+        const po2da=Math.round(p.price*0.75);
+        ctx.fillText('2ª ud → $'+fmt(po2da)+' c/u', cx+5, ahoY+proFs+2);
+      } else if(isNxM && ORS[String(p.rel)]){
+        const o=ORS[String(p.rel)];
+        const pUni=Math.round(price*o.pagas/o.cantidad);
+        ctx.fillText(o.nombre.toUpperCase()+' → $'+fmt(pUni)+' c/u', cx+5, ahoY+proFs+2);
+      }
     }
 
   } else {
-    // Sin descuento — precio grande centrado
+    // Sin descuento — precio centrado
     ctx.fillStyle=P.ac;
     ctx.font='bold '+ahoFs+'px "DM Sans",sans-serif';
     ctx.textAlign='center';
     ctx.fillText('$'+fmt(po), cx+CW/2, blkY+ahoFs);
   }
+
+  // ── 4. IMAGEN — ajustar encuadre vertical para eliminar espacio vacío ─────
+  // Ya está renderizada arriba — el clip ya cubre toda la zona FH
+  // No hay acción adicional aquí (el fit ya es contain)
 }
 
 // ── FORMATOS ──────────────────────────────────────────────────────────────────
