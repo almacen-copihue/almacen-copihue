@@ -338,6 +338,7 @@ let prodSelIdx=-1; // índice del producto seleccionado en el top (-1 = ninguno)
 // ===== COMPRA SUGERIDA INTELIGENTE — estado =====
 let showCSI=false, csiFiltroPeriodo='todos';
 let showRecienLlegados=false;
+let stockMap={}; // poblado en renderApp(), accedido por abrirModalProd()
 
 // safeEnc: encodeURIComponent seguro — evita URIError si el nombre tiene
 // caracteres Unicode inválidos (surrogates desparejados) cargados desde Sheets
@@ -379,6 +380,7 @@ async function init(){
     const r=await fetch(API_URL+'?action=getReportes',{redirect:'follow',signal:AbortSignal.timeout(20000)});
     const d=await r.json();
     if(d.error) throw new Error(d.error);
+    if(!d||!Array.isArray(d.items)||!Array.isArray(d.totales)) throw new Error('Respuesta inválida del servidor');
     raw=d;
     // Seleccionar hoy solo si el mes visible es el mes actual
     const hoy=new Date();
@@ -407,17 +409,17 @@ function filtrar(dias){
   const totsF=tots.filter(t=>!EXCLUIR_VENDEDORES.includes(normVend(t.vendedor||'')));
   // Tickets válidos
   let tksOk=new Set(totsF.map(t=>t.fechaStr+'_'+t.ticket));
+  // Map para lookup O(1) — evita Array.find() O(n) dentro del filter
+  const totsMap=new Map(totsF.map(t=>[t.fechaStr+'_'+t.ticket,t]));
   if(!metActivos.has('TODOS')){
     tksOk=new Set([...tksOk].filter(tk=>{
-      const [f,ti]=tk.split('_');
-      const tot=totsF.find(t=>t.fechaStr===f&&t.ticket===ti);
+      const tot=totsMap.get(tk);
       return tot&&Array.from(metActivos).some(m=>(tot.metodo||'').includes(m));
     }));
   }
   if(!vendActivos.has('TODOS')){
     tksOk=new Set([...tksOk].filter(tk=>{
-      const [f,ti]=tk.split('_');
-      const tot=totsF.find(t=>t.fechaStr===f&&t.ticket===ti);
+      const tot=totsMap.get(tk);
       // Comparar normalizando tildes
       return tot&&[...vendActivos].some(va=>normVend(va)===normVend(tot.vendedor||''));
     }));
@@ -586,7 +588,7 @@ function renderApp(){
   }).join('');
 
     // Top productos — escala separada para cada barra
-  const stockMap={};
+  stockMap={};
   (raw.vencProximos||[]).forEach(v=>{ if(v.nombre) stockMap[v.nombre]=(stockMap[v.nombre]!==undefined?Math.min(stockMap[v.nombre],v.stock):v.stock); });
   function stockBadge(nombre){
     if(stockMap[nombre]===undefined) return '';
@@ -1408,7 +1410,7 @@ function cerrarModalProd() {
 // Listener global para tap en prod-row — evita problemas de escape de comillas
 document.addEventListener('click', function(e) {
   const row = e.target.closest('.prod-clickable');
-  if (row) abrirModalProd(row.dataset.nombre);
+  if (row && row.dataset.nombre) abrirModalProd(row.dataset.nombre);
 });
 
 // ====== COMPRA SUGERIDA INTELIGENTE ======
@@ -1586,9 +1588,9 @@ function calcularMotorCSI() {
     });
   });
 
-  // Orden grupos: diario > especial > semanal > reactivacion > mensual > sin dato al final
+  // Orden grupos: diario > reactivacion > semanal > mensual > especial > sin dato al final
   // Dentro de cada grupo: mayor rotación primero (promDia desc), luego menor stock (más urgente)
-  var ORD = {diario:0, especial:1, semanal:2, reactivacion:3, mensual:4};
+  var ORD = {diario:0, reactivacion:1, semanal:2, mensual:3, especial:4};
   filas.sort(function(a,b) {
     // Pausados siempre al final
     if (a.pausado !== b.pausado) return a.pausado ? 1 : -1;
@@ -1614,15 +1616,7 @@ function renderCompraSugerida() {
   if (!raw) return '<div class="empty">Sin datos</div>';
   var res = calcularMotorCSI();
   var todos = res.filas, nMuertos = res.nMuertos, nVencOmit = res.nVencOmit, nSinStock = res.nSinStock;
-  var ORDEN_PERIODO = { diario:0, reactivacion:1, semanal:2, mensual:3, especial:4 };
-  todos.sort(function(a,b){
-    var aSD=a.compraSugerida===null,bSD=b.compraSugerida===null;
-    if(aSD!==bSD) return aSD?1:-1;
-    var oa=ORDEN_PERIODO[a.periodo]!==undefined?ORDEN_PERIODO[a.periodo]:9;
-    var ob=ORDEN_PERIODO[b.periodo]!==undefined?ORDEN_PERIODO[b.periodo]:9;
-    if(oa!==ob) return oa-ob;
-    return (a.stock===-1?9999:a.stock)-(b.stock===-1?9999:b.stock);
-  });
+  // orden ya aplicado por calcularMotorCSI()
   var nDia=todos.filter(function(p){return p.periodo==='diario';}).length;
   var nSem=todos.filter(function(p){return p.periodo==='semanal';}).length;
   var nMen=todos.filter(function(p){return p.periodo==='mensual';}).length;
