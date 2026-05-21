@@ -230,7 +230,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
   <div class="h-brand">
     <div class="h-icon">🖼</div>
     <div>
-      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v5.4</span></div>
+      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v5.5</span></div>
       <div class="h-sub">Generador para redes sociales</div>
     </div>
   </div>
@@ -372,7 +372,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-const VERSION = 'v5.4';
+const VERSION = 'v5.5';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -615,9 +615,10 @@ function calcRel(p){
     return {po, et:'-'+oferta.descuento+'%', pct:oferta.descuento, eslogan:oferta.eslogan};
   }
   if(oferta.tipo==='2da50'){
-    // Precio efectivo por unidad tomando de a 2: (precio + precio*0.5)/2
-    const po = Math.round(p.price*0.75); // precio promedio pagado por unidad
-    return {po, et:'2DA 50%', pct:25, eslogan:oferta.eslogan, nxm:oferta};
+    // AHORA = precio 1ra unidad (sin cambio)
+    // La promo está en la 2da: "2ª unidad: $X" — no mostramos promedio
+    const po = p.price;
+    return {po, et:'2DA 50%', pct:0, eslogan:oferta.eslogan, nxm:oferta};
   }
   // NxM: precio unitario sin cambio, el ahorro es por ciclo
   const pct = Math.round((oferta.cantidad-oferta.pagas)/oferta.cantidad*100);
@@ -1091,9 +1092,25 @@ function renderCandidatos(){
     const otCls=tipo.startsWith('relampago')||tipo==='cervecero'?'ot-rel':
                 tipo==='destacadas'?'ot-des':tipo==='especiales'?'ot-esp':
                 tipo==='promos'?'ot-pro':'ot-rel';
-    const prLabel = displayPo<displayP
-      ? `<s style="opacity:.4">$${fmt(displayP)}</s> <b>$${fmt(displayPo)}</b>`
-      : `<b>$${fmt(displayP)}</b>`;
+    const _tipo_lista = getOfertaTipo(p);
+    const _is2da_lista = _tipo_lista==='relampago_2da50' && !_overrides[p.id];
+    const _isNxM_lista = _tipo_lista==='relampago_nxm'  && !_overrides[p.id];
+    let prLabel;
+    if(_is2da_lista){
+      // Mostrar precio de la 2da unidad, no el promedio
+      const p2da = Math.round(displayP*0.50);
+      prLabel = `<s style="opacity:.45">$${fmt(displayP)}</s> <b style="color:var(--p)">$${fmt(displayP)}</b> · <span style="color:#2e7d32;font-size:.7em">2ª ud: $${fmt(p2da)}</span>`;
+    } else if(_isNxM_lista && ORS[String(p.rel)]){
+      const o=ORS[String(p.rel)];
+      const etNxM = o.cantidad===2&&o.pagas===1
+        ? 'Llevás 2, pagás 1'
+        : o.nombre.toUpperCase()+' · '+(o.cantidad-o.pagas)+' gratis';
+      prLabel = `<b style="color:var(--p)">$${fmt(displayP)}</b> · <span style="color:#2e7d32;font-size:.7em">${etNxM}</span>`;
+    } else if(displayPo<displayP){
+      prLabel = `<s style="opacity:.45">$${fmt(displayP)}</s> <b>$${fmt(displayPo)}</b>`;
+    } else {
+      prLabel = `<b>$${fmt(displayP)}</b>`;
+    }
     // Badge con color oficial
     const badgeBg=oc.hex, badgeTxt=oc.txt, badgeBdr=oc.bdr;
     return `<div class="pi${s?' sel':''}${edited?' edited':''} ${otCls}" onclick="clickProd(${p.id},this,event)">
@@ -1413,7 +1430,7 @@ async function drawCard(ctx,p,cx,cy,CW,CH,FH,P,pk){
   const tipo2 = getOfertaTipo(p);
   const is2da = tipo2==='relampago_2da50' && !_overrides[p.id];
   const isNxM = tipo2==='relampago_nxm'  && !_overrides[p.id];
-  const hasDisc = po < price;
+  const hasDisc = po < price || is2da || isNxM;
 
   // Tamaños relativos según ancho de card
   const sz    = CW<85?'xs':CW<110?'sm':'md';
@@ -1423,10 +1440,10 @@ async function drawCard(ctx,p,cx,cy,CW,CH,FH,P,pk){
   const proFs = Math.round(ahoFs*0.70);          // promo  — 70% (visible, secundario)
 
   // Altura total del bloque de precios
-  const promoLines = hasDisc && (is2da||isNxM) ? 1 : 0;
-  const blkH = hasDisc
+  const promoLines = (is2da||isNxM) ? 1 : 0;
+  const blkH = (po < price)
     ? antFs+2 + ahoFs+1 + (promoLines ? proFs+2 : 0)
-    : ahoFs;
+    : ahoFs+1 + (promoLines ? proFs+2 : 0);
   const PAD_BOT = 6;
   const blkBot  = cy+CH-PAD_BOT;
   const blkY    = blkBot-blkH;        // bloque siempre anclado al fondo
@@ -1445,7 +1462,7 @@ async function drawCard(ctx,p,cx,cy,CW,CH,FH,P,pk){
   ctx.beginPath();ctx.moveTo(cx+6,blkY-4);ctx.lineTo(cx+CW-6,blkY-4);ctx.stroke();
 
   // ── 3. BLOQUE DE PRECIOS ─────────────────────────────────────────────────
-  if(hasDisc){
+  if(po < price){
     // ANTES — 62% tamaño, gris-verde tenue, tachado fino
     // Solo color y tachado lo distinguen, NO el tamaño
     const antColor='#7a9a7a';         // más tenue — presente pero no grita
@@ -1477,18 +1494,60 @@ async function drawCard(ctx,p,cx,cy,CW,CH,FH,P,pk){
     ctx.fillText('$'+fmt(po), cx+5+lblW, ahoY);
 
     // PROMO — verde medio, 70%, semibold
+    // Estructura comercial correcta: mostrar beneficio real, no promedio
     if(promoLines){
       ctx.fillStyle='#2e7d32';
-      ctx.font='600 '+proFs+'px "DM Sans",sans-serif';
       ctx.textAlign='left';
       if(is2da){
-        const po2da=Math.round(p.price*0.75);
-        ctx.fillText('2ª ud → $'+fmt(po2da)+' c/u', cx+5, ahoY+proFs+2);
+        // 2DA 50%: mostrar precio exacto de la 2da unidad
+        // "2da unidad: $1.000" — clarísimo, sin cálculos mentales
+        const precio2da = Math.round(p.price * 0.5); // mitad exacta
+        ctx.font='600 '+proFs+'px "DM Sans",sans-serif';
+        ctx.fillText('2da unidad: $'+fmt(precio2da), cx+5, ahoY+proFs+2);
+
       } else if(isNxM && ORS[String(p.rel)]){
         const o=ORS[String(p.rel)];
-        const pUni=Math.round(price*o.pagas/o.cantidad);
-        ctx.fillText(o.nombre.toUpperCase()+' → $'+fmt(pUni)+' c/u', cx+5, ahoY+proFs+2);
+        if(o.cantidad===2 && o.pagas===1){
+          // 2x1: "2x1 — pagás 1" — concepto claro
+          ctx.font='600 '+proFs+'px "DM Sans",sans-serif';
+          ctx.fillText('2x1 — llevás 2, pagás 1', cx+5, ahoY+proFs+2);
+        } else if(o.cantidad===3 && o.pagas===2){
+          // 3x2: "3x2 — pagás 2"
+          ctx.font='600 '+proFs+'px "DM Sans",sans-serif';
+          ctx.fillText('3x2 — llevás 3, pagás 2', cx+5, ahoY+proFs+2);
+        } else {
+          // Otros NxM
+          ctx.font='600 '+proFs+'px "DM Sans",sans-serif';
+          ctx.fillText(o.nombre.toUpperCase()+' — pagás '+o.pagas, cx+5, ahoY+proFs+2);
+        }
       }
+    }
+
+  } else if(is2da || isNxM){
+    // 2DA 50% o NxM: mostrar precio normal + promo line
+    // Sin tachado — el precio 1ra unidad no cambia
+    const ahoY2 = blkY+ahoFs;
+    ctx.fillStyle=P.ac;
+    ctx.font='600 '+antFs+'px "DM Sans",sans-serif';
+    ctx.textAlign='left';
+    const ahoLbl2='AHORA ';
+    ctx.fillText(ahoLbl2, cx+5, ahoY2);
+    const lblW2=ctx.measureText(ahoLbl2).width;
+    ctx.font='bold '+ahoFs+'px "DM Sans",sans-serif';
+    ctx.fillText('$'+fmt(po), cx+5+lblW2, ahoY2);
+
+    // Promo line
+    ctx.fillStyle='#2e7d32';
+    ctx.font='600 '+proFs+'px "DM Sans",sans-serif';
+    ctx.textAlign='left';
+    if(is2da){
+      const precio2da=Math.round(p.price*0.5);
+      ctx.fillText('2da unidad: $'+fmt(precio2da), cx+5, ahoY2+proFs+2);
+    } else if(isNxM && ORS[String(p.rel)]){
+      const o=ORS[String(p.rel)];
+      if(o.cantidad===2&&o.pagas===1) ctx.fillText('2x1 — llevás 2, pagás 1', cx+5, ahoY2+proFs+2);
+      else if(o.cantidad===3&&o.pagas===2) ctx.fillText('3x2 — llevás 3, pagás 2', cx+5, ahoY2+proFs+2);
+      else ctx.fillText(o.nombre.toUpperCase()+' — pagás '+o.pagas, cx+5, ahoY2+proFs+2);
     }
 
   } else {
