@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>ver.8 · Copihue · Reportes</title>
+<title>ver.9 · Copihue · Reportes</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
@@ -257,6 +257,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
 .dia-dow{display:block;color:var(--gris);font-size:.48rem;line-height:1}
 .hoy-col .dia-n{background:var(--naranja);color:#fff;border-radius:8px;padding:1px 4px}
 
+.fiado-det.open{display:block!important}
 .toggle-btn{width:100%;padding:9px;border:2px solid var(--borde);border-radius:12px;background:#fff;font-size:.78rem;font-weight:700;color:var(--gris);cursor:pointer;font-family:inherit;margin-bottom:8px;display:flex;align-items:center;justify-content:center;gap:6px}
 .toggle-btn:active{background:var(--vl)}
 
@@ -333,7 +334,7 @@ let aniosAbiertos=new Set(); // años anteriores expandidos en el selector
 let metActivos=new Set(['TODOS']);
 let vendActivos=new Set(['TODOS']);
 let topOrden='venta'; // 'venta' | 'ganancia'
-let showVenc=false, showDiaSem=false, showHoras=false, showPDias=false, showGanDias=false;
+let showVenc=false, showDiaSem=false, showHoras=false, showPDias=false, showGanDias=false, showMetodos=false, showVendedores=false, showTopProd=false, showMejDias=false, showCompMeses=false;
 let prodSelIdx=-1; // índice del producto seleccionado en el top (-1 = ninguno)
 // ===== COMPRA SUGERIDA INTELIGENTE — estado =====
 let showCSI=false, csiFiltroPeriodo='todos';
@@ -575,12 +576,24 @@ function renderApp(){
     '<div class="card"><div class="card-lbl2">Ticket promedio</div><div class="card-val2">'+fmt(stats.nTks>0?stats.venta/stats.nTks:0)+'</div></div>'+
     '</div>';
 
-  // Métodos breakdown
-  const metRowsH=Object.entries(stats.metodos).sort((a,b)=>b[1]-a[1]).map(([m,t])=>{
+  // Métodos breakdown — FIADO colapsado en línea resumen + detalle expandible
+  const _metEntries=Object.entries(stats.metodos).sort((a,b)=>b[1]-a[1]);
+  const _metNormales=_metEntries.filter(([m])=>!m.toUpperCase().includes('FIADO')||!m.includes('|'));
+  const _metFiados=_metEntries.filter(([m])=>m.toUpperCase().includes('FIADO')&&m.includes('|'));
+  const _totalFiado=_metFiados.reduce((s,[,t])=>s+t,0);
+  const _pctFiado=stats.venta>0?Math.round(_totalFiado/stats.venta*100):0;
+  const _metFiadoResumen=_totalFiado>0
+    ?'<div class="row"><span class="row-l" style="cursor:pointer;color:var(--naranja)" onclick="this.closest(\'.tar\').querySelector(\'.fiado-det\').classList.toggle(\'open\')">'+
+        '📋 FIADO <span style="font-size:.65rem;color:var(--gris)">('+_metFiados.length+' · tocá para ver)</span></span>'+
+        '<span><strong class="row-v" style="color:var(--naranja)">'+fmt(_totalFiado)+'</strong><span class="row-pct">'+_pctFiado+'%</span></span></div>'+
+      '<div class="fiado-det" style="display:none;padding-left:10px;border-left:2px solid var(--nl)">'+
+        _metFiados.map(([m,t])=>{const pct=stats.venta>0?Math.round(t/stats.venta*100):0;return'<div class="row" style="font-size:.78rem"><span class="row-l" style="color:var(--gris)">'+m.replace(/FIADO\s*\|/i,'').trim()+'</span><span><strong class="row-v">'+fmt(t)+'</strong><span class="row-pct">'+pct+'%</span></span></div>';}).join('')+
+      '</div>'
+    :'';
+  const metRowsH=_metNormales.map(([m,t])=>{
     const pct=stats.venta>0?Math.round(t/stats.venta*100):0;
     return'<div class="row"><span class="row-l">'+m+'</span><span><strong class="row-v">'+fmt(t)+'</strong><span class="row-pct">'+pct+'%</span></span></div>';
-  }).join('');
-
+  }).join('')+_metFiadoResumen;
   // Vendedores
   const vendRowsH=Object.values(stats.vendedores).sort((a,b)=>b.total-a.total).map(({nombre,total})=>{
     const pct=stats.venta>0?Math.round(total/stats.venta*100):0;
@@ -991,35 +1004,60 @@ function renderApp(){
         :'')+
       // Resumen
       cardsH+
-      // Métodos
-      (Object.keys(stats.metodos).length?'<div class="tar"><div class="tar-t">💳 Por método de pago</div>'+metRowsH+'</div>':'')+
-      // Vendedores
-      (Object.keys(stats.vendedores).length>1?'<div class="tar"><div class="tar-t">👥 Por vendedor</div>'+vendRowsH+'</div>':'')+
-      // Top productos — con toggle venta/ganancia
-      '<div class="tar" style="'+(topOrden==='ganancia'?'border-color:var(--naranja)':'')+'">'+
-        '<div class="tar-t" style="display:flex;align-items:center;justify-content:space-between">'+
-          '<span style="color:'+(topOrden==='ganancia'?'var(--naranja)':'inherit')+'">'+(topOrden==='venta'?'🏆 Top por venta':'💰 Top por ganancia')+'</span>'+
-          '<div style="display:flex;gap:4px">'+
-            '<button onclick="topOrden=\'venta\';prodSelIdx=-1;renderApp()" style="padding:3px 10px;border-radius:20px;border:1px solid '+(topOrden==='venta'?'var(--verde)':'var(--borde)')+';background:'+(topOrden==='venta'?'var(--vl)':'#fff')+';color:'+(topOrden==='venta'?'var(--vd)':'var(--gris)')+';font-size:.65rem;font-weight:700;cursor:pointer;">🟩 Venta</button>'+
-            '<button onclick="topOrden=\'ganancia\';prodSelIdx=-1;renderApp()" style="padding:3px 10px;border-radius:20px;border:1px solid '+(topOrden==='ganancia'?'var(--naranja)':'var(--borde)')+';background:'+(topOrden==='ganancia'?'var(--nl)':'#fff')+';color:'+(topOrden==='ganancia'?'#e65100':'var(--gris)')+';font-size:.65rem;font-weight:700;cursor:pointer;">🟧 Ganancia</button>'+
+      // ── Separador ──
+      '<div style="height:1px;background:var(--borde);margin:8px 0 10px"></div>'+
+      // Métodos (colapsable)
+      '<button class="toggle-btn" onclick="showMetodos=!showMetodos;renderApp()" style="margin-bottom:6px">'+
+        (showMetodos?'▲':'▼')+' 💳 Por método de pago'+
+      '</button>'+
+      (showMetodos&&Object.keys(stats.metodos).length?'<div class="tar">'+metRowsH+'</div>':'')+
+      // Vendedores (colapsable)
+      (Object.keys(stats.vendedores).length>1?
+        '<button class="toggle-btn" onclick="showVendedores=!showVendedores;renderApp()" style="margin-bottom:6px">'+
+          (showVendedores?'▲':'▼')+' 👥 Por vendedor'+
+        '</button>'+
+        (showVendedores?'<div class="tar">'+vendRowsH+'</div>':'')
+      :'')+
+      // Top productos (colapsable)
+      '<button class="toggle-btn" onclick="showTopProd=!showTopProd;prodSelIdx=-1;renderApp()" style="margin-bottom:6px;border-color:'+(topOrden==='ganancia'?'var(--naranja)':'var(--borde)')+';color:'+(topOrden==='ganancia'?'var(--naranja)':'var(--gris)')+'">'+
+        (showTopProd?'▲':'▼')+' '+(topOrden==='venta'?'🏆 Top por venta':'💰 Top por ganancia')+
+      '</button>'+
+      (showTopProd?
+        '<div class="tar" style="'+(topOrden==='ganancia'?'border-color:var(--naranja)':'')+'">'+
+          '<div class="tar-t" style="display:flex;align-items:center;justify-content:space-between">'+
+            '<span style="color:'+(topOrden==='ganancia'?'var(--naranja)':'inherit')+'">'+(topOrden==='venta'?'🏆 Top por venta':'💰 Top por ganancia')+'</span>'+
+            '<div style="display:flex;gap:4px">'+
+              '<button onclick="topOrden='venta';prodSelIdx=-1;renderApp()" style="padding:3px 10px;border-radius:20px;border:1px solid '+(topOrden==='venta'?'var(--verde)':'var(--borde)')+';background:'+(topOrden==='venta'?'var(--vl)':'#fff')+';color:'+(topOrden==='venta'?'var(--vd)':'var(--gris)')+';font-size:.65rem;font-weight:700;cursor:pointer;">🟩 Venta</button>'+
+              '<button onclick="topOrden='ganancia';prodSelIdx=-1;renderApp()" style="padding:3px 10px;border-radius:20px;border:1px solid '+(topOrden==='ganancia'?'var(--naranja)':'var(--borde)')+';background:'+(topOrden==='ganancia'?'var(--nl)':'#fff')+';color:'+(topOrden==='ganancia'?'#e65100':'var(--gris)')+';font-size:.65rem;font-weight:700;cursor:pointer;">🟧 Ganancia</button>'+
+            '</div>'+
           '</div>'+
-        '</div>'+
-        (topOrden==='venta'?topsH:topGanH)+
-      '</div>'+
-      // Mejores días
-      (mejoresDias.length?'<div class="tar"><div class="tar-t">🏅 Mejores días</div>'+mejDiasH+'</div>':'')+
+          (topOrden==='venta'?topsH:topGanH)+
+        '</div>'
+      :'')+
+      // Mejores días (colapsable)
+      (mejoresDias.length?
+        '<button class="toggle-btn" onclick="showMejDias=!showMejDias;renderApp()" style="margin-bottom:6px">'+
+          (showMejDias?'▲':'▼')+' 🏅 Mejores días'+
+        '</button>'+
+        (showMejDias?'<div class="tar">'+mejDiasH+'</div>':'')
+      :'')+
       // Días semana
       '<button class="toggle-btn" onclick="showDiaSem=!showDiaSem;renderApp()">'+
-        (showDiaSem?'▲':'▼')+' Ventas por día de la semana'+
+        (showDiaSem?'▲':'▼')+' 📅 Ventas por día de la semana'+
       '</button>'+
       (showDiaSem?'<div class="tar"><div class="tar-t">📅 Por día de semana</div>'+dSemH+'</div>':'')+
       // Horas
       '<button class="toggle-btn" onclick="showHoras=!showHoras;renderApp()">'+
-        (showHoras?'▲':'▼')+' Horas de más ventas'+
+        (showHoras?'▲':'▼')+' 🕐 Horas de más ventas'+
       '</button>'+
       (showHoras?'<div class="tar"><div class="tar-t">🕐 Por hora del día</div>'+horasH+'</div>':'')+
-      // 6 meses
-      (compMH?'<div class="tar"><div class="tar-t">📅 Últimos 6 meses <span style="font-size:.58rem;color:var(--gris)">🟩 venta 🟧 ganancia</span></div>'+compMH+'</div>':'')+
+      // 6 meses (colapsable)
+      (compMH?
+        '<button class="toggle-btn" onclick="showCompMeses=!showCompMeses;renderApp()">'+
+          (showCompMeses?'▲':'▼')+' 📅 Últimos 6 meses'+
+        '</button>'+
+        (showCompMeses?'<div class="tar"><div class="tar-t">📅 Últimos 6 meses <span style="font-size:.58rem;color:var(--gris)">🟩 venta 🟧 ganancia</span></div>'+compMH+'</div>':'')
+      :'')+
       // Vencimientos top 7 días (siempre visible si hay algo urgente)
       (()=>{
         const venc7=venc.filter(v=>v.dias<=7);
