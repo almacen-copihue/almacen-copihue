@@ -823,121 +823,94 @@ function detectMes(fechaStr) {
   return 'unk';
 }
 
-function parseVentasRow(cols, isObj) {
-  if (isObj) {
-    // Object with named keys
-    const k = Object.keys(cols).map(x=>x.toLowerCase());
-    const g = key => {
-      const idx = k.findIndex(x => x.includes(key));
-      return idx >= 0 ? Object.values(cols)[idx] : 0;
+// ── Normaliza cualquier fila a un array de strings/números ──
+function normalizeRow(r) {
+  if (Array.isArray(r)) return r;
+  if (r && typeof r === 'object') return Object.values(r);
+  return [r];
+}
+
+// ── Getter por nombre de columna (para objetos con headers) ──
+function makeGetter(r) {
+  if (!Array.isArray(r) && typeof r === 'object') {
+    const keys = Object.keys(r).map(k => k.toLowerCase().trim());
+    const vals = Object.values(r);
+    return (terms, fallbackIdx) => {
+      for (const t of (Array.isArray(terms)?terms:[terms])) {
+        const i = keys.findIndex(k => k.includes(t.toLowerCase()));
+        if (i >= 0 && vals[i] !== '' && vals[i] !== null && vals[i] !== undefined) return vals[i];
+      }
+      return fallbackIdx !== undefined ? vals[fallbackIdx] : '';
     };
-    const fecha = parseStr(Object.values(cols)[0] || g('fecha') || g('date'));
-    const mes = detectMes(fecha);
-    return [
-      fecha, mes,
-      parseNum(g('efectivo') || g('efect')),
-      parseNum(g('posnet') || g('pos')),
-      parseNum(g('transferencia') || g('transf')),
-      parseNum(g('fiado')),
-      parseNum(g('total')),
-      parseInt(g('tickets') || g('ticket') || 0)
-    ];
   }
-  // Array row: [fecha, mes?, efec, posnet, transf, fiado, total, tickets]
-  if (cols.length < 5) return null;
-  let fecha, efec, posnet, transf, fiado, total, tickets;
-  // Check if col[1] is a month string
-  const col1 = parseStr(cols[1]).toLowerCase();
-  const mesStrings = ['feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic','ene'];
-  if (mesStrings.includes(col1)) {
-    // Format: [fecha, mes, efec, posnet, transf, fiado, total, tickets]
-    fecha = parseStr(cols[0]);
-    efec = parseNum(cols[2]); posnet = parseNum(cols[3]);
-    transf = parseNum(cols[4]); fiado = parseNum(cols[5]);
-    total = parseNum(cols[6]); tickets = parseInt(cols[7]) || 0;
-  } else {
-    // Format: [fecha, efec, posnet, transf, fiado, total, tickets] or similar
-    // Try to detect by looking at what makes sense
-    fecha = parseStr(cols[0]);
-    // Find columns that look like money (large numbers)
-    const nums = cols.slice(1).map(parseNum);
-    if (nums.length >= 5) {
-      efec = nums[0]; posnet = nums[1]; transf = nums[2]; fiado = nums[3];
-      total = nums[4]; tickets = parseInt(cols[6]) || 0;
-    } else {
-      efec = nums[0] || 0; posnet = 0; transf = nums[1] || 0; fiado = 0;
-      total = nums[2] || efec + transf; tickets = 0;
-    }
-  }
+  // array row — getter by index only
+  return (terms, fallbackIdx) => fallbackIdx !== undefined ? r[fallbackIdx] : '';
+}
+
+function parseVentasRow(r) {
+  const cols = normalizeRow(r);
+  const g = makeGetter(r);
+  // fecha
+  const fecha = parseStr(g(['fecha','date','día','dia'], 0));
+  if (!fecha) return null;
   const mes = detectMes(fecha);
-  return [fecha, mes, efec, posnet, transf, fiado, total, tickets];
+  const efec  = parseNum(g(['efectivo','efect','cash'], 2));
+  const pos   = parseNum(g(['posnet','pos','tarjeta','debito','crédito','credito'], 3));
+  const transf= parseNum(g(['transferencia','transf','transfer','mp','mercado'], 4));
+  const fiado = parseNum(g(['fiado','fiad','credito cliente'], 5));
+  // total: prefer explicit total column, else sum
+  let total = parseNum(g(['total','venta total','suma'], 6));
+  if (!total) total = efec + pos + transf + fiado;
+  const tickets = parseInt(g(['tickets','ticket','boletas','ventas n','cant'], 7)) || 0;
+  return [fecha, mes, efec, pos, transf, fiado, total, tickets];
 }
 
-function parseEgresosRow(cols, isObj) {
-  if (isObj) {
-    const vals = Object.values(cols);
-    const keys = Object.keys(cols).map(x=>x.toLowerCase());
-    const g = k => { const i=keys.findIndex(x=>x.includes(k)); return i>=0?vals[i]:''; };
-    return [
-      parseStr(g('fecha')||g('date')||vals[0]),
-      parseStr(g('tipo')||g('motivo')||vals[1]||'EGRESO'),
-      parseStr(g('observacion')||g('obs')||g('descripcion')||g('desc')||vals[2]||vals[3]||''),
-      parseNum(g('monto')||g('importe')||vals[3]||vals[4])
-    ];
-  }
-  if (cols.length < 3) return null;
-  // Detect format from CAJA_MOVIMIENTOS: FECHA, HORA, TIPO, MOTIVO, MONTO, MEDIO, CATEGORIA, OBS, VENDEDOR
-  // or simple: FECHA, TIPO, DESC, MONTO
+function parseEgresosRow(r) {
+  const cols = normalizeRow(r);
+  const g = makeGetter(r);
+  const fecha = parseStr(g(['fecha','date'], 0));
+  if (!fecha) return null;
+  // CAJA_MOVIMIENTOS format: FECHA HORA TIPO MOTIVO MONTO MEDIO CATEGORIA OBS VENDEDOR
+  // detect by checking col count and TIPO field
+  let tipo, desc, monto;
   if (cols.length >= 5) {
-    // Likely CAJA_MOVIMIENTOS format: filter only EGRESO rows
-    const tipo = parseStr(cols[2]).toUpperCase();
-    if (tipo !== 'EGRESO') return null; // skip non-egresos
-    return [
-      parseStr(cols[0]),
-      parseStr(cols[3] || cols[2]), // MOTIVO
-      parseStr(cols[7] || cols[4] || ''), // OBS or MONTO position
-      parseNum(cols[4])
-    ];
+    tipo = parseStr(g(['tipo'], 2)).toUpperCase();
+    // Only keep EGRESO rows (skip INGRESO, etc)
+    if (tipo && tipo !== 'EGRESO' && !['GASTO','PAGO','RETIRO','EGRESO'].some(t => tipo.includes(t))) return null;
+    desc = parseStr(g(['observacion','obs','descripcion','desc','motivo'], 7) ||
+                    g(['motivo'], 3));
+    monto = parseNum(g(['monto','importe','total','amount'], 4));
+    const motivo = parseStr(g(['motivo'], 3));
+    return [fecha, motivo || tipo, desc, monto];
   }
-  return [parseStr(cols[0]), parseStr(cols[1]), parseStr(cols[2]), parseNum(cols[3])];
+  tipo = parseStr(g(['tipo','motivo','categoria'], 1));
+  desc = parseStr(g(['observacion','obs','descripcion','desc'], 2));
+  monto = parseNum(g(['monto','importe','total'], 3));
+  return [fecha, tipo, desc, monto];
 }
 
-function parseConsumoRow(cols, isObj) {
-  if (isObj) {
-    const vals = Object.values(cols);
-    const keys = Object.keys(cols).map(x=>x.toLowerCase());
-    const g = k => { const i=keys.findIndex(x=>x.includes(k)); return i>=0?vals[i]:''; };
-    return [
-      parseStr(g('fecha')||g('date')||vals[0]),
-      parseStr(g('producto')||vals[1]||''),
-      parseStr(g('motivo')||g('tipo')||vals[2]||'CONSUMO'),
-      parseStr(g('observacion')||g('obs')||g('observación')||vals[3]||''),
-      parseNum(g('cantidad')||g('cant')||vals[4]||1) || 1,
-      parseNum(g('precio')||g('precio venta')||g('costo')||vals[5]||vals[6]||0)
-    ];
-  }
-  if (cols.length < 4) return null;
-  // SALIDAS format: Fecha, Hora, Producto, ID, Cantidad, Costo Unit., Precio Venta, Motivo, Obs, Vendedor
-  if (cols.length >= 7) {
-    return [
-      parseStr(cols[0]),
-      parseStr(cols[2]),  // Producto
-      parseStr(cols[7] || 'CONSUMO'), // Motivo
-      parseStr(cols[8] || ''),  // Obs
-      parseNum(cols[4]) || 1,   // Cantidad
-      parseNum(cols[6] || cols[5]) // Precio venta o costo
-    ];
-  }
-  return [parseStr(cols[0]), parseStr(cols[1]), parseStr(cols[2]), parseStr(cols[3]), parseNum(cols[4])||1, parseNum(cols[5])];
+function parseConsumoRow(r) {
+  const cols = normalizeRow(r);
+  const g = makeGetter(r);
+  const fecha = parseStr(g(['fecha','date'], 0));
+  if (!fecha) return null;
+  // SALIDAS format: Fecha Hora Producto ID Cantidad CostoUnit PrecioVenta Motivo Obs Vendedor
+  const producto = parseStr(g(['producto','product','descripcion','desc','item'], 2));
+  const motivo   = parseStr(g(['motivo','tipo','razon','reason'], 7) || g(['motivo','tipo'], 2));
+  const obs      = parseStr(g(['observacion','obs','observación','nota'], 8));
+  const cantidad = parseNum(g(['cantidad','cant','qty','units'], 4)) || 1;
+  const precio   = parseNum(g(['precio venta','precio','price','venta'], 6)) ||
+                   parseNum(g(['costo','cost','costo unit'], 5));
+  return [fecha, producto, motivo || 'CONSUMO', obs, cantidad, precio];
 }
 
 // ================== INIT FETCH ==================
 async function loadAll() {
   showLoading();
   const promises = [
-    fetchAndParse('Caja', parseVentasRow, r => { ventasDiarias = r; loaded.ventas = true; }),
-    fetchAndParse('CAJA_MOVIMIENTOS', parseEgresosRow, r => { egresosData = r.filter(x=>x); loaded.egresos = true; }),
-    fetchAndParse('SALIDAS', parseConsumoRow, r => { consumosData = r.filter(x=>x); loaded.consumos = true; })
+    fetchAndParse('Caja',             parseVentasRow,  r => { ventasDiarias = r; loaded.ventas = true; }),
+    fetchAndParse('CAJA_MOVIMIENTOS', parseEgresosRow, r => { egresosData = r;   loaded.egresos = true; }),
+    fetchAndParse('SALIDAS',          parseConsumoRow, r => { consumosData = r;  loaded.consumos = true; })
   ];
   await Promise.allSettled(promises);
   renderAll();
@@ -945,23 +918,42 @@ async function loadAll() {
 
 async function fetchAndParse(sheet, parser, setter) {
   try {
-    const rows = await fetchSheet(sheet);
-    if (!rows || rows.length === 0) { setter([]); return; }
-    // Detect if array of objects or array of arrays
-    const first = rows[0];
-    const isObj = !Array.isArray(first) && typeof first === 'object';
-    // Skip header row if it's an array of arrays and first col looks like a header
-    let startIdx = 0;
-    if (!isObj && Array.isArray(first)) {
-      const f0 = parseStr(first[0]).toLowerCase();
-      if (f0 === 'fecha' || f0 === 'date' || f0 === 'día') startIdx = 1;
+    const raw = await fetchSheet(sheet);
+    if (!raw || raw.length === 0) { setter([]); return; }
+
+    // Log first row so we can debug format issues
+    console.log('[' + sheet + '] first row sample:', JSON.stringify(raw[0]).slice(0, 200));
+
+    // Normalise: could be array-of-arrays, array-of-objects, or wrapped {values:[...]}
+    let rows = raw;
+
+    // Skip header row when it's array-of-arrays and first cell is a label
+    if (Array.isArray(rows[0])) {
+      const f0 = parseStr(rows[0][0]).toLowerCase();
+      if (['fecha','date','día','dia'].includes(f0)) rows = rows.slice(1);
     }
-    const parsed = rows.slice(startIdx).map(r => parser(r, isObj)).filter(x => x && x[0]);
+
+    const parsed = rows.map(r => {
+      try { return parser(r); } catch(e) { return null; }
+    }).filter(x => x && x[0]);
+
+    console.log('[' + sheet + '] parsed ' + parsed.length + ' of ' + rows.length + ' rows');
     setter(parsed);
   } catch(e) {
     console.warn('Error fetching ' + sheet + ':', e);
+    showError(sheet, e.message);
     setter([]);
   }
+}
+
+function showError(sheet, msg) {
+  const el = document.getElementById('resumen-kpis');
+  if (!el) return;
+  el.innerHTML += `<div class="kpi red" style="grid-column:1/-1">
+    <div class="kpi-label">Error — ${sheet}</div>
+    <div class="kpi-value red" style="font-size:13px">${msg}</div>
+    <div class="kpi-sub">Abrí la consola (F12) para ver el formato que devuelve el Apps Script</div>
+  </div>`;
 }
 
 function showLoading() {
