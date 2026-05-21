@@ -230,7 +230,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
   <div class="h-brand">
     <div class="h-icon">🖼</div>
     <div>
-      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v5.1</span></div>
+      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v5.2</span></div>
       <div class="h-sub">Generador para redes sociales</div>
     </div>
   </div>
@@ -372,7 +372,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-const VERSION = 'v5.1';
+const VERSION = 'v5.2';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -1377,69 +1377,71 @@ async function drawCard(ctx,p,cx,cy,CW,CH,FH,P,pk){
     ctx.fillText(_badgeLbl, bx+bw/2, by+13.5);
   }
 
-  // ── Zona de texto: nombre + precios ──────────────────────────────────────
-  const textZoneY = cy+FH+4;
-  const textZoneH = CH-FH-4;  // altura disponible para texto
+  // ── Zona de texto ─────────────────────────────────────────────────────────
+  const tzY = cy+FH+3;   // top de zona texto
+  const tzH = CH-FH-3;   // altura disponible
 
-  // Nombre — centrado, máx 2 líneas, fuente adaptada al ancho de card
-  const nomFontSize = CW<80?9:CW<110?10:11;
+  // Tamaños relativos según ancho de card
+  const sz = CW<85?'xs':CW<110?'sm':'md';
+  const nomFs  = {xs:8, sm:10, md:11}[sz];
+  const ahoFs  = {xs:12,sm:14, md:16}[sz];  // precio AHORA — 100%
+  const antFs  = Math.round(ahoFs*0.68);      // precio ANTES — 68%
+  const proFs  = Math.round(ahoFs*0.60);      // promo 2x1 etc — 60%
+
+  // ── NOMBRE centrado, máx 2 líneas ─────────────────────────────────────────
   ctx.fillStyle=P.txt; ctx.textAlign='center';
-  ctx.font=`bold ${nomFontSize}px "DM Sans",sans-serif`;
-  const nomCorto=corto(p.name, CW<90?16:CW<120?20:26);
-  wrap(ctx,nomCorto,cx+CW/2,textZoneY+nomFontSize,CW-8,nomFontSize+2,2);
+  ctx.font='bold '+nomFs+'px "DM Sans",sans-serif';
+  wrap(ctx, corto(p.name, sz==='xs'?14:sz==='sm'?20:26),
+       cx+CW/2, tzY+nomFs+1, CW-8, nomFs+2, 2);
 
-  // ── Layout de precios: tachado arriba-izquierda, final abajo-derecha ─────
-  // Zona de precios empieza a 2/3 de la zona de texto
-  const priceAreaY = textZoneY + Math.floor(textZoneH*0.52);
-  const is2da = getOfertaTipo(p)==='relampago_2da50' && !_overrides[p.id];
+  // ── BLOQUE DE PRECIOS — todo compacto, mismo bloque visual ────────────────
+  // Posición base del bloque: parte baja de la zona de texto
+  const blkY = cy+CH - (tzH>45 ? 34 : 28);  // sube si hay espacio
+  const tipo2 = getOfertaTipo(p);
+  const is2da = tipo2==='relampago_2da50' && !_overrides[p.id];
+  const isNxM = tipo2==='relampago_nxm'  && !_overrides[p.id];
 
-  if(po<price && !is2da){
-    // Precio tachado — pequeño, alineado a la izquierda de la card
-    ctx.fillStyle=P.ten;
-    const taFont=CW<100?'8px':'9px';
-    ctx.font=taFont+' "DM Mono",sans-serif';
+  if(po < price){
+    // ── Línea 1: ANTES $X (tachado) ──────────────────────────────────────
+    // Color: gris verdoso suave — visible pero no compite
+    ctx.fillStyle='#8aaa8a';
+    ctx.font=antFs+'px "DM Mono",sans-serif';
     ctx.textAlign='left';
-    const taTxt='$'+fmt(price);
-    const taTxtX=cx+6;
-    const taTxtY=priceAreaY+9;
-    ctx.fillText(taTxt,taTxtX,taTxtY);
-    // Línea de tachado
-    const taW=ctx.measureText(taTxt).width;
-    ctx.strokeStyle=P.ten; ctx.lineWidth=0.9;
-    ctx.beginPath();ctx.moveTo(taTxtX,taTxtY-3);ctx.lineTo(taTxtX+taW,taTxtY-3);ctx.stroke();
+    const antTxt='ANTES $'+fmt(price);
+    ctx.fillText(antTxt, cx+5, blkY);
+    // Tachado fino
+    const antW=ctx.measureText(antTxt).width;
+    ctx.strokeStyle='#8aaa8a'; ctx.lineWidth=0.9;
+    ctx.beginPath();ctx.moveTo(cx+5,blkY-3);ctx.lineTo(cx+5+antW,blkY-3);ctx.stroke();
 
-    // Precio final — grande, alineado a la derecha
-    const pfFontSize=CW<90?13:CW<120?15:17;
+    // ── Línea 2: AHORA $X — verde vivo, bold, mismo bloque ───────────────
     ctx.fillStyle=P.ac;
-    ctx.font=`bold ${pfFontSize}px "DM Sans",sans-serif`;
-    ctx.textAlign='right';
-    ctx.fillText('$'+fmt(po),cx+CW-5,priceAreaY+pfFontSize+2);
+    ctx.font='bold '+ahoFs+'px "DM Sans",sans-serif';
+    ctx.textAlign='left';
+    ctx.fillText('AHORA $'+fmt(po), cx+5, blkY+ahoFs+2);
 
-  } else if(is2da){
-    // 2DA 50%: precio por unidad llevando 2
-    const po2da=Math.round(p.price*0.75);
-    // Tachado pequeño izquierda
-    ctx.fillStyle=P.ten; ctx.font='8px "DM Mono",sans-serif'; ctx.textAlign='left';
-    const ta2='$'+fmt(p.price);
-    const ta2X=cx+6, ta2Y=priceAreaY+9;
-    ctx.fillText(ta2,ta2X,ta2Y);
-    const ta2W=ctx.measureText(ta2).width;
-    ctx.strokeStyle=P.ten; ctx.lineWidth=0.9;
-    ctx.beginPath();ctx.moveTo(ta2X,ta2Y-3);ctx.lineTo(ta2X+ta2W,ta2Y-3);ctx.stroke();
-    // Precio final derecha
-    const pf2Size=CW<90?12:CW<120?14:16;
-    ctx.fillStyle=P.ac; ctx.font=`bold ${pf2Size}px "DM Sans",sans-serif`; ctx.textAlign='right';
-    ctx.fillText('$'+fmt(po2da)+' c/u',cx+CW-5,priceAreaY+pf2Size+2);
-    // "llevando 2" pequeño debajo del precio
-    ctx.fillStyle=P.sub; ctx.font='7px "DM Sans",sans-serif'; ctx.textAlign='right';
-    ctx.fillText('llevando 2',cx+CW-5,priceAreaY+pf2Size+12);
+    // ── Línea 3 (si aplica): condición promocional ────────────────────────
+    if(is2da){
+      const po2da=Math.round(p.price*0.75);
+      ctx.fillStyle=P.pl||'#4caf50';
+      ctx.font=proFs+'px "DM Sans",sans-serif';
+      ctx.textAlign='left';
+      ctx.fillText('2da ud. → $'+fmt(po2da)+' c/u', cx+5, blkY+ahoFs+2+proFs+2);
+    } else if(isNxM && ORS[String(p.rel)]){
+      const o=ORS[String(p.rel)];
+      ctx.fillStyle=P.pl||'#4caf50';
+      ctx.font=proFs+'px "DM Sans",sans-serif';
+      ctx.textAlign='left';
+      ctx.fillText(o.nombre.toUpperCase()+' → $'+fmt(Math.round(po*o.pagas/o.cantidad))+' c/u',
+                   cx+5, blkY+ahoFs+2+proFs+2);
+    }
 
   } else {
-    // Sin descuento — precio centrado
-    const pfFontSize=CW<90?13:CW<120?15:17;
-    ctx.fillStyle=P.ac; ctx.font=`bold ${pfFontSize}px "DM Sans",sans-serif`;
+    // Sin descuento — solo precio centrado
+    ctx.fillStyle=P.ac;
+    ctx.font='bold '+ahoFs+'px "DM Sans",sans-serif';
     ctx.textAlign='center';
-    ctx.fillText('$'+fmt(po),cx+CW/2,priceAreaY+pfFontSize+2);
+    ctx.fillText('$'+fmt(po), cx+CW/2, blkY+ahoFs);
   }
 }
 
