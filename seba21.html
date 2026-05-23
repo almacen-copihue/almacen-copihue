@@ -2695,7 +2695,7 @@ function renderResultados(results, term = '') {
             : '';
 
         const esNxMSinActivar = oferta.tieneOferta && oferta.tipoOferta === 'relampago' && precio === p.price;
-        const precioAntes     = oferta.tipoOferta === 'normal' ? p.normal : p.price;
+        const precioAntes     = p.price; // precio original (tachado) — siempre col B
         const precioUnitHTML = sinStock
             ? `<span style="color:#ccc;font-size:.72rem;text-decoration:line-through;">$${p.price.toLocaleString('es-AR')}</span>`
             : (oferta.tieneOferta && !esNxMSinActivar)
@@ -2791,7 +2791,7 @@ function renderResultados(results, term = '') {
         const grUltimas        = conStock.filter(p => _poolIdsUltimas.has(p.id)    && _tipoActivo('ultimas')    && !grRelampago.includes(p));
         const grDestacadas     = conStock.filter(p => _destacadasFiltradas.has(p.id) && _tipoActivo('destacadas') && !grRelampago.includes(p) && !grUltimas.includes(p));
         const grEspeciales     = conStock.filter(p => _poolIdsEspeciales.has(p.id) && _tipoActivo('especiales') && !grRelampago.includes(p) && !grUltimas.includes(p) && !grDestacadas.includes(p));
-        const grPrecioRebajado = conStock.filter(p => p.normal > p.price && p.category === 'PROMOS' && !grRelampago.includes(p) && !grUltimas.includes(p) && !grDestacadas.includes(p) && !grEspeciales.includes(p));
+        const grPrecioRebajado = conStock.filter(p => p.catOferta === 'PROMO ACTIVA' && p.normal > 0 && p.normal < p.price && !grRelampago.includes(p) && !grUltimas.includes(p) && !grDestacadas.includes(p) && !grEspeciales.includes(p));
         const idsOferta        = new Set([...grRelampago, ...grUltimas, ...grDestacadas, ...grEspeciales, ...grPrecioRebajado].map(p => p.id));
         const grNormal         = conStock.filter(p => !idsOferta.has(p.id));
 
@@ -3003,16 +3003,15 @@ function agregarProducto(id) {
         const o = calcularOfertaPOS(producto, existente.qty);
         existente.price          = o.precioUnitario;
         existente.precioTotalCalc = o.precioTotal;
-        existente.precioOriginal = o.tipoOferta === 'normal' ? producto.normal : (o.tieneOferta ? producto.price : 0);
+        existente.precioOriginal = o.tieneOferta ? producto.price : 0;
         existente.precioModificado = o.tieneOferta;
         existente.ofertaEtiqueta = o.etiqueta || null;
         existente.ofertaTipo     = o.tipoOferta || null;
     } else {
         const oferta = calcularOfertaPOS(producto, 1);
-        // PROMOS: usar columna normal (precio original) como "antes"
-        const esPromo = String(producto.category || '').toUpperCase() === 'PROMOS' 
-            && producto.normal > 0 && producto.normal > producto.price;
-        const precioOrig = oferta.tipoOferta === 'normal' ? producto.normal : (oferta.tieneOferta ? producto.price : (esPromo ? producto.normal : 0));
+        // PROMOS: catOferta (col J) fuente de verdad; price=original, normal=promo
+        const esPromo = producto.catOferta === 'PROMO ACTIVA' && producto.normal > 0 && producto.normal < producto.price;
+        const precioOrig = oferta.tieneOferta ? producto.price : 0;
         const tieneDesc  = oferta.tieneOferta || esPromo;
         ventaActual.push({
             id: producto.id,
@@ -3100,7 +3099,7 @@ function confirmarSelectorQty() {
         existente.qty   = qty;
         existente.price = oferta.precioUnitario;
         existente.precioTotalCalc = oferta.precioTotal;
-        existente.precioOriginal  = oferta.tipoOferta === 'normal' ? p.normal : (oferta.tieneOferta ? p.price : 0);
+        existente.precioOriginal  = oferta.tieneOferta ? p.price : 0;
         existente.precioModificado = oferta.tieneOferta;
         existente.ofertaTipo   = oferta.tipoOferta || null;
         existente.ofertaEtiqueta = oferta.etiqueta || null;
@@ -3109,7 +3108,7 @@ function confirmarSelectorQty() {
             id: p.id, name: p.name,
             price: oferta.precioUnitario,
             precioTotalCalc: oferta.precioTotal,
-            precioOriginal: oferta.tipoOferta === 'normal' ? p.normal : (oferta.tieneOferta ? p.price : 0),
+            precioOriginal: oferta.tieneOferta ? p.price : 0,
             precioModificado: oferta.tieneOferta,
             qty,
             stockDisponible: p.stock,
@@ -3223,7 +3222,7 @@ function cambiarCantidad(id, delta) {
         if (p) {
             const oferta = calcularOfertaPOS(p, nuevaCant);
             item.price           = oferta.precioUnitario;
-            item.precioOriginal  = oferta.tipoOferta === 'normal' ? p.normal : (oferta.tieneOferta ? p.price : 0);
+            item.precioOriginal  = oferta.tieneOferta ? p.price : 0;
             item.precioModificado = oferta.tieneOferta;
             item.ofertaEtiqueta  = oferta.etiqueta || null;
             item.ofertaTipo      = oferta.tipoOferta || null;
@@ -4132,7 +4131,7 @@ function _tieneOfertaActiva(p) {
     if (_tipoActivo('ultimas') && _poolIdsUltimas.has(p.id)) return true;
     if (p.destacada > 0 && _tipoActivo('destacadas') && _destacadasFiltradas.has(p.id)) return true;
     if (p.especial  > 0 && _tipoActivo('especiales') && _poolIdsEspeciales.has(p.id)) return true;
-    if (p.normal > p.price && p.category === 'PROMOS') return true;
+    if (p.catOferta === 'PROMO ACTIVA' && p.normal > 0 && p.normal < p.price) return true;
     return false;
 }
 
@@ -4558,7 +4557,7 @@ function recuperarVenta() {
             return {
                 ...item,
                 price:           oferta.precioUnitario,
-                precioOriginal:  oferta.tipoOferta === 'normal' ? p.normal : (oferta.tieneOferta ? p.price : 0),
+                precioOriginal:  oferta.tieneOferta ? p.price : 0,
                 precioModificado: oferta.tieneOferta,
                 ofertaEtiqueta:  oferta.etiqueta || null,
                 ofertaTipo:      oferta.tipoOferta || null,
@@ -6805,9 +6804,11 @@ function calcularOfertaPOS(producto, qty) {
         r.etiqueta       = `⭐ -10% OFF`;
         r.tieneOferta = true; r.tipoOferta = 'especiales';
     }
-    // 4. PRECIO NORMAL columna K — solo si categoría es PROMOS (fuente de verdad: planilla)
-    else if (producto.normal && producto.normal > producto.price && producto.category === 'PROMOS') {
-        r.etiqueta  = `↓ -${Math.round((producto.normal - producto.price) / producto.normal * 100)}%`;
+    // 4. PROMO ACTIVA — catOferta (col J) es fuente de verdad; normal=precio promo, price=original
+    else if (producto.catOferta === 'PROMO ACTIVA' && producto.normal > 0 && producto.normal < producto.price) {
+        r.precioUnitario = producto.normal;
+        r.precioTotal    = producto.normal * qty;
+        r.etiqueta       = `🏷️ -${Math.round((producto.price - producto.normal) / producto.price * 100)}%`;
         r.tieneOferta = true; r.tipoOferta = 'normal';
     }
 
@@ -7381,7 +7382,7 @@ cargarProductos().then(() => {
                         return {
                             ...item,
                             price:            oferta.precioUnitario,
-                            precioOriginal:   oferta.tipoOferta === 'normal' ? p.normal : (oferta.tieneOferta ? p.price : 0),
+                            precioOriginal:   oferta.tieneOferta ? p.price : 0,
                             precioModificado: oferta.tieneOferta,
                             ofertaEtiqueta:   oferta.etiqueta || null,
                             ofertaTipo:       oferta.tipoOferta || null,
@@ -7734,7 +7735,7 @@ async function _generarFlyerOfertas() {
         const enRelampago  = _poolIdsRelampago.has(p.id)     && _tipoActivo('relampago');
         const enDestacadas = _destacadasFiltradas.has(p.id)   && _tipoActivo('destacadas');
         const enEspeciales = _poolIdsEspeciales.has(p.id)     && _tipoActivo('especiales');
-        const enPromos     = p.normal > p.price               && p.category === 'PROMOS';
+        const enPromos     = p.catOferta === 'PROMO ACTIVA' && p.normal > 0 && p.normal < p.price;
         if ((enRelampago || enDestacadas || enEspeciales || enPromos) && !ids.has(p.id)) {
             ids.add(p.id);
             // Calcular precio oferta
@@ -7744,14 +7745,14 @@ async function _generarFlyerOfertas() {
                 const cfg = OFERTAS_RELAMPAGO_SISTEMA?.[String(p.relampago)];
                 if (cfg) { precioOferta = Math.round(p.price * (1 - cfg.descuento / 100)); descPct = cfg.descuento; }
                 else { precioOferta = Math.round(p.price * (1 - p.relampago / 100)); descPct = p.relampago; }
-            } else if (enPromos && p.normal > p.price) {
-                descPct = Math.round((1 - p.price / p.normal) * 100);
-                precioOferta = p.price;
+            } else if (enPromos) {
+                descPct = Math.round((p.price - p.normal) / p.price * 100);
+                precioOferta = p.normal; // precio promo (lo que se paga)
             } else if (enDestacadas || enEspeciales) {
                 descPct = 10;
                 precioOferta = Math.round(p.price * 0.9);
             }
-            prods.push({ id: p.id, nombre: p.name, precio: p.normal > p.price ? p.normal : p.price, precioOferta, descPct });
+            prods.push({ id: p.id, nombre: p.name, precio: p.price, precioOferta, descPct }); // precio siempre el original
         }
     });
 

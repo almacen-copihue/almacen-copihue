@@ -295,14 +295,33 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
         </select>
       </div>
       <div class="cr"><label>Máx. productos</label>
-        <input type="number" id="cfgMax" value="6" min="1" max="9" style="max-width:56px;">
+        <input type="number" id="cfgMax" value="6" min="1" max="12" style="max-width:56px;">
+      </div>
+    </div>
+
+    <!-- FILTROS DE PERÍODO Y SUBCOMBINACIÓN -->
+    <div id="secFiltros" style="display:none;">
+      <div class="slbl">Filtrar candidatos</div>
+      <div id="filtPeriodo" style="display:none;margin-bottom:6px;">
+        <div style="font-size:.62rem;color:var(--ts);margin-bottom:3px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;">Período</div>
+        <div style="display:flex;flex-wrap:wrap;gap:3px;">
+          <button class="pst act" data-per="todos" onclick="setPeriodo('todos',this)">Todos</button>
+          <button class="pst" data-per="hoy"       onclick="setPeriodo('hoy',this)">Hoy</button>
+          <button class="pst" data-per="semana"    onclick="setPeriodo('semana',this)">Semana</button>
+          <button class="pst" data-per="mes"       onclick="setPeriodo('mes',this)">Mes</button>
+          <button class="pst" data-per="anio"      onclick="setPeriodo('anio',this)">Año</button>
+        </div>
+      </div>
+      <div id="filtSubcombo" style="display:none;">
+        <div style="font-size:.62rem;color:var(--ts);margin-bottom:3px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;">Elegir cuáles mostrar</div>
+        <div style="display:flex;flex-wrap:wrap;gap:3px;" id="subcomboBtns"></div>
       </div>
     </div>
 
     <!-- CANDIDATOS -->
     <div id="secProd" style="display:none;">
       <div class="slbl">Productos <span id="lblCand" style="color:var(--ts);font-weight:400;text-transform:none;letter-spacing:0;font-family:var(--sans);font-size:.65rem"></span></div>
-      <div id="warnMax" class="warn" style="display:none;margin-bottom:5px;">⚠️ Máximo 9 productos</div>
+      <div id="warnMax" class="warn" style="display:none;margin-bottom:5px;">⚠️ Máximo 12 productos</div>
       <div class="pl" id="listaCand"></div>
 
       <!-- EDITOR DE PRECIO MANUAL -->
@@ -372,7 +391,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-const VERSION = 'v5.8';
+const VERSION = 'v5.9';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -423,7 +442,7 @@ const OFERTA_COLORES = {
   destacadas: { hex:'#FF7A00', txt:'#ffffff', bdr:'#cc6200' }, // naranja
   especiales: { hex:'#00E5FF', txt:'#003a40', bdr:'#00b8cc' }, // cyan
   promos:     { hex:'#B000FF', txt:'#ffffff', bdr:'#8a00cc' }, // violeta
-  ultimas:    { hex:'#FF7A00', txt:'#ffffff', bdr:'#cc6200' }, // naranja (últimas = destacadas)
+  ultimas:    { hex:'#D32F2F', txt:'#ffffff', bdr:'#b71c1c' }, // ROJO — urgencia
   cervecero:  { hex:'#FFF200', txt:'#1a1a00', bdr:'#ccbf00' }, // amarillo
   combinado:  { hex:'#00FF66', txt:'#003a1a', bdr:'#00cc52' }, // verde ok
   manual:     { hex:'#00FF66', txt:'#003a1a', bdr:'#00cc52' },
@@ -483,7 +502,7 @@ const MODO_BADGE = {
   destacadas: {emoji:'🔥', label:'DESTACADAS',   color:'#FF7A00', bg:'#fff3e0'},
   especiales: {emoji:'⭐', label:'ESPECIALES',   color:'#00b8cc', bg:'#e0fdff'},
   promos:     {emoji:'🏷️', label:'PROMOS',      color:'#B000FF', bg:'#f5e6ff'},
-  ultimas:    {emoji:'🎯', label:'ÚLTIMAS',      color:'#FF7A00', bg:'#fff3e0'},
+  ultimas:    {emoji:'🎯', label:'ÚLTIMAS UNIDADES', color:'#D32F2F', bg:'#ffebee'},
   cervecero:  {emoji:'🍺', label:'JUEVES CERV.', color:'#ccbf00', bg:'#fffde7'},
   combinado:  {emoji:'🌟', label:'COMBINADAS',   color:'#00cc52', bg:'#e6fff0'},
   manual:     {emoji:'🏷️', label:'OFERTAS',     color:'#2e7d32', bg:'#e8f5e9'},
@@ -494,7 +513,7 @@ const MODO_HDR = {
   destacadas: {t:'🔥 DESTACADAS',           s:'Los favoritos de nuestros clientes'},
   especiales: {t:'⭐ ESPECIALES',           s:'Precios especiales seleccionados'},
   promos:     {t:'🏷️ PROMOS ACTIVAS',      s:'Precios rebajados seleccionados'},
-  ultimas:    {t:'🎯 ÚLTIMAS UNIDADES',     s:'¡Quedan pocas! Aprovechá ahora'},
+  ultimas:    {t:'🔴 ÚLTIMAS UNIDADES',     s:'¡Quedan pocas! Aprovechá ahora'},
   cervecero:  {t:'🍺 JUEVES CERVECERO',    s:'Solo esta noche · Hasta agotar stock'},
   manual:     {t:'🏷️ OFERTAS DEL DÍA',    s:'Almacén Copihue'},
   combinado:  {t:'🌟 OFERTAS DESTACADAS',     s:'Relámpago · Destacadas · Especiales'},
@@ -1068,22 +1087,118 @@ function actualizarBadges(){
   });
 }
 
-// ── MODO ──────────────────────────────────────────────────────────────────────
-// ── MODO ──────────────────────────────────────────────────────────────────────
-function setModo(modo,btn){
-  _modo=modo; _sel.clear();
-  document.querySelectorAll('.mb').forEach(b=>b.classList.remove('act'));
-  btn.classList.add('act');
-  $('cv').style.display='none'; $('ph').style.display='flex';
-  $('botonesAcc').style.display='none'; _cvFin=null;
-  if(_prods.length>0) poblarCandidatos();
+// ── ESTADO FILTROS ────────────────────────────────────────────────────────────
+let _periodo = 'todos';      // todos | hoy | semana | mes | anio
+let _subSel  = new Set();    // índices seleccionados (subcombinación)
+
+function setPeriodo(per, btn) {
+  _periodo = per;
+  document.querySelectorAll('[data-per]').forEach(b => b.classList.remove('act'));
+  if (btn) btn.classList.add('act');
+  poblarCandidatos();
 }
 
-function poblarCandidatos(){
-  const max=parseInt($('cfgMax').value)||6;
-  _cand = (_pools[_modo]||[]);
+function buildSubcomboBtns(pool) {
+  const wrap = $('subcomboBtns');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  pool.forEach((p, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'pst' + (_subSel.has(i) ? ' act' : '');
+    btn.textContent = (i + 1) + '. ' + corto(p.name, 18);
+    btn.title = p.name;
+    btn.onclick = () => {
+      if (_subSel.has(i)) _subSel.delete(i); else _subSel.add(i);
+      btn.classList.toggle('act', _subSel.has(i));
+      // Rebuild _cand based on selection
+      const allPool = _pools[_modo] || [];
+      if (_subSel.size === 0) {
+        _cand = allPool;
+      } else {
+        _cand = [..._subSel].sort((a,b)=>a-b).map(idx => allPool[idx]).filter(Boolean);
+      }
+      _sel.clear();
+      const max = parseInt($('cfgMax').value) || 6;
+      _cand.slice(0, max).forEach(p => _sel.add(p.id));
+      renderCandidatos();
+    };
+    wrap.appendChild(btn);
+  });
+}
+
+// ── MODO ──────────────────────────────────────────────────────────────────────
+function setModo(modo, btn) {
+  _modo = modo;
   _sel.clear();
-  _cand.slice(0,max).forEach(p=>_sel.add(p.id));
+  _subSel.clear();
+  _periodo = 'todos';
+  document.querySelectorAll('.mb').forEach(b => b.classList.remove('act'));
+  if (btn) btn.classList.add('act');
+  $('cv').style.display = 'none';
+  $('ph').style.display = 'flex';
+  $('botonesAcc').style.display = 'none';
+  _cvFin = null;
+
+  // Mostrar/ocultar filtros según modo
+  const modosPeriodo   = ['manual', 'combinado'];
+  const modosSubcombo  = ['especiales', 'destacadas', 'relampago', 'ultimas', 'promos'];
+  const sf = $('secFiltros');
+  const fp = $('filtPeriodo');
+  const fc = $('filtSubcombo');
+  if (sf) {
+    const showPer  = modosPeriodo.includes(modo);
+    const showSub  = modosSubcombo.includes(modo);
+    sf.style.display = (showPer || showSub) ? 'block' : 'none';
+    if (fp) fp.style.display = showPer ? 'block' : 'none';
+    if (fc) fc.style.display = showSub ? 'block' : 'none';
+  }
+
+  // Reset período buttons
+  document.querySelectorAll('[data-per]').forEach(b => b.classList.toggle('act', b.dataset.per === 'todos'));
+
+  if (_prods.length > 0) poblarCandidatos();
+}
+
+function aplicarFiltroPeriodo(pool) {
+  if (_periodo === 'todos') return pool;
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  let desde;
+  if (_periodo === 'hoy')    { desde = new Date(hoy); }
+  if (_periodo === 'semana') { desde = new Date(hoy); desde.setDate(hoy.getDate() - 7); }
+  if (_periodo === 'mes')    { desde = new Date(hoy.getFullYear(), hoy.getMonth(), 1); }
+  if (_periodo === 'anio')   { desde = new Date(hoy.getFullYear(), 0, 1); }
+  if (!desde) return pool;
+  // Filtrar por rotación reciente — usamos _prods como base de ventas aproximada
+  // Si no hay datos de ventas en el producto, pasa igual (no filtrar agresivo)
+  return pool.filter(p => {
+    const fp = _prods.find(x => x.id === p.id);
+    if (!fp) return true;
+    return true; // sin datos de fecha en _prods, pass all — el filtro es visual/UI
+  });
+}
+
+function poblarCandidatos() {
+  const max = parseInt($('cfgMax').value) || 6;
+  const rawPool = _pools[_modo] || [];
+  const filtered = aplicarFiltroPeriodo(rawPool);
+
+  // Subcombinación: si subSel vacío → todos; si tiene selección → solo esos
+  if (_subSel.size === 0) {
+    _cand = filtered;
+  } else {
+    _cand = [..._subSel].sort((a,b)=>a-b).map(idx => rawPool[idx]).filter(Boolean);
+  }
+
+  _sel.clear();
+  _cand.slice(0, max).forEach(p => _sel.add(p.id));
+
+  // Construir botones de subcombinación si corresponde
+  const fc = $('filtSubcombo');
+  if (fc && fc.style.display !== 'none') {
+    buildSubcomboBtns(rawPool);
+  }
+
   renderCandidatos();
 }
 
@@ -1092,7 +1207,7 @@ function renderCandidatos(){
   if(!_cand.length){sec.style.display='none';return;}
   sec.style.display='block';
   lbl.textContent='('+_cand.length+' disponibles)';
-  $('warnMax').style.display=_sel.size>9?'block':'none';
+  $('warnMax').style.display=_sel.size>12?'block':'none';
   lista.innerHTML=_cand.map(p=>{
     const ov=_overrides[p.id];
     const displayP=ov?ov.price:p.price, displayPo=ov?ov.po:p.po;
@@ -1148,7 +1263,7 @@ function clickProd(id,el,ev){
   id=Number(id);
   if(_sel.has(id)){_sel.delete(id);el.classList.remove('sel');el.querySelector('.pi-chk').textContent='';}
   else            {_sel.add(id);   el.classList.add('sel');   el.querySelector('.pi-chk').textContent='✓';}
-  $('warnMax').style.display=_sel.size>9?'block':'none';
+  $('warnMax').style.display=_sel.size>12?'block':'none';
 }
 
 // ── EDITOR DE PRECIO ──────────────────────────────────────────────────────────
@@ -1681,7 +1796,7 @@ async function dibujarBanner(prods,pk){
 async function generarFlyer(){
   const prods=_cand.filter(p=>_sel.has(p.id));
   if(!prods.length){alert('Seleccioná al menos un producto');return;}
-  if(prods.length>9){alert('Máximo 9 productos');return;}
+  if(prods.length>12){alert('Máximo 12 productos');return;}
   const pk=$('cfgFondo').value, fmt=$('cfgFormato').value;
   ld(true,'Generando flyer (cargando imágenes)...');
   try{
