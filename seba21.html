@@ -2036,7 +2036,7 @@ function badgeStock(stock) {
 }
 
 // ========== CONFIG ==========
-const API_URL = 'https://script.google.com/macros/s/AKfycbzWZzDvdGfW8vd2-FpQolT852cdPMeHbfKugn9DBOlju75bE1D0SUNB5EKEDOsI2vP4lA/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
 
 // Timeout unificado para todas las llamadas a Apps Script
 const API_TIMEOUT_MS = 25000;
@@ -2695,7 +2695,7 @@ function renderResultados(results, term = '') {
             : '';
 
         const esNxMSinActivar = oferta.tieneOferta && oferta.tipoOferta === 'relampago' && precio === p.price;
-        const precioAntes     = p.price; // precio original (tachado) — siempre col B
+        const precioAntes     = oferta.tipoOferta === 'normal' ? p.normal : p.price;
         const precioUnitHTML = sinStock
             ? `<span style="color:#ccc;font-size:.72rem;text-decoration:line-through;">$${p.price.toLocaleString('es-AR')}</span>`
             : (oferta.tieneOferta && !esNxMSinActivar)
@@ -2791,7 +2791,7 @@ function renderResultados(results, term = '') {
         const grUltimas        = conStock.filter(p => _poolIdsUltimas.has(p.id)    && _tipoActivo('ultimas')    && !grRelampago.includes(p));
         const grDestacadas     = conStock.filter(p => _destacadasFiltradas.has(p.id) && _tipoActivo('destacadas') && !grRelampago.includes(p) && !grUltimas.includes(p));
         const grEspeciales     = conStock.filter(p => _poolIdsEspeciales.has(p.id) && _tipoActivo('especiales') && !grRelampago.includes(p) && !grUltimas.includes(p) && !grDestacadas.includes(p));
-        const grPrecioRebajado = conStock.filter(p => p.catOferta === 'PROMO ACTIVA' && p.normal > 0 && p.normal < p.price && !grRelampago.includes(p) && !grUltimas.includes(p) && !grDestacadas.includes(p) && !grEspeciales.includes(p));
+        const grPrecioRebajado = conStock.filter(p => p.normal > p.price && p.category === 'PROMOS' && !grRelampago.includes(p) && !grUltimas.includes(p) && !grDestacadas.includes(p) && !grEspeciales.includes(p));
         const idsOferta        = new Set([...grRelampago, ...grUltimas, ...grDestacadas, ...grEspeciales, ...grPrecioRebajado].map(p => p.id));
         const grNormal         = conStock.filter(p => !idsOferta.has(p.id));
 
@@ -3003,15 +3003,16 @@ function agregarProducto(id) {
         const o = calcularOfertaPOS(producto, existente.qty);
         existente.price          = o.precioUnitario;
         existente.precioTotalCalc = o.precioTotal;
-        existente.precioOriginal = o.tieneOferta ? producto.price : 0;
+        existente.precioOriginal = o.tipoOferta === 'normal' ? producto.normal : (o.tieneOferta ? producto.price : 0);
         existente.precioModificado = o.tieneOferta;
         existente.ofertaEtiqueta = o.etiqueta || null;
         existente.ofertaTipo     = o.tipoOferta || null;
     } else {
         const oferta = calcularOfertaPOS(producto, 1);
-        // PROMOS: catOferta (col J) fuente de verdad; price=original, normal=promo
-        const esPromo = producto.catOferta === 'PROMO ACTIVA' && producto.normal > 0 && producto.normal < producto.price;
-        const precioOrig = oferta.tieneOferta ? producto.price : 0;
+        // PROMOS: usar columna normal (precio original) como "antes"
+        const esPromo = String(producto.category || '').toUpperCase() === 'PROMOS' 
+            && producto.normal > 0 && producto.normal > producto.price;
+        const precioOrig = oferta.tipoOferta === 'normal' ? producto.normal : (oferta.tieneOferta ? producto.price : (esPromo ? producto.normal : 0));
         const tieneDesc  = oferta.tieneOferta || esPromo;
         ventaActual.push({
             id: producto.id,
@@ -3099,7 +3100,7 @@ function confirmarSelectorQty() {
         existente.qty   = qty;
         existente.price = oferta.precioUnitario;
         existente.precioTotalCalc = oferta.precioTotal;
-        existente.precioOriginal  = oferta.tieneOferta ? p.price : 0;
+        existente.precioOriginal  = oferta.tipoOferta === 'normal' ? p.normal : (oferta.tieneOferta ? p.price : 0);
         existente.precioModificado = oferta.tieneOferta;
         existente.ofertaTipo   = oferta.tipoOferta || null;
         existente.ofertaEtiqueta = oferta.etiqueta || null;
@@ -3108,7 +3109,7 @@ function confirmarSelectorQty() {
             id: p.id, name: p.name,
             price: oferta.precioUnitario,
             precioTotalCalc: oferta.precioTotal,
-            precioOriginal: oferta.tieneOferta ? p.price : 0,
+            precioOriginal: oferta.tipoOferta === 'normal' ? p.normal : (oferta.tieneOferta ? p.price : 0),
             precioModificado: oferta.tieneOferta,
             qty,
             stockDisponible: p.stock,
@@ -3222,7 +3223,7 @@ function cambiarCantidad(id, delta) {
         if (p) {
             const oferta = calcularOfertaPOS(p, nuevaCant);
             item.price           = oferta.precioUnitario;
-            item.precioOriginal  = oferta.tieneOferta ? p.price : 0;
+            item.precioOriginal  = oferta.tipoOferta === 'normal' ? p.normal : (oferta.tieneOferta ? p.price : 0);
             item.precioModificado = oferta.tieneOferta;
             item.ofertaEtiqueta  = oferta.etiqueta || null;
             item.ofertaTipo      = oferta.tipoOferta || null;
@@ -4131,7 +4132,7 @@ function _tieneOfertaActiva(p) {
     if (_tipoActivo('ultimas') && _poolIdsUltimas.has(p.id)) return true;
     if (p.destacada > 0 && _tipoActivo('destacadas') && _destacadasFiltradas.has(p.id)) return true;
     if (p.especial  > 0 && _tipoActivo('especiales') && _poolIdsEspeciales.has(p.id)) return true;
-    if (p.catOferta === 'PROMO ACTIVA' && p.normal > 0 && p.normal < p.price) return true;
+    if (p.normal > p.price && p.category === 'PROMOS') return true;
     return false;
 }
 
@@ -4557,7 +4558,7 @@ function recuperarVenta() {
             return {
                 ...item,
                 price:           oferta.precioUnitario,
-                precioOriginal:  oferta.tieneOferta ? p.price : 0,
+                precioOriginal:  oferta.tipoOferta === 'normal' ? p.normal : (oferta.tieneOferta ? p.price : 0),
                 precioModificado: oferta.tieneOferta,
                 ofertaEtiqueta:  oferta.etiqueta || null,
                 ofertaTipo:      oferta.tipoOferta || null,
@@ -6804,11 +6805,9 @@ function calcularOfertaPOS(producto, qty) {
         r.etiqueta       = `⭐ -10% OFF`;
         r.tieneOferta = true; r.tipoOferta = 'especiales';
     }
-    // 4. PROMO ACTIVA — catOferta (col J) es fuente de verdad; normal=precio promo, price=original
-    else if (producto.catOferta === 'PROMO ACTIVA' && producto.normal > 0 && producto.normal < producto.price) {
-        r.precioUnitario = producto.normal;
-        r.precioTotal    = producto.normal * qty;
-        r.etiqueta       = `🏷️ -${Math.round((producto.price - producto.normal) / producto.price * 100)}%`;
+    // 4. PRECIO NORMAL columna K — solo si categoría es PROMOS (fuente de verdad: planilla)
+    else if (producto.normal && producto.normal > producto.price && producto.category === 'PROMOS') {
+        r.etiqueta  = `↓ -${Math.round((producto.normal - producto.price) / producto.normal * 100)}%`;
         r.tieneOferta = true; r.tipoOferta = 'normal';
     }
 
@@ -7382,7 +7381,7 @@ cargarProductos().then(() => {
                         return {
                             ...item,
                             price:            oferta.precioUnitario,
-                            precioOriginal:   oferta.tieneOferta ? p.price : 0,
+                            precioOriginal:   oferta.tipoOferta === 'normal' ? p.normal : (oferta.tieneOferta ? p.price : 0),
                             precioModificado: oferta.tieneOferta,
                             ofertaEtiqueta:   oferta.etiqueta || null,
                             ofertaTipo:       oferta.tipoOferta || null,
@@ -7472,51 +7471,115 @@ cargarProductos().then(() => {
 </div>
 
 <!-- ══ MODAL HERRAMIENTAS ══════════════════════════════════════════════════ -->
-<div id="modalHerramientas" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);
-     z-index:9990;align-items:center;justify-content:center;padding:12px;"
-     onclick="if(event.target===this)cerrarHerramientas()">
-  <div style="background:#161625;border-radius:22px;width:100%;max-width:min(440px,calc(100vw - 24px));
-              max-height:calc(100dvh - 24px);display:flex;flex-direction:column;
-              box-shadow:0 20px 60px rgba(0,0,0,0.7);">
+<style>
+#modalHerramientas { display:none; }
+#hBox {
+  background:#13131f;
+  border-radius:0;
+  width:100%; height:100%;
+  display:flex; flex-direction:column;
+  overflow:hidden;
+}
+#hHeader {
+  background:linear-gradient(135deg,#c0392b,#8e1a12);
+  padding:12px 16px;
+  display:flex; align-items:center; justify-content:space-between;
+  flex-shrink:0;
+}
+#hGrid {
+  padding:12px;
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:8px;
+  overflow-y:auto;
+  flex:1;
+  align-content:start;
+}
+#hGrid::-webkit-scrollbar{ width:4px; }
+#hGrid::-webkit-scrollbar-thumb{ background:rgba(255,255,255,0.15);border-radius:2px; }
+#hFooter {
+  padding:8px 12px;
+  border-top:1px solid rgba(255,255,255,0.08);
+  display:flex; gap:8px; flex-shrink:0;
+}
+.h-card {
+  background:rgba(255,255,255,0.05);
+  border:1px solid rgba(255,255,255,0.09);
+  border-radius:12px;
+  padding:10px 6px;
+  text-align:center;
+  cursor:pointer;
+  text-decoration:none;
+  display:flex; flex-direction:column; align-items:center; gap:4px;
+  transition:background 0.15s, transform 0.12s;
+  min-height:80px; justify-content:center;
+}
+.h-card:hover { background:rgba(255,255,255,0.12); transform:translateY(-1px); }
+.h-card:active { background:rgba(255,255,255,0.18); transform:scale(0.97); }
+.h-card-ico { font-size:1.5rem; line-height:1; }
+.h-card-nom { color:#fff; font-size:0.68rem; font-weight:800; line-height:1.2; }
+.h-card-desc { color:#777; font-size:0.56rem; line-height:1.2; }
+.h-card.inactiva { opacity:0.28; pointer-events:none; }
+.h-sep {
+  grid-column:1/-1;
+  border-top:1px solid rgba(255,255,255,0.07);
+  margin:4px 0;
+  display:flex; align-items:center; gap:8px;
+  color:rgba(255,255,255,0.2); font-size:0.6rem; font-weight:700;
+}
+.h-sep::after { content:''; flex:1; height:1px; background:rgba(255,255,255,0.07); }
+/* Mobile: 3 columnas */
+@media(max-width:480px){
+  #hGrid { grid-template-columns:repeat(3,1fr); gap:6px; padding:8px; }
+  .h-card { padding:8px 4px; min-height:72px; }
+  .h-card-ico { font-size:1.3rem; }
+}
+</style>
 
-    <!-- Header fijo -->
-    <div style="background:linear-gradient(135deg,#c0392b 0%,#7b1010 100%);
-                padding:15px 18px;display:flex;align-items:center;justify-content:space-between;
-                border-radius:22px 22px 0 0;flex-shrink:0;">
+<div id="modalHerramientas"
+     style="position:fixed;inset:0;background:rgba(0,0,0,0.92);
+            z-index:9990;display:none;flex-direction:column;"
+     onclick="if(event.target===this)cerrarHerramientas()">
+  <div id="hBox">
+
+    <!-- Header -->
+    <div id="hHeader">
       <div style="display:flex;align-items:center;gap:10px;">
-        <span style="font-size:1.5rem;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.4));">🧰</span>
+        <span style="font-size:1.3rem;">🧰</span>
         <div>
-          <div style="color:white;font-weight:900;font-size:1rem;letter-spacing:0.2px;">Herramientas Copihue</div>
-          <div style="color:rgba(255,255,255,0.6);font-size:0.68rem;margin-top:1px;" id="hSubtitle">Cargando...</div>
+          <div style="color:#fff;font-weight:900;font-size:0.95rem;letter-spacing:0.3px;">Herramientas Copihue</div>
+          <div style="color:rgba(255,255,255,0.6);font-size:0.68rem;" id="hSubtitle">Cargando...</div>
         </div>
       </div>
-      <button onclick="cerrarHerramientas()" style="background:rgba(0,0,0,0.25);border:none;
-              border-radius:50%;width:34px;height:34px;color:white;cursor:pointer;font-size:1rem;
-              display:flex;align-items:center;justify-content:center;flex-shrink:0;">✕</button>
+      <button onclick="cerrarHerramientas()"
+              style="background:rgba(255,255,255,0.15);border:none;border-radius:50%;
+                     width:34px;height:34px;color:#fff;cursor:pointer;font-size:1rem;
+                     display:flex;align-items:center;justify-content:center;">✕</button>
     </div>
 
-    <!-- Grid scrolleable — 2 columnas -->
-    <div id="hGrid" style="padding:14px;display:grid;grid-template-columns:repeat(2,1fr);gap:10px;
-                            overflow-y:auto;flex:1;-webkit-overflow-scrolling:touch;">
-      <div style="grid-column:1/-1;text-align:center;color:#555;padding:32px;font-size:0.85rem;">
+    <!-- Grid -->
+    <div id="hGrid">
+      <div style="grid-column:1/-1;text-align:center;color:#555;padding:40px;font-size:0.82rem;">
         <div style="font-size:2rem;margin-bottom:8px;">⏳</div>Cargando herramientas...
       </div>
     </div>
 
-    <!-- Footer fijo -->
-    <div style="padding:10px 14px 14px;border-top:1px solid rgba(255,255,255,0.07);
-                display:flex;gap:8px;flex-shrink:0;">
+    <!-- Footer -->
+    <div id="hFooter">
       <button onclick="cerrarHerramientas();abrirConfigProveedores();"
-              style="flex:1;padding:10px;background:rgba(255,193,7,0.12);border:1px solid rgba(255,193,7,0.35);
-                     border-radius:12px;color:#fbc02d;font-size:0.78rem;font-weight:700;cursor:pointer;">
+              style="flex:1;padding:9px;background:rgba(255,193,7,0.12);
+                     border:1px solid rgba(255,193,7,0.35);border-radius:10px;
+                     color:#fbc02d;font-size:0.78rem;font-weight:700;cursor:pointer;">
         ⚙️ Proveedores
       </button>
       <button onclick="_recargarHerramientas()"
-              style="flex:1;padding:10px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);
-                     border-radius:12px;color:#888;font-size:0.78rem;font-weight:700;cursor:pointer;">
+              style="flex:1;padding:9px;background:rgba(255,255,255,0.06);
+                     border:1px solid rgba(255,255,255,0.12);border-radius:10px;
+                     color:#aaa;font-size:0.78rem;font-weight:700;cursor:pointer;">
         🔄 Recargar
       </button>
     </div>
+
   </div>
 </div>
 <!-- ══ FIN MODAL HERRAMIENTAS ═════════════════════════════════════════════ -->
@@ -7557,6 +7620,7 @@ function cerrarHerramientas() {
 
 async function abrirHerramientas() {
   document.getElementById('modalHerramientas').style.display = 'flex';
+  document.getElementById('modalHerramientas').style.flexDirection = 'column';
   const stale = (Date.now() - _hTimestamp) > _H_TTL;
   if (stale) await _recargarHerramientas();
 }
@@ -7596,60 +7660,28 @@ function _renderHerramientas(lista) {
   const sub  = document.getElementById('hSubtitle');
   const activas   = lista.filter(h => h.activo !== false);
   const inactivas = lista.filter(h => h.activo === false);
-
-  // Grammar: 1 inactiva / 2 inactivas
-  const labelInactivas = inactivas.length === 1 ? '1 inactiva' : inactivas.length + ' inactivas';
   sub.textContent = activas.length + ' herramientas' +
-    (inactivas.length ? ' · ' + labelInactivas : '');
+    (inactivas.length ? ' · ' + inactivas.length + ' inactivas' : '');
 
   let html = '';
-
-  // ── Activas ──
   for (const h of activas) {
     const icono = h.icono && h.icono.trim() ? h.icono.trim() : '🔧';
-    const href  = h.url && h.url.trim() ? h.url.trim() : '#';
-    const dest  = href === '#' ? '' : 'target="_blank" rel="noopener"';
-    html += `
-      <a href="${href}" ${dest} style="text-decoration:none;">
-        <div style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.09);
-                    border-radius:16px;padding:14px 12px;cursor:pointer;
-                    display:flex;align-items:center;gap:12px;
-                    transition:background 0.12s,border-color 0.12s;"
-             ontouchstart="this.style.background='rgba(255,255,255,0.12)';this.style.borderColor='rgba(255,255,255,0.2)'"
-             ontouchend="this.style.background='rgba(255,255,255,0.05)';this.style.borderColor='rgba(255,255,255,0.09)'">
-          <div style="font-size:1.8rem;line-height:1;flex-shrink:0;">${icono}</div>
-          <div style="min-width:0;">
-            <div style="color:#f0f0f0;font-size:0.75rem;font-weight:800;line-height:1.3;
-                        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${h.nombre}</div>
-            ${h.descripcion ? `<div style="color:#666;font-size:0.62rem;margin-top:2px;line-height:1.3;
-                                           white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${h.descripcion}</div>` : ''}
-          </div>
-        </div>
-      </a>`;
+    html += `<a href="${h.url}" class="h-card">
+      <div class="h-card-ico">${icono}</div>
+      <div class="h-card-nom">${h.nombre}</div>
+      ${h.descripcion ? `<div class="h-card-desc">${h.descripcion}</div>` : ''}
+    </a>`;
   }
 
-  // ── Inactivas ── (misma grilla, visualmente atenuadas, sin link)
   if (inactivas.length) {
-    html += `<div style="grid-column:1/-1;border-top:1px solid rgba(255,255,255,0.07);
-                         margin-top:4px;padding-top:12px;">
-               <div style="color:#444;font-size:0.6rem;text-transform:uppercase;letter-spacing:1px;
-                            margin-bottom:8px;text-align:center;">Inactivas</div>
-               <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;">`;
+    html += `<div class="h-sep">INACTIVAS</div>`;
     for (const h of inactivas) {
       const icono = h.icono && h.icono.trim() ? h.icono.trim() : '🔧';
-      html += `
-        <div style="background:rgba(255,255,255,0.02);border:1px dashed rgba(255,255,255,0.07);
-                    border-radius:14px;padding:12px;opacity:0.35;
-                    display:flex;align-items:center;gap:10px;">
-          <div style="font-size:1.5rem;flex-shrink:0;">${icono}</div>
-          <div style="min-width:0;">
-            <div style="color:#666;font-size:0.72rem;font-weight:700;
-                        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${h.nombre}</div>
-            ${h.descripcion ? `<div style="color:#444;font-size:0.6rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${h.descripcion}</div>` : ''}
-          </div>
-        </div>`;
+      html += `<div class="h-card inactiva">
+        <div class="h-card-ico">${icono}</div>
+        <div class="h-card-nom">${h.nombre}</div>
+      </div>`;
     }
-    html += '</div></div>';
   }
 
   if (!activas.length && !inactivas.length) {
@@ -7722,7 +7754,7 @@ document.getElementById('modalWifiQR').addEventListener('click', function(e) {
 </div>
 
 <script>
-const GAS_URL_FLYER = 'https://script.google.com/macros/s/AKfycbzWZzDvdGfW8vd2-FpQolT852cdPMeHbfKugn9DBOlju75bE1D0SUNB5EKEDOsI2vP4lA/exec';
+const GAS_URL_FLYER = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
 let _flyerCanvasAdmin = null;
 let _flyerProductos = [];
 let _flyerHoraCierre = 22;
@@ -7761,7 +7793,7 @@ async function _generarFlyerOfertas() {
         const enRelampago  = _poolIdsRelampago.has(p.id)     && _tipoActivo('relampago');
         const enDestacadas = _destacadasFiltradas.has(p.id)   && _tipoActivo('destacadas');
         const enEspeciales = _poolIdsEspeciales.has(p.id)     && _tipoActivo('especiales');
-        const enPromos     = p.catOferta === 'PROMO ACTIVA' && p.normal > 0 && p.normal < p.price;
+        const enPromos     = p.normal > p.price               && p.category === 'PROMOS';
         if ((enRelampago || enDestacadas || enEspeciales || enPromos) && !ids.has(p.id)) {
             ids.add(p.id);
             // Calcular precio oferta
@@ -7771,14 +7803,14 @@ async function _generarFlyerOfertas() {
                 const cfg = OFERTAS_RELAMPAGO_SISTEMA?.[String(p.relampago)];
                 if (cfg) { precioOferta = Math.round(p.price * (1 - cfg.descuento / 100)); descPct = cfg.descuento; }
                 else { precioOferta = Math.round(p.price * (1 - p.relampago / 100)); descPct = p.relampago; }
-            } else if (enPromos) {
-                descPct = Math.round((p.price - p.normal) / p.price * 100);
-                precioOferta = p.normal; // precio promo (lo que se paga)
+            } else if (enPromos && p.normal > p.price) {
+                descPct = Math.round((1 - p.price / p.normal) * 100);
+                precioOferta = p.price;
             } else if (enDestacadas || enEspeciales) {
                 descPct = 10;
                 precioOferta = Math.round(p.price * 0.9);
             }
-            prods.push({ id: p.id, nombre: p.name, precio: p.price, precioOferta, descPct }); // precio siempre el original
+            prods.push({ id: p.id, nombre: p.name, precio: p.normal > p.price ? p.normal : p.price, precioOferta, descPct });
         }
     });
 
