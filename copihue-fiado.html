@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Copihue — Fiados v8</title>
+<title>Copihue — Fiados v9</title>
 <meta name="theme-color" content="#1b5e20">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -81,6 +81,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
 .fc-monto{font-size:1.05rem;font-weight:900}
 .fc-desc{font-size:.74rem;color:#555;padding-top:6px;border-top:1px solid rgba(0,0,0,.07);margin-top:6px;line-height:1.4}
 .fc-pago{font-size:.7rem;color:var(--verde);margin-top:4px;font-weight:600}
+.fc-abono-row{padding:7px 0 2px;display:flex;justify-content:flex-end}
+.btn-abono-rapido{background:var(--vd);color:#fff;border:none;border-radius:10px;padding:7px 20px;font-size:.8rem;font-weight:900;cursor:pointer;font-family:inherit}
+.btn-abono-rapido:active{opacity:.82}
 .sel-dot{position:absolute;top:9px;right:9px;width:22px;height:22px;border-radius:50%;background:var(--verde);color:#fff;font-size:.72rem;font-weight:900;display:flex;align-items:center;justify-content:center}
 
 /* ── Barra flotante ── */
@@ -341,17 +344,20 @@ function renderFiados(){
     if(!esPend)cls+=' pagado';else if(f.estado==='VENCIDO')cls+=' venc';
     if(selec)cls+=' sel';
     const tkt=f.ticket&&f.ticket.trim()!=='';
-    // Desc line: si tiene ticket → enlace a detalle, sino texto guardado
     const descLine=tkt
       ?`<div class="fc-desc" style="cursor:pointer" data-det="1" data-tkt="${f.ticket}" data-id="${f.idFiado}">🎫 Ticket #${f.ticket} <span style="color:var(--vd);font-weight:700">· Ver venta →</span></div>`
       :(f.descripcion?`<div class="fc-desc">📦 ${f.descripcion}</div>`:'');
     const pagoLine=!esPend?`<div class="fc-pago">✅ Cobrado el ${_fmt(f.fechaPago)}${f.metodoPago?' · '+f.metodoPago:''}</div>`:'';
     const dot=selec?`<div class="sel-dot">✓</div>`:'';
+    // Botón de abono rápido solo en pendientes
+    const btnAbono=esPend
+      ?`<div class="fc-abono-row"><button class="btn-abono-rapido" data-abono="1" data-id="${f.idFiado}">💲 Abonar</button></div>`
+      :'';
     return`<div class="${cls}" id="fc-${f.idFiado}" data-id="${f.idFiado}" data-tkt="${f.ticket||''}" data-espend="${esPend?'1':'0'}">${dot}
       <div class="fc-top">
         <div><div class="fc-fecha">📅 ${_fmt(f.fecha)}</div><div class="fc-id">${f.idFiado}</div></div>
         <div style="text-align:right"><div class="fc-monto" style="color:${esPend?'var(--rojo)':'var(--verde)'}">${fmt(f.total)}</div>${bdgEstado(f)}</div>
-      </div>${descLine}${pagoLine}</div>`;
+      </div>${descLine}${pagoLine}${btnAbono}</div>`;
   }
 
   let html='';
@@ -362,8 +368,18 @@ function renderFiados(){
   // Event delegation — evita problemas con IDs especiales en onclick inline
   document.querySelectorAll('#cuerpoFiados .fc').forEach(el=>{
     el.addEventListener('click', e=>{
-      // Si el click viene del enlace "Ver venta" interno no hacer nada aquí
       if(e.target.closest('[data-det]'))return;
+      // Botón abono rápido
+      if(e.target.closest('[data-abono]')){
+        e.stopPropagation();
+        const id=e.target.closest('[data-abono]').dataset.id;
+        // Seleccionar solo este fiado y abrir modal
+        _sel.clear();
+        _sel.add(id);
+        renderFiados();
+        abrirCobrar();
+        return;
+      }
       const esPend=el.dataset.espend==='1';
       const id=el.dataset.id;
       const tkt=el.dataset.tkt;
