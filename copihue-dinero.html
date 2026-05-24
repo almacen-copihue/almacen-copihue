@@ -86,7 +86,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
 <body>
 <div class="hdr">
   <div class="hdr-icon">💰</div>
-  <div><div class="hdr-t">Copihue · Dinero</div><div class="hdr-s">Panel financiero</div></div>
+  <div><div class="hdr-t">Copihue · Dinero</div><div class="hdr-s">Panel financiero · <span id="versionTag">v1</span></div></div>
   <button class="btn-back" onclick="history.back()">← Volver</button>
 </div>
 <div class="wrap">
@@ -199,7 +199,7 @@ function renderResumen(){
   <div class="met-card"><div class="met-icon">💳</div><div class="met-v">${fmtK(po)}</div><div class="met-l">Posnet</div><div class="met-p">${ti?Math.round(po/ti*100):0}%</div></div>
   <div class="met-card"><div class="met-icon">📲</div><div class="met-v">${fmtK(tr)}</div><div class="met-l">Transferencia</div><div class="met-p">${ti?Math.round(tr/ti*100):0}%</div></div>
   <div class="met-card"><div class="met-icon">📋</div><div class="met-v">${fmtK(fi)}</div><div class="met-l">Fiado</div><div class="met-p">${ti?Math.round(fi/ti*100):0}%</div></div></div></div>`;
-  if(topCat){const pct=te?Math.round(topCat[1]/te*100):0;h+=`<div class="alert-r"><span style="font-size:1.3rem">${CATS_EMOJI[topCat[0]]||'💸'}</span><div><div>Mayor egreso: <strong>${topCat[0]}</strong></div><div style="font-size:.7rem;opacity:.8">${fmt(topCat[1])} · ${pct}% del total</div></div></div>`;}
+  if(topCat){const pct=te?Math.round(topCat[1]/te*100):0;h+=`<div class="alert-r" onclick="abrirDetalleCat('${topCat[0]}')" style="cursor:pointer"><span style="font-size:1.3rem">${CATS_EMOJI[topCat[0]]||'💸'}</span><div><div>Mayor egreso: <strong>${topCat[0]}</strong> ›</div><div style="font-size:.7rem;opacity:.8">${fmt(topCat[1])} · ${pct}% del total</div></div></div>`;}
   document.getElementById('contenido').innerHTML=h;
 }
 
@@ -256,7 +256,7 @@ function renderEgresos(){
   else cats.forEach(([cat,monto])=>{
     const p=Math.round(monto/maxC*100),pt=te?Math.round(monto/te*100):0;
     const c=CATS_CLS[cat]||'br';
-    h+=`<div class="bar-wrap"><div class="bar-hdr"><div class="bar-n">${CATS_EMOJI[cat]||'💸'} ${cat}</div><div class="bar-v neg">${fmt(monto)} <span style="font-size:.6rem;color:var(--gris)">${pt}%</span></div></div><div class="bar-bg"><div class="bar-f ${c}" style="width:${p}%"></div></div></div>`;
+    h+=`<div class="bar-wrap" onclick="abrirDetalleCat('${cat}')" style="cursor:pointer;padding:6px 8px;border-radius:10px;transition:background .12s;margin-bottom:6px" onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background=''"><div class="bar-hdr"><div class="bar-n">${CATS_EMOJI[cat]||'💸'} ${cat}</div><div class="bar-v neg">${fmt(monto)} <span style="font-size:.6rem;color:var(--gris)">${pt}% ›</span></div></div><div class="bar-bg"><div class="bar-f ${c}" style="width:${p}%"></div></div></div>`;
   });
   h+=`</div>`;
   const sorted=[...egrs].sort((a,b)=>b.monto-a.monto);
@@ -311,6 +311,47 @@ function setTab(tab){
 }
 function cambiarMes(d){mesSel+=d;if(mesSel<0){mesSel=11;anioSel--;}if(mesSel>11){mesSel=0;anioSel++;}renderTab();}
 function irAHoy(){mesSel=new Date().getMonth();anioSel=new Date().getFullYear();renderTab();}
+// ─── VERSIÓN ─────────────────────────────────────────────────────────────────
+(function(){
+  const KEY='copihue_dinero_visits';
+  const v=(parseInt(localStorage.getItem(KEY)||'0')+1);
+  localStorage.setItem(KEY,v);
+  document.getElementById('versionTag').textContent='v'+v;
+})();
+
+// ─── MODAL DETALLE CATEGORÍA ─────────────────────────────────────────────────
+function abrirDetalleCat(cat){
+  const egrs=getEgrMes();
+  const items=egrs.filter(e=>(e.categoria||'').trim().toUpperCase()===cat).sort((a,b)=>b.monto-a.monto);
+  const total=items.reduce((s,e)=>s+e.monto,0);
+  let h=`<div id="modal-cat" onclick="cerrarDetalleCat(event)" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:999;display:flex;align-items:flex-end;justify-content:center">
+  <div onclick="event.stopPropagation()" style="background:#fff;border-radius:20px 20px 0 0;padding:16px;width:100%;max-width:600px;max-height:80vh;overflow-y:auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div>
+        <div style="font-size:1rem;font-weight:900;color:var(--texto)">${CATS_EMOJI[cat]||'💸'} ${cat}</div>
+        <div style="font-size:.72rem;color:var(--gris)">${items.length} movimientos · Total ${fmt(total)}</div>
+      </div>
+      <button onclick="cerrarDetalleCat()" style="background:var(--rl);border:none;border-radius:50%;width:32px;height:32px;font-size:1.1rem;cursor:pointer;color:var(--rojo)">✕</button>
+    </div>`;
+  if(!items.length){h+='<div class="empty">Sin movimientos en esta categoría</div>';}
+  else items.forEach(e=>{
+    h+=`<div class="egr-item">
+      <div style="flex:1;min-width:0">
+        <div class="egr-obs">${e.obs||e.motivo||'—'}</div>
+        <div class="egr-meta">${e.motivo||''} · ${e.fecha||''}</div>
+      </div>
+      <div class="egr-mnt">−${fmt(e.monto)}</div>
+    </div>`;
+  });
+  h+=`</div></div>`;
+  const div=document.createElement('div');div.id='modal-cat-wrap';div.innerHTML=h;
+  document.body.appendChild(div);
+}
+function cerrarDetalleCat(e){
+  if(e&&e.target.id!=='modal-cat')return;
+  const el=document.getElementById('modal-cat-wrap');if(el)el.remove();
+}
+
 cargarDatos();
 </script>
 </body>
