@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>ver.19 · Copihue · Reportes</title>
+<title>ver.20 · Copihue · Reportes</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
@@ -380,7 +380,8 @@ let prodSelIdx=-1; // índice del producto seleccionado en el top (-1 = ninguno)
 // ===== COMPRA SUGERIDA INTELIGENTE — estado =====
 let showCSI=false, csiFiltroPeriodo='todos';
 let showRecienLlegados=false;
-let showClientes=false, clientesBusqueda='', clientesFiltro='todos'; // 'todos'|'pendiente'|'vencido'|'pagado'
+let showClientes=false, clientesBusqueda='', clientesFiltro='todos'; // 'todos'|'pendiente'|'vencido'
+let pagadosPeriodo='30d'; // '7d'|'30d'|'90d'|'180d'|'365d'|'pagado'
 
 // ====== HELPER HORA ======
 // Normaliza hora a "HH:MM" — evita el bug "Sat Dec 30 1899 20:12..."
@@ -923,12 +924,16 @@ function renderApp(){
       const prods=id.filter(i=>i.ticket===t.ticket);
       const horaFmt=fmtHora(t.hora);
       const esFiado=(t.metodo||'').toUpperCase().includes('FIADO');
-      const _ef=t.estadoFiado?(t.estadoFiado+'').toUpperCase():'';
+      // Estado real desde rawFiados
+      const tkN=String(t.ticket||'').trim().replace(/^0+/,'');
+      const fInfo=esFiado?(rawFiados.find(f=>String(f.ticket).trim().replace(/^0+/,'')===tkN)||null):null;
+      const _ef=fInfo?(fInfo.estado||'PENDIENTE').toUpperCase():esFiado?'PENDIENTE':'';
       const _fiadoColor=!esFiado?'':_ef==='PAGADO'?'#2e7d32':_ef==='VENCIDO'?'#c62828':'#f57c00';
       const _fiadoIcon=!esFiado?'🎫':_ef==='PAGADO'?'✅':_ef==='VENCIDO'?'🔴':'📋';
       const _tktStyle=esFiado?'background:'+(
         _ef==='PAGADO'?'#e8f5e9':_ef==='VENCIDO'?'#ffebee':'#fff8e1'
       )+';border-left:3px solid '+_fiadoColor+'!important':'';
+      const _estadoBadge=esFiado?'<span style="font-size:.65rem;font-weight:800;padding:2px 7px;border-radius:8px;background:'+(_ef==='PAGADO'?'#e8f5e9':_ef==='VENCIDO'?'#ffebee':'#fff3e0')+';color:'+_fiadoColor+'">'+(_ef==='PAGADO'?'✅ Pagado':_ef==='VENCIDO'?'🔴 Vencido':'⏳ Pendiente')+'</span>':'';
       const fPhone=extractFiadoPhone(t.metodo);
       const waTxt=safeEnc(
         '🛒 *Almacén Copihue* · #'+t.ticket+'\n'+
@@ -943,7 +948,7 @@ function renderApp(){
         ?'intent://send/'+fPhone+'?text='+waTxt+'#Intent;package=com.whatsapp.w4b;scheme=whatsapp;end'
         :'intent://send?text='+waTxt+'#Intent;package=com.whatsapp.w4b;scheme=whatsapp;end';
       return'<div class="tkt" style="'+_tktStyle+'">'+
-        '<div class="tkt-hdr"><span>'+_fiadoIcon+' #'+t.ticket+' <span class="vtag">'+t.vendedor+'</span></span><span>'+horaFmt+'hs <span class="mtag" style="'+(esFiado?'background:'+(
+        '<div class="tkt-hdr"><span>'+_fiadoIcon+' #'+t.ticket+' <span class="vtag">'+t.vendedor+'</span>'+_estadoBadge+'</span><span>'+horaFmt+'hs <span class="mtag" style="'+(esFiado?'background:'+(
           _ef==='PAGADO'?'#e8f5e9':_ef==='VENCIDO'?'#ffebee':'#fff3e0'
         )+';color:'+_fiadoColor:'')+'">'+t.metodo+'</span></span></div>'+
         prods.map(p=>'<div class="vi"><span>'+p.qty+'× '+p.nombre.substring(0,24)+'</span><span>'+fmt(p.subtotal)+'</span></div>').join('')+
@@ -1611,6 +1616,42 @@ function renderClientes(){
   let lista=Object.values(clientes);
 
   // Solo clientes con deuda activa (pendiente o vencido)
+  // Para tab Pagados: mostrar pagados del período seleccionado
+  if(clientesFiltro==='todos'){
+    // Construir lista de pagados desde rawFiados directamente, filtrada por período
+    const diasMap={'7d':7,'30d':30,'90d':90,'180d':180,'365d':365};
+    const dias=diasMap[pagadosPeriodo]||30;
+    const hoy=new Date(); hoy.setHours(0,0,0,0);
+    const desde=new Date(hoy); desde.setDate(desde.getDate()-dias);
+    const pagados=rawFiados.filter(f=>{
+      if((f.estado||'').toUpperCase()!=='PAGADO') return false;
+      const fp=f.fechaPago?new Date(f.fechaPago):null;
+      if(!fp||isNaN(fp)) return false;
+      return fp>=desde;
+    }).sort((a,b)=>new Date(b.fechaPago)-new Date(a.fechaPago));
+    if(!pagados.length){
+      html+='<div class="empty">Sin pagados en este período</div></div>';
+      return html;
+    }
+    pagados.forEach(f=>{
+      const fp=f.fechaPago?new Date(f.fechaPago):null;
+      const MNOM3=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+      const fPagoLabel=fp?fp.getDate()+' '+MNOM3[fp.getMonth()]+' '+fp.getFullYear():'—';
+      html+='<div class="cli-card pagado" style="border-left:4px solid #2e7d32">'+
+        '<div class="cli-card-hdr">'+
+          '<div>'+
+            '<div class="cli-nom">'+f.cliente+'</div>'+
+            '<div class="cli-meta">✅ Pagado el '+fPagoLabel+(f.metodoPago?' · '+f.metodoPago:'')+'</div>'+
+            '<div style="font-size:.68rem;color:var(--gris)">Ticket #'+f.ticket+'</div>'+
+          '</div>'+
+          '<div class="cli-total pagado">'+fmt(f.total)+'</div>'+
+        '</div>'+
+      '</div>';
+    });
+    html+='</div>';
+    return html;
+  }
+
   lista=lista.filter(c=>c.pendiente>0||c.vencido>0);
 
   // filtro tabs — solo pendiente y vencido
@@ -1640,10 +1681,17 @@ function renderClientes(){
     '</div>'+
     '<input class="cli-busq" type="text" placeholder="🔍 Buscar cliente..." value="'+clientesBusqueda+'" oninput="clientesBusqueda=this.value;renderApp()">'+
     '<div class="cli-tabs">'+
-      '<button class="cli-tab'+(clientesFiltro==='todos'?' activo':'')+'" onclick="clientesFiltro=\'todos\';renderApp()">✅ Pagados</button>'+
+      '<button class="cli-tab'+(clientesFiltro==='todos'?' activo pag':'')+'" onclick="clientesFiltro=\'todos\';renderApp()">✅ Pagados</button>'+
       '<button class="cli-tab pen'+(clientesFiltro==='pendiente'?' activo':'')+'" onclick="clientesFiltro=\'pendiente\';renderApp()">⏳ Pendientes</button>'+
       '<button class="cli-tab ven'+(clientesFiltro==='vencido'?' activo':'')+'" onclick="clientesFiltro=\'vencido\';renderApp()">🔴 Vencidos</button>'+
-    '</div>';
+    '</div>'+
+    (clientesFiltro==='todos'?
+      '<div class="cli-tabs" style="margin-top:-4px">'+
+        ['7d','30d','90d','180d','365d'].map(p=>'<button class="cli-tab'+(pagadosPeriodo===p?' activo pag':'')+'" onclick="pagadosPeriodo=\''+p+'\';renderApp()">'+
+          (p==='7d'?'7 días':p==='30d'?'30 días':p==='90d'?'90 días':p==='180d'?'Semestre':'Año')+
+        '</button>').join('')+
+      '</div>'
+    :'');
 
   if(!lista.length){
     html+='<div class="empty">✅ Sin deudas activas</div></div>';
