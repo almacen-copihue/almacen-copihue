@@ -516,6 +516,7 @@ let _of    = {};
 let _cerv  = {};
 let _pools = {};
 let _modo  = 'relampago';
+let _modos = new Set(['relampago']); // multi-selección de modos
 let _cand  = [];
 let _sel   = new Set();
 let _cvFin = null;   // canvas final (SCALE_OUT×)
@@ -1079,10 +1080,36 @@ function actualizarBadges(){
 
 // ── MODO ──────────────────────────────────────────────────────────────────────
 // ── MODO ──────────────────────────────────────────────────────────────────────
+// Modos seleccionados (multi-select)
+let _modos = new Set();
+
 function setModo(modo,btn){
-  _modo=modo; _sel.clear(); _filtroActivo=new Set();
-  document.querySelectorAll('.mb').forEach(b=>b.classList.remove('act'));
-  btn.classList.add('act');
+  // manual y combinado son exclusivos — limpian los demás
+  const exclusivos = new Set(['manual','combinado']);
+
+  if(exclusivos.has(modo)){
+    _modos.clear();
+    _modos.add(modo);
+  } else {
+    // Si había un exclusivo activo, lo quitamos
+    exclusivos.forEach(e=>_modos.delete(e));
+    // Toggle del modo clickeado
+    if(_modos.has(modo)) _modos.delete(modo);
+    else _modos.add(modo);
+    // Si quedó vacío, activar el clickeado igual
+    if(_modos.size===0) _modos.add(modo);
+  }
+
+  // Actualizar visual de botones
+  document.querySelectorAll('.mb').forEach(b=>{
+    const m=b.getAttribute('data-modo');
+    b.classList.toggle('act', _modos.has(m));
+  });
+
+  // Compatibilidad con código que usa _modo (string)
+  _modo = _modos.size===1 ? [..._modos][0] : 'combinado';
+
+  _sel.clear(); _filtroActivo=new Set();
   $('cv').style.display='none'; $('ph').style.display='flex';
   $('botonesAcc').style.display='none'; _cvFin=null;
   if(_prods.length>0) poblarCandidatos();
@@ -1090,7 +1117,16 @@ function setModo(modo,btn){
 
 function poblarCandidatos(){
   const max=parseInt($('cfgMax').value)||6;
-  _cand = (_pools[_modo]||[]);
+
+  // Combinar pools de todos los modos activos (sin duplicados)
+  const visto = new Set();
+  _cand = [];
+  _modos.forEach(m=>{
+    (_pools[m]||[]).forEach(p=>{
+      if(!visto.has(p.id)){ visto.add(p.id); _cand.push(p); }
+    });
+  });
+
   _sel.clear();
   _cand.slice(0,max).forEach(p=>_sel.add(p.id));
   renderCandidatos();
