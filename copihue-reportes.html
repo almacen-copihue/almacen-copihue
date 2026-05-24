@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>ver.15 · Copihue · Reportes</title>
+<title>ver.16 · Copihue · Reportes</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
@@ -1604,16 +1604,18 @@ function renderClientes(){
 
   let lista=Object.values(clientes);
 
-  // filtro tabs
+  // Solo clientes con deuda activa (pendiente o vencido)
+  lista=lista.filter(c=>c.pendiente>0||c.vencido>0);
+
+  // filtro tabs — solo pendiente y vencido
   if(clientesFiltro==='pendiente') lista=lista.filter(c=>c.pendiente>0);
   else if(clientesFiltro==='vencido') lista=lista.filter(c=>c.vencido>0);
-  else if(clientesFiltro==='pagado') lista=lista.filter(c=>c.pagado>0&&c.pendiente===0&&c.vencido===0);
 
   // filtro búsqueda
   const q=clientesBusqueda.toLowerCase().trim();
   if(q) lista=lista.filter(c=>c.nombre.toLowerCase().includes(q));
 
-  // ordenar: vencidos > pendientes > pagados, luego por deuda desc
+  // ordenar: vencidos primero, luego por deuda desc
   lista.sort((a,b)=>{
     const pa=(a.vencido>0?2:a.pendiente>0?1:0);
     const pb=(b.vencido>0?2:b.pendiente>0?1:0);
@@ -1630,46 +1632,42 @@ function renderClientes(){
       (total_ven>0?'<span style="color:var(--rojo);font-size:.78rem">🔴 Venc: '+fmt(total_ven)+'</span>':'')+
       (total_pen>0?'<span style="color:var(--naranja);font-size:.78rem">⏳ Pend: '+fmt(total_pen)+'</span>':'')+
     '</div>'+
-    // búsqueda
     '<input class="cli-busq" type="text" placeholder="🔍 Buscar cliente..." value="'+clientesBusqueda+'" oninput="clientesBusqueda=this.value;renderApp()">'+
-    // tabs filtro
     '<div class="cli-tabs">'+
       '<button class="cli-tab'+(clientesFiltro==='todos'?' activo':'')+'" onclick="clientesFiltro=\'todos\';renderApp()">📋 Todos</button>'+
       '<button class="cli-tab pen'+(clientesFiltro==='pendiente'?' activo':'')+'" onclick="clientesFiltro=\'pendiente\';renderApp()">⏳ Pendientes</button>'+
       '<button class="cli-tab ven'+(clientesFiltro==='vencido'?' activo':'')+'" onclick="clientesFiltro=\'vencido\';renderApp()">🔴 Vencidos</button>'+
-      '<button class="cli-tab pag'+(clientesFiltro==='pagado'?' activo':'')+'" onclick="clientesFiltro=\'pagado\';renderApp()">✅ Pagados</button>'+
     '</div>';
 
   if(!lista.length){
-    html+='<div class="empty">Sin clientes para este filtro</div></div>';
+    html+='<div class="empty">✅ Sin deudas activas</div></div>';
     return html;
   }
 
   lista.forEach((c,ci)=>{
-    const clsCard=c.vencido>0?'vencido':c.pendiente>0?'pendiente':'pagado';
+    const clsCard=c.vencido>0?'vencido':'pendiente';
     const deudaActiva=c.pendiente+c.vencido;
+    // Tickets solo pendientes/vencidos para mostrar dentro
+    const ticketsPend=c.tickets.filter(t=>t.estadoNorm!=='PAGADO');
     html+=
       '<div class="cli-card '+clsCard+'" onclick="cliToggle('+ci+')">'+
         '<div class="cli-card-hdr">'+
           '<div>'+
             '<div class="cli-nom">'+c.nombre+'</div>'+
-            '<div class="cli-meta">'+c.tickets.length+' compra'+(c.tickets.length>1?'s':'')+'</div>'+
+            '<div class="cli-meta">'+ticketsPend.length+' deuda'+(ticketsPend.length>1?'s':'')+'</div>'+
           '</div>'+
           '<div style="text-align:right">'+
-            (deudaActiva>0?'<div class="cli-total '+(c.vencido>0?'vencido':'')+'">'+fmt(deudaActiva)+'</div>':'')+
-            (c.pagado>0?'<div class="cli-total pagado" style="font-size:.78rem">✅ '+fmt(c.pagado)+'</div>':'')+
+            '<div class="cli-total '+(c.vencido>0?'vencido':'')+'">'+fmt(deudaActiva)+'</div>'+
           '</div>'+
         '</div>'+
-        // estados rápidos siempre visibles
         '<div style="display:flex;gap:6px;padding:0 13px 8px;flex-wrap:wrap">'+
           (c.vencido>0?'<span class="cli-vest vencido">🔴 Vencido '+fmt(c.vencido)+'</span>':'')+
           (c.pendiente>0?'<span class="cli-vest pendiente">⏳ Pendiente '+fmt(c.pendiente)+'</span>':'')+
-          (c.pagado>0?'<span class="cli-vest pagado">✅ Pagado '+fmt(c.pagado)+'</span>':'')+
         '</div>'+
         '<div class="cli-body" id="cli-body-'+ci+'">'+
-          c.tickets.sort((a,b)=>b.fechaStr>a.fechaStr?1:-1).map((t,ti)=>{
+          ticketsPend.sort((a,b)=>b.fechaStr>a.fechaStr?1:-1).map((t,ti)=>{
             const ef=t.estadoNorm;
-            const clsV=ef==='PAGADO'?'pagado':ef==='VENCIDO'?'vencido':'pendiente';
+            const clsV=ef==='VENCIDO'?'vencido':'pendiente';
             const [a,m,d]=t.fechaStr.split('-');
             const fLabel=parseInt(d)+' '+MNOM3[parseInt(m)-1]+' '+a;
             const horaFmt2=fmtHora(t.hora);
@@ -1683,16 +1681,21 @@ function renderClientes(){
             const nomEnc=safeEnc(c.nombre);
             const tkEnc=safeEnc(t.ticket);
             const feEnc=safeEnc(t.fechaStr);
+            // Abono: viene en t.metodoPago (col N de la hoja FIADOS)
+            const abonoInfo=t.metodoPago&&t.metodoPago.trim()
+              ?'<div style="font-size:.7rem;color:#2e7d32;margin-top:3px">💵 Abono: '+t.metodoPago+'</div>'
+              :'';
             return '<div class="cli-venta '+clsV+'">'+
               '<div class="cli-vhdr">'+
                 '<div><div class="cli-vf">📅 '+fLabel+(horaFmt2?' · '+horaFmt2+'hs':'')+'</div>'+
-                '<div style="font-size:.68rem;color:var(--gris)">Ticket #'+t.ticket+'</div></div>'+
-                '<span class="cli-vest '+clsV+'">'+(ef==='PAGADO'?'✅ Pagado':ef==='VENCIDO'?'🔴 Vencido':'⏳ Pendiente')+'</span>'+
+                '<div style="font-size:.68rem;color:var(--gris)">Ticket #'+t.ticket+'</div>'+
+                abonoInfo+'</div>'+
+                '<span class="cli-vest '+clsV+'">'+(ef==='VENCIDO'?'🔴 Vencido':'⏳ Pendiente')+'</span>'+
               '</div>'+
               t.items.map(p=>'<div class="cli-vi"><span>'+p.qty+'× '+p.nombre.substring(0,26)+'</span><span>'+fmt(p.subtotal)+'</span></div>').join('')+
               '<div class="cli-vfoot">'+
                 '<div style="display:flex;gap:6px">'+
-                  (ef!=='PAGADO'?'<button class="btn-abono" onclick="event.stopPropagation();abrirAbono(\''+nomEnc+'\',\''+tkEnc+'\',\''+feEnc+'\','+t.total+',this)">💲 Abono</button>':'')+
+                  '<button class="btn-abono" onclick="event.stopPropagation();abrirAbono(\''+nomEnc+'\',\''+tkEnc+'\',\''+feEnc+'\','+t.total+',this)">💲 Abono</button>'+
                   (fPhone?'<button class="btn-wa" onclick="event.stopPropagation();window.open(\''+waHref+'\',\'_blank\')">📲 WA</button>':'')+
                 '</div>'+
                 '<span style="font-size:.88rem;font-weight:900;color:var(--vd)">'+fmt(t.total)+'</span>'+
