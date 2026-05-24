@@ -274,7 +274,10 @@ function renderEgresos(){
 function renderFlujo(){
   const caja=getCajaMes(),egrs=getEgrMes();
   const egrsXF={};egrs.forEach(e=>{const f=e.fecha||'';egrsXF[f]=(egrsXF[f]||0)+e.monto;});
-  const fechas=[...new Set([...caja.map(r=>r.fecha),...Object.keys(egrsXF)])].sort().reverse();
+  // Unir fechas y ordenar descendente
+  const fechas=[...new Set([...caja.map(r=>r.fecha),...Object.keys(egrsXF)])]
+    .filter(Boolean)
+    .sort((a,b)=>{const da=parseFecha(a),db=parseFecha(b);return db-da;});
   const maxV=Math.max(...fechas.map(f=>{const i=(caja.find(r=>r.fecha===f)||{}).total||0;return Math.max(i,egrsXF[f]||0);}),1);
   const ti=caja.reduce((s,r)=>s+r.total,0);
   const te=egrs.reduce((s,r)=>s+r.monto,0);
@@ -283,25 +286,87 @@ function renderFlujo(){
   h+=`<div class="metrics-grid"><div class="mc vg"><div class="ml">📈 Ingresos</div><div class="mv">${fmtK(ti)}</div></div>
   <div class="mc rg"><div class="ml">📉 Egresos</div><div class="mv">${fmtK(te)}</div></div>
   <div class="mc ${neto>=0?'vg':'rg'} full"><div class="ml">${neto>=0?'✅':'⚠️'} Neto del mes</div><div class="mv">${neto>=0?'+':''}${fmtK(neto)}</div><div class="ms">${neto>=0?'El negocio generó más de lo que gastó':'Los egresos superaron los ingresos'}</div></div></div>`;
-  h+=`<div class="sec"><div class="sec-t">📅 Flujo día a día</div>`;
+  h+=`<div class="sec"><div class="sec-t">📅 Flujo día a día <span style="font-size:.65rem;color:var(--gris);font-weight:400">Tocá un día para ver el detalle</span></div>`;
   if(!fechas.length){h+='<div class="empty">Sin datos este mes</div>';}
   else fechas.forEach(f=>{
-    const d=parseFecha(f);const l=d?String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0'):f;
+    const d=parseFecha(f);
+    const l=d?String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0'):f;
     const ing=(caja.find(r=>r.fecha===f)||{}).total||0;
     const egr=egrsXF[f]||0;
     const n=ing-egr;
     const pi=Math.round(ing/maxV*100),pe=Math.round(egr/maxV*100);
-    h+=`<div style="margin-bottom:9px;padding:8px;background:${n>=0?'#f9fdf9':'#fff9f9'};border-radius:10px;border:1px solid ${n>=0?'var(--borde)':'#ffcdd2'}">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
-      <span style="font-size:.75rem;font-weight:900">${l}</span>
-      <span style="font-size:.75rem;font-weight:900;color:${n>=0?'var(--verde)':'var(--rojo)'}">${n>=0?'+':''}${fmt(n)}</span>
-    </div>
-    ${ing>0?`<div class="dia-row" style="margin-bottom:2px"><div style="font-size:.62rem;min-width:20px">📈</div><div class="dia-bg"><div class="dia-f bv" style="width:${pi}%"></div></div><div class="dia-v pos" style="font-size:.7rem">${fmt(ing)}</div></div>`:''}
-    ${egr>0?`<div class="dia-row"><div style="font-size:.62rem;min-width:20px">📉</div><div class="dia-bg"><div class="dia-f br" style="width:${pe}%"></div></div><div class="dia-v neg" style="font-size:.7rem">${fmt(egr)}</div></div>`:''}
+    h+=`<div onclick="abrirDetalleDia('${f}')" style="margin-bottom:9px;padding:9px 10px;background:${n>=0?'#f9fdf9':'#fff9f9'};border-radius:10px;border:1px solid ${n>=0?'var(--borde)':'#ffcdd2'};cursor:pointer;transition:opacity .12s" onmouseover="this.style.opacity='.85'" onmouseout="this.style.opacity='1'">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <span style="font-size:.82rem;font-weight:900">${l}</span>
+        <span style="font-size:.8rem;font-weight:900;color:${n>=0?'var(--verde)':'var(--rojo)'}">${n>=0?'+':''}${fmt(n)} ›</span>
+      </div>
+      ${ing>0?`<div class="dia-row" style="margin-bottom:3px"><div style="font-size:.65rem;min-width:20px">📈</div><div class="dia-bg"><div class="dia-f bv" style="width:${pi}%"></div></div><div class="dia-v pos" style="font-size:.72rem">${fmt(ing)}</div></div>`:''}
+      ${egr>0?`<div class="dia-row"><div style="font-size:.65rem;min-width:20px">📉</div><div class="dia-bg"><div class="dia-f br" style="width:${pe}%"></div></div><div class="dia-v neg" style="font-size:.72rem">${fmt(egr)}</div></div>`:''}
     </div>`;
   });
   h+=`</div>`;
   document.getElementById('contenido').innerHTML=h;
+}
+
+function abrirDetalleDia(fecha){
+  const d=parseFecha(fecha);
+  const l=d?String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear():fecha;
+  const caja=getCajaMes();
+  const egrs=getEgrMes().filter(e=>e.fecha===fecha).sort((a,b)=>b.monto-a.monto);
+  const cajaD=caja.find(r=>r.fecha===fecha);
+  const totalIng=cajaD?.total||0;
+  const totalEgr=egrs.reduce((s,e)=>s+e.monto,0);
+  const neto=totalIng-totalEgr;
+
+  let h=`<div id="modal-dia-wrap"><div id="modal-dia" onclick="cerrarDetalleDia(event)" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:999;display:flex;align-items:flex-end;justify-content:center">
+  <div onclick="event.stopPropagation()" style="background:#fff;border-radius:20px 20px 0 0;padding:16px;width:100%;max-width:600px;max-height:82vh;overflow-y:auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div>
+        <div style="font-size:1rem;font-weight:900">📅 ${l}</div>
+        <div style="font-size:.72rem;color:var(--gris)">Neto: <strong style="color:${neto>=0?'var(--verde)':'var(--rojo)'}">${neto>=0?'+':''}${fmt(neto)}</strong></div>
+      </div>
+      <button onclick="cerrarDetalleDia()" style="background:var(--rl);border:none;border-radius:50%;width:32px;height:32px;font-size:1.1rem;cursor:pointer;color:var(--rojo)">✕</button>
+    </div>`;
+
+  // Ingresos del día
+  if(cajaD && totalIng>0){
+    h+=`<div style="background:var(--vl);border-radius:12px;padding:10px;margin-bottom:10px">
+      <div style="font-size:.7rem;font-weight:900;color:var(--vd);margin-bottom:8px">📈 INGRESOS — ${fmt(totalIng)}</div>`;
+    [{n:'💵 Efectivo',v:cajaD.efectivo},{n:'💳 Posnet',v:cajaD.posnet},{n:'📲 Transferencia',v:cajaD.transferencia},{n:'📋 Fiado',v:cajaD.fiado}]
+      .filter(x=>x.v>0).forEach(x=>{
+        h+=`<div class="row"><div class="row-l">${x.n}</div><div class="row-v pos">${fmt(x.v)}</div></div>`;
+      });
+    h+=`<div style="font-size:.68rem;color:var(--gris);margin-top:5px">🎫 ${cajaD.tickets} tickets</div>`;
+    h+=`</div>`;
+  }
+
+  // Egresos del día
+  if(egrs.length){
+    h+=`<div style="background:var(--rl);border-radius:12px;padding:10px;">
+      <div style="font-size:.7rem;font-weight:900;color:var(--rojo);margin-bottom:8px">📉 EGRESOS — ${fmt(totalEgr)}</div>`;
+    egrs.forEach(e=>{
+      const cat=(e.categoria||'').trim().toUpperCase();
+      h+=`<div class="egr-item">
+        <div style="flex:1;min-width:0">
+          <div class="egr-obs">${e.obs||e.motivo||'—'}</div>
+          <div class="egr-meta"><span class="badge">${CATS_EMOJI[cat]||''} ${cat}</span></div>
+        </div>
+        <div class="egr-mnt">−${fmt(e.monto)}</div>
+      </div>`;
+    });
+    h+=`</div>`;
+  }
+
+  if(!cajaD && !egrs.length) h+=`<div class="empty">Sin datos para este día</div>`;
+
+  h+=`</div></div></div>`;
+  const div=document.createElement('div');div.innerHTML=h;
+  document.body.appendChild(div);
+}
+
+function cerrarDetalleDia(e){
+  if(e&&e.target.id!=='modal-dia')return;
+  const el=document.getElementById('modal-dia-wrap');if(el)el.remove();
 }
 
 function setTab(tab){
