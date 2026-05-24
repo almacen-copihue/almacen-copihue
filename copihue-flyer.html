@@ -516,6 +516,7 @@ let _of    = {};
 let _cerv  = {};
 let _pools = {};
 let _modo  = 'relampago';
+let _modos = new Set(['relampago']); // multi-selección de modos
 let _cand  = [];
 let _sel   = new Set();
 let _cvFin = null;   // canvas final (SCALE_OUT×)
@@ -777,7 +778,12 @@ function construirPools(){
     const v=k?_cfgRaw[k]?.[0]:null;
     return v!==0&&v!=='0'&&v!==false&&v!==null;
   })();
-  _pools.promos    = _prods.filter(p=>p.cat==='PROMOS'&&p.normal>p.price&&p.stock>0).map(p=>({...p,...calcPro(p)}));
+  _pools.promos = _prods.filter(p=>{
+    const cat=(p.cat||'').toString().toUpperCase().trim();
+    const esPromo = cat==='PROMOS'||cat==='PROMO'||cat.includes('PROMO')||
+                    (p.normal>0&&p.price>0&&p.normal>p.price&&p.pct>=5);
+    return esPromo && p.stock>0;
+  }).map(p=>({...p,...calcPro(p)}));
   _pools._promosOn = promosOn;
 
   // ── ÚLTIMAS UNIDADES ─────────────────────────────────────────────────────
@@ -1079,10 +1085,34 @@ function actualizarBadges(){
 
 // ── MODO ──────────────────────────────────────────────────────────────────────
 // ── MODO ──────────────────────────────────────────────────────────────────────
+// Modos seleccionados (multi-select) — declarado en línea 519
 function setModo(modo,btn){
-  _modo=modo; _sel.clear(); _filtroActivo=new Set();
-  document.querySelectorAll('.mb').forEach(b=>b.classList.remove('act'));
-  btn.classList.add('act');
+  // manual y combinado son exclusivos — limpian los demás
+  const exclusivos = new Set(['manual','combinado']);
+
+  if(exclusivos.has(modo)){
+    _modos.clear();
+    _modos.add(modo);
+  } else {
+    // Si había un exclusivo activo, lo quitamos
+    exclusivos.forEach(e=>_modos.delete(e));
+    // Toggle del modo clickeado
+    if(_modos.has(modo)) _modos.delete(modo);
+    else _modos.add(modo);
+    // Si quedó vacío, activar el clickeado igual
+    if(_modos.size===0) _modos.add(modo);
+  }
+
+  // Actualizar visual de botones
+  document.querySelectorAll('.mb').forEach(b=>{
+    const m=b.getAttribute('data-modo');
+    b.classList.toggle('act', _modos.has(m));
+  });
+
+  // Compatibilidad con código que usa _modo (string)
+  _modo = _modos.size===1 ? [..._modos][0] : 'combinado';
+
+  _sel.clear(); _filtroActivo=new Set();
   $('cv').style.display='none'; $('ph').style.display='flex';
   $('botonesAcc').style.display='none'; _cvFin=null;
   if(_prods.length>0) poblarCandidatos();
@@ -1090,7 +1120,16 @@ function setModo(modo,btn){
 
 function poblarCandidatos(){
   const max=parseInt($('cfgMax').value)||6;
-  _cand = (_pools[_modo]||[]);
+
+  // Combinar pools de todos los modos activos (sin duplicados)
+  const visto = new Set();
+  _cand = [];
+  _modos.forEach(m=>{
+    (_pools[m]||[]).forEach(p=>{
+      if(!visto.has(p.id)){ visto.add(p.id); _cand.push(p); }
+    });
+  });
+
   _sel.clear();
   _cand.slice(0,max).forEach(p=>_sel.add(p.id));
   renderCandidatos();
@@ -1238,6 +1277,14 @@ function renderCandidatos(){
       </div>
     </div>`;
   }).join('');
+
+  // Contador de seleccionados al pie
+  const selCount = _sel.size;
+  const footerId = 'sel-count-footer';
+  let footer = document.getElementById(footerId);
+  if(!footer){ footer=document.createElement('div'); footer.id=footerId; lista.parentNode.appendChild(footer); }
+  footer.style.cssText='margin-top:8px;padding:8px 12px;background:var(--p);color:#fff;border-radius:10px;text-align:center;font-size:.82rem;font-weight:700;display:'+(selCount?'block':'none');
+  footer.textContent = selCount ? `✅ ${selCount} producto${selCount!==1?'s':''} seleccionado${selCount!==1?'s':''}` : '';
 }
 
 function clickProd(id,el,ev){
@@ -1246,6 +1293,13 @@ function clickProd(id,el,ev){
   if(_sel.has(id)){_sel.delete(id);el.classList.remove('sel');el.querySelector('.pi-chk').textContent='';}
   else            {_sel.add(id);   el.classList.add('sel');   el.querySelector('.pi-chk').textContent='✓';}
   $('warnMax').style.display=_sel.size>12?'block':'none';
+  // Actualizar contador al pie
+  const footer=document.getElementById('sel-count-footer');
+  if(footer){
+    const n=_sel.size;
+    footer.style.display=n?'block':'none';
+    footer.textContent=n?`✅ ${n} producto${n!==1?'s':''} seleccionado${n!==1?'s':''}. Tocá GENERAR cuando estés listo.`:'';
+  }
 }
 
 // ── EDITOR DE PRECIO ──────────────────────────────────────────────────────────
