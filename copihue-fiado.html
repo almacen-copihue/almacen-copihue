@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Copihue — Fiados v6</title>
+<title>Copihue — Fiados v8</title>
 <meta name="theme-color" content="#1b5e20">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -45,7 +45,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
 .resumen .sub{font-size:.72rem;color:#aaa;margin-top:2px}
 
 /* ── Tarjeta cliente ── */
-.cli-card{background:#fff;border-radius:14px;padding:13px 15px;margin-bottom:9px;cursor:pointer;border:2px solid transparent;box-shadow:0 1px 5px rgba(46,125,50,.08);display:flex;justify-content:space-between;align-items:center;transition:transform .1s,border-color .15s}
+.cli-card{background:#fff;border-radius:14px;padding:13px 15px;margin-bottom:9px;cursor:pointer;border:2px solid transparent;box-shadow:0 1px 5px rgba(46,125,50,.08);display:flex;justify-content:space-between;align-items:center;transition:transform .1s,border-color .15s;touch-action:pan-y}
 .cli-card:active{transform:scale(.98);border-color:var(--borde)}
 .cli-nombre{font-weight:900;font-size:.93rem}
 .cli-tel{font-size:.7rem;color:var(--gris);margin-top:2px}
@@ -70,7 +70,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
 .sec-lbl::before{content:'';display:block;width:3px;height:12px;background:var(--verde);border-radius:2px}
 
 /* ── Tarjeta fiado ── */
-.fc{background:#fff;border-radius:12px;padding:12px 14px;margin-bottom:8px;border:2px solid #ffe082;box-shadow:0 1px 4px rgba(0,0,0,.06);cursor:pointer;position:relative;user-select:none;transition:transform .1s,border-color .15s}
+.fc{background:#fff;border-radius:12px;padding:12px 14px;margin-bottom:8px;border:2px solid #ffe082;box-shadow:0 1px 4px rgba(0,0,0,.06);cursor:pointer;position:relative;user-select:none;transition:transform .1s,border-color .15s;touch-action:pan-y}
 .fc:active{transform:scale(.99)}
 .fc.venc{border-color:#ef9a9a;background:#fff8f8}
 .fc.pagado{border-color:var(--borde);background:#f9fbe7;cursor:default}
@@ -300,7 +300,6 @@ function renderClientes(){
   // Event delegation — robusto con cualquier nombre
   document.querySelectorAll('.cli-card').forEach(el=>{
     el.addEventListener('click',()=>abrirCli(clis[parseInt(el.dataset.idx)].nom));
-    el.addEventListener('touchend',e=>{e.preventDefault();abrirCli(clis[parseInt(el.dataset.idx)].nom);});
   });
 }
 
@@ -412,7 +411,48 @@ async function abrirDet(ticket,idFiado){
     // Armar mensaje WA igual que copihue-reportes
     const MESES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
     const fLabel = d.fecha ? _fmt(_normFecha(d.fecha)) : '—';
-    const hLabel = d.hora  ? String(d.hora).replace(/^(\d{2}:\d{2}).*/, '$1') : '';
+    // ── Normalizar hora — soporta: "HH:MM", decimal Excel, Date string completo
+    // Si d.hora es un serial 1899 o falta, extraer hora de d.fecha directamente
+    function _normHora(h, fechaFallback){
+      function _extraer(s){
+        if(!s&&s!==0) return'';
+        s=String(s).trim();
+        if(/^\d{1,2}:\d{2}/.test(s)) return s.slice(0,5);
+        // Número decimal puro (fracción de día Excel)
+        const num=parseFloat(s);
+        if(!isNaN(num)&&num>=0&&num<1){
+          const mins=Math.round(num*1440);
+          return String(Math.floor(mins/60)).padStart(2,'0')+':'+String(mins%60).padStart(2,'0');
+        }
+        // String Date completo — verificar que el año sea válido (no 1899)
+        const yearM=s.match(/\b(\d{4})\b/);
+        if(yearM&&parseInt(yearM[1])>=2000){
+          try{
+            const dd=new Date(s);
+            if(!isNaN(dd.getTime())){
+              const offM=s.match(/GMT([+-])(\d{2})(\d{2})/);
+              if(offM){
+                const sign=offM[1]==='+'?1:-1;
+                const offMin=sign*(parseInt(offM[2])*60+parseInt(offM[3]));
+                const local=new Date(dd.getTime()+offMin*60000);
+                return String(local.getUTCHours()).padStart(2,'0')+':'+String(local.getUTCMinutes()).padStart(2,'0');
+              }
+              return String(dd.getHours()).padStart(2,'0')+':'+String(dd.getMinutes()).padStart(2,'0');
+            }
+          }catch(e){}
+        }
+        // Fallback regex: primer HH:MM ignorando offset GMT
+        const cleaned=s.replace(/GMT[+-]\d{4}/,'');
+        const m=cleaned.match(/(\d{1,2}):(\d{2})(?::\d{2})?/);
+        if(m) return m[1].padStart(2,'0')+':'+m[2];
+        return'';
+      }
+      // Intentar con h primero; si produce vacío o año 1899 → usar fechaFallback
+      const fromH=_extraer(h);
+      if(fromH) return fromH;
+      return _extraer(fechaFallback);
+    }
+    const hLabel=_normHora(d.hora, d.fecha);
     const waTxt=safeEnc(
       '🛒 *Almacén Copihue* · #'+d.ticket+'\n'+
       '📅 '+fLabel+(hLabel?' · '+hLabel+'hs':'')+'\n\n'+
