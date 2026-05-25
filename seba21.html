@@ -53,6 +53,22 @@
   • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
     evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
 
+  v358 — 25/05/2026
+  ------------------
+  • FIX CRÍTICO: Race condition entre getConfig y getOfertas eliminado.
+    cargarEstadoToggles() y cargarPoolsOfertas() ahora corren secuencialmente
+    dentro de inicializarSistemaOfertas() — config primero, pools después,
+    refresh único al final. Las ofertas de la planilla ahora aparecen siempre.
+  • FIX CRÍTICO: _refreshResultadosBadges() bloqueado por flag _sistemaOfertasReady
+    hasta que config Y pools estén cargados — elimina renders prematuros con
+    _tipoActivo() devolviendo false por _configCache null.
+  • FIX: Default _toggleModo cambiado de 'off' a 'auto' en primera carga
+    (sin localStorage) — evita inconsistencia visual en instalaciones nuevas.
+  • FIX CODE.GS: horariosOferta.ultimas ahora existe y se lee correctamente
+    desde config_sistema. ultimasSeleccionadas ya no siempre devuelve [].
+    Se agregaron _inicioUltimas/_cierreUltimas y lectura de dias/hora ultimas.
+  • recargarTodo() actualizado para usar inicializarSistemaOfertas().
+
   v357 — 24/05/2026
   ------------------
   • FIX proveedor en datalist ingreso: el campo proveedor no estaba mapeado
@@ -2917,6 +2933,10 @@ function esPorPeso(producto) {
 }
 
 function _refreshResultadosBadges(idActualizado) {
+    // Bloquear render de ofertas hasta que config Y pools estén listos
+    // (evita renders prematuros con _tipoActivo() devolviendo false por falta de _configCache)
+    if (!_sistemaOfertasReady && idActualizado == null) return;
+
     // Si hay un ID específico — actualización quirúrgica (mobile y desktop)
     if (idActualizado != null) {
         const item = ventaActual.find(i => (i.esPeso ? i.idOriginal : i.id) === idActualizado);
@@ -3472,12 +3492,12 @@ async function recargarTodo() {
     if (btn) { btn.disabled = true; btn.textContent = '⏳ …'; btn.style.opacity = '0.6'; }
     mostrarToast('🔄 Recargando ofertas y productos…', 'verde');
     try {
+        // Productos en paralelo con la inicialización secuencial de ofertas
+        _sistemaOfertasReady = false;
         await Promise.all([
             cargarProductos(),
-            cargarPoolsOfertas(),
-            cargarEstadoToggles()
+            inicializarSistemaOfertas()  // ya incluye config → pools → refresh
         ]);
-        _refreshResultadosBadges();
         mostrarToast('✅ Todo actualizado', 'verde');
     } catch(e) {
         mostrarToast('❌ Error al recargar', 'rojo');
@@ -6894,7 +6914,7 @@ const _toggleEstado = (() => {
 })();
 const _toggleModo = (() => {
     const p = _cargarTogglesPersistidos();
-    return (p && p.modo) ? p.modo : { relampago: 'off', destacadas: 'off', especiales: 'off', ultimas: 'off' };
+    return (p && p.modo) ? p.modo : { relampago: 'auto', destacadas: 'auto', especiales: 'auto', ultimas: 'auto' };
 })();
 
 // Día actual → índice columna planilla (0=Lun...6=Dom)
@@ -7151,10 +7171,21 @@ function _tipoActivo(tipo) {
 // Estado anterior de auto-horario (para detectar cambios de apertura/cierre)
 const _autoHorarioUltimoEstado = {};
 
+// ── Estado central del sistema de ofertas ──────────────────────────────────
+// Bloquea _refreshResultadosBadges hasta que config Y pools estén listos.
+let _sistemaOfertasReady = false;
+
+// Inicialización centralizada: secuencial, sin race condition
+async function inicializarSistemaOfertas() {
+    await cargarEstadoToggles();
+    await cargarPoolsOfertas();
+    _sistemaOfertasReady = true;
+    _refreshResultadosBadges();
+}
+
 function iniciarToggleOfertas() {
     // Mostrar estado "cargando" mientras fetch
     Object.keys(_TOGGLE_CONFIG).forEach(tipo => _pintarToggle(tipo, null));
-    cargarEstadoToggles();
     _pintarToggleCervecero();
 
     // ── Monitor automático: re-evaluar apertura/cierre cada 60s ──
@@ -7371,7 +7402,7 @@ function cerrarBuscadorFlotante() {
     }, true);
 })();
 
-cargarProductos().then(() => {
+cargarProductos().then(async () => {
     actualizarRanking();
     reporteOfertasPOS('post-productos');
     iniciarToggleOfertas();
@@ -7381,51 +7412,52 @@ cargarProductos().then(() => {
         if (pv) pv.style.display = 'flex';
     }
 
-    // Cargar pools primero, LUEGO recuperar carrito con precios correctos
-    cargarPoolsOfertas().then(() => {
-        const guardado = localStorage.getItem(CARRITO_KEY);
-        if (guardado) {
-            try {
-                const items = JSON.parse(guardado);
-                if (items && items.length > 0) {
-                    ventaActual = items.filter(item => {
-                        const p = productos.find(pr => pr.id === (item.esPeso ? item.idOriginal : item.id));
-                        return p != null;
-                    }).map(item => {
-                        const p = productos.find(pr => pr.id === (item.esPeso ? item.idOriginal : item.id));
-                        if (item.esPeso) return { ...item, stockDisponible: p.stock };
-                        // Recalcular oferta con pools ya cargados
-                        const oferta = calcularOfertaPOS(p, item.qty);
-                        return {
-                            ...item,
-                            price:            oferta.precioUnitario,
-                            precioOriginal:   oferta.tipoOferta === 'normal' ? p.normal : (oferta.tieneOferta ? p.price : 0),
-                            precioModificado: oferta.tieneOferta,
-                            ofertaEtiqueta:   oferta.etiqueta || null,
-                            ofertaTipo:       oferta.tipoOferta || null,
-                            stockDisponible:  p.stock
-                        };
-                    });
-                    if (ventaActual.length > 0) {
-                        renderVenta();
-                        const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
-                        mostrarBannerRecuperado(total);
-                    } else {
-                        localStorage.removeItem(CARRITO_KEY);
-                        renderVenta();
-                    }
+    // Inicializar sistema de ofertas: secuencial (config → pools → refresh único)
+    // Esto elimina el race condition entre getConfig y getOfertas.
+    await inicializarSistemaOfertas();
+
+    // Recuperar carrito con precios correctos (pools ya cargados)
+    const guardado = localStorage.getItem(CARRITO_KEY);
+    if (guardado) {
+        try {
+            const items = JSON.parse(guardado);
+            if (items && items.length > 0) {
+                ventaActual = items.filter(item => {
+                    const p = productos.find(pr => pr.id === (item.esPeso ? item.idOriginal : item.id));
+                    return p != null;
+                }).map(item => {
+                    const p = productos.find(pr => pr.id === (item.esPeso ? item.idOriginal : item.id));
+                    if (item.esPeso) return { ...item, stockDisponible: p.stock };
+                    // Recalcular oferta con pools ya cargados
+                    const oferta = calcularOfertaPOS(p, item.qty);
+                    return {
+                        ...item,
+                        price:            oferta.precioUnitario,
+                        precioOriginal:   oferta.tipoOferta === 'normal' ? p.normal : (oferta.tieneOferta ? p.price : 0),
+                        precioModificado: oferta.tieneOferta,
+                        ofertaEtiqueta:   oferta.etiqueta || null,
+                        ofertaTipo:       oferta.tipoOferta || null,
+                        stockDisponible:  p.stock
+                    };
+                });
+                if (ventaActual.length > 0) {
+                    renderVenta();
+                    const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
+                    mostrarBannerRecuperado(total);
                 } else {
+                    localStorage.removeItem(CARRITO_KEY);
                     renderVenta();
                 }
-            } catch(e) {
-                localStorage.removeItem(CARRITO_KEY);
+            } else {
                 renderVenta();
             }
-        } else {
+        } catch(e) {
+            localStorage.removeItem(CARRITO_KEY);
             renderVenta();
         }
-        _refreshResultadosBadges();
-    });
+    } else {
+        renderVenta();
+    }
 });
 </script>
 <!-- MODAL SELECTOR DE CANTIDAD -->
