@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v3.3';
+const CACHE_VERSION = 'v3.4';
 const CACHE_NAME = `almacen-copihue-${CACHE_VERSION}`;
 
 const ESSENTIAL_FILES = [
