@@ -1125,6 +1125,10 @@ function collectState() {
     backLogoChips: chipVal('backLogoChips'),
     fontSizes:     Object.assign({}, FONT_SIZES),
     zoomSlider:    document.getElementById('zoom-slider').value,
+    backCrop:      Object.assign({}, backCrop),
+    imgFront:      imgs.frontImg ? imgs.frontImg.src : null,
+    imgBack:       imgs.backImg  ? imgs.backImg.src  : null,
+    shots:         shots.map(s => s ? s.src : null),
   };
 }
 
@@ -1153,7 +1157,43 @@ function applyState(s) {
   chip('backLogoChips', s.backLogoChips);
   if (s.fontSizes) Object.assign(FONT_SIZES, s.fontSizes);
   if (s.zoomSlider) { set('zoom-slider', s.zoomSlider); applySize(); }
-  updateFontLabels(); renderCover();
+  updateFontLabels();
+  // Restore images
+  function restoreImg(src, callback) {
+    if (!src) { callback(null); return; }
+    const i = new Image(); i.onload = () => callback(i); i.src = src;
+  }
+  function restoreThumb(tid, nid, src) {
+    if (!src) return;
+    const t = document.getElementById(tid); if (t) { t.src = src; t.style.display = 'block'; }
+    const n = document.getElementById(nid); if (n) n.textContent = '(restaurado)';
+  }
+  restoreImg(s.imgFront, i => {
+    imgs.frontImg = i;
+    if (i) restoreThumb('fThumb', 'fName', s.imgFront);
+    restoreImg(s.imgBack, i2 => {
+      imgs.backImg = i2;
+      if (i2) restoreThumb('bThumb', 'bName', s.imgBack);
+      if (s.backCrop) Object.assign(backCrop, s.backCrop);
+      // Restore shots
+      let pending = 4;
+      const done = () => { pending--; if (pending <= 0) renderCover(); };
+      (s.shots || [null,null,null,null]).forEach((src, idx) => {
+        restoreImg(src, i3 => {
+          shots[idx] = i3;
+          if (i3) {
+            const im = document.getElementById('shi'+idx);
+            if (im) { im.src = src; im.style.display = 'block'; }
+            const ico = document.querySelectorAll('.shot-slot')[idx];
+            if (ico) ico.querySelector('.sico').style.display = 'none';
+            const scl = document.getElementById('scl'+idx);
+            if (scl) scl.style.display = 'block';
+          }
+          done();
+        });
+      });
+    });
+  });
 }
 
 function saveProject() {
