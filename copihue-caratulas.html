@@ -125,7 +125,7 @@ textarea{resize:vertical;font-size:.83rem}
 </div>
 
 <div id="pzone">
-  <canvas id="coverCanvas" style="cursor:pointer" title="Clic para re-encuadrar imagen trasera" onclick="if(imgs.backImg)openCropEditor(imgs.backImg)"></canvas>
+  <canvas id="coverCanvas" style="cursor:pointer" title="Clic en una foto para re-encuadrarla"></canvas>
   <div class="guide" id="g1"></div>
   <div class="guide" id="g2"></div>
 </div>
@@ -471,15 +471,18 @@ const shots=[null,null,null,null];
 // ── Back image crop state ─────────────────────────────────────
 // backCrop: { offsetX, offsetY, scale } — how to draw backImg onto the canvas
 const backCrop={offsetX:0,offsetY:0,scale:1};
+const frontCrop={offsetX:0,offsetY:0,scale:1};
+const shotCrops=[null,null,null,null]; // crop state per screenshot slot
 let _cropRawImg=null; // the raw Image object being cropped
+let _cropTarget='back'; // 'back' | 'shot0'..'shot3' | 'shot4' 
 
-function openCropEditor(img){
+function openCropEditor(img, target){
   _cropRawImg=img;
+  _cropTarget=target||'back';
   const modal=document.getElementById('cropModal');
   const stage=document.getElementById('cropStage');
   const cimg=document.getElementById('cropImg');
   modal.classList.add('open');
-
   // Set image
   cimg.src=img.src;
   cimg.onload=()=>initCrop(stage,cimg,img);
@@ -488,9 +491,11 @@ function openCropEditor(img){
 
 function initCrop(stage,cimg,img){
   const sw=stage.clientWidth, sh=stage.clientHeight;
-  // Aspect ratio of the back panel on canvas: W_BACK x H
-  // We show the back panel crop box centered in stage
-  const panelAspect=W_BACK/H;
+  // Aspect ratio depends on target slot
+  let panelAspect;
+  if(_cropTarget==='back'||_cropTarget==='front'){ panelAspect=_cropTarget==='front'?W_FRONT/H:W_BACK/H; }
+  else if(_cropTarget==='shot4'){ panelAspect=W_BACK/Math.round(H*0.18); }
+  else { panelAspect=(Math.round((W_BACK-28-Math.round(5*MM/10)*2)/3))/(Math.round(H*0.28)); }
   let boxW,boxH;
   if(sw/sh>panelAspect){ boxH=sh*0.88; boxW=boxH*panelAspect; }
   else{ boxW=sw*0.88; boxH=boxW/panelAspect; }
@@ -577,13 +582,29 @@ function cropConfirm(){
   const imgX=(boxX-tx)/sc, imgY=(boxY-ty)/sc;
   const imgW=boxW/sc, imgH=boxH/sc;
   // Store crop in naturalWidth/naturalHeight space
-  backCrop.offsetX=imgX;
-  backCrop.offsetY=imgY;
-  backCrop.scale=sc;
-  backCrop.sx=imgX; backCrop.sy=imgY;
-  backCrop.sw=imgW; backCrop.sh=imgH;
-  backCrop.hasCrop=true;
-  imgs.backImg=_cropRawImg;
+  const cropObj={offsetX:imgX,offsetY:imgY,scale:sc,sx:imgX,sy:imgY,sw:imgW,sh:imgH,hasCrop:true};
+  if(_cropTarget==='front'){
+    imgs.frontImg=_cropRawImg;
+    // store frontCrop for redraw
+    Object.assign(frontCrop,cropObj);
+  } else if(_cropTarget==='back'){
+    Object.assign(backCrop,cropObj);
+    imgs.backImg=_cropRawImg;
+  } else if(_cropTarget==='shot4'){
+    shotCrops[3]=cropObj;
+    shots[3]=_cropRawImg;
+    // update thumb
+    const im=document.getElementById('shi3');if(im){im.src=_cropRawImg.src;im.style.display='block';}
+    const ico=document.querySelectorAll('.shot-slot')[3];if(ico)ico.querySelector('.sico').style.display='none';
+    const scl=document.getElementById('scl3');if(scl)scl.style.display='block';
+  } else {
+    const idx=parseInt(_cropTarget.replace('shot',''));
+    shotCrops[idx]=cropObj;
+    shots[idx]=_cropRawImg;
+    const im=document.getElementById('shi'+idx);if(im){im.src=_cropRawImg.src;im.style.display='block';}
+    const ico=document.querySelectorAll('.shot-slot')[idx];if(ico)ico.querySelector('.sico').style.display='none';
+    const scl=document.getElementById('scl'+idx);if(scl)scl.style.display='block';
+  }
   cropCancel();
   renderCover();
 }
@@ -629,8 +650,8 @@ function clearImg(id,tid,nid){
   document.getElementById(id).value='';
   renderCover();
 }
-function loadShot(idx,input){const f=input.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{const i=new Image();i.onload=()=>{shots[idx]=i;const im=document.getElementById('shi'+idx);im.src=e.target.result;im.style.display='block';document.querySelectorAll('.shot-slot')[idx].querySelector('.sico').style.display='none';document.getElementById('scl'+idx).style.display='block';renderCover();};i.src=e.target.result;};r.readAsDataURL(f);}
-function clearShot(idx){shots[idx]=null;const im=document.getElementById('shi'+idx);im.src='';im.style.display='none';document.querySelectorAll('.shot-slot')[idx].querySelector('.sico').style.display='';document.getElementById('scl'+idx).style.display='none';document.getElementById('sh'+idx).value='';renderCover();}
+function loadShot(idx,input){const f=input.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{const i=new Image();i.onload=()=>{const target=idx===3?'shot4':'shot'+idx;openCropEditor(i,target);};i.src=e.target.result;};r.readAsDataURL(f);}
+function clearShot(idx){shots[idx]=null;shotCrops[idx]=null;const im=document.getElementById('shi'+idx);im.src='';im.style.display='none';document.querySelectorAll('.shot-slot')[idx].querySelector('.sico').style.display='';document.getElementById('scl'+idx).style.display='none';document.getElementById('sh'+idx).value='';renderCover();}
 
 let shot4Opacity=100; // 0-100
 function adjShot4Opacity(delta){
@@ -954,14 +975,19 @@ function renderCover(){
     }
     slotH=Math.min(slotH,maxAvailH);
 
-    function drawOriginalSize(img,slotX,slotY,slotW2,slotH2){
+    function drawOriginalSize(img,slotX,slotY,slotW2,slotH2,crop){
       if(!img)return;
       ctx.save();
       ctx.fillStyle='#000';ctx.fillRect(slotX,slotY,slotW2,slotH2);
-      const dx=slotX+(slotW2-img.width)/2;
-      const dy=slotY+(slotH2-img.height)/2;
       ctx.beginPath();ctx.rect(slotX,slotY,slotW2,slotH2);ctx.clip();
-      ctx.drawImage(img,dx,dy);
+      if(crop&&crop.hasCrop&&crop.sw>0){
+        ctx.drawImage(img,crop.sx,crop.sy,crop.sw,crop.sh,slotX,slotY,slotW2,slotH2);
+      } else {
+        const nw=img.naturalWidth||img.width,nh=img.naturalHeight||img.height;
+        const sc=Math.max(slotW2/nw,slotH2/nh);
+        const dx=slotX+(slotW2-nw*sc)/2,dy=slotY+(slotH2-nh*sc)/2;
+        ctx.drawImage(img,dx,dy,nw*sc,nh*sc);
+      }
       ctx.restore();
       ctx.strokeStyle='rgba(120,170,255,.5)';ctx.lineWidth=1.5;
       ctx.strokeRect(slotX,slotY,slotW2,slotH2);
@@ -970,7 +996,7 @@ function renderCover(){
     for(let i=0;i<3;i++){
       const slotX=BX+14+i*(slotW+gap);
       if(shots[i]){
-        drawOriginalSize(shots[i],slotX,shotAreaY,slotW,slotH);
+        drawOriginalSize(shots[i],slotX,shotAreaY,slotW,slotH,shotCrops[i]);
       } else {
         ctx.fillStyle='rgba(0,25,65,.6)';ctx.strokeStyle='rgba(50,90,180,.2)';ctx.lineWidth=1.5;
         ctx.fillRect(slotX,shotAreaY,slotW,slotH);ctx.strokeRect(slotX,shotAreaY,slotW,slotH);
@@ -989,9 +1015,15 @@ function renderCover(){
       ctx.save();
       ctx.globalAlpha=op;
       ctx.beginPath();ctx.rect(BX,stripY,W_BACK,stripH);ctx.clip();
-      const dx4=BX+(W_BACK-img4.width)/2;
-      const dy4=stripY+(stripH-img4.height)/2;
-      ctx.drawImage(img4,dx4,dy4);
+      const cr4=shotCrops[3];
+      if(cr4&&cr4.hasCrop&&cr4.sw>0){
+        ctx.drawImage(img4,cr4.sx,cr4.sy,cr4.sw,cr4.sh,BX,stripY,W_BACK,stripH);
+      } else {
+        const nw4=img4.naturalWidth||img4.width,nh4=img4.naturalHeight||img4.height;
+        const sc4=Math.max(W_BACK/nw4,stripH/nh4);
+        const dx4=BX+(W_BACK-nw4*sc4)/2,dy4=stripY+(stripH-nh4*sc4)/2;
+        ctx.drawImage(img4,dx4,dy4,nw4*sc4,nh4*sc4);
+      }
       ctx.restore();
       ctx.strokeStyle='rgba(100,140,200,.3)';ctx.lineWidth=1;
       ctx.beginPath();ctx.moveTo(BX,stripY);ctx.lineTo(BX+W_BACK,stripY);ctx.stroke();
@@ -1060,7 +1092,11 @@ function renderCover(){
   // ═══ FRONT ═══════════════════════════════════════════════════
   const FX=W_BACK+W_SPINE;
   if(imgs.frontImg){
-    coverFit(imgs.frontImg,FX,0,W_FRONT,H);
+    if(frontCrop.hasCrop&&frontCrop.sw>0){
+      ctx.save();ctx.beginPath();ctx.rect(FX,0,W_FRONT,H);ctx.clip();
+      ctx.drawImage(imgs.frontImg,frontCrop.sx,frontCrop.sy,frontCrop.sw,frontCrop.sh,FX,0,W_FRONT,H);
+      ctx.restore();
+    } else { coverFit(imgs.frontImg,FX,0,W_FRONT,H); }
     const to=ctx.createLinearGradient(FX,0,FX,H*.2);
     to.addColorStop(0,'rgba(0,0,0,.55)');to.addColorStop(1,'rgba(0,0,0,0)');
     ctx.fillStyle=to;ctx.fillRect(FX,0,W_FRONT,Math.round(H*.2));
@@ -1126,6 +1162,8 @@ function collectState() {
     fontSizes:     Object.assign({}, FONT_SIZES),
     zoomSlider:    document.getElementById('zoom-slider').value,
     backCrop:      Object.assign({}, backCrop),
+    frontCrop:     Object.assign({}, frontCrop),
+    shotCrops:     shotCrops.map(c=>c?Object.assign({},c):null),
     imgFront:      imgs.frontImg ? imgs.frontImg.src : null,
     imgBack:       imgs.backImg  ? imgs.backImg.src  : null,
     shots:         shots.map(s => s ? s.src : null),
@@ -1175,6 +1213,8 @@ function applyState(s) {
       imgs.backImg = i2;
       if (i2) restoreThumb('bThumb', 'bName', s.imgBack);
       if (s.backCrop) Object.assign(backCrop, s.backCrop);
+      if (s.frontCrop) Object.assign(frontCrop, s.frontCrop);
+      if (s.shotCrops) s.shotCrops.forEach((c,i)=>{ if(c) shotCrops[i]=Object.assign({},c); });
       // Restore shots
       let pending = 4;
       const done = () => { pending--; if (pending <= 0) renderCover(); };
@@ -1237,6 +1277,41 @@ window.addEventListener('load', () => {
     if (saved) applyState(JSON.parse(saved));
   } catch(e) {}
 });
+
+// ── Clic en canvas: detecta qué slot de foto tocó ─────────────
+(function(){
+  const cv=document.getElementById('coverCanvas');
+  cv.addEventListener('click',function(e){
+    const rect=cv.getBoundingClientRect();
+    const scaleX=W_TOTAL/rect.width;
+    const cx=(e.clientX-rect.left)*scaleX;
+    const cy=(e.clientY-rect.top)*scaleX;
+    // Zona trasera (back panel: BX..BX+W_BACK)
+    // Clic en shot4 (franja inferior)?
+    const stripH=Math.round(H*0.18);
+    const stripY=H-stripH;
+    if(cx>=BX&&cx<=BX+W_BACK){
+      if(cy>=stripY&&shots[3]){ openCropEditor(shots[3],'shot4'); return; }
+      // Shots 0-2?
+      const titleBarH=Math.round(H*0.10);
+      const descBlockH=Math.round(H*0.22);
+      const shotAreaY=titleBarH+descBlockH+4;
+      const gap=Math.round(5*MM/10);
+      const slotW=Math.round((W_BACK-28-gap*2)/3);
+      const slotH=Math.min(stripY-shotAreaY-4,Math.round(slotW*0.65));
+      for(let i=0;i<3;i++){
+        const slotX=BX+14+i*(slotW+gap);
+        if(cx>=slotX&&cx<=slotX+slotW&&cy>=shotAreaY&&cy<=shotAreaY+slotH&&shots[i]){
+          openCropEditor(shots[i],'shot'+i); return;
+        }
+      }
+      // Resto de la trasera = backImg
+      if(imgs.backImg){ openCropEditor(imgs.backImg,'back'); return; }
+    }
+    // Portada frontal
+    if(cx>=FX&&imgs.frontImg){ openCropEditor(imgs.frontImg,'front'); return; }
+  });
+})();
 
 function downloadPNG(){const a=document.createElement('a');a.download=`caratula-ps2-${(document.getElementById('gameTitle').value||'juego').replace(/\s+/g,'-')}.png`;a.href=canvas.toDataURL('image/png');a.click();}
 function init(){ctx.clearRect(0,0,W_TOTAL,H);updateFontLabels();if(document.fonts&&document.fonts.ready){document.fonts.ready.then(()=>{renderCover();setTimeout(renderCover,500);});}else{renderCover();setTimeout(renderCover,700);}}
