@@ -114,6 +114,9 @@ textarea{resize:vertical;font-size:.83rem}
     <button class="hb hb-green" onclick="window.print()">🖨 A4</button>
     <button class="hb hb-ghost" onclick="downloadPNG()">💾 PNG</button>
     <button class="hb hb-orange" onclick="forceRender()">⚡</button>
+    <button class="hb hb-ghost" onclick="saveProject()" title="Guardar proyecto como .json">💾 PROY</button>
+    <label class="hb hb-ghost" style="cursor:pointer" title="Cargar proyecto .json">📂 <input type="file" accept=".json" onchange="loadProject(this)" style="display:none"></label>
+    <button class="hb hb-orange" onclick="resetLS()" title="Reset (borra ajustes guardados en esta pestaña)">↺ RESET</button>
     <div id="zoom-wrap">
       <span id="zoom-lbl">50%</span>
       <input type="range" id="zoom-slider" min="25" max="100" value="50" step="5" oninput="applySize()">
@@ -1087,9 +1090,113 @@ function renderCover(){
   ctx.fillText('PLAYSTATION®2',FX+W_FRONT-8,H-7);ctx.textAlign='left';
   ctx.strokeStyle='rgba(140,180,255,.15)';ctx.lineWidth=3;
   ctx.strokeRect(FX+1,1,W_FRONT-2,H-2);
+  autoSaveLS();
 }
 
 function forceRender(){ctx.clearRect(0,0,W_TOTAL,H);setTimeout(renderCover,30);}
+// ── Proyecto: guardar / cargar / reset ────────────────────────
+const LS_KEY = 'copihue_project';
+
+function collectState() {
+  return {
+    v: 1,
+    gameTitle:     document.getElementById('gameTitle').value,
+    gameSubtitle:  document.getElementById('gameSubtitle').value,
+    players:       document.getElementById('players').value,
+    descText:      document.getElementById('descText').value,
+    sc1:           document.getElementById('sc1').value,
+    sc2:           document.getElementById('sc2').value,
+    stc:           document.getElementById('stc').value,
+    spineFont:     document.getElementById('spineFont').value,
+    spineFontSize: document.getElementById('spineFontSize').value,
+    frontFont:     document.getElementById('frontFont').value,
+    frontFontSize: document.getElementById('frontFontSize').value,
+    rating:        document.getElementById('rating').value,
+    togDesc:       document.getElementById('togDesc').checked,
+    togLogos:      document.getElementById('togLogos').checked,
+    togBarcode:    document.getElementById('togBarcode').checked,
+    togRating:     document.getElementById('togRating').checked,
+    togLegal:      document.getElementById('togLegal').checked,
+    backModeChips: chipVal('backModeChips'),
+    platChips:     chipVal('platChips'),
+    ageChips:      chipVal('ageChips'),
+    frontLogoChips:chipVal('frontLogoChips'),
+    backLogoChips: chipVal('backLogoChips'),
+    fontSizes:     Object.assign({}, FONT_SIZES),
+    zoomSlider:    document.getElementById('zoom-slider').value,
+  };
+}
+
+function applyState(s) {
+  if (!s || s.v !== 1) return;
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+  const chk = (id, val) => { const el = document.getElementById(id); if (el) el.checked = val; };
+  const chip = (gid, val) => {
+    const el = document.querySelector('#' + gid + ' .chip[data-v="' + val + '"]');
+    if (el) { document.querySelectorAll('#' + gid + ' .chip').forEach(c => c.classList.remove('on')); el.classList.add('on'); }
+  };
+  set('gameTitle', s.gameTitle);
+  set('gameSubtitle', s.gameSubtitle);
+  set('players', s.players);
+  set('descText', s.descText);
+  set('sc1', s.sc1); set('sc2', s.sc2); set('stc', s.stc);
+  set('spineFont', s.spineFont); set('spineFontSize', s.spineFontSize);
+  document.getElementById('sfsV').textContent = s.spineFontSize + '%';
+  set('frontFont', s.frontFont); set('frontFontSize', s.frontFontSize);
+  document.getElementById('ffsV').textContent = s.frontFontSize + '%';
+  set('rating', s.rating);
+  chk('togDesc', s.togDesc); chk('togLogos', s.togLogos);
+  chk('togBarcode', s.togBarcode); chk('togRating', s.togRating); chk('togLegal', s.togLegal);
+  chip('backModeChips', s.backModeChips); chip('platChips', s.platChips);
+  chip('ageChips', s.ageChips); chip('frontLogoChips', s.frontLogoChips);
+  chip('backLogoChips', s.backLogoChips);
+  if (s.fontSizes) Object.assign(FONT_SIZES, s.fontSizes);
+  if (s.zoomSlider) { set('zoom-slider', s.zoomSlider); applySize(); }
+  updateFontLabels(); renderCover();
+}
+
+function saveProject() {
+  const s = collectState();
+  const blob = new Blob([JSON.stringify(s, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.download = (s.gameTitle || 'proyecto').replace(/\s+/g, '-').toLowerCase() + '.json';
+  a.href = URL.createObjectURL(blob); a.click();
+  localStorage.setItem(LS_KEY, JSON.stringify(s));
+}
+
+function loadProject(input) {
+  const f = input.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = e => {
+    try {
+      const s = JSON.parse(e.target.result);
+      applyState(s);
+      localStorage.setItem(LS_KEY, JSON.stringify(s));
+    } catch(err) { alert('Archivo inválido'); }
+  };
+  r.readAsText(f);
+  input.value = '';
+}
+
+function resetLS() {
+  if (!confirm('¿Resetear todos los ajustes guardados?')) return;
+  localStorage.removeItem(LS_KEY);
+  location.reload();
+}
+
+// Auto-guardar en LS al hacer cambios
+const _origRender = renderCover;
+// hook post-render save
+function autoSaveLS() { try { localStorage.setItem(LS_KEY, JSON.stringify(collectState())); } catch(e){} }
+
+// Restaurar desde LS al cargar
+window.addEventListener('load', () => {
+  try {
+    const saved = localStorage.getItem(LS_KEY);
+    if (saved) applyState(JSON.parse(saved));
+  } catch(e) {}
+});
+
 function downloadPNG(){const a=document.createElement('a');a.download=`caratula-ps2-${(document.getElementById('gameTitle').value||'juego').replace(/\s+/g,'-')}.png`;a.href=canvas.toDataURL('image/png');a.click();}
 function init(){ctx.clearRect(0,0,W_TOTAL,H);updateFontLabels();if(document.fonts&&document.fonts.ready){document.fonts.ready.then(()=>{renderCover();setTimeout(renderCover,500);});}else{renderCover();setTimeout(renderCover,700);}}
 if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',init);}else{init();}
