@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>SendWA — Almacén Copihue ver.6</title>
+<title>SendWA — Almacén Copihue ver.7</title>
 <style>
   /* ===== VARIABLES ===== */
   :root {
@@ -278,7 +278,7 @@
     transition: background .3s;
   }
   #action-btns {
-    display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px;
   }
   .act-btn {
     display: flex; flex-direction: column; align-items: center; gap: 3px;
@@ -343,15 +343,29 @@
     background: var(--card-bg); border-radius: 20px 20px 0 0;
     width: 100%; max-height: 85vh; overflow-y: auto; padding: 20px 16px 30px;
   }
-  #collage-sheet h2 { font-size: 16px; margin-bottom: 12px; color: var(--text); }
-  #collage-canvas-wrap { text-align: center; margin: 12px 0; }
   #collage-canvas { max-width: 100%; border-radius: 10px; box-shadow: var(--shadow); }
-  #collage-actions { display: flex; gap: 8px; }
+  #collage-actions { display: flex; gap: 8px; margin-top: 10px; }
   #collage-actions button {
     flex: 1; height: 42px; border-radius: 10px; font-weight: 700; font-size: 13px;
   }
   #btn-collage-dl { background: var(--primary); color: #fff; }
   #btn-collage-close { background: var(--bg); border: 1.5px solid var(--border); color: var(--text); }
+  .collage-tab {
+    flex:1; padding: 7px 4px; border-radius: 8px; font-size: 12px; font-weight: 700;
+    border: 2px solid var(--border); color: var(--text-muted); background: var(--bg);
+    transition: all .2s;
+  }
+  .collage-tab.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .single-thumb {
+    display: inline-flex; flex-direction: column; align-items: center;
+    gap: 3px; cursor: pointer; padding: 4px; border-radius: 8px;
+    border: 2px solid var(--border); background: var(--card-bg); min-width: 70px;
+    transition: border-color .15s;
+  }
+  .single-thumb.active { border-color: var(--selected-border); }
+  .single-thumb img { width: 60px; height: 60px; object-fit: cover; border-radius: 6px; background: #e8f0e5; }
+  .single-thumb span { font-size: 9px; color: var(--text-muted); text-align: center;
+    max-width: 66px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
   /* ===== HISTORIA 1080x1920 ===== */
   #historia-canvas { display: none; }
@@ -415,6 +429,7 @@
     <button class="filter-chip" data-filter="ultimas">🏷️ Últimas</button>
     <button class="filter-chip" data-filter="promo">🏷️ Promos</button>
     <button class="filter-chip" data-filter="combo">🎯 Combos</button>
+    <button class="filter-chip" data-filter="sinoferta">✅ Sin oferta</button>
     <!-- categorías se insertan dinámicamente -->
   </div>
 </div>
@@ -443,6 +458,9 @@
     <button class="act-btn" id="btn-collage" title="Generar collage">
       <span class="icon">🖼️</span>Collage
     </button>
+    <button class="act-btn warn" id="btn-clear-sel" title="Limpiar selección">
+      <span class="icon">🗑️</span>Limpiar
+    </button>
   </div>
   <button id="btn-ia-suggest">✨ Sugerencia IA — Ordenar automáticamente</button>
 </div>
@@ -453,14 +471,23 @@
 <!-- COLLAGE MODAL -->
 <div id="collage-modal">
   <div id="collage-sheet">
-    <h2>🖼️ Collage generado</h2>
-    <div id="collage-canvas-wrap">
+    <!-- Selector de modo -->
+    <div id="collage-mode-tabs" style="display:flex;gap:6px;margin-bottom:12px;">
+      <button class="collage-tab active" data-cmode="collage">🖼️ Collage</button>
+      <button class="collage-tab" data-cmode="single">📸 1 Foto</button>
+      <button class="collage-tab" data-cmode="historia">📱 Historia</button>
+    </div>
+    <!-- Selector de producto (modo 1 foto) -->
+    <div id="single-picker" style="display:none;margin-bottom:10px;overflow-x:auto;white-space:nowrap;">
+      <small style="color:var(--text-muted);display:block;margin-bottom:6px">Elegí el producto:</small>
+      <div id="single-picker-list" style="display:flex;gap:8px;padding-bottom:4px;"></div>
+    </div>
+    <div id="collage-canvas-wrap" style="text-align:center;margin:10px 0;">
       <canvas id="collage-canvas"></canvas>
     </div>
-    <canvas id="historia-canvas" width="1080" height="1920"></canvas>
+    <canvas id="historia-canvas" width="1080" height="1920" style="display:none;"></canvas>
     <div id="collage-actions">
       <button id="btn-collage-dl">⬇️ Descargar</button>
-      <button id="btn-historia-dl">📱 Historia</button>
       <button id="btn-collage-close">✕ Cerrar</button>
     </div>
   </div>
@@ -782,6 +809,7 @@ function applyFilter() {
     if (currentFilter === 'ultimas')   return p.catOferta === 'ultimas';
     if (currentFilter === 'promo')     return p.catOferta === 'promo';
     if (currentFilter === 'combo')     return p.catOferta === 'combo';
+    if (currentFilter === 'sinoferta') return !p.catOferta;
     if (currentFilter !== 'todos') {
       return norm(p.categoria) === norm(currentFilter);
     }
@@ -975,8 +1003,10 @@ function generateText(mode) {
       const emoji = getCatEmoji(cat);
       if (mode === 'grupo') lines.push(`\n${emoji} *${cat.toUpperCase()}*`);
       for (const p of ps) {
-        const ofBadge = p.catOferta ? ` ${BADGE_LABELS[p.catOferta] || '🏷️'}` : '';
-        lines.push(`• ${p.nombre}${ofBadge} — *${fmt(p.precioVenta)}*`);
+        const of = calcularOferta(p);
+        const precioFinal = of && of.precio ? fmt(of.precio) : fmt(p.precioVenta);
+        const etiqueta = of ? ` ${of.etiqueta}` : '';
+        lines.push(`• ${p.nombre}${etiqueta} — *${precioFinal}*`);
       }
     }
   } else {
@@ -1029,155 +1059,319 @@ document.getElementById('btn-dl').onclick = async () => {
 };
 
 // ============================================================
-// COLLAGE
+// COLLAGE — modos: collage (multi), single (1 foto), historia
 // ============================================================
+let _collageMode = 'collage';
+let _singleIdx   = 0;
+let _collageProds = [];
+
 document.getElementById('btn-collage').onclick = () => {
   const prods = getSelectedProducts();
-  if (prods.length < 2) { toast('⚠️ Seleccioná al menos 2 productos — tocá las tarjetas para elegir'); return; }
-  generateCollage(prods.slice(0, 6));
+  if (!prods.length) { toast('⚠️ Seleccioná al menos un producto primero'); return; }
+  _collageProds = prods;
+  _singleIdx    = 0;
+  openCollageModal('collage');
 };
 
-async function generateCollage(prods) {
-  const n = prods.length <= 4 ? 4 : 6;
-  const cols = n <= 4 ? 2 : 3;
-  const rows = Math.ceil(n / cols);
-  const SIZE = 320;
-  const PAD = 8;
-  const W = cols * SIZE + (cols + 1) * PAD;
-  const H = rows * SIZE + (rows + 1) * PAD + 80;
+// Tabs de modo
+document.getElementById('collage-mode-tabs').onclick = e => {
+  const tab = e.target.closest('.collage-tab');
+  if (!tab) return;
+  document.querySelectorAll('.collage-tab').forEach(t => t.classList.remove('active'));
+  tab.classList.add('active');
+  openCollageModal(tab.dataset.cmode);
+};
 
-  const canvas = document.getElementById('collage-canvas');
-  canvas.width = W; canvas.height = H;
-  const ctx = canvas.getContext('2d');
-
-  // BG
-  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--primary-dark').trim() || '#2d5a22';
-  ctx.fillRect(0, 0, W, H);
-
-  // Header text
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 28px Segoe UI';
-  ctx.textAlign = 'center';
-  ctx.fillText('🛒 ALMACÉN COPIHUE', W/2, 50);
-
-  for (let i = 0; i < Math.min(n, prods.length); i++) {
-    const col = i % cols;
-    const row = Math.floor(i / cols);
-    const x = PAD + col * (SIZE + PAD);
-    const y = 70 + PAD + row * (SIZE + PAD);
-    const p = prods[i];
-
-    // Card background
-    ctx.fillStyle = '#ffffff';
-    roundRect(ctx, x, y, SIZE, SIZE, 12);
-    ctx.fill();
-
-    // Image
-    if (p.nombre) {
-      try {
-        const img = await loadImg(getImgUrl(p));
-        ctx.save();
-        roundRect(ctx, x, y, SIZE, SIZE - 60, 12);
-        ctx.clip();
-        ctx.drawImage(img, x, y, SIZE, SIZE - 60);
-        ctx.restore();
-      } catch {}
-    } else {
-      ctx.fillStyle = '#e8f0e5';
-      ctx.fillRect(x, y, SIZE, SIZE - 60);
-      ctx.fillStyle = '#aaa'; ctx.font = '48px serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(getCatEmoji(p.categoria), x + SIZE/2, y + (SIZE-60)/2 + 18);
-    }
-
-    // Nombre + precio
-    ctx.fillStyle = '#1a2e17'; ctx.font = 'bold 14px Segoe UI';
-    ctx.textAlign = 'center';
-    const name = p.nombre.length > 22 ? p.nombre.slice(0,22)+'…' : p.nombre;
-    ctx.fillText(name, x + SIZE/2, y + SIZE - 38);
-    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--primary-dark').trim() || '#2d5a22';
-    ctx.font = 'bold 18px Segoe UI';
-    ctx.fillText(fmt(p.precioVenta), x + SIZE/2, y + SIZE - 14);
-
-    // Oferta badge
-    if (p.catOferta) {
-      const colors = { relampago:'#e74c3c', destacado:'#f39c12', especial:'#8e44ad', promo:'#27ae60', combo:'#2980b9' };
-      ctx.fillStyle = colors[p.catOferta] || '#27ae60';
-      ctx.fillRect(x, y, SIZE, 22);
-      ctx.fillStyle = '#fff'; ctx.font = 'bold 11px Segoe UI';
-      ctx.fillText((BADGE_LABELS[p.catOferta]||'🏷️ OFERTA').toUpperCase(), x+SIZE/2, y+15);
-    }
-  }
-
-  // Show modal
+function openCollageModal(mode) {
+  _collageMode = mode;
   document.getElementById('collage-modal').classList.add('open');
-  generateHistoria(ctx, canvas, prods);
+  // Selector de producto solo en modo single
+  const picker = document.getElementById('single-picker');
+  if (mode === 'single') {
+    picker.style.display = 'block';
+    buildSinglePicker(_collageProds);
+  } else {
+    picker.style.display = 'none';
+  }
+  renderCollageMode();
 }
 
+function buildSinglePicker(prods) {
+  const list = document.getElementById('single-picker-list');
+  list.innerHTML = prods.map((p, i) => {
+    const url = getImgUrl(p);
+    return `<div class="single-thumb ${i===_singleIdx?'active':''}" onclick="selectSingleProd(${i})">
+      <img src="${url}" onerror="this.src=''">
+      <span>${p.nombre.slice(0,16)}</span>
+    </div>`;
+  }).join('');
+}
+window.selectSingleProd = (i) => {
+  _singleIdx = i;
+  document.querySelectorAll('.single-thumb').forEach((el,j)=>el.classList.toggle('active',j===i));
+  renderCollageMode();
+};
+
+async function renderCollageMode() {
+  if (_collageMode === 'collage')  await drawCollage(_collageProds.slice(0, 6));
+  if (_collageMode === 'single')   await drawSingle(_collageProds[_singleIdx]);
+  if (_collageMode === 'historia') await drawHistoria(_collageProds.slice(0, 6));
+}
+
+// ── HELPERS CANVAS ──────────────────────────────────────────────
 function loadImg(src) {
   return new Promise((res, rej) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => res(img);
-    img.onerror = rej;
+    img.onerror = () => rej(new Error('img error'));
     img.src = src;
+    setTimeout(() => rej(new Error('timeout')), 5000);
   });
 }
-
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
-  ctx.moveTo(x+r, y);
-  ctx.lineTo(x+w-r, y); ctx.arcTo(x+w, y, x+w, y+r, r);
-  ctx.lineTo(x+w, y+h-r); ctx.arcTo(x+w, y+h, x+w-r, y+h, r);
-  ctx.lineTo(x+r, y+h); ctx.arcTo(x, y+h, x, y+h-r, r);
-  ctx.lineTo(x, y+r); ctx.arcTo(x, y, x+r, y, r);
+  ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.arcTo(x+w,y,x+w,y+r,r);
+  ctx.lineTo(x+w,y+h-r); ctx.arcTo(x+w,y+h,x+w-r,y+h,r);
+  ctx.lineTo(x+r,y+h); ctx.arcTo(x,y+h,x,y+h-r,r);
+  ctx.lineTo(x,y+r); ctx.arcTo(x,y,x+r,y,r);
   ctx.closePath();
 }
+function wrapText(ctx, text, x, y, maxW, lineH, maxLines) {
+  const words = text.split(' ');
+  let line = '';
+  let lines = [];
+  for (const w of words) {
+    const test = line ? line + ' ' + w : w;
+    if (ctx.measureText(test).width > maxW && line) { lines.push(line); line = w; }
+    else line = test;
+  }
+  if (line) lines.push(line);
+  lines = lines.slice(0, maxLines);
+  lines.forEach((l, i) => ctx.fillText(l, x, y + i * lineH));
+  return lines.length;
+}
 
-// Historia 1080x1920
-async function generateHistoria(srcCtx, srcCanvas, prods) {
-  const hCanvas = document.getElementById('historia-canvas');
-  hCanvas.width = 1080; hCanvas.height = 1920;
-  const hCtx = hCanvas.getContext('2d');
-  hCtx.fillStyle = '#1a2e17';
-  hCtx.fillRect(0, 0, 1080, 1920);
+// Dibuja una tarjeta de producto en el canvas con badge y precio oferta
+async function drawProductCard(ctx, p, x, y, W, H) {
+  const oferta = calcularOferta(p);
+  const badgeColor = BADGE_COLORS[p.catOferta] || null;
+  const IMGH = H - 68;
 
-  // Scale collage onto historia
-  const scale = Math.min(1080 / srcCanvas.width, 1400 / srcCanvas.height);
-  const sw = srcCanvas.width * scale;
-  const sh = srcCanvas.height * scale;
-  hCtx.drawImage(srcCanvas, (1080-sw)/2, 200, sw, sh);
+  // Fondo blanco con sombra suave
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.15)'; ctx.shadowBlur = 8;
+  ctx.fillStyle = '#ffffff';
+  roundRect(ctx, x, y, W, H, 14); ctx.fill();
+  ctx.restore();
+
+  // Marco de color si tiene oferta
+  if (badgeColor) {
+    ctx.save();
+    ctx.strokeStyle = badgeColor; ctx.lineWidth = 4;
+    roundRect(ctx, x+2, y+2, W-4, H-4, 12); ctx.stroke();
+    ctx.restore();
+  }
+
+  // Imagen
+  try {
+    const img = await loadImg(getImgUrl(p));
+    ctx.save();
+    roundRect(ctx, x, y, W, IMGH, 14); ctx.clip();
+    ctx.drawImage(img, x, y, W, IMGH);
+    ctx.restore();
+  } catch {
+    ctx.fillStyle = '#e8f0e5';
+    ctx.fillRect(x, y, W, IMGH);
+    ctx.fillStyle = '#aaa'; ctx.font = `${W*0.22}px serif`; ctx.textAlign = 'center';
+    ctx.fillText(getCatEmoji(p.categoria), x+W/2, y+IMGH/2+W*0.08);
+  }
+
+  // Badge de oferta encima de la imagen
+  if (oferta && badgeColor) {
+    ctx.fillStyle = badgeColor;
+    ctx.fillRect(x, y, W, 24);
+    ctx.fillStyle = '#fff'; ctx.font = `bold ${W*0.055}px Segoe UI`; ctx.textAlign = 'center';
+    ctx.fillText(oferta.etiqueta.toUpperCase(), x+W/2, y+17);
+  }
+
+  // Nombre
+  ctx.fillStyle = '#1a2e17'; ctx.font = `bold ${W*0.058}px Segoe UI`; ctx.textAlign = 'center';
+  wrapText(ctx, p.nombre, x+W/2, y+IMGH+16, W-10, W*0.065, 2);
+
+  // Precio: si hay oferta → tachado + precio oferta; si no → normal
+  if (oferta && oferta.precio) {
+    ctx.fillStyle = '#999'; ctx.font = `${W*0.048}px Segoe UI`;
+    ctx.textAlign = 'center';
+    // Texto tachado manual
+    const antes = fmt(p.precioVenta);
+    const mx = x + W/2;
+    const ty = y + IMGH + 44;
+    ctx.fillText(antes, mx, ty);
+    const tw = ctx.measureText(antes).width;
+    ctx.beginPath(); ctx.strokeStyle='#999'; ctx.lineWidth=1.2;
+    ctx.moveTo(mx-tw/2, ty-4); ctx.lineTo(mx+tw/2, ty-4); ctx.stroke();
+    // Precio oferta
+    ctx.fillStyle = badgeColor || '#2d5a22';
+    ctx.font = `bold ${W*0.072}px Segoe UI`;
+    ctx.fillText(fmt(oferta.precio), mx, y + IMGH + 63);
+  } else {
+    ctx.fillStyle = '#2d5a22'; ctx.font = `bold ${W*0.075}px Segoe UI`; ctx.textAlign = 'center';
+    ctx.fillText(fmt(p.precioVenta), x+W/2, y+IMGH+60);
+  }
+}
+
+// ── MODO COLLAGE (4 o 6 productos) ──────────────────────────────
+async function drawCollage(prods) {
+  const n    = Math.min(prods.length, 6);
+  const cols = n <= 4 ? 2 : 3;
+  const rows = Math.ceil(n / cols);
+  const CARD = 300; const PAD = 10; const HDRH = 70; const FTRH = 50;
+  const W = cols*CARD + (cols+1)*PAD;
+  const H = HDRH + rows*CARD + (rows+1)*PAD + FTRH;
+
+  const cvs = document.getElementById('collage-canvas');
+  cvs.width = W; cvs.height = H;
+  const ctx = cvs.getContext('2d');
+
+  // BG degradado
+  const grd = ctx.createLinearGradient(0,0,W,H);
+  grd.addColorStop(0,'#1a3a16'); grd.addColorStop(1,'#2d5a22');
+  ctx.fillStyle = grd; ctx.fillRect(0,0,W,H);
+
+  // Header dinámico según tipos de oferta en los productos
+  const tiposEnCollage = [...new Set(prods.map(p=>p.catOferta).filter(Boolean))];
+  const titleMap = {
+    relampago: '⚡ OFERTAS RELÁMPAGO', ultimas: '🏷️ ÚLTIMAS UNIDADES',
+    destacado: '🔥 DESTACADOS', especial: '💜 ESPECIALES',
+    promo: '🏷️ PROMOS', combo: '🎯 COMBOS'
+  };
+  const collageTitle = tiposEnCollage.length === 1 && titleMap[tiposEnCollage[0]]
+    ? titleMap[tiposEnCollage[0]]
+    : tiposEnCollage.length > 1 ? '🔥 OFERTAS DEL DÍA' : '🛒 PRODUCTOS DESTACADOS';
+  // Color del header según tipo principal
+  const hdrColorMap = { relampago:'#c0392b', ultimas:'#d35400', destacado:'#d68910',
+    especial:'#6c3483', promo:'#6c3483', combo:'#bf360c' };
+  const hdrColor = hdrColorMap[tiposEnCollage[0]] || '#1a3a16';
+  ctx.fillStyle = hdrColor; ctx.fillRect(0,0,W,HDRH);
+  ctx.fillStyle='#fff'; ctx.font='bold 22px Segoe UI'; ctx.textAlign='center';
+  ctx.fillText('🛒 ALMACÉN COPIHUE', W/2, 26);
+  ctx.font='bold 15px Segoe UI'; ctx.fillStyle='rgba(255,255,255,.95)';
+  ctx.fillText(collageTitle, W/2, 52);
+
+  // Cards
+  for (let i=0; i<n; i++) {
+    const col=i%cols, row=Math.floor(i/cols);
+    const x=PAD+col*(CARD+PAD), y=HDRH+PAD+row*(CARD+PAD);
+    await drawProductCard(ctx, prods[i], x, y, CARD, CARD);
+  }
 
   // Footer
-  hCtx.fillStyle = '#25D366';
-  hCtx.fillRect(0, 1750, 1080, 170);
-  hCtx.fillStyle = '#fff';
-  hCtx.font = 'bold 56px Segoe UI';
-  hCtx.textAlign = 'center';
-  hCtx.fillText('📲 Pedidos por WhatsApp', 540, 1830);
-  hCtx.font = '40px Segoe UI';
-  hCtx.fillText('Almacén Copihue', 540, 1890);
+  ctx.fillStyle='rgba(0,0,0,.35)'; ctx.fillRect(0,H-FTRH,W,FTRH);
+  ctx.fillStyle='#fff'; ctx.font='bold 14px Segoe UI'; ctx.textAlign='center';
+  ctx.fillText('📦 Hacemos pedidos  •  💬 Consultas por WhatsApp', W/2, H-FTRH+32);
+}
+
+// ── MODO 1 FOTO ──────────────────────────────────────────────────
+async function drawSingle(p) {
+  if (!p) return;
+  const oferta = calcularOferta(p);
+  const badgeColor = BADGE_COLORS[p.catOferta] || null;
+  const W=900, H=900;
+  const cvs = document.getElementById('collage-canvas');
+  cvs.width=W; cvs.height=H;
+  const ctx = cvs.getContext('2d');
+
+  // BG
+  const grd=ctx.createLinearGradient(0,0,W,H);
+  grd.addColorStop(0,'#1a3a16'); grd.addColorStop(1,'#2d5a22');
+  ctx.fillStyle=grd; ctx.fillRect(0,0,W,H);
+
+  // Card centrada grande
+  const CW=780, CH=780, CX=(W-CW)/2, CY=(H-CH)/2-20;
+  await drawProductCard(ctx, p, CX, CY, CW, CH);
+
+  // Footer
+  ctx.fillStyle='rgba(0,0,0,.4)'; ctx.fillRect(0,H-60,W,60);
+  ctx.fillStyle='#fff'; ctx.font='bold 18px Segoe UI'; ctx.textAlign='center';
+  ctx.fillText('🛒 Almacén Copihue  •  📦 Pedidos por WhatsApp', W/2, H-25);
+}
+
+// ── MODO HISTORIA 1080x1920 ──────────────────────────────────────
+async function drawHistoria(prods) {
+  const n=Math.min(prods.length, 6), cols=n<=4?2:3, rows=Math.ceil(n/cols);
+  const W=1080, H=1920;
+  const CARD=Math.floor((W-60-(cols-1)*12)/cols);
+  const startY=260;
+  const cvs = document.getElementById('historia-canvas');
+  cvs.width=W; cvs.height=H; cvs.style.display='block';
+  const ctx=cvs.getContext('2d');
+
+  // BG
+  const grd=ctx.createLinearGradient(0,0,W,H);
+  grd.addColorStop(0,'#0f2b0b'); grd.addColorStop(1,'#1a3a16');
+  ctx.fillStyle=grd; ctx.fillRect(0,0,W,H);
+
+  // Header dinámico
+  const _tiposH = [...new Set(prods.map(p=>p.catOferta).filter(Boolean))];
+  const _titleH = { relampago:'⚡ OFERTAS RELÁMPAGO', ultimas:'🏷️ ÚLTIMAS UNIDADES',
+    destacado:'🔥 DESTACADOS', especial:'💜 ESPECIALES', promo:'🏷️ PROMOS', combo:'🎯 COMBOS' };
+  const _hTitulo = _tiposH.length===1 && _titleH[_tiposH[0]] ? _titleH[_tiposH[0]] : '🔥 OFERTAS DEL DÍA';
+  const _hColorMap = { relampago:'#c0392b', ultimas:'#d35400', destacado:'#d68910',
+    especial:'#6c3483', promo:'#6c3483', combo:'#bf360c' };
+  ctx.fillStyle = _hColorMap[_tiposH[0]] || '#0f2b0b';
+  ctx.fillRect(0,0,W,220);
+  ctx.fillStyle='#fff'; ctx.font='bold 64px Segoe UI'; ctx.textAlign='center';
+  ctx.fillText('🛒 ALMACÉN COPIHUE', W/2, 100);
+  ctx.font='bold 44px Segoe UI'; ctx.fillStyle='rgba(255,255,255,.95)';
+  ctx.fillText(_hTitulo, W/2, 170);
+
+  for (let i=0;i<n;i++) {
+    const col=i%cols, row=Math.floor(i/cols);
+    const x=30+col*(CARD+12), y=startY+row*(CARD+12);
+    await drawProductCard(ctx, prods[i], x, y, CARD, CARD);
+  }
+
+  // Footer WA
+  ctx.fillStyle='#25D366'; ctx.fillRect(0,H-150,W,150);
+  ctx.fillStyle='#fff'; ctx.font='bold 52px Segoe UI'; ctx.textAlign='center';
+  ctx.fillText('📲 Pedidos por WhatsApp', W/2, H-80);
+  ctx.font='36px Segoe UI';
+  ctx.fillText('Almacén Copihue', W/2, H-30);
+
+  // Mostrar en canvas principal también (preview)
+  const cvs2=document.getElementById('collage-canvas');
+  const scale=Math.min(700/W, 700/H);
+  cvs2.width=Math.round(W*scale); cvs2.height=Math.round(H*scale);
+  const ctx2=cvs2.getContext('2d');
+  ctx2.drawImage(cvs, 0,0, cvs2.width, cvs2.height);
 }
 
 document.getElementById('btn-collage-dl').onclick = () => {
   const a = document.createElement('a');
-  a.href = document.getElementById('collage-canvas').toDataURL('image/jpeg', .9);
-  a.download = 'collage_copihue.jpg';
-  a.click();
-};
-document.getElementById('btn-historia-dl').onclick = () => {
-  const a = document.createElement('a');
-  a.href = document.getElementById('historia-canvas').toDataURL('image/jpeg', .9);
-  a.download = 'historia_copihue.jpg';
+  const isHistoria = _collageMode === 'historia';
+  const src = isHistoria
+    ? document.getElementById('historia-canvas').toDataURL('image/jpeg',.95)
+    : document.getElementById('collage-canvas').toDataURL('image/jpeg',.92);
+  a.href = src;
+  a.download = `copihue_${_collageMode}.jpg`;
   a.click();
 };
 document.getElementById('btn-collage-close').onclick = () => {
   document.getElementById('collage-modal').classList.remove('open');
+  document.getElementById('historia-canvas').style.display = 'none';
 };
 
 // ============================================================
 // IA SUGGEST
 // ============================================================
+document.getElementById('btn-clear-sel').onclick = () => {
+  if (!selectedIds.size) { toast('No hay productos seleccionados'); return; }
+  selectedIds.clear(); selectionOrder = [];
+  renderGrid();
+  toast('🗑️ Selección limpiada');
+};
+
 document.getElementById('btn-ia-suggest').onclick = async () => {
   if (!selectedIds.size) {
     // Auto-seleccionar mejores según prioridad
