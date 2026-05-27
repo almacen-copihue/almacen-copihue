@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v3.4';
+const CACHE_VERSION = 'v3.5';
 const CACHE_NAME = `almacen-copihue-${CACHE_VERSION}`;
 
 const ESSENTIAL_FILES = [
@@ -10,7 +10,6 @@ const ESSENTIAL_FILES = [
     './iconos-pwa/ios/180.png'
 ];
 
-// Archivos HTML del sistema — siempre Network First + re-cacheo
 const HTML_DINAMICOS = [
     'index.html',
     'seba21.html',
@@ -60,7 +59,6 @@ self.addEventListener('fetch', (event) => {
     const url = event.request.url;
     const method = event.request.method;
 
-    // Ignorar no-GET
     if (method !== 'GET') return;
 
     // Nunca cachear API Google
@@ -71,10 +69,9 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
-    // ─── HTML DINÁMICOS: siempre red primero, luego cachear ───────────────────
+    // ─── HTML DINÁMICOS: siempre red primero ─────────────────────────────────
     const esHTML = HTML_DINAMICOS.some(f => url.includes(f)) ||
                    url.endsWith('/') ||
-                   // cualquier .html no listado también va por red
                    url.match(/\.html(\?.*)?$/);
 
     if (esHTML) {
@@ -101,7 +98,8 @@ self.addEventListener('fetch', (event) => {
                 .then(cached => cached || fetch(event.request)
                     .then(res => {
                         if (res && res.status === 200) {
-                            caches.open(CACHE_NAME).then(c => c.put(event.request, res.clone()));
+                            const clone = res.clone();
+                            caches.open(CACHE_NAME).then(c => c.put(event.request, clone));
                         }
                         return res;
                     })
@@ -118,7 +116,9 @@ self.addEventListener('fetch', (event) => {
             fetch(cleanRequest)
                 .then(response => {
                     if (response && response.ok) {
-                        caches.open(CACHE_NAME).then(c => c.put(cleanUrl, response.clone()));
+                        // ✅ Clone ANTES de retornar — fix bug "body already used"
+                        const clone = response.clone();
+                        caches.open(CACHE_NAME).then(c => c.put(cleanUrl, clone));
                     }
                     return response;
                 })
