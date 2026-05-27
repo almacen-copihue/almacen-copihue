@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>SendWA — Almacén Copihue ver.3</title>
+<title>SendWA — Almacén Copihue ver.5</title>
 <style>
   /* ===== VARIABLES ===== */
   :root {
@@ -403,8 +403,11 @@
     <button class="filter-chip active" data-filter="todos">Todos</button>
     <button class="filter-chip" data-filter="oferta">🔥 Ofertas</button>
     <button class="filter-chip" data-filter="relampago">⚡ Relámpago</button>
-    <button class="filter-chip" data-filter="destacado">⭐ Destacado</button>
+    <button class="filter-chip" data-filter="destacado">🔥 Destacado</button>
     <button class="filter-chip" data-filter="especial">💜 Especial</button>
+    <button class="filter-chip" data-filter="ultimas">🏷️ Últimas</button>
+    <button class="filter-chip" data-filter="promo">🏷️ Promos</button>
+    <button class="filter-chip" data-filter="combo">🎯 Combos</button>
     <!-- categorías se insertan dinámicamente -->
   </div>
 </div>
@@ -465,9 +468,9 @@ const WA_LIMIT_ESTADO = 30;
 const IMG_SIZE_MB = 0.15; // tamaño estimado por imagen (150KB)
 
 // Priority map — columna J categoriaOferta
-const PRIORITY_ORDER = { relampago: 1, destacado: 2, especial: 3, promo: 4, combo: 5, '': 6 };
+const PRIORITY_ORDER = { relampago: 1, ultimas: 2, destacado: 3, especial: 4, promo: 5, combo: 6, '': 7 };
 const BADGE_LABELS = {
-  relampago: '⚡ Relámpago', destacado: '⭐ Destacado', especial: '💜 Especial',
+  relampago: '⚡ Relámpago', ultimas: '🏷️ Últimas', destacado: '🔥 Destacado', especial: '💜 Especial',
   promo: '🏷️ Promo', combo: '📦 Combo'
 };
 
@@ -529,30 +532,62 @@ function toast(msg, ms = 2000) {
 }
 
 // ============================================================
-// FETCH DATA
+// FETCH DATA — igual que v361: productos + getOfertas en paralelo
 // ============================================================
+
+// Pools de ofertas activos (cargados desde getOfertas, igual que seba21)
+const _poolRelampago  = new Set();
+const _poolDestacadas = new Set();
+const _poolEspeciales = new Set();
+const _poolUltimas    = new Set();
+
+async function _apiFetch(action) {
+  const r = await fetch(API_URL + '?action=' + action + '&t=' + Date.now(),
+    { redirect: 'follow' });
+  return r.json();
+}
+
 async function fetchData() {
   try {
-    const r = await fetch(API_URL + '?t=' + Date.now());
-    const data = await r.json();
-    return data;
+    const r = await fetch(API_URL + '?t=' + Date.now(), { redirect: 'follow' });
+    return await r.json();
   } catch(e) {
-    console.error('API error:', e);
+    console.error('API productos error:', e);
     return null;
   }
 }
 
+// Carga pools desde getOfertas — fuente de verdad, igual que seba21 v361
+async function cargarPools() {
+  try {
+    const data = await _apiFetch('getOfertas');
+    if (!data.success) { console.warn('getOfertas sin success'); return; }
+
+    _poolRelampago.clear(); _poolDestacadas.clear();
+    _poolEspeciales.clear(); _poolUltimas.clear();
+
+    (data.relampagoActivo   || []).forEach(p => _poolRelampago.add(Number(p.id)));
+    (data.destacadasActivas || []).filter(p => p.categoria !== 'CERVEZAS')
+                                  .forEach(p => _poolDestacadas.add(Number(p.id)));
+    (data.especialesActivas || []).filter(p => p.categoria !== 'CERVEZAS')
+                                  .forEach(p => _poolEspeciales.add(Number(p.id)));
+    const ults = data.ultimasSeleccionadasSiempre || data.ultimasSeleccionadas || [];
+    ults.forEach(p => _poolUltimas.add(Number(p.id)));
+
+    console.log(`📊 Pools SendWA — ⚡${_poolRelampago.size} 🔥${_poolDestacadas.size} 🌙${_poolEspeciales.size} 🏷️${_poolUltimas.size}`);
+  } catch(e) {
+    console.warn('No se pudieron cargar pools de ofertas:', e.message);
+  }
+}
+
 // ============================================================
-// PARSE PRODUCTS
-// Columnas clave: B=precioVenta, C=categoria, F=stock, J=categoriaOferta
+// PARSE PRODUCTS — misma estructura que seba21
 // ============================================================
 function parseProducts(data) {
-  // Extraer array de productos desde cualquier estructura
   let rows = null;
   if (Array.isArray(data)) {
     rows = data;
   } else if (typeof data === 'object') {
-    // Buscar el primer array en el objeto
     for (const k of Object.keys(data)) {
       if (Array.isArray(data[k]) && data[k].length > 0) { rows = data[k]; break; }
     }
@@ -562,28 +597,45 @@ function parseProducts(data) {
   return rows
     .filter(r => r && typeof r === 'object')
     .map((r, i) => {
-      // API real: {id, name, price, category, stock, image, categoriaOferta, relampago, destacada, especial, ...}
-      const nombre     = String(r.name || r.nombre || r.producto || '').trim();
-      const precioVenta= parseFloat(r.price || r.precio || r.precioVenta || 0);
-      const categoria  = String(r.category || r.categoria || '').trim();
-      const stock      = parseFloat(r.stock ?? 1);
-      const foto       = String(r.image || r.imagen || r.foto || '').trim();
-      const id         = String(r.id || r._id || (nombre + '_' + i));
-      const vendidos   = parseFloat(r.rotacion || r.vendidos || r.ventas || 0);
+      const nombre      = String(r.name || r.nombre || '').trim();
+      const precioVenta = parseFloat(r.price || r.precio || 0);
+      const categoria   = String(r.category || r.categoria || '').trim();
+      const stock       = parseFloat(r.stock ?? 1);
+      const foto        = String(r.image || r.imagen || r.foto || '').trim();
+      const id          = Number(r.id) || (nombre + '_' + i);
+      const vendidos    = parseFloat(r.rotacion || r.vendidos || 0);
+      // campos numéricos directos igual que seba21
+      const relampago   = (r.relampago !== undefined && r.relampago !== null && r.relampago !== '') 
+                          ? (isNaN(parseInt(r.relampago)) ? String(r.relampago).trim() : parseInt(r.relampago)) : 0;
+      const destacada   = parseInt(r.destacada) || 0;
+      const especial    = parseInt(r.especial)  || 0;
 
-      // Determinar categoría de oferta
-      // catOferta puede venir como string "relampago 15%", "especial", "destacada", "sin oferta", etc.
-      const rawCat = String(r.categoriaOferta || '').toLowerCase().trim();
-      let catOferta = '';
-      if (rawCat.includes('relampago') || r.relampago > 0) catOferta = 'relampago';
-      else if (rawCat.includes('destacad') || r.destacada > 0) catOferta = 'destacado';
-      else if (rawCat.includes('especial') || r.especial > 0) catOferta = 'especial';
-      else if (rawCat.includes('promo')) catOferta = 'promo';
-      else if (rawCat.includes('combo')) catOferta = 'combo';
-
-      return { id, nombre, precioVenta, categoria, stock, catOferta, foto, vendidos, _raw: r };
+      // catOferta se resuelve en applyFilter() contra los pools activos
+      return { id, nombre, precioVenta, categoria, stock, foto, vendidos,
+               relampago, destacada, especial, catOferta: '', _raw: r };
     })
     .filter(p => p.nombre && p.precioVenta > 0);
+}
+
+// Asigna catOferta a cada producto según pools activos (igual que seba21 v361)
+// — relampago/destacado/especial/ultimas: vienen de getOfertas (pools)
+// — promo/combo: se detectan del campo catOferta del producto directamente (col J)
+function resolveOfertas(products) {
+  return products.map(p => {
+    const pid = Number(p.id);
+    const rawCat = String(p._raw?.categoriaOferta || '').toUpperCase().trim();
+    let catOferta = '';
+
+    if      (p.relampago && _poolRelampago.has(pid))        catOferta = 'relampago';
+    else if (_poolUltimas.has(pid))                          catOferta = 'ultimas';
+    else if (p.destacada > 0 && _poolDestacadas.has(pid))   catOferta = 'destacado';
+    else if (p.especial  > 0 && _poolEspeciales.has(pid))   catOferta = 'especial';
+    // PROMO ACTIVA / COMBO ACTIVO — leídos directo de col J, sin pool ni toggle
+    else if (rawCat === 'PROMO ACTIVA')                      catOferta = 'promo';
+    else if (rawCat === 'COMBO ACTIVO')                      catOferta = 'combo';
+
+    return { ...p, catOferta };
+  });
 }
 
 // Aplica colores de CONFIG_UI si vienen en la respuesta
@@ -634,11 +686,17 @@ function interleavedSort(sorted) {
 }
 
 function applyFilter() {
-  let f = allProducts.filter(p => {
-    if (currentFilter === 'oferta') return !!p.catOferta;
+  // Primero resolver catOferta contra pools activos
+  const resolved = resolveOfertas(allProducts);
+
+  let f = resolved.filter(p => {
+    if (currentFilter === 'oferta')    return !!p.catOferta;
     if (currentFilter === 'relampago') return p.catOferta === 'relampago';
     if (currentFilter === 'destacado') return p.catOferta === 'destacado';
     if (currentFilter === 'especial')  return p.catOferta === 'especial';
+    if (currentFilter === 'ultimas')   return p.catOferta === 'ultimas';
+    if (currentFilter === 'promo')     return p.catOferta === 'promo';
+    if (currentFilter === 'combo')     return p.catOferta === 'combo';
     if (currentFilter !== 'todos') {
       return norm(p.categoria) === norm(currentFilter);
     }
@@ -1118,7 +1176,8 @@ function buildCategoryFilters() {
 window.toggleSelect = toggleSelect; // expose to onclick
 
 async function init() {
-  const data = await fetchData();
+  // Cargar productos Y pools en paralelo — igual que seba21
+  const [data] = await Promise.all([fetchData(), cargarPools()]);
   document.getElementById('loader').style.display = 'none';
 
   if (!data) {
@@ -1146,7 +1205,7 @@ async function init() {
   // Restaurar selección reciente
   if (recentSelection.length) {
     recentSelection.forEach(id => {
-      if (allProducts.find(p => p.id === id)) {
+      if (allProducts.find(p => String(p.id) === String(id))) {
         selectedIds.add(id);
         selectionOrder.push(id);
       }
