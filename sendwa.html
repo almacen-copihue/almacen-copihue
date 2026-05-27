@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>SendWA — Almacén Copihue ver.1</title>
+<title>SendWA — Almacén Copihue ver.2</title>
 <style>
   /* ===== VARIABLES ===== */
   :root {
@@ -533,35 +533,41 @@ async function fetchData() {
 // Columnas clave: B=precioVenta, C=categoria, F=stock, J=categoriaOferta
 // ============================================================
 function parseProducts(data) {
-  // Soporta {inventario: [...]} o array directo o {productos: [...]}
-  let rows = data.inventario || data.productos || data.items || data;
-  if (!Array.isArray(rows)) {
-    // Intentar extraer desde keys
-    const keys = Object.keys(data);
-    for (const k of keys) {
+  // Extraer array de productos desde cualquier estructura
+  let rows = null;
+  if (Array.isArray(data)) {
+    rows = data;
+  } else if (typeof data === 'object') {
+    // Buscar el primer array en el objeto
+    for (const k of Object.keys(data)) {
       if (Array.isArray(data[k]) && data[k].length > 0) { rows = data[k]; break; }
     }
   }
-  if (!Array.isArray(rows)) return [];
+  if (!Array.isArray(rows) || rows.length === 0) return [];
 
   return rows
-    .filter(r => r && (r.nombre || r.name || r.producto || r.B || r[1]))
+    .filter(r => r && typeof r === 'object')
     .map((r, i) => {
-      // Soporte para rows como array o como objeto
-      const isArr = Array.isArray(r);
-      const get = (objKey, arrIdx) => isArr ? r[arrIdx] : (r[objKey] ?? r[objKey.toLowerCase()] ?? '');
+      // API real: {id, name, price, category, stock, image, categoriaOferta, relampago, destacada, especial, ...}
+      const nombre     = String(r.name || r.nombre || r.producto || '').trim();
+      const precioVenta= parseFloat(r.price || r.precio || r.precioVenta || 0);
+      const categoria  = String(r.category || r.categoria || '').trim();
+      const stock      = parseFloat(r.stock ?? 1);
+      const foto       = String(r.image || r.imagen || r.foto || '').trim();
+      const id         = String(r.id || r._id || (nombre + '_' + i));
+      const vendidos   = parseFloat(r.rotacion || r.vendidos || r.ventas || 0);
 
-      const precioVenta = parseFloat(get('precioVenta', 1) || get('precio_venta', 1) || get('B', 1) || 0);
-      const categoria   = String(get('categoria', 2) || get('C', 2) || '').trim();
-      const stock       = parseFloat(get('stock', 5) || get('F', 5) || 1);
-      const catOferta   = String(get('categoriaOferta', 9) || get('J', 9) || '').trim().toLowerCase();
-      const nombre      = String(get('nombre', 0) || get('name', 0) || get('producto', 0) || get('A', 0) || '').trim();
-      const foto        = String(get('foto', 10) || get('imagen', 10) || get('image', 10) || get('K', 10) || '').trim();
-      const id          = get('id', '') || get('_id', '') || (nombre + '_' + i);
-      const vendidos    = parseFloat(get('vendidos', '') || get('ventas', '') || 0);
-      const fechaIngreso= get('fechaIngreso', '') || get('fecha', '') || '';
+      // Determinar categoría de oferta
+      // catOferta puede venir como string "relampago 15%", "especial", "destacada", "sin oferta", etc.
+      const rawCat = String(r.categoriaOferta || '').toLowerCase().trim();
+      let catOferta = '';
+      if (rawCat.includes('relampago') || r.relampago > 0) catOferta = 'relampago';
+      else if (rawCat.includes('destacad') || r.destacada > 0) catOferta = 'destacado';
+      else if (rawCat.includes('especial') || r.especial > 0) catOferta = 'especial';
+      else if (rawCat.includes('promo')) catOferta = 'promo';
+      else if (rawCat.includes('combo')) catOferta = 'combo';
 
-      return { id, nombre, precioVenta, categoria, stock, catOferta, foto, vendidos, fechaIngreso, _raw: r };
+      return { id, nombre, precioVenta, categoria, stock, catOferta, foto, vendidos, _raw: r };
     })
     .filter(p => p.nombre && p.precioVenta > 0);
 }
