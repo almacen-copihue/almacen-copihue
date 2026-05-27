@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Almacén Copihue v134</title>
+    <title>Almacén Copihue v137</title>
     
     <!-- META TAGS PARA PWA -->
     <meta name="theme-color" content="#2e7d32" id="meta-theme-color">
@@ -1855,7 +1855,6 @@
 #destacadas-grid,
 #especiales-grid,
 #promos-grid,
-#combos-grid,
 #ultimas-grid { min-height: 320px; }
 
 /* Animación suave al aparecer — reduce el impacto visual del CLS */
@@ -1947,26 +1946,15 @@
     <!-- ========== COMBOS / PROMOS ========== -->
     <div class="ofertas-container promos cls-oculto" id="ofertasPromos">
         <div class="ofertas-header">
-            <h2>🎯 COMBOS Y PROMOS</h2>
+            <h2>
+                🎯 COMBOS Y PROMOS
+                <span class="ofertas-badge">COMBO</span>
+            </h2>
         </div>
-        <!-- Sub-sección PROMOS -->
-        <div id="secPromos" style="display:none;">
-            <div style="padding:10px 16px 6px;font-weight:800;font-size:0.88rem;
-                        background:rgba(123,31,162,0.08);color:#7b1fa2;
-                        border-left:4px solid #7b1fa2;letter-spacing:0.5px;">
-                🎯 PROMOS
-            </div>
-            <div class="ofertas-products-grid" id="promos-grid"></div>
+        <div class="ofertas-stock-warning" id="msg-promos">
+            🎯 <strong>¡COMBOS ESPECIALES!</strong> Llevate más y ahorrás más.
         </div>
-        <!-- Sub-sección COMBOS -->
-        <div id="secCombos" style="display:none;">
-            <div style="padding:10px 16px 6px;font-weight:800;font-size:0.88rem;
-                        background:rgba(230,81,0,0.08);color:#e65100;
-                        border-left:4px solid #e65100;letter-spacing:0.5px;">
-                📦 COMBOS
-            </div>
-            <div class="ofertas-products-grid" id="combos-grid"></div>
-        </div>
+        <div class="ofertas-products-grid" id="promos-grid"></div>
     </div>
 
     <!-- ========== OFERTAS RELÁMPAGO ========== -->
@@ -2245,25 +2233,15 @@ const APP_VERSION = 'copihue-index-v112';
 // Tag versión automático con fecha
 // versionTag se actualiza desde config_sistema (campo 'version')
 
-// ========== HELPER PROMO / COMBO ACTIVO ==========
-// Fuente de verdad: category === 'PROMOS' o 'COMBOS' (col categoría planilla)
+// ========== HELPER PROMO ACTIVA ==========
+// Fuente de verdad: categoriaOferta (col J) === 'promo activa'
 // price  = col B = precio original (tachado)
-// normal = col L = precio promo/combo (el que se paga)
+// normal = col L = precio promo   (el que se paga)
 function esPromoActiva(p) {
-    return p.category === 'PROMOS'
-        && p.stockNumber > 0
+    const cat = String(p.categoriaOferta || '').trim().toLowerCase();
+    return (cat === 'promo activa' || cat === 'combo activo')
         && (p.normal || 0) > 0
         && (p.normal || 0) < (p.price || 0);
-}
-function esComboActivo(p) {
-    return p.category === 'COMBOS'
-        && p.stockNumber > 0
-        && (p.normal || 0) > 0
-        && (p.normal || 0) < (p.price || 0);
-}
-// Helper unificado para modal, carrito y cualquier display que aplique a AMBOS
-function _esPromoOComboActivo(p) {
-    return esPromoActiva(p) || esComboActivo(p);
 }
 
 // ========== MAPEO DE OFERTAS RELÁMPAGO ==========
@@ -3107,12 +3085,10 @@ function renderizarProductosNormales() {
     if (!productsGrid) return;
     
     // Filtrar productos que NO están en ofertas activas
-    // PROMOS y COMBOS nunca van al grid normal — tienen su propio contenedor
+    // PROMOS sin promo activa aparecen acá normalmente
     const productosNormales = products.filter(p => 
         !idsEnOfertas.has(p.id) && 
-        p.stockNumber > 0 &&
-        p.category !== 'PROMOS' &&
-        p.category !== 'COMBOS'
+        p.stockNumber > 0
     );
     
     // Filtrar por categoría si no estamos en búsqueda
@@ -3156,7 +3132,7 @@ function renderizarProductosNormales() {
     
     // Badge ANTES/AHORA: solo cuando esPromoActiva (fuente de verdad = col J)
     // price = precio original (tachado) | normal = precio promo (lo que se paga)
-    const tienePrecioNormal = _esPromoOComboActivo(product);
+    const tienePrecioNormal = esPromoActiva(product);
     const badgePrecioHTML = tienePrecioNormal ? `
         <div class="price-badge-promo">
             <span class="antes">ANTES $${product.price}</span>
@@ -3165,6 +3141,16 @@ function renderizarProductosNormales() {
         </div>
     ` : '';
     
+    // Badge top-right diferenciado por tipo: PROMO ACTIVA = 🏷️ violeta, COMBO ACTIVO = 🎯 naranja
+    const catOfertaIndex = String(product.categoriaOferta || '').trim().toLowerCase();
+    const esComboActivo = catOfertaIndex === 'combo activo' && tienePrecioNormal;
+    const esPromoActivo = catOfertaIndex === 'promo activa' && tienePrecioNormal;
+    const badgeTopRight = estaActiva
+        ? (esComboActivo
+            ? `<div style="position:absolute;top:10px;right:10px;background:linear-gradient(135deg,#ff9800,#ff5722);color:white;padding:8px 12px;border-radius:8px;font-size:0.9rem;font-weight:bold;z-index:10;box-shadow:0 3px 10px rgba(0,0,0,0.3);">🎯 COMBO</div>`
+            : `<div style="position:absolute;top:10px;right:10px;background:linear-gradient(135deg,#7b1fa2,#ab47bc);color:white;padding:8px 12px;border-radius:8px;font-size:0.9rem;font-weight:bold;z-index:10;box-shadow:0 3px 10px rgba(0,0,0,0.3);">🏷️ PROMO</div>`)
+        : '';
+
     if (esPromo && stock === 0) {
         return `
             <div class="product-card promo-card out-of-stock" style="opacity:0.6;filter:grayscale(0.7);">
@@ -3198,11 +3184,7 @@ function renderizarProductosNormales() {
                 <img src="${product.image}" loading="${imgLoading}" ${imgPriority} width="400" height="400"
                      alt="${product.name}"
                      onerror="handleImageError(this, '${product.name.replace(/'/g, "\\'")}')">
-                ${estaActiva ? `
-                    <div style="position:absolute;top:10px;right:10px;background:#4CAF50;color:white;padding:8px 12px;border-radius:8px;font-size:0.9rem;font-weight:bold;z-index:10;box-shadow:0 3px 10px rgba(0,0,0,0.3);">
-                        🔥 COMBO ${index + 1}
-                    </div>
-                ` : ''}
+                ${badgeTopRight}
             </div>
             ${badgePrecioHTML}
             <div class="product-info">
@@ -3848,9 +3830,11 @@ function processAPIData(apiData) {
             item.destacada = parseInt(item.oferta2) || 0;
         }
         
-        // Convertir categoriaOferta → especial
-        if (item.categoriaOferta !== undefined && item.especial === undefined) {
-            item.especial = parseInt(item.categoriaOferta) || 0;
+        // Adaptador legacy: si viene especial como categoriaOferta numérico (esquema viejo)
+        if (item.especial === undefined && item.categoriaOferta !== undefined) {
+            const parsed = parseInt(item.categoriaOferta);
+            if (!isNaN(parsed)) item.especial = parsed;
+            // NO sobreescribir item.categoriaOferta — es el campo de texto col J
         }
     });
     // console.log('✅ Adaptación completada');
@@ -3911,7 +3895,8 @@ function processAPIData(apiData) {
                 return key ? parseInt(item[key]) || 0 : 0;
             })(),
             vencimiento: item.vencimiento || '',
-            ultimaPromo: item.ultimaPromo || ''
+            ultimaPromo: item.ultimaPromo || '',
+            categoriaOferta: String(item.categoriaOferta || '').trim()
         };
         
         // Solo incluir productos con stock disponible
@@ -3979,81 +3964,75 @@ function actualizarSoloOfertas() {
 }
 
 function renderizarPromos() {
-    const container  = document.getElementById('ofertasPromos');
-    const secPromos  = document.getElementById('secPromos');
-    const secCombos  = document.getElementById('secCombos');
-    const gridPromos = document.getElementById('promos-grid');
-    const gridCombos = document.getElementById('combos-grid');
-    if (!container) return;
+    const container = document.getElementById('ofertasPromos');
+    const grid      = document.getElementById('promos-grid');
+    if (!container || !grid) return;
 
-    const listaPromos = products.filter(p => esPromoActiva(p));
-    const listaCombos = products.filter(p => esComboActivo(p));
-
-    // Excluir del grid normal (belt-and-suspenders además del filtro de categoría)
-    listaPromos.forEach(p => idsEnOfertas.add(p.id));
-    listaCombos.forEach(p => idsEnOfertas.add(p.id));
-
-    if (!listaPromos.length && !listaCombos.length) {
-        container.classList.add('cls-oculto');
-        container.style.marginBottom = '';
-        return;
+    // ── DEBUG — ver en consola qué llega de GAS para cada producto PROMOS ──
+    // Eliminar este bloque una vez confirmado que funciona
+    const candidatos = products.filter(p => p.category === 'PROMOS' || String(p.categoriaOferta||'').toLowerCase().includes('promo'));
+    if (candidatos.length) {
+        console.group('🎯 PROMOS — diagnóstico col J / col B / col L');
+        candidatos.forEach(p => console.log({
+            nombre: p.name,
+            colJ_categoriaOferta: p.categoriaOferta,
+            colB_price:  p.price,   // ANTES (precio original)
+            colL_normal: p.normal,  // AHORA (precio promo)
+            ahorra: (p.price||0) - (p.normal||0),
+            esPromoActiva: esPromoActiva(p)
+        }));
+        console.groupEnd();
     }
+    // ── FIN DEBUG ──
+
+    // Fuente de verdad: SOLO col J (categoriaOferta === 'promo activa')
+    // Col B = precio original (ANTES), Col L = precio promo (AHORA)
+    // Col K ($Oferta) no se usa en PROMOS — es solo para relampago/destacadas/especiales
+    const lista = products.filter(p => esPromoActiva(p) && p.stockNumber > 0);
+
+    // Excluir del grid normal para evitar duplicados
+    lista.forEach(p => idsEnOfertas.add(p.id));
+
+    if (!lista.length) { container.classList.add('cls-oculto'); container.style.marginBottom = ''; return; }
     container.classList.remove('cls-oculto');
-    container.style.marginBottom = '2rem';
 
-    // Sub-sección PROMOS
-    if (secPromos && gridPromos) {
-        if (listaPromos.length) {
-            secPromos.style.display = '';
-            gridPromos.innerHTML = listaPromos.map(p => _renderCardPromoCombo(p, 'promo')).join('');
-        } else {
-            secPromos.style.display = 'none';
-        }
-    }
+    grid.innerHTML = lista.map(prod => {
+        // price  = col B = precio original → ANTES (tachado)
+        // normal = col L = $promo_act     → AHORA (precio que paga el cliente)
+        const pct  = Math.round(((prod.price - prod.normal) / prod.price) * 100);
+        const ahorra = prod.price - prod.normal;
+        const foto = prod.name.toLowerCase()
+            .replace(/[áàä]/g,'a').replace(/[éèë]/g,'e').replace(/[íìï]/g,'i')
+            .replace(/[óòö]/g,'o').replace(/[úùü]/g,'u').replace(/ñ/g,'n')
+            .replace(/[^a-z0-9\s-]/g,'').replace(/\s+/g,'-').trim();
 
-    // Sub-sección COMBOS
-    if (secCombos && gridCombos) {
-        if (listaCombos.length) {
-            secCombos.style.display = '';
-            gridCombos.innerHTML = listaCombos.map(p => _renderCardPromoCombo(p, 'combo')).join('');
-        } else {
-            secCombos.style.display = 'none';
-        }
-    }
-}
-
-function _renderCardPromoCombo(prod, tipo) {
-    const pct    = Math.round(((prod.price - prod.normal) / prod.price) * 100);
-    const ahorra = prod.price - prod.normal;
-    const foto   = simplificarNombre(prod.name);
-    const color  = tipo === 'promo' ? '#7b1fa2' : '#e65100';
-    const label  = tipo === 'promo' ? '🎯 PROMO' : '📦 COMBO';
-    return `<div class="product-card" onclick="abrirModalProducto(${prod.id})" style="cursor:pointer;">
-        <div style="position:relative;width:100%;aspect-ratio:1/1;background:#f9f9f9;border-radius:10px 10px 0 0;overflow:hidden;">
-            <img src="imagenes-productos/${foto}.jpg" onerror="this.style.display='none'"
-                 style="width:100%;height:100%;object-fit:contain;padding:8px;" loading="lazy">
-            <div style="position:absolute;top:8px;left:8px;background:${color};color:white;
-                font-size:0.75rem;font-weight:900;padding:4px 10px;border-radius:20px;
-                box-shadow:0 2px 6px rgba(0,0,0,0.25);">${label} -${pct}%</div>
-        </div>
-        <div class="product-info" style="padding:10px;">
-            <div class="product-name" style="font-size:0.85rem;font-weight:700;line-height:1.3;margin-bottom:6px;">${prod.name}</div>
-            <div style="margin-bottom:8px;">
-                <div style="font-size:0.78rem;color:#999;text-decoration:line-through;">
-                    ANTES $${prod.price.toLocaleString('es-AR')}
-                </div>
-                <div style="color:${color};font-weight:900;font-size:1.1rem;">
-                    AHORA $${prod.normal.toLocaleString('es-AR')}
-                </div>
-                <div style="font-size:0.72rem;color:#4caf50;font-weight:600;">
-                    Ahorrás $${ahorra.toLocaleString('es-AR')}
-                </div>
+        return `<div class="product-card" onclick="abrirModalProducto(${prod.id})" style="cursor:pointer;">
+            <div style="position:relative;width:100%;aspect-ratio:1/1;background:#f9f9f9;border-radius:10px 10px 0 0;overflow:hidden;">
+                <img src="imagenes-productos/${foto}.jpg" onerror="this.style.display='none'"
+                     style="width:100%;height:100%;object-fit:contain;padding:8px;" loading="lazy">
+                <div style="position:absolute;top:8px;left:8px;background:#7b1fa2;color:white;
+                    font-size:0.75rem;font-weight:900;padding:4px 10px;border-radius:20px;
+                    box-shadow:0 2px 6px rgba(0,0,0,0.25);">-${pct}%</div>
             </div>
-            <button class="add-to-cart" data-id="${prod.id}"
-                    onclick="event.stopPropagation();addToCart(${prod.id});"
-                    style="margin-top:4px;">🛒 Agregar al Carrito</button>
-        </div>
-    </div>`;
+            <div class="product-info" style="padding:10px;">
+                <div class="product-name" style="font-size:0.85rem;font-weight:700;line-height:1.3;margin-bottom:6px;">${prod.name}</div>
+                <div style="margin-bottom:8px;">
+                    <div style="font-size:0.78rem;color:#999;text-decoration:line-through;">
+                        ANTES $${prod.price.toLocaleString('es-AR')}
+                    </div>
+                    <div style="color:#7b1fa2;font-weight:900;font-size:1.1rem;">
+                        AHORA $${prod.normal.toLocaleString('es-AR')}
+                    </div>
+                    <div style="font-size:0.72rem;color:#4caf50;font-weight:600;">
+                        Ahorrás $${ahorra.toLocaleString('es-AR')}
+                    </div>
+                </div>
+                <button class="add-to-cart" data-id="${prod.id}"
+                        onclick="event.stopPropagation();addToCart(${prod.id});"
+                        style="margin-top:4px;">🛒 Agregar al Carrito</button>
+            </div>
+        </div>`;
+    }).join('');
 }
 
 function renderizarUltimasUnidades() {
@@ -4206,7 +4185,7 @@ function renderCategories() {
     if (!categoriesContainer) return;
 
     const categories = [...new Set(products
-        .filter(p => p.category !== 'PROMOS' && p.category !== 'COMBOS')
+        .filter(p => p.category !== 'PROMOS')
         .map(p => p.category)
     )].sort();
 
@@ -4374,8 +4353,8 @@ function addToCart(productId, tipoForzado) {
     
     // ===== IMPORTANTE: Verificar ofertas ACTIVAS =====
     
-    // 0. Verificar si es PROMO o COMBO
-    if (product.category === 'PROMOS' || product.category === 'COMBOS') {
+    // 0. Verificar si es PROMO
+    if (product.category === 'PROMOS') {
         esPromo = true;
     }
     
@@ -4668,7 +4647,7 @@ function renderCartItems() {
             badge = `COMBO`;
             
             // Calcular ahorro si tiene promo activa (price=original, normal=promo)
-            if (_esPromoOComboActivo(product)) {
+            if (esPromoActiva(product)) {
                 precioAntes = product.price * item.quantity;
                 ahorroItem = (product.price - product.normal) * item.quantity;
                 const porcentaje = Math.round(((product.price - product.normal) / product.price) * 100);
@@ -4870,7 +4849,7 @@ function sendOrderViaWhatsApp() {
             ofertaInfo = `\n🏷️ Últimas Unidades -${item.oferta.descuento}% · Ahorrás $${ahorro}`;
         }
         // COMBO (PROMOS) — price=original tachado, normal=precio promo
-        else if (item.esPromo && _esPromoOComboActivo(product)) {
+        else if (item.esPromo && esPromoActiva(product)) {
             const precioNormalCombo = product.price * item.quantity;
             precioParaTotal = precioNormalCombo;
             const ahorro = (product.price - product.normal) * item.quantity;
@@ -5343,7 +5322,7 @@ function generarTarjetaBusqueda(product) {
         precioHTML = `<div style="text-decoration:line-through;color:#999;font-size:0.85rem;">$${product.price}</div>
             <div style="font-size:1.2rem;font-weight:900;color:#2196f3;">$${po}</div>
             <div style="font-size:0.75rem;color:#4caf50;">Ahorrás $${product.price - po}</div>`;
-    } else if (_esPromoOComboActivo(product)) {
+    } else if (esPromoActiva(product)) {
         const pct = Math.round(((product.price - product.normal) / product.price) * 100);
         badgeOferta = `<div style="position:absolute;top:8px;left:8px;background:linear-gradient(135deg,#ff9800,#ff5722);color:white;padding:4px 8px;border-radius:8px;font-size:0.75rem;font-weight:bold;z-index:10;">🎯 COMBO -${pct}%</div>`;
         precioHTML = `<div style="text-decoration:line-through;color:#999;font-size:0.85rem;">ANTES $${product.price}</div>
@@ -5355,7 +5334,7 @@ function generarTarjetaBusqueda(product) {
 
     const stockClass = product.stockNumber > 5 ? 'in-stock' : 'low-stock';
     const stockIcon = product.stockNumber > 5 ? '✅' : '⚠️';
-    const badgePrecioPromo = _esPromoOComboActivo(product) ? `
+    const badgePrecioPromo = esPromoActiva(product) ? `
         <div class="price-badge-promo">
             <span class="antes">ANTES $${product.price}</span>
             <span class="ahora">AHORA<br>$${product.normal}</span>
@@ -5539,7 +5518,7 @@ function compartirProducto(productId, event) {
         infoOferta = ' (-10% OFF)';
     }
     // 4. PROMO ACTIVA — columna J = fuente de verdad (price=original, normal=promo)
-    else if (_esPromoOComboActivo(product)) {
+    else if (esPromoActiva(product)) {
         precioNormalMostrar = product.price;
         const ahorro = product.price - product.normal;
         const porcentaje = Math.round((ahorro / product.price) * 100);
@@ -5573,7 +5552,7 @@ function compartirProducto(productId, event) {
                        `🌐 ${urlProducto}`;
             }
         }
-        else if (_esPromoOComboActivo(product)) {
+        else if (esPromoActiva(product)) {
             // Formato oferta: Antes/Ahora (PROMOS)
             const ahorro = product.price - product.normal;
             const porcentaje = Math.round((ahorro / product.price) * 100);
@@ -5789,7 +5768,7 @@ function abrirModalDeepLink(product) {
             <div class="deeplink-price-actual">$${precioOferta}</div>
             <div class="deeplink-oferta-badge">⭐ -10% ESPECIAL — Ahorrás $${product.price - precioOferta}</div>
         `;
-    } else if (_esPromoOComboActivo(product)) {
+    } else if (esPromoActiva(product)) {
         const porcentaje = Math.round(((product.price - product.normal) / product.price) * 100);
         precioHTML = `
             <div class="deeplink-price-normal">ANTES $${product.price}</div>
