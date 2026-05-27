@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>SendWA — Almacén Copihue ver.2</title>
+<title>SendWA — Almacén Copihue ver.3</title>
 <style>
   /* ===== VARIABLES ===== */
   :root {
@@ -506,6 +506,20 @@ function fmt(n) {
 function norm(s) {
   return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
+// Igual que simplificarNombre() del POS — genera el slug del archivo de imagen
+function slugFoto(nombre) {
+  return String(nombre).toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9 ]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .trim();
+}
+// URL de imagen: usa el campo image si viene con URL, sino construye path local igual que el POS
+function getImgUrl(p) {
+  if (p.foto && p.foto.startsWith('http')) return p.foto;
+  return `imagenes-productos/${slugFoto(p.nombre)}.jpg`;
+}
 function toast(msg, ms = 2000) {
   const el = document.getElementById('toast');
   el.textContent = msg;
@@ -686,13 +700,10 @@ function renderGrid() {
     const badgeClass = p.catOferta ? `badge-oferta badge-${p.catOferta}` : '';
     const badgeLabel = BADGE_LABELS[p.catOferta] || '';
 
-    let imgEl;
-    if (p.foto && p.foto.startsWith('http')) {
-      imgEl = `<img class="card-img" src="${p.foto}" alt="${p.nombre}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
-               <div class="card-img-placeholder" style="display:none">${getCatEmoji(p.categoria)}</div>`;
-    } else {
-      imgEl = `<div class="card-img-placeholder">${getCatEmoji(p.categoria)}</div>`;
-    }
+    const imgUrl = getImgUrl(p);
+    const imgEl = `<img class="card-img" src="${imgUrl}" alt="${p.nombre}" loading="lazy"
+                     onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                   <div class="card-img-placeholder" style="display:none">${getCatEmoji(p.categoria)}</div>`;
 
     return `
     <div class="prod-card ${sel?'selected':''} ${sinStock?'sin-stock':''}"
@@ -761,7 +772,7 @@ function getSelectedProducts() {
 // ============================================================
 function updateStats() {
   const sel = selectedIds.size;
-  const imgs = getSelectedProducts().filter(p => p.foto).length;
+  const imgs = getSelectedProducts().length;
   const cats = new Set(getSelectedProducts().map(p=>p.categoria)).size;
   const sizeMB = (imgs * IMG_SIZE_MB).toFixed(1);
 
@@ -848,13 +859,13 @@ document.getElementById('btn-wa').onclick = () => {
 };
 
 document.getElementById('btn-dl').onclick = async () => {
-  const prods = getSelectedProducts().filter(p => p.foto);
+  const prods = getSelectedProducts();
   if (!prods.length) { toast('⚠️ Sin imágenes para descargar'); return; }
   toast(`⬇️ Descargando ${prods.length} imagen(es)…`, 3000);
   for (const p of prods.slice(0, 20)) {
     try {
       const a = document.createElement('a');
-      a.href = p.foto; a.download = norm(p.nombre) + '.jpg';
+      a.href = getImgUrl(p); a.download = norm(p.nombre) + '.jpg';
       a.target = '_blank'; a.click();
       await new Promise(r => setTimeout(r, 400));
     } catch {}
@@ -906,9 +917,9 @@ async function generateCollage(prods) {
     ctx.fill();
 
     // Image
-    if (p.foto) {
+    if (p.nombre) {
       try {
-        const img = await loadImg(p.foto);
+        const img = await loadImg(getImgUrl(p));
         ctx.save();
         roundRect(ctx, x, y, SIZE, SIZE - 60, 12);
         ctx.clip();
