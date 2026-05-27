@@ -2822,19 +2822,25 @@ function renderResultados(results, term = '') {
         const sinStock = resto.filter(p => p.stock === 0);
 
         const grRelampago      = conStock.filter(p => _poolIdsRelampago.has(p.id)  && _tipoActivo('relampago'));
-        const grUltimas        = conStock.filter(p => _poolIdsUltimas.has(p.id)    && _tipoActivo('ultimas')    && !grRelampago.includes(p));
-        const grDestacadas     = conStock.filter(p => _destacadasFiltradas.has(p.id) && _tipoActivo('destacadas') && !grRelampago.includes(p) && !grUltimas.includes(p));
-        const grEspeciales     = conStock.filter(p => _poolIdsEspeciales.has(p.id) && _tipoActivo('especiales') && !grRelampago.includes(p) && !grUltimas.includes(p) && !grDestacadas.includes(p));
-        const grPrecioRebajado = conStock.filter(p => p.normal > p.price && p.category === 'PROMOS' && !grRelampago.includes(p) && !grUltimas.includes(p) && !grDestacadas.includes(p) && !grEspeciales.includes(p));
-        const idsOferta        = new Set([...grRelampago, ...grUltimas, ...grDestacadas, ...grEspeciales, ...grPrecioRebajado].map(p => p.id));
+        const grDestacadas     = conStock.filter(p => _destacadasFiltradas.has(p.id) && _tipoActivo('destacadas') && !grRelampago.includes(p));
+        const grEspeciales     = conStock.filter(p => _poolIdsEspeciales.has(p.id) && _tipoActivo('especiales') && !grRelampago.includes(p) && !grDestacadas.includes(p));
+        const grUltimas        = conStock.filter(p => _poolIdsUltimas.has(p.id)    && _tipoActivo('ultimas')    && !grRelampago.includes(p) && !grDestacadas.includes(p) && !grEspeciales.includes(p));
+        const grCervecero      = conStock.filter(p => _poolCervecero && _poolCervecero.has(p.id) && _esCerveceroActivo() && !grRelampago.includes(p) && !grDestacadas.includes(p) && !grEspeciales.includes(p) && !grUltimas.includes(p));
+        const grPromos         = conStock.filter(p => String(p.catOferta||'').toUpperCase()==='PROMO ACTIVA' && (p.normal||0)>0 && (p.normal||0)<(p.price||0) && !grRelampago.includes(p) && !grDestacadas.includes(p) && !grEspeciales.includes(p) && !grUltimas.includes(p) && !grCervecero.includes(p));
+        const grCombos         = conStock.filter(p => String(p.catOferta||'').toUpperCase()==='COMBO ACTIVO' && !grRelampago.includes(p) && !grPromos.includes(p));
+        const grRecien         = conStock.filter(p => p.recienLlegado && !grRelampago.includes(p) && !grDestacadas.includes(p) && !grEspeciales.includes(p) && !grUltimas.includes(p) && !grCervecero.includes(p) && !grPromos.includes(p) && !grCombos.includes(p));
+        const idsOferta        = new Set([...grRelampago,...grDestacadas,...grEspeciales,...grUltimas,...grCervecero,...grPromos,...grCombos,...grRecien].map(p=>p.id));
         const grNormal         = conStock.filter(p => !idsOferta.has(p.id));
 
         if (enCarrito.length) html += seccion('🛒', 'En carrito', '#2e7d32', enCarrito);
+        html += seccion('🏷️', 'Promos Activas', '#6a1b9a', grPromos);
+        html += seccion('🎯', 'Combos', '#00838f', grCombos);
+        html += seccion('🍺', 'Jueves Cervecero', '#1565c0', grCervecero);
         html += seccion('⚡', 'Relámpago', '#f9a825', grRelampago);
-        html += seccion('🏷️', 'Últimas Unidades', '#b71c1c', grUltimas);
         html += seccion('🔥', 'Destacadas', '#e65100', grDestacadas);
         html += seccion('⭐', 'Especiales', '#00838f', grEspeciales);
-        html += seccion('🏷️', 'Promos Activas', '#43a047', grPrecioRebajado);
+        html += seccion('🆕', 'Recién Llegados', '#2e7d32', grRecien);
+        html += seccion('🏷️', 'Últimas Unidades', '#b71c1c', grUltimas);
         if (grNormal.length) html += `<div style="padding:6px 10px 4px;font-size:0.65rem;font-weight:900;color:#aaa;
                             text-transform:uppercase;letter-spacing:0.8px;background:#f9f9f9;
                             margin:4px 0 0;">📦 Productos</div>` + grNormal.map(cardHTML).join('');
@@ -3350,7 +3356,8 @@ function _renderVentaCompleta(ligero) {
         const imgSrc = `imagenes-productos/${simplificarNombre(item.name)}.jpg`;
 
         // ── Calcular precios y ahorro ──────────────────────────────
-        const tieneOferta  = item.precioModificado && item.precioOriginal > 0 && item.precioOriginal > item.price;
+        const tieneOferta  = item.precioModificado && item.precioOriginal > 0 && item.precioOriginal > item.price
+                          || (item.ofertaTipo === 'promo' || item.ofertaTipo === 'combo') && item.ofertaEtiqueta;
         const precioUnit   = item.price;
         // NxM: usar precioTotalCalc si existe (evita desvíos por redondeo de unitario promedio)
         const subtotal     = item.precioTotalCalc != null ? item.precioTotalCalc : Math.round(precioUnit * item.qty);
@@ -3377,6 +3384,12 @@ function _renderVentaCompleta(ligero) {
             } else if (tipo === 'ultimas') {
                 colOferta = '#b71c1c';
                 formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">${item.ofertaEtiqueta || '🏷️ ÚLTIMAS UNIDADES'}</div>`;
+            } else if (tipo === 'promo') {
+                colOferta = '#6a1b9a';
+                formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">${item.ofertaEtiqueta || '🏷️ Promo Activa'}</div>`;
+            } else if (tipo === 'combo') {
+                colOferta = '#00838f';
+                formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">${item.ofertaEtiqueta || '🎯 Combo'}</div>`;
             } else if (tipo === 'normal') {
                 colOferta = '#43a047';
                 formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">↓ Precio rebajado</div>`;
