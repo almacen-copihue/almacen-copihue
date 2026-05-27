@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>SendWA — Almacén Copihue ver.5</title>
+<title>SendWA — Almacén Copihue ver.6</title>
 <style>
   /* ===== VARIABLES ===== */
   :root {
@@ -217,6 +217,13 @@
     margin-top: 3px;
   }
   [data-theme="dark"] .card-price { color: var(--primary-light); }
+  .card-price-oferta { margin-top: 3px; line-height: 1.2; }
+  .price-antes {
+    font-size: 10px; color: var(--text-muted); text-decoration: line-through; display: block;
+  }
+  .price-oferta {
+    font-size: 13px; font-weight: 800; display: block;
+  }
 
   /* Check overlay */
   .card-check {
@@ -465,13 +472,13 @@
 // ============================================================
 const API_URL = 'https://script.google.com/macros/s/AKfycbzWZzDvdGfW8vd2-FpQolT852cdPMeHbfKugn9DBOlju75bE1D0SUNB5EKEDOsI2vP4lA/exec';
 const WA_LIMIT_ESTADO = 30;
-const IMG_SIZE_MB = 0.15; // tamaño estimado por imagen (150KB)
+const IMG_SIZE_MB = 0.15;
 
-// Priority map — columna J categoriaOferta
+// Priority map
 const PRIORITY_ORDER = { relampago: 1, ultimas: 2, destacado: 3, especial: 4, promo: 5, combo: 6, '': 7 };
-const BADGE_LABELS = {
-  relampago: '⚡ Relámpago', ultimas: '🏷️ Últimas', destacado: '🔥 Destacado', especial: '💜 Especial',
-  promo: '🏷️ Promo', combo: '📦 Combo'
+const BADGE_COLORS = {
+  relampago: '#e74c3c', ultimas: '#e67e22', destacado: '#f39c12',
+  especial: '#8e44ad', promo: '#7b1fa2', combo: '#ff5722'
 };
 
 // Separadores automáticos por categoría
@@ -479,12 +486,79 @@ const SEP_LABELS = {
   'bebidas':    '🥤 BEBIDAS',
   'limpieza':   '🛒 LIMPIEZA',
   'snacks':     '🍪 SNACKS',
+  'dulces y snacks': '🍪 DULCES Y SNACKS',
   'lacteos':    '🥛 LÁCTEOS',
+  'heladera y congelados': '🧊 HELADERA Y CONGELADOS',
   'carnes':     '🥩 CARNES',
   'frutas':     '🍎 FRUTAS Y VERDURAS',
   'panaderia':  '🍞 PANADERÍA',
   'ferreteria': '🔧 FERRETERÍA',
+  'almacen':    '🛍️ ALMACÉN',
+  'higiene personal': '🧴 HIGIENE PERSONAL',
 };
+
+// Tabla de ofertas relámpago — idéntica a seba21 v361
+const OFERTAS_RELAMPAGO = {
+  '1':  { nombre:'2x1',   tipo:'nxm', cantidad:2, pagas:1   },
+  '2':  { nombre:'3x2',   tipo:'nxm', cantidad:3, pagas:2   },
+  '3':  { nombre:'4x3',   tipo:'nxm', cantidad:4, pagas:3   },
+  '4':  { nombre:'5x4',   tipo:'nxm', cantidad:5, pagas:4   },
+  '5':  { nombre:'6x5',   tipo:'nxm', cantidad:6, pagas:5   },
+  '6':  { nombre:'7x6',   tipo:'nxm', cantidad:7, pagas:6   },
+  '10': { nombre:'2da50', tipo:'nxm', cantidad:2, pagas:1.5 },
+  '11': { nombre:'10off', tipo:'pct', descuento:10           },
+  '12': { nombre:'15off', tipo:'pct', descuento:15           },
+  '13': { nombre:'20off', tipo:'pct', descuento:20           },
+  '14': { nombre:'25off', tipo:'pct', descuento:25           },
+  '15': { nombre:'30off', tipo:'pct', descuento:30           },
+};
+
+// Calcula precio oferta y etiqueta para mostrar en la tarjeta (qty=1 para vista)
+// Lógica idéntica a calcularOfertaPOS de seba21 v361
+function calcularOferta(p) {
+  const precio = p.precioVenta;
+  const cat    = p.catOferta;
+  if (!cat) return null;
+
+  // RELÁMPAGO
+  if (cat === 'relampago' && p.relampago) {
+    const key = String(p.relampago);
+    const cfg = OFERTAS_RELAMPAGO[key];
+    if (cfg && cfg.tipo === 'pct') {
+      return { precio: Math.round(precio * (1 - cfg.descuento / 100)), etiqueta: `⚡ -${cfg.descuento}% OFF` };
+    } else if (cfg && cfg.tipo === 'nxm') {
+      return { precio: null, etiqueta: `⚡ ${cfg.nombre.toUpperCase()}` }; // NxM: sin precio unitario fijo
+    }
+    // fallback string
+    const match = key.match(/(\d+)x(\d+)/i);
+    if (match) return { precio: null, etiqueta: `⚡ ${match[1]}X${match[2]}` };
+    return { precio: null, etiqueta: '⚡ RELÁMPAGO' };
+  }
+  // ÚLTIMAS UNIDADES — precio viene de getOfertas (poolUltimas tiene {pct,precioOferta})
+  if (cat === 'ultimas') {
+    const ult = _poolUltimasData.get(Number(p.id));
+    if (ult && ult.precioOferta != null) {
+      const pct = ult.pct != null ? ult.pct : Math.round((1 - ult.precioOferta / precio) * 100);
+      return { precio: ult.precioOferta, etiqueta: `🏷️ -${pct}% ÚLTIMAS` };
+    }
+    return { precio: Math.round(precio * 0.9), etiqueta: '🏷️ -10% ÚLTIMAS' };
+  }
+  // DESTACADAS — p.destacada = porcentaje directo
+  if (cat === 'destacado' && p.destacada > 0) {
+    return { precio: Math.round(precio * (1 - p.destacada / 100)), etiqueta: `🔥 -${p.destacada}% OFF` };
+  }
+  // ESPECIALES — siempre 10%
+  if (cat === 'especial' && p.especial > 0) {
+    return { precio: Math.round(precio * 0.9), etiqueta: '💜 -10% OFF' };
+  }
+  // PROMO ACTIVA / COMBO ACTIVO — precio en col L (campo normal de la API)
+  if ((cat === 'promo' || cat === 'combo') && p.normal > 0 && p.normal < precio) {
+    const pct = Math.round((1 - p.normal / precio) * 100);
+    const icono = cat === 'combo' ? '🎯' : '🏷️';
+    return { precio: p.normal, etiqueta: `${icono} ${cat.toUpperCase()} -${pct}% OFF` };
+  }
+  return null;
+}
 
 // ============================================================
 // STATE
@@ -540,6 +614,7 @@ const _poolRelampago  = new Set();
 const _poolDestacadas = new Set();
 const _poolEspeciales = new Set();
 const _poolUltimas    = new Set();
+const _poolUltimasData = new Map(); // id → { precioOferta, pct, diasParaVencer }
 
 async function _apiFetch(action) {
   const r = await fetch(API_URL + '?action=' + action + '&t=' + Date.now(),
@@ -564,7 +639,7 @@ async function cargarPools() {
     if (!data.success) { console.warn('getOfertas sin success'); return; }
 
     _poolRelampago.clear(); _poolDestacadas.clear();
-    _poolEspeciales.clear(); _poolUltimas.clear();
+    _poolEspeciales.clear(); _poolUltimas.clear(); _poolUltimasData.clear();
 
     (data.relampagoActivo   || []).forEach(p => _poolRelampago.add(Number(p.id)));
     (data.destacadasActivas || []).filter(p => p.categoria !== 'CERVEZAS')
@@ -572,7 +647,15 @@ async function cargarPools() {
     (data.especialesActivas || []).filter(p => p.categoria !== 'CERVEZAS')
                                   .forEach(p => _poolEspeciales.add(Number(p.id)));
     const ults = data.ultimasSeleccionadasSiempre || data.ultimasSeleccionadas || [];
-    ults.forEach(p => _poolUltimas.add(Number(p.id)));
+    ults.forEach(p => {
+      const id = Number(p.id);
+      _poolUltimas.add(id);
+      _poolUltimasData.set(id, {
+        precioOferta:   p.precioOferta   != null ? p.precioOferta   : null,
+        pct:            p.pct            != null ? p.pct            : null,
+        diasParaVencer: p.diasParaVencer != null ? p.diasParaVencer : null,
+      });
+    });
 
     console.log(`📊 Pools SendWA — ⚡${_poolRelampago.size} 🔥${_poolDestacadas.size} 🌙${_poolEspeciales.size} 🏷️${_poolUltimas.size}`);
   } catch(e) {
@@ -605,14 +688,16 @@ function parseProducts(data) {
       const id          = Number(r.id) || (nombre + '_' + i);
       const vendidos    = parseFloat(r.rotacion || r.vendidos || 0);
       // campos numéricos directos igual que seba21
-      const relampago   = (r.relampago !== undefined && r.relampago !== null && r.relampago !== '') 
+      const relampago   = (r.relampago !== undefined && r.relampago !== null && r.relampago !== '')
                           ? (isNaN(parseInt(r.relampago)) ? String(r.relampago).trim() : parseInt(r.relampago)) : 0;
       const destacada   = parseInt(r.destacada) || 0;
       const especial    = parseInt(r.especial)  || 0;
+      // col L: precio promo/combo (campo normal en la API = $promos/combos)
+      const normal      = parseFloat(r.normal || r.precioNormal || r['$promos/combos'] || 0);
 
-      // catOferta se resuelve en applyFilter() contra los pools activos
+      // catOferta se resuelve en resolveOfertas() contra los pools activos
       return { id, nombre, precioVenta, categoria, stock, foto, vendidos,
-               relampago, destacada, especial, catOferta: '', _raw: r };
+               relampago, destacada, especial, normal, catOferta: '', _raw: r };
     })
     .filter(p => p.nombre && p.precioVenta > 0);
 }
@@ -752,16 +837,29 @@ function renderGrid() {
     if (p._sep) {
       return `<div class="separator-card">${p.label}</div>`;
     }
-    const sel = selectedIds.has(p.id);
-    const orderNum = selectionOrder.indexOf(p.id) + 1;
+    const sel = selectedIds.has(String(p.id));
+    const orderNum = selectionOrder.indexOf(String(p.id)) + 1;
     const sinStock = p.stock <= 0;
-    const badgeClass = p.catOferta ? `badge-oferta badge-${p.catOferta}` : '';
-    const badgeLabel = BADGE_LABELS[p.catOferta] || '';
+    const oferta   = calcularOferta(p);
+    const badgeColor = BADGE_COLORS[p.catOferta] || '';
 
     const imgUrl = getImgUrl(p);
     const imgEl = `<img class="card-img" src="${imgUrl}" alt="${p.nombre}" loading="lazy"
                      onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
                    <div class="card-img-placeholder" style="display:none">${getCatEmoji(p.categoria)}</div>`;
+
+    // Precio: si tiene oferta muestra precio oferta + tachado original
+    const precioHTML = oferta
+      ? `<div class="card-price-oferta">
+           <span class="price-antes">${fmt(p.precioVenta)}</span>
+           <span class="price-oferta" style="color:${badgeColor}">${oferta.precio ? fmt(oferta.precio) : ''}</span>
+         </div>`
+      : `<div class="card-price">${fmt(p.precioVenta)}</div>`;
+
+    // Badge con etiqueta real de la oferta
+    const badgeHTML = oferta
+      ? `<div class="badge-oferta" style="background:${badgeColor}">${oferta.etiqueta}</div>`
+      : '';
 
     return `
     <div class="prod-card ${sel?'selected':''} ${sinStock?'sin-stock':''}"
@@ -769,13 +867,13 @@ function renderGrid() {
          onclick="toggleSelect('${p.id}')">
       ${sinStock ? `<div class="badge-sin-stock">Sin stock</div>` : ''}
       ${imgEl}
-      ${badgeLabel ? `<div class="${badgeClass}">${badgeLabel}</div>` : ''}
+      ${badgeHTML}
       <div class="card-order">${orderNum||''}</div>
       <div class="card-check">✓</div>
       <div class="card-body">
         <div class="card-name">${p.nombre}</div>
         <div class="card-cat">${p.categoria}</div>
-        <div class="card-price">${fmt(p.precioVenta)}</div>
+        ${precioHTML}
       </div>
     </div>`;
   }).join('');
@@ -787,6 +885,7 @@ function renderGrid() {
 // SELECTION
 // ============================================================
 function toggleSelect(id) {
+  id = String(id); // normalizar siempre a string
   if (selectedIds.has(id)) {
     selectedIds.delete(id);
     selectionOrder = selectionOrder.filter(x => x !== id);
@@ -795,9 +894,8 @@ function toggleSelect(id) {
     selectionOrder.push(id);
   }
   updateStats();
-  // Re-render solo tarjetas afectadas (performance)
   document.querySelectorAll('.prod-card').forEach(el => {
-    const eid = el.dataset.id;
+    const eid = String(el.dataset.id);
     const sel = selectedIds.has(eid);
     el.classList.toggle('selected', sel);
     const orderEl = el.querySelector('.card-order');
@@ -807,7 +905,7 @@ function toggleSelect(id) {
 }
 
 function selectAll() {
-  const allVisible = filteredProducts.filter(p => p && !p._sep).map(p => p.id);
+  const allVisible = filteredProducts.filter(p => p && !p._sep).map(p => String(p.id));
   const allSel = allVisible.every(id => selectedIds.has(id));
   if (allSel) {
     allVisible.forEach(id => { selectedIds.delete(id); selectionOrder = selectionOrder.filter(x=>x!==id); });
@@ -821,7 +919,7 @@ function selectAll() {
 
 function getSelectedProducts() {
   return selectionOrder
-    .map(id => allProducts.find(p => p.id === id))
+    .map(id => allProducts.find(p => String(p.id) === String(id)))
     .filter(Boolean);
 }
 
@@ -935,7 +1033,7 @@ document.getElementById('btn-dl').onclick = async () => {
 // ============================================================
 document.getElementById('btn-collage').onclick = () => {
   const prods = getSelectedProducts();
-  if (prods.length < 2) { toast('⚠️ Seleccioná al menos 2 productos'); return; }
+  if (prods.length < 2) { toast('⚠️ Seleccioná al menos 2 productos — tocá las tarjetas para elegir'); return; }
   generateCollage(prods.slice(0, 6));
 };
 
@@ -1174,6 +1272,37 @@ function buildCategoryFilters() {
 // INIT
 // ============================================================
 window.toggleSelect = toggleSelect; // expose to onclick
+
+// Botón atrás del celular — evitar salir de la app
+history.pushState({ sendwa: true }, '', location.href);
+window.addEventListener('popstate', (e) => {
+  // Si hay modal de collage abierto, cerrarlo
+  if (document.getElementById('collage-modal').classList.contains('open')) {
+    document.getElementById('collage-modal').classList.remove('open');
+    history.pushState({ sendwa: true }, '', location.href);
+    return;
+  }
+  // Si hay selección activa, limpiarla
+  if (selectedIds.size > 0) {
+    selectedIds.clear(); selectionOrder = [];
+    renderGrid();
+    toast('Selección limpiada');
+    history.pushState({ sendwa: true }, '', location.href);
+    return;
+  }
+  // Si hay filtro activo, volver a todos
+  if (currentFilter !== 'todos' || currentSearch) {
+    currentFilter = 'todos'; currentSearch = '';
+    document.getElementById('search-input').value = '';
+    document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+    document.querySelector('.filter-chip[data-filter="todos"]').classList.add('active');
+    applyFilter();
+    history.pushState({ sendwa: true }, '', location.href);
+    return;
+  }
+  // Ya en estado neutro — quedarse en la página
+  history.pushState({ sendwa: true }, '', location.href);
+});
 
 async function init() {
   // Cargar productos Y pools en paralelo — igual que seba21
