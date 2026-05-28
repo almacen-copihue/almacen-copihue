@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>SendWA — Almacén Copihue ver.14</title>
+<title>SendWA — Almacén Copihue ver.15</title>
 <style>
   /* ===== VARIABLES ===== */
   :root {
@@ -407,7 +407,7 @@
 <!-- HEADER -->
 <div id="header">
   <h1>📲 SendWA <span>Almacén Copihue</span></h1>
-  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.14</div>
+  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.15</div>
   <button id="btn-dark" title="Modo oscuro">🌙</button>
 </div>
 
@@ -1123,16 +1123,71 @@ function recalcLayout() {
 // TEXTO AUTOMÁTICO
 // ============================================================
 function generateText(mode) {
-  const prods = getSelectedProducts();
-  if (!prods.length) return '❌ Ningún producto seleccionado.';
+  const prodsRaw = getSelectedProducts();
+  if (!prodsRaw.length) return '❌ Ningún producto seleccionado.';
+  // Resolver ofertas
+  const prods = resolveOfertas(prodsRaw);
 
-  const header = mode === 'estado'
-    ? '📲 *ALMACÉN COPIHUE* 📲\n'
-    : '🛒 *ALMACÉN COPIHUE* 🛒\n🔥 ¡OFERTAS DEL DÍA! 🔥\n';
+  // ── Contar cuántos tienen oferta para elegir encabezado ──
+  const conOferta = prods.filter(p => p.catOferta).length;
+  const tiposPresentes = [...new Set(prods.map(p=>p.catOferta).filter(Boolean))];
+  const tituloOferta = {
+    relampago:'⚡ OFERTAS RELÁMPAGO', ultimas:'🏷️ ÚLTIMAS UNIDADES',
+    destacado:'🔥 OFERTAS DESTACADAS', especial:'💜 PRECIOS ESPECIALES',
+    promo:'🏷️ PROMOS DEL DÍA', combo:'🎯 COMBOS'
+  };
+
+  // Encabezado dinámico
+  let header = '';
+  if (mode === 'rapido') {
+    header = `📲 *ALMACÉN COPIHUE*
+`;
+  } else if (tiposPresentes.length === 1 && tituloOferta[tiposPresentes[0]]) {
+    header = `📲 *ALMACÉN COPIHUE* 📲
+${tituloOferta[tiposPresentes[0]]}
+`;
+  } else if (conOferta > 0) {
+    header = `🛒 *ALMACÉN COPIHUE* 🛒
+🔥 ¡OFERTAS DEL DÍA! 🔥
+`;
+  } else {
+    header = `🛒 *ALMACÉN COPIHUE* 🛒
+`;
+  }
+
+  // ── Etiqueta legible del tipo de oferta ──
+  function labelOferta(p, of) {
+    if (!of) return '';
+    const cat = p.catOferta;
+    if (cat === 'relampago') {
+      // NxM → explicar la promo
+      const cfg = OFERTAS_RELAMPAGO[String(p.relampago)];
+      if (cfg && cfg.tipo === 'nxm') {
+        if (cfg.cantidad === 2 && cfg.pagas === 1.5) return ' _(2da unidad 50% OFF)_';
+        return ` _(${cfg.nombre.toUpperCase()})_`;
+      }
+      return of.etiqueta ? ` _${of.etiqueta}_` : '';
+    }
+    if (cat === 'destacado') return of.etiqueta ? ` _${of.etiqueta}_` : '';
+    if (cat === 'especial')  return ' _(-10% especial)_';
+    if (cat === 'ultimas')   return of.etiqueta ? ` _${of.etiqueta}_` : ' _(últimas unidades)_';
+    if (cat === 'promo')     return of.etiqueta ? ` _${of.etiqueta}_` : ' _(promo)_';
+    if (cat === 'combo')     return of.etiqueta ? ` _${of.etiqueta}_` : ' _(combo)_';
+    return '';
+  }
 
   let lines = [];
 
-  if (mode !== 'rapido') {
+  if (mode === 'rapido') {
+    // Lista rápida: emoji + nombre + precio
+    for (const p of prods) {
+      const of = calcularOferta(p);
+      const precio = of && of.precio ? fmt(of.precio) : fmt(p.precioVenta);
+      const e = getCatEmoji(p.categoria);
+      lines.push(`${e} ${p.nombre} — *${precio}*`);
+    }
+  } else {
+    // Agrupar por categoría
     const grupos = {};
     for (const p of prods) {
       const cat = p.categoria || 'Varios';
@@ -1141,21 +1196,29 @@ function generateText(mode) {
     }
     for (const [cat, ps] of Object.entries(grupos)) {
       const emoji = getCatEmoji(cat);
-      if (mode === 'grupo') lines.push(`\n${emoji} *${cat.toUpperCase()}*`);
+      // Separador de categoría siempre (en grupo más visible, en estado más compacto)
+      lines.push(`\n${emoji} *${cat.toUpperCase()}*`);
       for (const p of ps) {
         const of = calcularOferta(p);
         const precioFinal = of && of.precio ? fmt(of.precio) : fmt(p.precioVenta);
-        const etiqueta = of ? ` ${of.etiqueta}` : '';
-        lines.push(`• ${p.nombre}${etiqueta} — *${precioFinal}*`);
+        const precioAntes  = of && of.precio ? ` ~${fmt(p.precioVenta)}~` : '';
+        const labelOf = labelOferta(p, of);
+        if (mode === 'grupo') {
+          // Formato detallado para grupos
+          lines.push(`• *${p.nombre}*${labelOf}\n  ${precioAntes ? precioAntes + ' → ' : ''}*${precioFinal}*`);
+        } else {
+          // Estado: más compacto
+          lines.push(`• ${p.nombre}${labelOf} — *${precioFinal}*${precioAntes ? ` ~(antes ${fmt(p.precioVenta)})~` : ''}`);
+        }
       }
-    }
-  } else {
-    for (const p of prods) {
-      lines.push(`${p.nombre} ${fmt(p.precioVenta)}`);
     }
   }
 
-  const footer = '\n\n📦 Hacemos pedidos\n💬 Consultas por WhatsApp';
+  // Footer según modo
+  const footer = mode === 'grupo'
+    ? '\n\n📦 *Hacemos pedidos a domicilio*\n💬 Consultá por WhatsApp\n⏰ Ofertas por tiempo limitado'
+    : '\n\n📦 Pedidos por WhatsApp';
+
   return header + lines.join('\n') + footer;
 }
 
@@ -1187,6 +1250,34 @@ document.getElementById('btn-wa').onclick = () => {
 document.getElementById('btn-dl').onclick = async () => {
   const prods = getSelectedProducts();
   if (!prods.length) { toast('⚠️ Sin imágenes para descargar'); return; }
+  // Preguntar si quiere con badge o foto original
+  const conBadge = confirm('¿Descargar con badge de oferta?\n\nOK = Con badge (tarjeta completa)\nCancelar = Solo la foto original');
+  if (conBadge) {
+    // Generar y descargar cada tarjeta como canvas
+    toast(`⬇️ Generando ${Math.min(prods.length,12)} tarjetas con badge…`, 4000);
+    const resolved = resolveOfertas(prods);
+    const tmpCvs = document.createElement('canvas');
+    tmpCvs.width=600; tmpCvs.height=600;
+    const tmpCtx = tmpCvs.getContext('2d');
+    for (const p of resolved.slice(0,12)) {
+      tmpCtx.clearRect(0,0,600,600);
+      // BG degradado
+      const bgColors = { relampago:['#7b1212','#c0392b'], ultimas:['#7d3700','#d35400'],
+        destacado:['#6b4200','#d68910'], especial:['#3b1a6b','#6c3483'],
+        promo:['#4a0e6b','#7b1fa2'], combo:['#5d1800','#bf360c'] };
+      const [c1,c2] = bgColors[p.catOferta]||['#1a3a16','#2d5a22'];
+      const g=tmpCtx.createLinearGradient(0,0,600,600);
+      g.addColorStop(0,c1); g.addColorStop(1,c2);
+      tmpCtx.fillStyle=g; tmpCtx.fillRect(0,0,600,600);
+      await drawProductCard(tmpCtx, p, 8, 8, 584, 584);
+      const a=document.createElement('a');
+      a.href=tmpCvs.toDataURL('image/jpeg',.92);
+      a.download=norm(p.nombre)+'_badge.jpg';
+      a.click();
+      await new Promise(r=>setTimeout(r,300));
+    }
+    return;
+  }
   toast(`⬇️ Descargando ${prods.length} imagen(es)…`, 3000);
   for (const p of prods.slice(0, 20)) {
     try {
@@ -1461,8 +1552,11 @@ async function drawSingle(p) {
   cvs.width=W; cvs.height=H;
   const ctx = cvs.getContext('2d');
 
-  // BG degradado según tipo de oferta
   const oferta = calcularOferta(p);
+  const badgeColor = BADGE_COLORS[p.catOferta] || null;
+  const tieneOfertaPrecio = oferta && oferta.precio;
+
+  // BG degradado según tipo
   const bgColors = { relampago:['#7b1212','#c0392b'], ultimas:['#7d3700','#d35400'],
     destacado:['#6b4200','#d68910'], especial:['#3b1a6b','#6c3483'],
     promo:['#4a0e6b','#7b1fa2'], combo:['#5d1800','#bf360c'] };
@@ -1471,21 +1565,80 @@ async function drawSingle(p) {
   grd.addColorStop(0,c1); grd.addColorStop(1,c2);
   ctx.fillStyle=grd; ctx.fillRect(0,0,W,H);
 
-  // Header nombre tienda
-  ctx.fillStyle='rgba(255,255,255,.15)'; ctx.fillRect(0,0,W,72);
-  ctx.fillStyle='#fff'; ctx.font='bold 26px Segoe UI'; ctx.textAlign='center';
-  ctx.fillText('🛒 ALMACÉN COPIHUE', W/2, 46);
+  // ── Zonas ──
+  const HDRH = 80;   // header tienda
+  const BADGEH = oferta ? 54 : 0;  // badge oferta
+  const NAMEH = 80;  // nombre 2 líneas
+  const PRICEH = tieneOfertaPrecio ? 100 : 72; // precio (con tachado o sin)
+  const FTRH = 60;
+  const IMGH = H - HDRH - BADGEH - NAMEH - PRICEH - FTRH;
+  const IMGPAD = 24; // margen interno de la imagen
 
-  // Card centrada — ocupa la mayor parte
-  const PAD=40, HDRH=72, FTRH=72;
-  const CW=W-PAD*2, CH=H-HDRH-FTRH-PAD;
-  const CX=PAD, CY=HDRH+PAD/2;
-  await drawProductCard(ctx, p, CX, CY, CW, CH);
+  // Header
+  const hdrColor = badgeColor || '#1a3a16';
+  ctx.fillStyle = hdrColor; ctx.fillRect(0,0,W,HDRH);
+  ctx.fillStyle='#fff'; ctx.font='bold 30px Segoe UI'; ctx.textAlign='center';
+  ctx.fillText('🛒 ALMACÉN COPIHUE', W/2, 52);
+
+  // Badge oferta
+  let curY = HDRH;
+  if (oferta && badgeColor) {
+    ctx.fillStyle = badgeColor; ctx.fillRect(0, curY, W, BADGEH);
+    ctx.fillStyle='#fff'; ctx.font='bold 28px Segoe UI'; ctx.textAlign='center';
+    ctx.fillText(oferta.etiqueta.toUpperCase(), W/2, curY+36);
+    curY += BADGEH;
+  }
+
+  // Imagen con margen interno — usa contain para que no se corte
+  const imgAreaY = curY;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(IMGPAD, imgAreaY + IMGPAD, W - IMGPAD*2, IMGH - IMGPAD*2);
+  try {
+    const img = await loadImg(getImgUrl(p));
+    // contain: escalar manteniendo ratio dentro del área con padding
+    const areaW = W - IMGPAD*4, areaH = IMGH - IMGPAD*4;
+    const scale = Math.min(areaW/img.width, areaH/img.height);
+    const dw = img.width*scale, dh = img.height*scale;
+    const dx = (W-dw)/2, dy = imgAreaY + IMGPAD*2 + (areaH-dh)/2;
+    ctx.drawImage(img, dx, dy, dw, dh);
+  } catch {
+    ctx.fillStyle='#e8f0e5'; ctx.fillRect(IMGPAD, imgAreaY+IMGPAD, W-IMGPAD*2, IMGH-IMGPAD*2);
+    ctx.fillStyle='#aaa'; ctx.font=`160px serif`; ctx.textAlign='center';
+    ctx.fillText(getCatEmoji(p.categoria), W/2, imgAreaY+IMGH/2+50);
+  }
+  curY += IMGH;
+
+  // Nombre — sobre fondo blanco
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, curY, W, NAMEH);
+  ctx.fillStyle = '#1a2e17'; ctx.font = 'bold 32px Segoe UI'; ctx.textAlign='center';
+  wrapText(ctx, p.nombre, W/2, curY+28, W-40, 36, 2);
+  curY += NAMEH;
+
+  // Precio
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, curY, W, PRICEH);
+  const mx = W/2;
+  if (tieneOfertaPrecio) {
+    // Precio anterior tachado
+    ctx.fillStyle='#888'; ctx.font='28px Segoe UI'; ctx.textAlign='center';
+    const antes = fmt(p.precioVenta);
+    const ty_a = curY + 36;
+    ctx.fillText(antes, mx, ty_a);
+    const tw = ctx.measureText(antes).width;
+    ctx.beginPath(); ctx.strokeStyle='#888'; ctx.lineWidth=2.5;
+    ctx.moveTo(mx-tw/2, ty_a-10); ctx.lineTo(mx+tw/2, ty_a-10); ctx.stroke();
+    // Precio oferta grande
+    ctx.fillStyle = badgeColor||'#c0392b'; ctx.font='bold 56px Segoe UI';
+    ctx.fillText(fmt(oferta.precio), mx, curY+88);
+  } else {
+    ctx.fillStyle='#2d5a22'; ctx.font='bold 56px Segoe UI'; ctx.textAlign='center';
+    ctx.fillText(fmt(p.precioVenta), mx, curY+58);
+  }
+  curY += PRICEH;
 
   // Footer
-  ctx.fillStyle='rgba(0,0,0,.4)'; ctx.fillRect(0,H-FTRH,W,FTRH);
+  ctx.fillStyle='rgba(0,0,0,.5)'; ctx.fillRect(0,curY,W,FTRH);
   ctx.fillStyle='#fff'; ctx.font='bold 22px Segoe UI'; ctx.textAlign='center';
-  ctx.fillText('📦 Pedidos por WhatsApp', W/2, H-22);
+  ctx.fillText('📦 Pedidos por WhatsApp', W/2, curY+38);
 }
 
 // ── MODO HISTORIA 1080x1920 ──────────────────────────────────────
