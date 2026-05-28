@@ -226,17 +226,43 @@ function toast(msg, err=false){
   setTimeout(()=>t.classList.remove('show'),2500);
 }
 
-// ── PARSE FECHA ──
-function parseDate(s){
-  if(!s) return null;
-  if(s instanceof Date) return isNaN(s)?null:s;
-  const st = str(s);
-  if(st.includes('/')){const p=st.split('/');if(p.length===3)return new Date(parseInt(p[2]),parseInt(p[1])-1,parseInt(p[0]));}
-  const d = new Date(st);
-  return isNaN(d)?null:d;
-}
 
 // ── FETCH ──
+async function apiFetch(action, datos={}){
+  const url = API + '?action=' + action + '&data=' + encodeURIComponent(JSON.stringify(datos)) + '&t=' + Date.now();
+  const r = await fetch(url, {signal: AbortSignal.timeout(25000)});
+  if(!r.ok) throw new Error('HTTP ' + r.status + ' (' + action + ')');
+  return await r.json();
+}
+
+function parseFecha(s){
+  if(!s) return null;
+  if(s instanceof Date) return isNaN(s)?null:s;
+  const st = String(s).trim();
+  const m1 = st.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(m1) return new Date(parseInt(m1[1]),parseInt(m1[2])-1,parseInt(m1[3]));
+  const m2 = st.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if(m2) return new Date(parseInt(m2[3]),parseInt(m2[2])-1,parseInt(m2[1]));
+  return new Date(st);
+}
+
+function parseCajaReg(r){
+  const d = parseFecha(r.fecha);
+  if(!d) return null;
+  return {fecha:d, efectivo:num(r.efectivo), posnet:num(r.posnet),
+          transferencia:num(r.transferencia), fiado:num(r.fiado),
+          total:num(r.total), tickets:num(r.tickets)};
+}
+
+function parseEgrReg(r){
+  const d = parseFecha(r.fecha);
+  if(!d) return null;
+  return {fecha:d, hora:str(r.hora), tipo:str(r.tipo).toUpperCase(),
+          motivo:str(r.motivo), monto:num(r.monto), medio:str(r.medio),
+          categoria:str(r.categoria||r.cat).toUpperCase(),
+          obs:str(r.observacion||r.obs), vendedor:str(r.vendedor)};
+}
+
 async function cargarDatos(){
   if(cargando) return;
   cargando = true;
@@ -244,11 +270,11 @@ async function cargarDatos(){
   document.getElementById('hdr-sub').textContent = 'Actualizando…';
   try {
     const [rCaja, rEgr] = await Promise.all([
-      fetchSheet('Caja'),
-      fetchSheet('CAJA_MOVIMIENTOS')
+      apiFetch('getCajaDiaria', {limite:1000}),
+      apiFetch('getCajaEgresos', {limite:2000})
     ]);
-    cajaData = rCaja;
-    egresosData = rEgr;
+    cajaData = (rCaja.ok ? rCaja.registros : []).map(parseCajaReg).filter(Boolean);
+    egresosData = (rEgr.ok ? rEgr.registros : []).map(parseEgrReg).filter(Boolean);
     const total = cajaData.length + egresosData.length;
     document.getElementById('hdr-sub').textContent = total + ' registros · ' + new Date().toLocaleDateString('es-AR');
     toast('✅ ' + total + ' registros cargados');
@@ -263,58 +289,6 @@ async function cargarDatos(){
   }
   cargando = false;
   render();
-}
-
-async function fetchSheet(sheet){
-  const url = API + '?sheet=' + encodeURIComponent(sheet) + '&t=' + Date.now();
-  const r = await fetch(url, {signal: AbortSignal.timeout(25000)});
-  if(!r.ok) throw new Error('HTTP ' + r.status + ' (' + sheet + ')');
-  const data = await r.json();
-  const rows = Array.isArray(data) ? data :
-               Array.isArray(data.values) ? data.values :
-               Array.isArray(data.data) ? data.data :
-               data.error ? (()=>{throw new Error(data.error)})() :
-               Object.values(data);
-  if(!rows || !rows.length) return [];
-  // Detectar encabezado
-  const first = rows[0];
-  if(typeof first === 'object' && !Array.isArray(first)){
-    return rows.slice(1).map(o=>parseObj(o,sheet)).filter(r=>r&&r.fecha);
-  }
-  const fStr = Array.isArray(first) ? str(first[0]).toLowerCase() : '';
-  const start = (fStr==='fecha'||fStr==='date') ? 1 : 0;
-  return rows.slice(start).map(r=>parseArr(r,sheet)).filter(r=>r&&r.fecha);
-}
-
-function parseArr(cols, sheet){
-  if(!cols || cols.length < 2) return null;
-  const d = parseDate(cols[0]);
-  if(!d) return null;
-  if(sheet === 'Caja'){
-    return {fecha:d, efectivo:num(cols[1]), posnet:num(cols[2]), transferencia:num(cols[3]),
-            fiado:num(cols[4]), total:num(cols[5]), tickets:num(cols[6])};
-  } else {
-    return {fecha:d, hora:str(cols[1]), tipo:str(cols[2]).toUpperCase(),
-            motivo:str(cols[3]), monto:num(cols[4]), medio:str(cols[5]),
-            categoria:str(cols[6]).toUpperCase(), obs:str(cols[7]), vendedor:str(cols[8])};
-  }
-}
-
-function parseObj(o, sheet){
-  const keys = Object.keys(o).map(k=>k.toLowerCase().trim());
-  const v = k => { const i=keys.findIndex(x=>x.includes(k)); return i>=0?Object.values(o)[i]:''; };
-  const d = parseDate(v('fecha')||v('date')||Object.values(o)[0]);
-  if(!d) return null;
-  if(sheet === 'Caja'){
-    return {fecha:d, efectivo:num(v('efectivo')), posnet:num(v('posnet')),
-            transferencia:num(v('transfer')), fiado:num(v('fiado')),
-            total:num(v('total')), tickets:num(v('ticket'))};
-  } else {
-    return {fecha:d, hora:str(v('hora')), tipo:str(v('tipo')).toUpperCase(),
-            motivo:str(v('motivo')), monto:num(v('monto')), medio:str(v('medio')),
-            categoria:str(v('categoria')||v('cat')).toUpperCase(),
-            obs:str(v('obs')||v('observac')), vendedor:str(v('vendedor'))};
-  }
 }
 
 // ── FILTROS ──
@@ -366,7 +340,7 @@ function render(){
   // Tabs — en anual mostramos solo Resumen y Egresos
   h += `<div class="tabs">
     <button class="tab ${tabActiva==='resumen'?'activo':''}" onclick="setTab('resumen')">📊 Resumen</button>
-    <button class="tab ${tabActiva==='ingresos'?'activo':''}" onclick="setTab('ingresos')">📈 Ingresos</button>
+    <button class="tab ${tabActiva==='ingresos'?'activo':''}" onclick="setTab('ingresos')">📈 Ventas</button>
     <button class="tab ${tabActiva==='egresos'?'activo':''}" onclick="setTab('egresos')">📉 Egresos</button>
     <button class="tab ${tabActiva==='flujo'?'activo':''}" onclick="setTab('flujo')">🔄 Flujo</button>
     ${vista==='mes'?`<button class="tab ${tabActiva==='categorias'?'activo':''}" onclick="setTab('categorias')">🏷️ Categorías</button>
@@ -420,16 +394,16 @@ function buildResumen(){
 
   h += `<div class="cards">
     <div class="card ${neto>=0?'vg':'rg'} full">
-      <div class="card-lbl">${neto>=0?'✅':'⚠️'} Resultado del período</div>
+      <div class="card-lbl">${neto>=0?'✅':'⚠️'} ${neto>=0?'Tu ganancia':'Déficit del período'}</div>
       <div class="card-val">${fmtK(Math.abs(neto))}</div>
       ${delta(neto,tiA-teA)}
       <div class="card-sub">${neto>=0?'Superávit':'Déficit'} — ${neto>=0?'ingresó más de lo que salió':'salió más de lo que ingresó'}</div>
     </div>
     <div class="card vg" onclick="setTab('ingresos')" style="cursor:pointer">
-      <div class="card-lbl">📈 Ingresos ›</div>
+      <div class="card-lbl">📈 Ventas ›</div>
       <div class="card-val">${fmtK(ti)}</div>
       ${delta(ti,tiA)}
-      <div class="card-sub">${tix} tickets · ${caja.length} días</div>
+      <div class="card-sub">${tix} tickets · ${caja.length} días vendidos</div>
     </div>
     <div class="card rg" onclick="setTab('egresos')" style="cursor:pointer">
       <div class="card-lbl">📉 Egresos ›</div>
@@ -441,9 +415,9 @@ function buildResumen(){
 
   // Barra ingreso vs egreso
   h += `<div class="tar">
-    <div class="tar-t">📊 Ingresos vs Egresos</div>
+    <div class="tar-t">📊 Ventas vs Egresos</div>
     <div style="display:flex;justify-content:space-between;font-size:.72rem;font-weight:700;margin-bottom:5px">
-      <span class="pos">Ingresos ${pctIng}%</span><span class="neg">Egresos ${100-pctIng}%</span>
+      <span class="pos">Ventas ${pctIng}%</span><span class="neg">Egresos ${100-pctIng}%</span>
     </div>
     <div class="comp-bar"><div class="ci" style="width:${pctIng}%"></div><div class="ce" style="width:${100-pctIng}%"></div></div>
     <div style="display:flex;justify-content:space-between;font-size:.7rem;color:var(--gris);margin-top:4px"><span>${fmt(ti)}</span><span>${fmt(te)}</span></div>
@@ -467,6 +441,7 @@ function buildResumen(){
       <div class="tar-t">🏷️ Top categorías de egreso <span style="color:var(--azul);font-size:.7rem">ver todo ›</span></div>`;
     cats.slice(0,4).forEach(([cat,monto])=>{
       const pct = te ? Math.round(monto/te*100) : 0;
+    const pctN = (ti-te)>0 ? Math.round(monto/(ti-te)*100) : 0;
       h += `<div class="bw">
         <div class="bw-hdr"><div class="bw-n">${CATS_EMOJI[cat]||'💸'} ${cat}</div><div class="bw-v neg">${fmt(monto)} <span style="font-size:.6rem;color:var(--gris)">${pct}%</span></div></div>
         <div class="barra-bg"><div class="barra-f bar-r" style="width:${Math.round(monto/cats[0][1]*100)}%"></div></div>
@@ -494,7 +469,7 @@ function buildIngresos(){
 
   let h = `<div class="cards">
     <div class="card vg full">
-      <div class="card-lbl">📈 Ingresos del período</div>
+      <div class="card-lbl">📈 Ventas del período</div>
       <div class="card-val">${fmtK(ti)}</div>
       ${delta(ti,tiA)}
       <div class="card-sub">${dias} días · ${tix} tickets · prom/tkt ${fmt(tix?ti/tix:0)}</div>
@@ -537,7 +512,7 @@ function buildIngresos(){
   const periodos = vista==='mes' ? [-5,-4,-3,-2,-1,0].map(d=>{let m2=mesSel+d,a2=anioSel;if(m2<0){m2+=12;a2--;}return{l:MESES[m2].slice(0,3),total:getCajaMes(m2,a2).reduce((s,r)=>s+r.total,0)};})
     : [0,1,2,3,4,5,6,7,8,9,10,11].map(m2=>({l:MESES[m2].slice(0,3),total:getCajaMes(m2,anioSel).reduce((s,r)=>s+r.total,0)}));
   const maxP = Math.max(...periodos.map(x=>x.total),1);
-  h += `<div class="tar"><div class="tar-t">${vista==='mes'?'📈 Últimos 6 meses':'📆 Ingresos por mes del año'}</div>`;
+  h += `<div class="tar"><div class="tar-t">${vista==='mes'?'📈 Últimas 6 meses — ventas':'📆 Ventas por mes del año'}</div>`;
   periodos.forEach(x=>{
     h += `<div class="dia-row">
       <div class="dia-lbl">${x.l}</div>
@@ -610,7 +585,7 @@ function buildFlujo(){
   const neto = ti-te;
 
   let h = `<div class="cards">
-    <div class="card vg"><div class="card-lbl">📈 Ingresos</div><div class="card-val">${fmtK(ti)}</div></div>
+    <div class="card vg"><div class="card-lbl">📈 Ventas</div><div class="card-val">${fmtK(ti)}</div></div>
     <div class="card rg"><div class="card-lbl">📉 Egresos</div><div class="card-val">${fmtK(te)}</div></div>
     <div class="card ${neto>=0?'vg':'rg'} full"><div class="card-lbl">${neto>=0?'✅':'⚠️'} Neto</div><div class="card-val">${neto>=0?'+':''}${fmtK(neto)}</div>
       <div class="card-sub">${neto>=0?'El negocio generó más de lo que gastó':'Los egresos superaron los ingresos'}</div>
@@ -709,10 +684,12 @@ function buildCategorias(){
   h += '</div>';
 
   if(cats[0]){
+    const pctDeNeto = neto>0 ? Math.round(cats[0][1]/neto*100) : 0;
+    const pctEgrDeNeto = neto>0 ? Math.round(te/neto*100) : 0;
     h += `<div style="background:linear-gradient(135deg,#b71c1c,#e53935);border-radius:14px;padding:14px;color:#fff;margin-bottom:10px">
-      <div style="font-size:.72rem;opacity:.8;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">💡 Insight</div>
-      <div style="font-size:.88rem;font-weight:700">Mayor gasto: <strong>${cats[0][0]}</strong></div>
-      <div style="font-size:.72rem;opacity:.85;margin-top:3px">Representa el ${te?Math.round(cats[0][1]/te*100):0}% del total de egresos</div>
+      <div style="font-size:.72rem;opacity:.8;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">💡 Tu bolsillo</div>
+      <div style="font-size:.88rem;font-weight:700">Los egresos son el <strong>${pctEgrDeNeto}%</strong> de tu ganancia neta</div>
+      <div style="font-size:.72rem;opacity:.85;margin-top:3px">Mayor gasto: ${cats[0][0]} — ${Math.round(cats[0][1]/te*100)}% de los egresos</div>
     </div>`;
   }
 
@@ -795,7 +772,7 @@ function buildCalendario(){
     const totalE = eDias.reduce((s,e)=>s+e.monto,0);
     const totalI = iDias.reduce((s,r)=>s+r.total,0);
     h += `<div class="tar"><div class="tar-t">📋 Días seleccionados <span class="badge bg-a">${fmt(totalI-totalE)}</span></div>`;
-    if(totalI){ h += `<div class="row"><div class="row-l">📈 Ingresos</div><div class="row-v pos">${fmt(totalI)}</div></div>`; }
+    if(totalI){ h += `<div class="row"><div class="row-l">📈 Ventas</div><div class="row-v pos">${fmt(totalI)}</div></div>`; }
     if(totalE){ h += `<div class="row"><div class="row-l">📉 Egresos</div><div class="row-v neg">${fmt(totalE)}</div></div>`; }
     eDias.sort((a,b)=>b.monto-a.monto).slice(0,10).forEach(e=>{
       h += `<div class="row"><div class="row-l">${e.obs||e.motivo}</div><div class="row-v neg">${fmt(e.monto)}</div></div>`;
