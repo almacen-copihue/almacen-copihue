@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>SendWA — Almacén Copihue ver.16</title>
+<title>SendWA — Almacén Copihue ver.17</title>
 <style>
   /* ===== VARIABLES ===== */
   :root {
@@ -362,6 +362,22 @@
   }
   #btn-collage-dl { background: var(--primary); color: #fff; }
   #btn-collage-close { background: var(--bg); border: 1.5px solid var(--border); color: var(--text); }
+  #single-layout-bar {
+    display: none; gap: 6px; flex-wrap: wrap; margin-bottom: 10px;
+  }
+  #single-layout-bar.show { display: flex; }
+  .layout-btn {
+    flex: 1; min-width: 0; padding: 7px 4px; border-radius: 10px; font-size: 11px; font-weight: 700;
+    border: 2px solid var(--border); background: var(--bg); color: var(--text-muted);
+    text-align: center; transition: all .2s; white-space: nowrap;
+  }
+  .layout-btn.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+  #btn-dl-todas {
+    width: 100%; margin-top: 6px; height: 40px; border-radius: 10px;
+    background: var(--primary-dark); color: #fff; font-weight: 700; font-size: 13px;
+    display: none;
+  }
+  #btn-dl-todas.show { display: block; }
   .collage-tab {
     flex:1; padding: 7px 4px; border-radius: 8px; font-size: 12px; font-weight: 700;
     border: 2px solid var(--border); color: var(--text-muted); background: var(--bg);
@@ -407,7 +423,7 @@
 <!-- HEADER -->
 <div id="header">
   <h1>📲 SendWA <span>Almacén Copihue</span></h1>
-  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.16</div>
+  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.17</div>
   <button id="btn-dark" title="Modo oscuro">🌙</button>
 </div>
 
@@ -497,14 +513,22 @@
       <small style="color:var(--text-muted);display:block;margin-bottom:6px">Elegí el producto:</small>
       <div id="single-picker-list" style="display:flex;gap:8px;padding-bottom:4px;"></div>
     </div>
+    <!-- Layout selector (solo modo 1 foto) -->
+    <div id="single-layout-bar">
+      <button class="layout-btn active" data-layout="clasico">📸 Clásico</button>
+      <button class="layout-btn" data-layout="h2">↔️ Horiz 2</button>
+      <button class="layout-btn" data-layout="v2">↕️ Vert 2</button>
+      <button class="layout-btn" data-layout="expandido">🔲 Expandido</button>
+    </div>
     <div id="collage-canvas-wrap" style="text-align:center;margin:10px 0;">
       <canvas id="collage-canvas"></canvas>
     </div>
     <canvas id="historia-canvas" width="1080" height="1920" style="display:none;"></canvas>
     <div id="collage-actions">
-      <button id="btn-collage-dl">⬇️ Descargar</button>
+      <button id="btn-collage-dl">⬇️ Esta imagen</button>
       <button id="btn-collage-close">✕ Cerrar</button>
     </div>
+    <button id="btn-dl-todas">⬇️ Descargar TODAS (${0})</button>
   </div>
 </div>
 
@@ -1309,13 +1333,24 @@ document.getElementById('collage-mode-tabs').onclick = e => {
 function openCollageModal(mode) {
   _collageMode = mode;
   document.getElementById('collage-modal').classList.add('open');
-  // Selector de producto solo en modo single
   const picker = document.getElementById('single-picker');
+  const layoutBar = document.getElementById('single-layout-bar');
+  const btnTodas = document.getElementById('btn-dl-todas');
   if (mode === 'single') {
     picker.style.display = 'block';
+    layoutBar.classList.add('show');
     buildSinglePicker(_collageProds);
+    // Mostrar btn descargar todas si hay más de 1
+    if (_collageProds.length > 1) {
+      btnTodas.classList.add('show');
+      btnTodas.textContent = `⬇️ Descargar TODAS (${_collageProds.length} fotos)`;
+    } else {
+      btnTodas.classList.remove('show');
+    }
   } else {
     picker.style.display = 'none';
+    layoutBar.classList.remove('show');
+    btnTodas.classList.remove('show');
   }
   renderCollageMode();
 }
@@ -1336,10 +1371,141 @@ window.selectSingleProd = (i) => {
   renderCollageMode();
 };
 
+let _singleLayout = 'clasico'; // clasico | h2 | v2 | expandido
+
 async function renderCollageMode() {
-  if (_collageMode === 'collage')  await drawCollage(_collageProds.slice(0, 6));
-  if (_collageMode === 'single')   await drawSingle(_collageProds[_singleIdx]);
-  if (_collageMode === 'historia') await drawHistoria(_collageProds.slice(0, 6));
+  if (_collageMode === 'collage')  await drawCollage(_collageProds);
+  if (_collageMode === 'single')   await drawSingleLayout(_collageProds[_singleIdx], _singleLayout);
+  if (_collageMode === 'historia') await drawHistoria(_collageProds);
+}
+
+// Wiring layout buttons
+document.getElementById('single-layout-bar').onclick = e => {
+  const btn = e.target.closest('.layout-btn');
+  if (!btn) return;
+  _singleLayout = btn.dataset.layout;
+  document.querySelectorAll('.layout-btn').forEach(b => b.classList.toggle('active', b===btn));
+  renderCollageMode();
+};
+
+// Wrapper que elige variante de drawSingle según layout
+async function drawSingleLayout(p, layout) {
+  if (!p) return;
+  if (layout === 'clasico')    return drawSingle(p);
+  if (layout === 'expandido')  return drawSingleExpandido(p);
+  if (layout === 'h2')         return drawSingleH2(p);
+  if (layout === 'v2')         return drawSingleV2(p);
+  return drawSingle(p);
+}
+
+// ── LAYOUT EXPANDIDO — foto ocupa casi todo, texto superpuesto abajo ──
+async function drawSingleExpandido(p) {
+  const W=1080, H=1080;
+  const cvs = document.getElementById('collage-canvas');
+  cvs.width=W; cvs.height=H;
+  const ctx = cvs.getContext('2d');
+  const oferta = calcularOferta(p);
+  const badgeColor = BADGE_COLORS[p.catOferta] || null;
+
+  // Foto ocupa TODO el canvas (cover)
+  try {
+    const img = await loadImg(getImgUrl(p));
+    const scale = Math.max(W/img.width, H/img.height);
+    const dw=img.width*scale, dh=img.height*scale;
+    ctx.drawImage(img, (W-dw)/2, (H-dh)/2, dw, dh);
+  } catch {
+    const grd=ctx.createLinearGradient(0,0,W,H);
+    grd.addColorStop(0,'#1a3a16'); grd.addColorStop(1,'#2d5a22');
+    ctx.fillStyle=grd; ctx.fillRect(0,0,W,H);
+  }
+
+  // Overlay gradiente abajo
+  const ovH = 340;
+  const ov = ctx.createLinearGradient(0, H-ovH, 0, H);
+  ov.addColorStop(0,'rgba(0,0,0,0)'); ov.addColorStop(1,'rgba(0,0,0,.85)');
+  ctx.fillStyle=ov; ctx.fillRect(0,H-ovH,W,ovH);
+
+  // Badge arriba izquierda
+  if (oferta && badgeColor) {
+    ctx.fillStyle=badgeColor; ctx.beginPath();
+    ctx.roundRect(16,16,300,48,10); ctx.fill();
+    ctx.fillStyle='#fff'; ctx.font='bold 24px Segoe UI'; ctx.textAlign='left';
+    ctx.fillText(oferta.etiqueta.toUpperCase(), 28, 48);
+  }
+  // Logo tienda arriba derecha
+  ctx.fillStyle='rgba(0,0,0,.5)'; ctx.beginPath();
+  ctx.roundRect(W-240,16,224,48,10); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.font='bold 18px Segoe UI'; ctx.textAlign='center';
+  ctx.fillText('🛒 ALMACÉN COPIHUE', W-128, 47);
+
+  // Nombre
+  ctx.fillStyle='#fff'; ctx.font='bold 42px Segoe UI'; ctx.textAlign='center';
+  wrapText(ctx, p.nombre, W/2, H-ovH+80, W-60, 48, 2);
+
+  // Precio
+  if (oferta && oferta.precio) {
+    ctx.fillStyle='rgba(255,255,255,.6)'; ctx.font='28px Segoe UI';
+    const antes=fmt(p.precioVenta);
+    ctx.fillText(antes, W/2, H-120);
+    const tw=ctx.measureText(antes).width;
+    ctx.beginPath(); ctx.strokeStyle='rgba(255,255,255,.6)'; ctx.lineWidth=2;
+    ctx.moveTo(W/2-tw/2,H-132); ctx.lineTo(W/2+tw/2,H-132); ctx.stroke();
+    ctx.fillStyle='#fff'; ctx.font='bold 64px Segoe UI';
+    ctx.fillText(fmt(oferta.precio), W/2, H-52);
+  } else {
+    ctx.fillStyle='#fff'; ctx.font='bold 64px Segoe UI'; ctx.textAlign='center';
+    ctx.fillText(fmt(p.precioVenta), W/2, H-52);
+  }
+}
+
+// ── LAYOUT HORIZONTAL 2 — si hay 2+ productos, los muestra lado a lado ──
+async function drawSingleH2(p) {
+  const prods = _collageProds.slice(_singleIdx, _singleIdx+2);
+  if (prods.length < 2) return drawSingle(p); // fallback si es solo 1
+  const W=1080, H=600;
+  const cvs = document.getElementById('collage-canvas');
+  cvs.width=W; cvs.height=H;
+  const ctx = cvs.getContext('2d');
+  const grd=ctx.createLinearGradient(0,0,W,H);
+  grd.addColorStop(0,'#1a3a16'); grd.addColorStop(1,'#2d5a22');
+  ctx.fillStyle=grd; ctx.fillRect(0,0,W,H);
+  // Header
+  ctx.fillStyle='rgba(0,0,0,.3)'; ctx.fillRect(0,0,W,50);
+  ctx.fillStyle='#fff'; ctx.font='bold 22px Segoe UI'; ctx.textAlign='center';
+  ctx.fillText('🛒 ALMACÉN COPIHUE', W/2, 34);
+  // 2 cards lado a lado
+  const PAD=10, HDRH=50, FTRH=40;
+  const cw=Math.floor((W-PAD*3)/2), ch=H-HDRH-FTRH-PAD*2;
+  for (let i=0;i<2;i++) {
+    await drawProductCard(ctx, prods[i], PAD+i*(cw+PAD), HDRH+PAD, cw, ch);
+  }
+  ctx.fillStyle='rgba(0,0,0,.4)'; ctx.fillRect(0,H-FTRH,W,FTRH);
+  ctx.fillStyle='#fff'; ctx.font='bold 16px Segoe UI'; ctx.textAlign='center';
+  ctx.fillText('📦 Pedidos por WhatsApp', W/2, H-FTRH+26);
+}
+
+// ── LAYOUT VERTICAL 2 — 2 productos apilados ──
+async function drawSingleV2(p) {
+  const prods = _collageProds.slice(_singleIdx, _singleIdx+2);
+  if (prods.length < 2) return drawSingle(p);
+  const W=1080, H=1080;
+  const cvs = document.getElementById('collage-canvas');
+  cvs.width=W; cvs.height=H;
+  const ctx = cvs.getContext('2d');
+  const grd=ctx.createLinearGradient(0,0,W,H);
+  grd.addColorStop(0,'#1a3a16'); grd.addColorStop(1,'#2d5a22');
+  ctx.fillStyle=grd; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='rgba(0,0,0,.3)'; ctx.fillRect(0,0,W,50);
+  ctx.fillStyle='#fff'; ctx.font='bold 22px Segoe UI'; ctx.textAlign='center';
+  ctx.fillText('🛒 ALMACÉN COPIHUE', W/2, 34);
+  const PAD=10, HDRH=50, FTRH=40;
+  const cw=W-PAD*2, ch=Math.floor((H-HDRH-FTRH-PAD*3)/2);
+  for (let i=0;i<2;i++) {
+    await drawProductCard(ctx, prods[i], PAD, HDRH+PAD+i*(ch+PAD), cw, ch);
+  }
+  ctx.fillStyle='rgba(0,0,0,.4)'; ctx.fillRect(0,H-FTRH,W,FTRH);
+  ctx.fillStyle='#fff'; ctx.font='bold 16px Segoe UI'; ctx.textAlign='center';
+  ctx.fillText('📦 Pedidos por WhatsApp', W/2, H-FTRH+26);
 }
 
 // ── HELPERS CANVAS ──────────────────────────────────────────────
@@ -1679,6 +1845,28 @@ async function drawHistoria(prods) {
   const ctx2=cvs2.getContext('2d');
   ctx2.drawImage(cvs, 0,0, cvs2.width, cvs2.height);
 }
+
+// Descargar TODAS: itera cada producto con el layout actual
+document.getElementById('btn-dl-todas').onclick = async () => {
+  const prods = _collageProds;
+  if (!prods.length) return;
+  toast(`⬇️ Descargando ${prods.length} imágenes…`, prods.length*600+1000);
+  const savedIdx = _singleIdx;
+  for (let i=0; i<prods.length; i++) {
+    _singleIdx = i;
+    await drawSingleLayout(prods[i], _singleLayout);
+    const cvs = document.getElementById('collage-canvas');
+    const a = document.createElement('a');
+    a.href = cvs.toDataURL('image/jpeg', .92);
+    a.download = `copihue_${norm(prods[i].nombre).slice(0,30)}.jpg`;
+    a.click();
+    await new Promise(r => setTimeout(r, 500));
+  }
+  _singleIdx = savedIdx;
+  // Restaurar canvas
+  await drawSingleLayout(prods[savedIdx], _singleLayout);
+  toast(`✅ ${prods.length} imágenes descargadas`);
+};
 
 document.getElementById('btn-collage-dl').onclick = () => {
   const a = document.createElement('a');
