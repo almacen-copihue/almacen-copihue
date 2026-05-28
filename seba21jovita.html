@@ -53,16 +53,6 @@
   • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
     evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
 
-  v363 — 28/05/2026
-  ------------------
-  • SORT: Prioridad de ofertas en el scroll ahora es granular (0-8) en lugar
-    de binaria (0/1). Orden: Promo (8) > Combo (7) > Jueves Cervecero (6) >
-    Relámpago (5) > Destacadas (4) > Especiales (3) > Últimas Unidades (2) >
-    sin oferta (0, ordenado por más vendidos 15d). Dentro de cada nivel de
-    oferta, los más vendidos quedan primero. Sin ofertas activas, los más
-    vendidos 15d dominan el top como siempre.
-    Nueva función: _ofertaPrioridad(p) reemplaza el flag binario en _sortProductos.
-
   v358 — 25/05/2026
   ------------------
   • FIX CRÍTICO: Race condition entre getConfig y getOfertas eliminado.
@@ -422,7 +412,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v363</title>
+    <title>Copihue — POS v364</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -4184,15 +4174,15 @@ function _tieneOfertaActiva(p) {
 }
 
 function _ofertaPrioridad(p) {
-    // 0 = sin oferta, 8 = máxima prioridad visual en el scroll
-    // Promo > Combo > Cervecero > Relámpago > Destacadas > Especiales > Últimas
+    // Prioridad visual en el scroll — mayor número = más arriba
+    // Promo(8) > Combo(7) > Cervecero(6) > Relámpago(5) > Destacadas(4) > Especiales(3) > Últimas(2) > sin oferta(0)
     const cat = String(p.catOferta || '').toUpperCase();
-    if (cat === 'PROMO ACTIVA' && (p.normal||0) > 0 && (p.normal||0) < (p.price||0)) return 8;
-    if (cat === 'COMBO ACTIVO' && (p.normal||0) > 0 && (p.normal||0) < (p.price||0)) return 7;
-    if (_esCerveceroActivo() && _poolCervecero && _poolCervecero.has(p.id))            return 6;
-    if (p.relampago  && _tipoActivo('relampago')  && _poolIdsRelampago.has(p.id))      return 5;
+    if (cat === 'PROMO ACTIVA' && p.normal > 0 && p.normal < p.price) return 8;
+    if (cat === 'COMBO ACTIVO' && p.normal > 0 && p.normal < p.price) return 7;
+    if (_esCerveceroActivo() && _poolCervecero.has(p.id))              return 6;
+    if (p.relampago && _tipoActivo('relampago') && _poolIdsRelampago.has(p.id))       return 5;
     if (p.destacada > 0 && _tipoActivo('destacadas') && _destacadasFiltradas.has(p.id)) return 4;
-    if (p.especial  > 0 && _tipoActivo('especiales') && _poolIdsEspeciales.has(p.id))  return 3;
+    if (p.especial  > 0 && _tipoActivo('especiales') && _poolIdsEspeciales.has(p.id))   return 3;
     if (_tipoActivo('ultimas') && _poolIdsUltimas.has(p.id))                           return 2;
     return 0;
 }
@@ -4207,15 +4197,15 @@ function _sortProductos(lista, idsEnCarrito) {
     }
     const scored = lista.map(p => ({
         p,
-        oferta:  _ofertaPrioridad(p),           // 0–8: promo>combo>cerv>rel>dest>esp>ult
+        oferta:  _ofertaPrioridad(p),           // 0–8: prioridad granular por tipo
         carrito: (idsEnCarrito && idsEnCarrito.has(p.id)) ? 1 : 0,
         rank:    rankScore(p.id) + _catPeso(p)
     }));
     scored.sort((a, b) => {
         if (a.p.stock === 0 && b.p.stock > 0) return 1;
         if (a.p.stock > 0 && b.p.stock === 0) return -1;
-        if (b.oferta  !== a.oferta)  return b.oferta  - a.oferta;   // prioridad de oferta
-        if (b.carrito !== a.carrito) return b.carrito - a.carrito;  // en carrito primero
+        if (b.oferta  !== a.oferta)  return b.oferta  - a.oferta;   // tipo de oferta primero
+        if (b.carrito !== a.carrito) return b.carrito - a.carrito;  // en carrito
         return b.rank - a.rank;                                      // más vendidos 15d
     });
     return scored.map(s => s.p);
@@ -9001,7 +8991,7 @@ window.t9Limpiar = function(){};
 
 // Restaurar badge de notificaciones del día al arrancar
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('%c🏪 COPIHUE POS — Sistema listo v363', 'color:#4caf50;font-weight:bold;font-size:1.2em;');
+    console.log('%c🏪 COPIHUE POS — Sistema listo v364', 'color:#4caf50;font-weight:bold;font-size:1.2em;');
     setTimeout(_precargarClientes, 3000); // precarga clientes en background
     setTimeout(() => {
         const arr = _cargarNotifPos ? _cargarNotifPos() : [];
