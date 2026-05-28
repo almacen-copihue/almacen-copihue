@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Almacén Copihue v137</title>
+    <title>Almacén Copihue v138</title>
     
     <!-- META TAGS PARA PWA -->
     <meta name="theme-color" content="#2e7d32" id="meta-theme-color">
@@ -219,10 +219,26 @@
             transform: scale(0.95);
         }
         
-        /* Badge ANTES/AHORA para PROMOS */
-        .price-badge-promo {
-            background: linear-gradient(135deg, #FF5722, #FF9800);
-            color: white;
+        /* PROMOS / COMBOS — sin botón compartir */
+        #ofertasPromos .share-btn,
+        #ofertasCombos .share-btn { display: none !important; }
+
+        /* Grid centrado con flexbox para PROMOS y COMBOS (pueden tener 1-2 items) */
+        #promos-grid,
+        #combos-grid {
+            display: flex !important;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 1.5rem;
+            padding: 1.5rem;
+            background: white;
+        }
+        #promos-grid .product-card,
+        #combos-grid .product-card {
+            flex: 0 1 300px;
+            min-width: 240px;
+            max-width: 340px;
+        }
             padding: 15px 20px;
             border-radius: 12px;
             box-shadow: 0 4px 15px rgba(255, 87, 34, 0.4);
@@ -1974,7 +1990,7 @@
         </div>
         
         <div class="ofertas-stock-warning" id="msg-relampago">
-            ⚡ <strong>¡OFERTA ACTIVA AHORA!</strong> Precios especiales por tiempo limitado. ¡Aprovechá mientras dura!
+            ⚡ Precio válido <strong>solo mientras dura el cronómetro</strong>. Mañana vuelve al precio normal.
         </div>
         
         <div class="ofertas-products-grid" id="relampago-grid">
@@ -1995,7 +2011,7 @@
         </div>
         
         <div class="ofertas-stock-warning" id="msg-destacadas">
-            🔥 <strong>¡OFERTAS DESTACADAS!</strong> Los mejores descuentos de la semana, solo por hoy.
+            💰 Precios que elegimos para vos esta semana. No los vas a encontrar así en otro lado.
         </div>
         
         <div class="ofertas-products-grid" id="destacadas-grid">
@@ -2016,7 +2032,7 @@
         </div>
         
         <div class="ofertas-stock-warning" id="msg-especiales">
-            🌙 <strong>¡ESPECIAL DE HOY!</strong> Precios únicos disponibles por tiempo limitado.
+            🌙 Solo aparecen a esta hora. Si los ves, llegaste justo.
         </div>
         
         <div class="ofertas-products-grid" id="especiales-grid">
@@ -2033,7 +2049,7 @@
             </h2>
         </div>
         <div class="ofertas-stock-warning" id="msg-ultimas">
-            🏷️ <strong>¡ÚLTIMAS UNIDADES!</strong> Productos seleccionados con descuento especial.
+            🏷️ Cuando se acaba, se acaba. <strong>Sin reposición garantizada.</strong>
         </div>
         <div class="ofertas-products-grid" id="ultimas-grid"></div>
     </div>
@@ -2048,7 +2064,7 @@
         </div>
         <div class="ofertas-stock-warning" id="msg-recien"
              style="background:rgba(0,137,123,0.15);color:#004d40;border-left:4px solid #00897b;font-size:0.95rem;">
-            🆕 <strong>¡RECIÉN LLEGADOS AL STOCK!</strong> Productos que ingresaron en los últimos días.
+            📦 Ingresaron al stock en los últimos días. Frescos y listos.
         </div>
         <div class="ofertas-products-grid" id="recien-grid">
             <div style="border-radius:12px;overflow:hidden;background:#f5f5f5;animation:skeletonPulse 1.5s infinite 0s;"><div style="width:100%;aspect-ratio:1/1;background:#e0e0e0;"></div><div style="padding:10px;"><div style="height:13px;background:#e0e0e0;border-radius:4px;margin-bottom:8px;"></div><div style="height:13px;background:#e0e0e0;border-radius:4px;width:65%;margin-bottom:8px;"></div><div style="height:13px;background:#e0e0e0;border-radius:4px;width:45%;margin-bottom:10px;"></div><div style="height:36px;background:#e0e0e0;border-radius:8px;"></div></div></div>
@@ -3083,62 +3099,57 @@ function renderizarContenedorOfertas(tipo, productos) {
     iniciarCountdown(tipo);
 }
 
-// ========== COUNTDOWN RELÁMPAGO — cronómetro real ticking ==========
+// ========== COUNTDOWN RELÁMPAGO — cronómetro solo en modo AUTO ==========
 function iniciarCountdown(tipo) {
     if (tipo === 'destacadas' || tipo === 'especiales') return; // Usan texto estático en HTML
 
     const countdownEl = document.getElementById('relampago-countdown');
+    const timerDiv    = document.getElementById('relampago-timer');
     if (!countdownEl) return;
 
-    // Limpiar intervalo previo
     if (window._relampagoCDInterval) clearInterval(window._relampagoCDInterval);
 
-    function getTargetMs() {
-        const h = _horariosOferta && _horariosOferta.relampago;
-        const modo = h ? String(h.modo || 'A').toUpperCase() : 'A';
+    const h    = _horariosOferta && _horariosOferta.relampago;
+    const modo = h ? String(h.modo || 'A').toUpperCase() : 'A';
 
-        const now = new Date();
-        const arg = new Date(now.toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+    // Modo forzado ON → no cronómetro, ocultar timer
+    if (modo === '1') {
+        if (timerDiv) timerDiv.style.display = 'none';
+        return;
+    }
 
-        let targetH, targetM;
+    // Modo AUTO con horario de cierre → cronómetro ticking
+    if (h && h.cierre !== null && h.cierre !== undefined) {
+        if (timerDiv) timerDiv.style.display = '';
 
-        if (modo === '1') {
-            // Forzado ON: cronómetro al cierre del local
-            targetH = _horaCierreLocal;
-            targetM = _minsCierreLocal;
-        } else if (h && h.cierre !== null && h.cierre !== undefined) {
-            // Auto: cronómetro al cierre de la oferta según planilla
+        function getTargetMs() {
             const totalMins = Math.round(h.cierre * 60);
-            targetH = Math.floor(totalMins / 60) % 24;
-            targetM = totalMins % 60;
-        } else {
-            return null;
+            const targetH   = Math.floor(totalMins / 60) % 24;
+            const targetM   = totalMins % 60;
+            const now       = new Date();
+            const arg       = new Date(now.toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+            const target    = new Date(arg);
+            target.setHours(targetH, targetM, 0, 0);
+            if (target <= arg) target.setDate(target.getDate() + 1);
+            return target;
         }
 
-        const target = new Date(arg);
-        target.setHours(targetH, targetM, 0, 0);
-        if (target <= arg) target.setDate(target.getDate() + 1); // siguiente día si ya pasó
-        return target;
+        function tick() {
+            const now  = new Date();
+            const arg  = new Date(now.toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+            const diff = Math.max(0, getTargetMs() - arg);
+            if (diff === 0) { countdownEl.textContent = '00:00:00'; clearInterval(window._relampagoCDInterval); return; }
+            const hh = Math.floor(diff / 3600000);
+            const mm = Math.floor((diff % 3600000) / 60000);
+            const ss = Math.floor((diff % 60000) / 1000);
+            countdownEl.textContent = `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
+        }
+        tick();
+        window._relampagoCDInterval = setInterval(tick, 1000);
+    } else {
+        // Sin horario definido → ocultar timer
+        if (timerDiv) timerDiv.style.display = 'none';
     }
-
-    function tick() {
-        const target = getTargetMs();
-        if (!target) { countdownEl.textContent = ''; return; }
-
-        const now = new Date();
-        const arg = new Date(now.toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
-        const diff = Math.max(0, target - arg);
-
-        if (diff === 0) { countdownEl.textContent = '00:00:00'; clearInterval(window._relampagoCDInterval); return; }
-
-        const hh = Math.floor(diff / 3600000);
-        const mm = Math.floor((diff % 3600000) / 60000);
-        const ss = Math.floor((diff % 60000) / 1000);
-        countdownEl.textContent = `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
-    }
-
-    tick();
-    window._relampagoCDInterval = setInterval(tick, 1000);
 }
         
 function renderizarProductosNormales() {
