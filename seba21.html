@@ -53,6 +53,7 @@
   • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
     evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
 
+  v363 — 28/05/2026 — Fix precio promo/combo desde col L planilla
   v362 — 28/05/2026 — Badge oferta visible en carrito (promo/combo)
   v358 — 25/05/2026
   ------------------
@@ -413,7 +414,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v362</title>
+    <title>Copihue — POS v363</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3048,15 +3049,17 @@ function agregarProducto(id) {
         const o = calcularOfertaPOS(producto, existente.qty);
         existente.price          = o.precioUnitario;
         existente.precioTotalCalc = o.precioTotal;
-        existente.precioOriginal = (o.tipoOferta === 'normal' || o.tipoOferta === 'combo' || o.tipoOferta === 'promo') ? producto.price : (o.tieneOferta ? producto.price : 0);
+        existente.precioOriginal = (o.tipoOferta === 'promo' || o.tipoOferta === 'combo')
+            ? producto.price  // col B = precio normal original
+            : o.tipoOferta === 'normal' ? producto.normal : (o.tieneOferta ? producto.price : 0);
         existente.precioModificado = o.tieneOferta;
         existente.ofertaEtiqueta = o.etiqueta || null;
         existente.ofertaTipo     = o.tipoOferta || null;
     } else {
         const oferta = calcularOfertaPOS(producto, 1);
-        // COMBO/PROMO: col J = "promo activa", precio real = col L (normal < price)
-        const esCombo = oferta.tipoOferta === 'combo';
-        const precioOrig = oferta.tipoOferta === 'normal' ? producto.normal : (oferta.tieneOferta ? producto.price : 0);
+        const precioOrig = (oferta.tipoOferta === 'promo' || oferta.tipoOferta === 'combo')
+            ? producto.price  // col B = precio normal original
+            : oferta.tipoOferta === 'normal' ? producto.normal : (oferta.tieneOferta ? producto.price : 0);
         const tieneDesc  = oferta.tieneOferta;
         ventaActual.push({
             id: producto.id,
@@ -6856,29 +6859,29 @@ function calcularOfertaPOS(producto, qty) {
         r.etiqueta       = `⭐ -10% OFF`;
         r.tieneOferta = true; r.tipoOferta = 'especiales';
     }
-    // 4. PROMO ACTIVA — col J = "promo activa", col L = precio promo (sin toggle)
-    else if (
-        String(producto.catOferta || '').toUpperCase() === 'PROMO ACTIVA' &&
-        (producto.normal || 0) > 0 &&
-        (producto.normal || 0) < (producto.price || 0)
-    ) {
-        const pct = Math.round((1 - producto.normal / producto.price) * 100);
-        r.precioUnitario = producto.normal;
-        r.precioTotal    = producto.normal * qty;
-        r.etiqueta       = `🏷️ PROMO -${pct}% OFF`;
-        r.tieneOferta = true; r.tipoOferta = 'promo';
+    // 4. PROMO ACTIVA — col J = "promo activa", col L = precio promo — la planilla manda
+    else if (String(producto.catOferta || '').toUpperCase() === 'PROMO ACTIVA') {
+        const precioPromo = (producto.normal > 0 && producto.normal < producto.price)
+            ? producto.normal
+            : producto.price; // fallback si col L no llegó
+        const pct = producto.price > 0 ? Math.round((1 - precioPromo / producto.price) * 100) : 0;
+        r.precioUnitario = precioPromo;
+        r.precioTotal    = precioPromo * qty;
+        r.etiqueta       = pct > 0 ? `🏷️ PROMO -${pct}% OFF` : `🏷️ PROMO ACTIVA`;
+        r.tieneOferta    = true;
+        r.tipoOferta     = 'promo';
     }
-    // 5. COMBO ACTIVO — col J = "combo activo", col L = precio combo (sin toggle)
-    else if (
-        String(producto.catOferta || '').toUpperCase() === 'COMBO ACTIVO' &&
-        (producto.normal || 0) > 0 &&
-        (producto.normal || 0) < (producto.price || 0)
-    ) {
-        const pct = Math.round((1 - producto.normal / producto.price) * 100);
-        r.precioUnitario = producto.normal;
-        r.precioTotal    = producto.normal * qty;
-        r.etiqueta       = `🎯 COMBO -${pct}% OFF`;
-        r.tieneOferta = true; r.tipoOferta = 'combo';
+    // 5. COMBO ACTIVO — col J = "combo activo", col L = precio combo — la planilla manda
+    else if (String(producto.catOferta || '').toUpperCase() === 'COMBO ACTIVO') {
+        const precioCombo = (producto.normal > 0 && producto.normal < producto.price)
+            ? producto.normal
+            : producto.price;
+        const pct = producto.price > 0 ? Math.round((1 - precioCombo / producto.price) * 100) : 0;
+        r.precioUnitario = precioCombo;
+        r.precioTotal    = precioCombo * qty;
+        r.etiqueta       = pct > 0 ? `🎯 COMBO -${pct}% OFF` : `🎯 COMBO ACTIVO`;
+        r.tieneOferta    = true;
+        r.tipoOferta     = 'combo';
     }
 
     return r;
