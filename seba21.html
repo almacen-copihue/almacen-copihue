@@ -53,6 +53,7 @@
   • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
     evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
 
+  v364 — 28/05/2026 — Fix doble-tap + INP debounce + rAF badge refresh
   v363 — 28/05/2026 — Fix precio promo/combo desde col L planilla
   v362 — 28/05/2026 — Badge oferta visible en carrito (promo/combo)
   v358 — 25/05/2026
@@ -414,7 +415,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v363</title>
+    <title>Copihue — POS v364</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3010,7 +3011,13 @@ function _refreshResultadosBadges(idActualizado) {
     if (contenedor) contenedor.scrollTop = scrollPos;
 }
 
+// Debounce para evitar doble-tap en mobile
+let _addDebounce = {};
 function agregarProducto(id) {
+    const ahora = Date.now();
+    if (_addDebounce[id] && ahora - _addDebounce[id] < 400) return; // bloquear doble-tap
+    _addDebounce[id] = ahora;
+
     const producto = productos.find(p => p.id === id);
     if (!producto || producto.stock === 0) return;
 
@@ -3082,7 +3089,8 @@ function agregarProducto(id) {
 
     renderVenta(true); // ligero: solo panel y totales
     _guardarCarritoDiferido(); // async — no bloquea el hilo en Android
-    _refreshResultadosBadges(id); // quirúrgico: solo el card tocado
+    // Diferir el badge al próximo frame para no bloquear el click (mejora INP)
+    requestAnimationFrame(() => _refreshResultadosBadges(id));
 }
 
 // ===== SELECTOR DE CANTIDAD ANTES DE AGREGAR =====
