@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>SendWA — Almacén Copihue ver.13</title>
+<title>SendWA — Almacén Copihue ver.14</title>
 <style>
   /* ===== VARIABLES ===== */
   :root {
@@ -407,7 +407,7 @@
 <!-- HEADER -->
 <div id="header">
   <h1>📲 SendWA <span>Almacén Copihue</span></h1>
-  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.13</div>
+  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.14</div>
   <button id="btn-dark" title="Modo oscuro">🌙</button>
 </div>
 
@@ -1392,55 +1392,65 @@ async function drawProductCard(ctx, p, x, y, W, H) {
   }
 }
 
-// ── MODO COLLAGE (4 o 6 productos) ──────────────────────────────
+// ── MODO COLLAGE — hasta 3x4=12 productos, canvas 1080x1080 ────────
 async function drawCollage(prods) {
-  const n    = Math.min(prods.length, 6);
-  const cols = n <= 4 ? 2 : 3;
+  const n = Math.min(prods.length, 12);
+
+  // Layout: hasta 12 productos en 3 cols × hasta 4 filas
+  // Para menos de 4 usamos 2 cols para que las tarjetas sean más grandes
+  const cols = n <= 2 ? 1 : n <= 4 ? 2 : 3;
   const rows = Math.ceil(n / cols);
-  const CARD = 300; const PAD = 10; const HDRH = 70; const FTRH = 50;
-  const W = cols*CARD + (cols+1)*PAD;
-  const H = HDRH + rows*CARD + (rows+1)*PAD + FTRH;
+
+  // Canvas siempre 1080x1080
+  const CW = 1080, CH = 1080;
+  const HDRH = 72, FTRH = 44;
+  const PAD  = 8;
+  const gridW = CW - PAD * (cols + 1);
+  const gridH = CH - HDRH - FTRH - PAD * (rows + 1);
+  const CARD_W = Math.floor(gridW / cols);
+  const CARD_H = Math.floor(gridH / rows);
 
   const cvs = document.getElementById('collage-canvas');
-  cvs.width = W; cvs.height = H;
+  cvs.width = CW; cvs.height = CH;
   const ctx = cvs.getContext('2d');
 
-  // BG degradado
-  const grd = ctx.createLinearGradient(0,0,W,H);
+  // BG
+  const grd = ctx.createLinearGradient(0,0,CW,CH);
   grd.addColorStop(0,'#1a3a16'); grd.addColorStop(1,'#2d5a22');
-  ctx.fillStyle = grd; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle = grd; ctx.fillRect(0,0,CW,CH);
 
-  // Header dinámico según tipos de oferta en los productos
-  const tiposEnCollage = [...new Set(prods.map(p=>p.catOferta).filter(Boolean))];
+  // Header dinámico
+  const tiposEnCollage = [...new Set(prods.slice(0,n).map(p=>p.catOferta).filter(Boolean))];
   const titleMap = {
-    relampago: '⚡ OFERTAS RELÁMPAGO', ultimas: '🏷️ ÚLTIMAS UNIDADES',
-    destacado: '🔥 DESTACADOS', especial: '💜 ESPECIALES',
-    promo: '🏷️ PROMOS', combo: '🎯 COMBOS'
+    relampago:'⚡ OFERTAS RELÁMPAGO', ultimas:'🏷️ ÚLTIMAS UNIDADES',
+    destacado:'🔥 DESTACADOS', especial:'💜 ESPECIALES',
+    promo:'🏷️ PROMOS', combo:'🎯 COMBOS'
   };
   const collageTitle = tiposEnCollage.length === 1 && titleMap[tiposEnCollage[0]]
     ? titleMap[tiposEnCollage[0]]
     : tiposEnCollage.length > 1 ? '🔥 OFERTAS DEL DÍA' : '🛒 PRODUCTOS DESTACADOS';
-  // Color del header según tipo principal
   const hdrColorMap = { relampago:'#c0392b', ultimas:'#d35400', destacado:'#d68910',
     especial:'#6c3483', promo:'#6c3483', combo:'#bf360c' };
   const hdrColor = hdrColorMap[tiposEnCollage[0]] || '#1a3a16';
-  ctx.fillStyle = hdrColor; ctx.fillRect(0,0,W,HDRH);
-  ctx.fillStyle='#fff'; ctx.font='bold 22px Segoe UI'; ctx.textAlign='center';
-  ctx.fillText('🛒 ALMACÉN COPIHUE', W/2, 26);
-  ctx.font='bold 15px Segoe UI'; ctx.fillStyle='rgba(255,255,255,.95)';
-  ctx.fillText(collageTitle, W/2, 52);
+  ctx.fillStyle = hdrColor; ctx.fillRect(0,0,CW,HDRH);
+  ctx.fillStyle='#fff'; ctx.font='bold 26px Segoe UI'; ctx.textAlign='center';
+  ctx.fillText('🛒 ALMACÉN COPIHUE', CW/2, 30);
+  ctx.font='bold 18px Segoe UI'; ctx.fillStyle='rgba(255,255,255,.95)';
+  ctx.fillText(collageTitle, CW/2, 56);
 
   // Cards
-  for (let i=0; i<n; i++) {
-    const col=i%cols, row=Math.floor(i/cols);
-    const x=PAD+col*(CARD+PAD), y=HDRH+PAD+row*(CARD+PAD);
-    await drawProductCard(ctx, prods[i], x, y, CARD, CARD);
+  for (let i = 0; i < n; i++) {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const x = PAD + col * (CARD_W + PAD);
+    const y = HDRH + PAD + row * (CARD_H + PAD);
+    await drawProductCard(ctx, prods[i], x, y, CARD_W, CARD_H);
   }
 
   // Footer
-  ctx.fillStyle='rgba(0,0,0,.35)'; ctx.fillRect(0,H-FTRH,W,FTRH);
-  ctx.fillStyle='#fff'; ctx.font='bold 14px Segoe UI'; ctx.textAlign='center';
-  ctx.fillText('📦 Hacemos pedidos  •  💬 Consultas por WhatsApp', W/2, H-FTRH+32);
+  ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.fillRect(0, CH-FTRH, CW, FTRH);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 16px Segoe UI'; ctx.textAlign = 'center';
+  ctx.fillText('📦 Hacemos pedidos  •  💬 Consultas por WhatsApp', CW/2, CH-FTRH+28);
 }
 
 // ── MODO 1 FOTO ──────────────────────────────────────────────────
