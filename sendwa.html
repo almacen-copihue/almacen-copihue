@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>SendWA — Almacén Copihue ver.11</title>
+<title>SendWA — Almacén Copihue ver.12</title>
 <style>
   /* ===== VARIABLES ===== */
   :root {
@@ -407,7 +407,7 @@
 <!-- HEADER -->
 <div id="header">
   <h1>📲 SendWA <span>Almacén Copihue</span></h1>
-  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.11</div>
+  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.12</div>
   <button id="btn-dark" title="Modo oscuro">🌙</button>
 </div>
 
@@ -1297,29 +1297,31 @@ function wrapText(ctx, text, x, y, maxW, lineH, maxLines) {
 
 // Dibuja una tarjeta de producto en el canvas con badge y precio oferta
 async function drawProductCard(ctx, p, x, y, W, H) {
-  // Si viene marcado como sin oferta → tratarlo como sin catOferta
   const _esSinOferta = p._sinOferta === true;
   const oferta = calcularOferta(p);
   const badgeColor = BADGE_COLORS[p.catOferta] || null;
-  const IMGH = H - 68;
+  const tieneOfertaPrecio = oferta && oferta.precio && !_esSinOferta;
 
-  // Fondo blanco con sombra suave
+  // Zona de texto: más alta si hay precio tachado (nombre 2 líneas + tachado + oferta)
+  const TEXTH = tieneOfertaPrecio ? 96 : 72;
+  const IMGH  = H - TEXTH;
+
+  // Fondo blanco
   ctx.save();
   ctx.shadowColor = 'rgba(0,0,0,0.15)'; ctx.shadowBlur = 8;
   ctx.fillStyle = '#ffffff';
   roundRect(ctx, x, y, W, H, 14); ctx.fill();
   ctx.restore();
 
-  // Marco: color si tiene oferta, gris si sin oferta explícito, nada si normal
+  // Marco de color
   if (!_esSinOferta && badgeColor) {
     ctx.save();
     ctx.strokeStyle = badgeColor; ctx.lineWidth = 4;
     roundRect(ctx, x+2, y+2, W-4, H-4, 12); ctx.stroke();
     ctx.restore();
   } else if (_esSinOferta) {
-    // Marco gris sutil — "precio normal"
     ctx.save();
-    ctx.strokeStyle = '#aaaaaa'; ctx.lineWidth = 2;
+    ctx.strokeStyle = '#cccccc'; ctx.lineWidth = 2;
     roundRect(ctx, x+2, y+2, W-4, H-4, 12); ctx.stroke();
     ctx.restore();
   }
@@ -1332,43 +1334,60 @@ async function drawProductCard(ctx, p, x, y, W, H) {
     ctx.drawImage(img, x, y, W, IMGH);
     ctx.restore();
   } catch {
-    ctx.fillStyle = '#e8f0e5';
-    ctx.fillRect(x, y, W, IMGH);
-    ctx.fillStyle = '#aaa'; ctx.font = `${W*0.22}px serif`; ctx.textAlign = 'center';
+    ctx.fillStyle = '#e8f0e5'; ctx.fillRect(x, y, W, IMGH);
+    ctx.fillStyle = '#bbb'; ctx.font = `${W*0.22}px serif`; ctx.textAlign = 'center';
     ctx.fillText(getCatEmoji(p.categoria), x+W/2, y+IMGH/2+W*0.08);
   }
 
-  // Badge de oferta encima de la imagen — no mostrar si sin oferta explícito
+  // Badge encima de la imagen
   if (oferta && badgeColor && !_esSinOferta) {
     ctx.fillStyle = badgeColor;
-    ctx.fillRect(x, y, W, 24);
-    ctx.fillStyle = '#fff'; ctx.font = `bold ${W*0.055}px Segoe UI`; ctx.textAlign = 'center';
-    ctx.fillText(oferta.etiqueta.toUpperCase(), x+W/2, y+17);
+    ctx.fillRect(x, y, W, 26);
+    ctx.fillStyle = '#fff'; ctx.font = `bold ${Math.max(W*0.052,10)}px Segoe UI`; ctx.textAlign = 'center';
+    ctx.fillText(oferta.etiqueta.toUpperCase(), x+W/2, y+18);
   }
 
-  // Nombre
-  ctx.fillStyle = '#1a2e17'; ctx.font = `bold ${W*0.058}px Segoe UI`; ctx.textAlign = 'center';
-  wrapText(ctx, p.nombre, x+W/2, y+IMGH+16, W-10, W*0.065, 2);
+  // ── ZONA DE TEXTO: fondo blanco liso debajo de la imagen ──
+  const txtY = y + IMGH;  // baseline de la zona de texto
+  const FS_NOMBRE = Math.max(W*0.054, 10);
+  const LH_NOMBRE = FS_NOMBRE * 1.25;
 
-  // Precio: si hay oferta Y no está forzado sin oferta → mostrar precio oferta
-  if (oferta && oferta.precio && !_esSinOferta) {
-    ctx.fillStyle = '#999'; ctx.font = `${W*0.048}px Segoe UI`;
+  // Nombre — 2 líneas máximo, centrado
+  ctx.fillStyle = '#1a2e17';
+  ctx.font = `bold ${FS_NOMBRE}px Segoe UI`;
+  ctx.textAlign = 'center';
+  const nLines = wrapText(ctx, p.nombre, x+W/2, txtY + LH_NOMBRE, W-12, LH_NOMBRE, 2);
+  const afterName = txtY + LH_NOMBRE * (nLines + 0.3);
+
+  // Precio
+  const mx = x + W/2;
+  if (tieneOfertaPrecio) {
+    // Precio anterior tachado — gris oscuro suficiente para ver
+    const FS_ANTES = Math.max(W*0.044, 9);
+    ctx.font = `${FS_ANTES}px Segoe UI`;
+    ctx.fillStyle = '#888888';
     ctx.textAlign = 'center';
-    // Texto tachado manual
     const antes = fmt(p.precioVenta);
-    const mx = x + W/2;
-    const ty = y + IMGH + 44;
-    ctx.fillText(antes, mx, ty);
+    const ty_antes = afterName + FS_ANTES;
+    ctx.fillText(antes, mx, ty_antes);
+    // Línea tachado — más gruesa y bien centrada verticalmente
     const tw = ctx.measureText(antes).width;
-    ctx.beginPath(); ctx.strokeStyle='#999'; ctx.lineWidth=1.2;
-    ctx.moveTo(mx-tw/2, ty-4); ctx.lineTo(mx+tw/2, ty-4); ctx.stroke();
-    // Precio oferta
-    ctx.fillStyle = badgeColor || '#2d5a22';
-    ctx.font = `bold ${W*0.072}px Segoe UI`;
-    ctx.fillText(fmt(oferta.precio), mx, y + IMGH + 63);
+    ctx.beginPath();
+    ctx.strokeStyle = '#777777'; ctx.lineWidth = Math.max(W*0.008, 1.5);
+    const midY = ty_antes - FS_ANTES * 0.35;
+    ctx.moveTo(mx - tw/2, midY); ctx.lineTo(mx + tw/2, midY); ctx.stroke();
+    // Precio oferta — grande, color del badge
+    const FS_OFERTA = Math.max(W*0.068, 12);
+    ctx.font = `bold ${FS_OFERTA}px Segoe UI`;
+    ctx.fillStyle = badgeColor || '#c0392b';
+    ctx.fillText(fmt(oferta.precio), mx, ty_antes + FS_OFERTA + 2);
   } else {
-    ctx.fillStyle = '#2d5a22'; ctx.font = `bold ${W*0.075}px Segoe UI`; ctx.textAlign = 'center';
-    ctx.fillText(fmt(p.precioVenta), x+W/2, y+IMGH+60);
+    // Solo precio normal — verde, bien posicionado
+    const FS_PRECIO = Math.max(W*0.07, 12);
+    ctx.font = `bold ${FS_PRECIO}px Segoe UI`;
+    ctx.fillStyle = '#2d5a22';
+    ctx.textAlign = 'center';
+    ctx.fillText(fmt(p.precioVenta), mx, afterName + FS_PRECIO);
   }
 }
 
