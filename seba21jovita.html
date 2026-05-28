@@ -53,14 +53,15 @@
   • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
     evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
 
-  v362 — 28/05/2026
+  v363 — 28/05/2026
   ------------------
-  • FIX: Badges de COMBO y PROMO no aparecían en el carrito.
-    Faltaban los casos 'combo' y 'promo' en el bloque formulaHTML
-    de _renderVentaCompleta(). El precio llegaba correcto pero la
-    etiqueta visual (color + texto) quedaba vacía. Ahora muestra
-    🏷️ PROMO (morado) y 🎯 COMBO (naranja oscuro) con el texto
-    exacto que viene de calcularOfertaPOS() (ej: "🎯 COMBO -15% OFF").
+  • SORT: Prioridad de ofertas en el scroll ahora es granular (0-8) en lugar
+    de binaria (0/1). Orden: Promo (8) > Combo (7) > Jueves Cervecero (6) >
+    Relámpago (5) > Destacadas (4) > Especiales (3) > Últimas Unidades (2) >
+    sin oferta (0, ordenado por más vendidos 15d). Dentro de cada nivel de
+    oferta, los más vendidos quedan primero. Sin ofertas activas, los más
+    vendidos 15d dominan el top como siempre.
+    Nueva función: _ofertaPrioridad(p) reemplaza el flag binario en _sortProductos.
 
   v358 — 25/05/2026
   ------------------
@@ -421,7 +422,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v362</title>
+    <title>Copihue — POS v363</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3386,12 +3387,6 @@ function _renderVentaCompleta(ligero) {
             } else if (tipo === 'ultimas') {
                 colOferta = '#b71c1c';
                 formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">${item.ofertaEtiqueta || '🏷️ ÚLTIMAS UNIDADES'}</div>`;
-            } else if (tipo === 'promo') {
-                colOferta = '#7b1fa2';
-                formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">${item.ofertaEtiqueta || '🏷️ PROMO'}</div>`;
-            } else if (tipo === 'combo') {
-                colOferta = '#e65100';
-                formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">${item.ofertaEtiqueta || '🎯 COMBO'}</div>`;
             } else if (tipo === 'normal') {
                 colOferta = '#43a047';
                 formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">↓ Precio rebajado</div>`;
@@ -4188,6 +4183,20 @@ function _tieneOfertaActiva(p) {
     return false;
 }
 
+function _ofertaPrioridad(p) {
+    // 0 = sin oferta, 8 = máxima prioridad visual en el scroll
+    // Promo > Combo > Cervecero > Relámpago > Destacadas > Especiales > Últimas
+    const cat = String(p.catOferta || '').toUpperCase();
+    if (cat === 'PROMO ACTIVA' && (p.normal||0) > 0 && (p.normal||0) < (p.price||0)) return 8;
+    if (cat === 'COMBO ACTIVO' && (p.normal||0) > 0 && (p.normal||0) < (p.price||0)) return 7;
+    if (_esCerveceroActivo() && _poolCervecero && _poolCervecero.has(p.id))            return 6;
+    if (p.relampago  && _tipoActivo('relampago')  && _poolIdsRelampago.has(p.id))      return 5;
+    if (p.destacada > 0 && _tipoActivo('destacadas') && _destacadasFiltradas.has(p.id)) return 4;
+    if (p.especial  > 0 && _tipoActivo('especiales') && _poolIdsEspeciales.has(p.id))  return 3;
+    if (_tipoActivo('ultimas') && _poolIdsUltimas.has(p.id))                           return 2;
+    return 0;
+}
+
 function _sortProductos(lista, idsEnCarrito) {
     // Pre-calcular peso de categoría UNA vez por producto (no dentro del comparador)
     function _catPeso(p) {
@@ -4198,16 +4207,16 @@ function _sortProductos(lista, idsEnCarrito) {
     }
     const scored = lista.map(p => ({
         p,
-        oferta:  _tieneOfertaActiva(p) ? 1 : 0,
+        oferta:  _ofertaPrioridad(p),           // 0–8: promo>combo>cerv>rel>dest>esp>ult
         carrito: (idsEnCarrito && idsEnCarrito.has(p.id)) ? 1 : 0,
         rank:    rankScore(p.id) + _catPeso(p)
     }));
     scored.sort((a, b) => {
         if (a.p.stock === 0 && b.p.stock > 0) return 1;
         if (a.p.stock > 0 && b.p.stock === 0) return -1;
-        if (b.oferta  !== a.oferta)  return b.oferta  - a.oferta;
-        if (b.carrito !== a.carrito) return b.carrito - a.carrito;
-        return b.rank - a.rank;
+        if (b.oferta  !== a.oferta)  return b.oferta  - a.oferta;   // prioridad de oferta
+        if (b.carrito !== a.carrito) return b.carrito - a.carrito;  // en carrito primero
+        return b.rank - a.rank;                                      // más vendidos 15d
     });
     return scored.map(s => s.p);
 }
@@ -8992,7 +9001,7 @@ window.t9Limpiar = function(){};
 
 // Restaurar badge de notificaciones del día al arrancar
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('%c🏪 COPIHUE POS — Sistema listo v362', 'color:#4caf50;font-weight:bold;font-size:1.2em;');
+    console.log('%c🏪 COPIHUE POS — Sistema listo v363', 'color:#4caf50;font-weight:bold;font-size:1.2em;');
     setTimeout(_precargarClientes, 3000); // precarga clientes en background
     setTimeout(() => {
         const arr = _cargarNotifPos ? _cargarNotifPos() : [];
