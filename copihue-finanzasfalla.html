@@ -226,17 +226,43 @@ function toast(msg, err=false){
   setTimeout(()=>t.classList.remove('show'),2500);
 }
 
-// ── PARSE FECHA ──
-function parseDate(s){
-  if(!s) return null;
-  if(s instanceof Date) return isNaN(s)?null:s;
-  const st = str(s);
-  if(st.includes('/')){const p=st.split('/');if(p.length===3)return new Date(parseInt(p[2]),parseInt(p[1])-1,parseInt(p[0]));}
-  const d = new Date(st);
-  return isNaN(d)?null:d;
-}
 
 // ── FETCH ──
+async function apiFetch(action, datos={}){
+  const url = API + '?action=' + action + '&data=' + encodeURIComponent(JSON.stringify(datos)) + '&t=' + Date.now();
+  const r = await fetch(url, {signal: AbortSignal.timeout(25000)});
+  if(!r.ok) throw new Error('HTTP ' + r.status + ' (' + action + ')');
+  return await r.json();
+}
+
+function parseFecha(s){
+  if(!s) return null;
+  if(s instanceof Date) return isNaN(s)?null:s;
+  const st = String(s).trim();
+  const m1 = st.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(m1) return new Date(parseInt(m1[1]),parseInt(m1[2])-1,parseInt(m1[3]));
+  const m2 = st.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if(m2) return new Date(parseInt(m2[3]),parseInt(m2[2])-1,parseInt(m2[1]));
+  return new Date(st);
+}
+
+function parseCajaReg(r){
+  const d = parseFecha(r.fecha);
+  if(!d) return null;
+  return {fecha:d, efectivo:num(r.efectivo), posnet:num(r.posnet),
+          transferencia:num(r.transferencia), fiado:num(r.fiado),
+          total:num(r.total), tickets:num(r.tickets)};
+}
+
+function parseEgrReg(r){
+  const d = parseFecha(r.fecha);
+  if(!d) return null;
+  return {fecha:d, hora:str(r.hora), tipo:str(r.tipo).toUpperCase(),
+          motivo:str(r.motivo), monto:num(r.monto), medio:str(r.medio),
+          categoria:str(r.categoria||r.cat).toUpperCase(),
+          obs:str(r.observacion||r.obs), vendedor:str(r.vendedor)};
+}
+
 async function cargarDatos(){
   if(cargando) return;
   cargando = true;
@@ -244,11 +270,11 @@ async function cargarDatos(){
   document.getElementById('hdr-sub').textContent = 'Actualizando…';
   try {
     const [rCaja, rEgr] = await Promise.all([
-      fetchSheet('Caja'),
-      fetchSheet('CAJA_MOVIMIENTOS')
+      apiFetch('getCajaDiaria', {limite:1000}),
+      apiFetch('getCajaEgresos', {limite:2000})
     ]);
-    cajaData = rCaja;
-    egresosData = rEgr;
+    cajaData = (rCaja.ok ? rCaja.registros : []).map(parseCajaReg).filter(Boolean);
+    egresosData = (rEgr.ok ? rEgr.registros : []).map(parseEgrReg).filter(Boolean);
     const total = cajaData.length + egresosData.length;
     document.getElementById('hdr-sub').textContent = total + ' registros · ' + new Date().toLocaleDateString('es-AR');
     toast('✅ ' + total + ' registros cargados');
@@ -263,58 +289,6 @@ async function cargarDatos(){
   }
   cargando = false;
   render();
-}
-
-async function fetchSheet(sheet){
-  const url = API + '?sheet=' + encodeURIComponent(sheet) + '&t=' + Date.now();
-  const r = await fetch(url, {signal: AbortSignal.timeout(25000)});
-  if(!r.ok) throw new Error('HTTP ' + r.status + ' (' + sheet + ')');
-  const data = await r.json();
-  const rows = Array.isArray(data) ? data :
-               Array.isArray(data.values) ? data.values :
-               Array.isArray(data.data) ? data.data :
-               data.error ? (()=>{throw new Error(data.error)})() :
-               Object.values(data);
-  if(!rows || !rows.length) return [];
-  // Detectar encabezado
-  const first = rows[0];
-  if(typeof first === 'object' && !Array.isArray(first)){
-    return rows.slice(1).map(o=>parseObj(o,sheet)).filter(r=>r&&r.fecha);
-  }
-  const fStr = Array.isArray(first) ? str(first[0]).toLowerCase() : '';
-  const start = (fStr==='fecha'||fStr==='date') ? 1 : 0;
-  return rows.slice(start).map(r=>parseArr(r,sheet)).filter(r=>r&&r.fecha);
-}
-
-function parseArr(cols, sheet){
-  if(!cols || cols.length < 2) return null;
-  const d = parseDate(cols[0]);
-  if(!d) return null;
-  if(sheet === 'Caja'){
-    return {fecha:d, efectivo:num(cols[1]), posnet:num(cols[2]), transferencia:num(cols[3]),
-            fiado:num(cols[4]), total:num(cols[5]), tickets:num(cols[6])};
-  } else {
-    return {fecha:d, hora:str(cols[1]), tipo:str(cols[2]).toUpperCase(),
-            motivo:str(cols[3]), monto:num(cols[4]), medio:str(cols[5]),
-            categoria:str(cols[6]).toUpperCase(), obs:str(cols[7]), vendedor:str(cols[8])};
-  }
-}
-
-function parseObj(o, sheet){
-  const keys = Object.keys(o).map(k=>k.toLowerCase().trim());
-  const v = k => { const i=keys.findIndex(x=>x.includes(k)); return i>=0?Object.values(o)[i]:''; };
-  const d = parseDate(v('fecha')||v('date')||Object.values(o)[0]);
-  if(!d) return null;
-  if(sheet === 'Caja'){
-    return {fecha:d, efectivo:num(v('efectivo')), posnet:num(v('posnet')),
-            transferencia:num(v('transfer')), fiado:num(v('fiado')),
-            total:num(v('total')), tickets:num(v('ticket'))};
-  } else {
-    return {fecha:d, hora:str(v('hora')), tipo:str(v('tipo')).toUpperCase(),
-            motivo:str(v('motivo')), monto:num(v('monto')), medio:str(v('medio')),
-            categoria:str(v('categoria')||v('cat')).toUpperCase(),
-            obs:str(v('obs')||v('observac')), vendedor:str(v('vendedor'))};
-  }
 }
 
 // ── FILTROS ──
@@ -922,20 +896,6 @@ function toggleCal(k){ diasCal.has(k)?diasCal.delete(k):diasCal.add(k); render()
   },{passive:true});
 })();
 
-// ── DEBUG temporal ──
-async function debugAPI(){
-  try {
-    const url = API + '?sheet=Caja&t=' + Date.now();
-    const r = await fetch(url);
-    const data = await r.json();
-    console.log('Caja RAW (primeros 3):', JSON.stringify(Array.isArray(data)?data.slice(0,3):data).slice(0,500));
-    const url2 = API + '?sheet=CAJA_MOVIMIENTOS&t=' + Date.now();
-    const r2 = await fetch(url2);
-    const data2 = await r2.json();
-    console.log('CAJA_MOV RAW (primeros 3):', JSON.stringify(Array.isArray(data2)?data2.slice(0,3):data2).slice(0,500));
-  } catch(e){ console.error('DEBUG error:', e); }
-}
-debugAPI();
 cargarDatos();
 </script>
 </body>
