@@ -53,6 +53,32 @@
   • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
     evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
 
+  v367 — 29/05/2026 — Caché productos + filtro sin stock + re-render post-ajuste
+  ------------------
+  • PERF: cargarProductos() ahora usa caché localStorage (TTL 30min).
+    Primera carga: scroll aparece al instante desde caché, fetch GAS corre
+    en background y actualiza memoria + caché. Sin conexión: aviso naranja
+    y sigue operando con caché. Ataca LCP de ~12s → <100ms con caché caliente.
+  • PERF: renderResultados() filtra stock=0 del scroll cuando no hay búsqueda.
+    Con búsqueda los muestra igual (al final, badge SIN STOCK). productos[]
+    en memoria sigue completo. Ataca INP de ~4s → reducción directa de DOM.
+  • FIX: guardarAjuste() y guardarIngreso() ahora disparan re-render del
+    scroll tras éxito: si stock sube desde 0 → renderResultados completo
+    (producto reaparece). Si solo cambia el número → badge quirúrgico.
+    Si baja a 0 → renderResultados completo (producto desaparece).
+    También actualizan la caché localStorage con el stock nuevo.
+
+  v366 — 29/05/2026 — Fix nombre cortado feo en modal confirmación (peso)
+  ------------------
+  • FIX: En el modal "Confirmar venta", los productos por peso mostraban el
+    nombre con el sufijo de gramos truncado a mitad: "SUPREMA DE PECHUGA DE
+    POLLO X KG (" — el paréntesis quedaba colgado porque substring(0,34)
+    cortaba antes de cerrar el "(Xgr)".
+    Solución: para items esPeso=true, se elimina el sufijo "(Xgr)" antes de
+    truncar. Límite subido de 34 a 40 chars para nombres largos normales.
+    Expresión: (item.esPeso ? item.name.replace(/\s*\(\d+gr\)\s*$/i,'')
+               : item.name).substring(0,40)
+
   v365 — 29/05/2026 — Fix imagen productos por peso en carrito
   ------------------
   • FIX: Items por peso no mostraban imagen en el carrito (panel lateral
@@ -423,7 +449,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v365</title>
+    <title>Copihue — POS v367</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2495,37 +2521,75 @@ async function _recargaSilenciosa() {
     } catch(e) { console.warn('Recarga silenciosa:', e.message); }
 }
 
+const _PRODUCTOS_CACHE_KEY = 'copihue_productos_cache';
+const _PRODUCTOS_CACHE_TTL = 30 * 60 * 1000; // 30 min — si GAS tarda, se usa cache
+
+function _mapProducto(p) {
+    return {
+        id: p.id,
+        name: String(p.name).trim(),
+        price: parseInt(p.price) || 0,
+        stock: parseInt(p.stock) || 0,
+        image: `imagenes-productos/${simplificarNombre(String(p.name).trim())}.jpg`,
+        category: String(p.category || 'ALMACEN').trim().toUpperCase(),
+        rotacion: parseInt(p.rotacion) || 3,
+        vencimiento: p.vencimiento || '',
+        diaCritico: (p.diaCritico || '').toLowerCase().trim(),
+        precioCosto: parseInt(p.precioCosto) || 0,
+        stockMin: parseInt(p.stockMin) || 0,
+        relampago: (p.relampago !== undefined && p.relampago !== null && p.relampago !== '') ? (isNaN(parseInt(p.relampago)) ? String(p.relampago).trim() : parseInt(p.relampago)) : 0,
+        destacada: parseInt(p.destacada) || 0,
+        especial: parseInt(p.especial) || 0,
+        normal: parseInt(p.normal) || 0,
+        catOferta: String(p.categoriaOferta || '').trim().toUpperCase(),
+        proveedor: String(p.proveedor || '').trim()
+    };
+}
+
+function _guardarProductosCache(arr) {
+    try {
+        localStorage.setItem(_PRODUCTOS_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: arr }));
+    } catch(e) { /* localStorage lleno — no crítico */ }
+}
+
+function _cargarProductosCache() {
+    try {
+        const raw = localStorage.getItem(_PRODUCTOS_CACHE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || !parsed.data || !parsed.data.length) return null;
+        if (Date.now() - parsed.ts > _PRODUCTOS_CACHE_TTL) return null;
+        return parsed.data;
+    } catch(e) { return null; }
+}
+
 async function cargarProductos() {
     const ind = document.getElementById('indicadorCarga');
-    if (ind) { ind.classList.remove('ok'); ind.classList.add('cargando'); ind.title = 'Cargando...'; }
+
+    // ── Fase 1: pintar desde caché si existe (render inmediato, LCP ~0ms) ──
+    const cache = _cargarProductosCache();
+    if (cache && cache.length > 0) {
+        productos = cache;
+        const indC = document.getElementById('indicadorCarga');
+        if (indC) { indC.classList.remove('cargando'); indC.classList.add('ok'); indC.title = `${productos.length} productos (caché)`; }
+        console.log(`📦 ${productos.length} productos desde caché`);
+    } else {
+        if (ind) { ind.classList.remove('ok'); ind.classList.add('cargando'); ind.title = 'Cargando...'; }
+    }
+
+    // ── Fase 2: fetch en background — actualiza memoria y caché ──
     try {
         const r = await fetch(API_URL + '?cache=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(API_TIMEOUT_MS) });
         const data = await r.json();
         const arr = data.productos || data;
-        productos = arr
+        const mapeados = arr
             .filter(p => p.name && p.price > 0)
-            .map(p => ({
-                id: p.id,
-                name: String(p.name).trim(),
-                price: parseInt(p.price) || 0,
-                stock: parseInt(p.stock) || 0,
-                image: `imagenes-productos/${simplificarNombre(String(p.name).trim())}.jpg`,
-                category: String(p.category || 'ALMACEN').trim().toUpperCase(),
-                rotacion: parseInt(p.rotacion) || 3,
-                vencimiento: p.vencimiento || '',
-                diaCritico: (p.diaCritico || '').toLowerCase().trim(),
-                precioCosto: parseInt(p.precioCosto) || 0,
-                stockMin: parseInt(p.stockMin) || 0,
-                relampago: (p.relampago !== undefined && p.relampago !== null && p.relampago !== '') ? (isNaN(parseInt(p.relampago)) ? String(p.relampago).trim() : parseInt(p.relampago)) : 0,
-                destacada: parseInt(p.destacada) || 0,
-                especial: parseInt(p.especial) || 0,
-                normal: parseInt(p.normal) || 0,
-                catOferta: String(p.categoriaOferta || '').trim().toUpperCase(),
-                proveedor: String(p.proveedor || '').trim()
-            }));
+            .map(_mapProducto);
+        productos = mapeados;
+        _guardarProductosCache(mapeados);
         const indOk = document.getElementById('indicadorCarga');
         if (indOk) { indOk.classList.remove('cargando'); indOk.classList.add('ok'); indOk.title = `${productos.length} productos cargados`; }
-        console.log(`✅ ${productos.length} productos cargados`);
+        console.log(`✅ ${productos.length} productos cargados desde GAS`);
         // Alertas del día al terminar de cargar
         setTimeout(alertarVencidosHoy, 500);
         setTimeout(procesarVencidosDeAyer, 1500); // auto-zero stock confirmados ayer
@@ -2539,9 +2603,13 @@ async function cargarProductos() {
         // Ofertas automáticas por vencimiento (después del relámpago)
         setTimeout(verificarOfertasAutomaticas, 3500);
     } catch(e) {
-        mostrarToast('❌ Error al cargar productos', 'rojo');
-        const indErr = document.getElementById('indicadorCarga');
-        if (indErr) { indErr.classList.remove('cargando'); indErr.title = 'Error de conexión'; }
+        if (!cache || !cache.length) {
+            mostrarToast('❌ Error al cargar productos', 'rojo');
+            const indErr = document.getElementById('indicadorCarga');
+            if (indErr) { indErr.classList.remove('cargando'); indErr.title = 'Error de conexión'; }
+        } else {
+            mostrarToast('⚠️ Sin conexión — usando productos en caché', 'naranja');
+        }
         console.error(e);
     }
 }
@@ -2682,7 +2750,11 @@ document.getElementById('buscador').addEventListener('input', function() {
 function renderResultados(results, term = '') {
     const contenedor = document.getElementById('resultados');
 
-    if (results.length === 0) {
+    // Sin búsqueda: ocultar productos sin stock (menos DOM, mejor INP)
+    // Con búsqueda: mostrarlos igual, al final, con badge SIN STOCK
+    const lista = term.length === 0 ? results.filter(p => p.stock > 0) : results;
+
+    if (lista.length === 0) {
         contenedor.innerHTML = `<div style="text-align:center;padding:2rem;color:#bbb;">Sin resultados${term ? ` para "<b>${term}</b>"` : ''}</div>`;
         mostrarResultados();
         return;
@@ -2704,14 +2776,14 @@ function renderResultados(results, term = '') {
         const key = i.esPeso ? i.idOriginal : i.id;
         if (!(key in ordenCarrito)) ordenCarrito[key] = i.insertedAt || 0;
     });
-    const enCarrito = results
+    const enCarrito = lista
         .filter(p => idsEnCarrito[p.id])
         .sort((a, b) => (ordenCarrito[a.id] || 0) - (ordenCarrito[b.id] || 0));
-    const resto     = results.filter(p => !idsEnCarrito[p.id]);
+    const resto     = lista.filter(p => !idsEnCarrito[p.id]);
 
     // Pre-calcular ofertas UNA sola vez para todos los productos visibles
     const ofertaCache = {};
-    results.forEach(p => {
+    lista.forEach(p => {
         const qty = idsEnCarrito[p.id] || 0;
         ofertaCache[p.id] = calcularOfertaPOS(p, Math.max(qty, 1));
     });
@@ -3581,7 +3653,7 @@ function _buildDetalleModalHTML() {
                  onerror="this.style.display='none'"
                  style="width:34px;height:34px;border-radius:6px;object-fit:cover;background:#e8f5e9;flex-shrink:0;">` : ''}
             <div style="flex:1;min-width:0;">
-                <div style="font-size:0.82rem;line-height:1.3;word-break:break-word;">${item.name.substring(0,34)}${badgeHTML}</div>
+                <div style="font-size:0.82rem;line-height:1.3;word-break:break-word;">${(item.esPeso ? item.name.replace(/\s*\(\d+gr\)\s*$/i,'') : item.name).substring(0,40)}${badgeHTML}</div>
             </div>
             <div style="display:flex;align-items:center;gap:3px;flex-shrink:0;" onclick="event.stopPropagation()">
                 <button onclick="_modalQty(${idx},-1)"
@@ -5104,7 +5176,24 @@ async function guardarIngreso() {
             mostrarToast(resp.esNuevo ? '🆕 Producto nuevo creado' : '📦 Ingreso guardado', 'verde');
             if (productoIngresoSeleccionado) {
                 const p = productos.find(pr => pr.id === productoIngresoSeleccionado.id);
-                if (p) p.stock = resp.nuevoStock;
+                if (p) {
+                    const stockAntes = p.stock;
+                    p.stock = resp.nuevoStock;
+                    // Si subió desde 0 → producto reaparece en el scroll
+                    if (stockAntes === 0 && p.stock > 0) {
+                        const term = document.getElementById('buscador').value.trim();
+                        const idsEnCarrito = new Set(ventaActual.map(i => i.esPeso ? i.idOriginal : i.id));
+                        if (term.length > 0) {
+                            renderResultados(buscarProductos(term), term);
+                        } else {
+                            renderResultados(_sortProductos(productos, idsEnCarrito));
+                        }
+                    } else {
+                        _refreshResultadosBadges(p.id);
+                    }
+                    // Actualizar caché con el nuevo stock
+                    _guardarProductosCache(productos);
+                }
             }
             cerrarIngreso();
         } else {
@@ -5352,6 +5441,7 @@ async function guardarAjuste() {
         const url = API_URL + '?action=ajusteRapido&data=' + encodeURIComponent(JSON.stringify(datos));
         const resp = await _apiFetchUrl('registrarMovimientoCaja', url);
         if (resp.success) {
+            const stockAntes = ajusteProducto.stock;
             ajusteProducto.stock = ajusteValor;
             const nombreNuevoLocal = document.getElementById('ajusteNombreNuevo').value.trim().toUpperCase();
             if (nombreNuevoLocal && nombreNuevoLocal !== ajusteProducto.name) {
@@ -5368,6 +5458,24 @@ async function guardarAjuste() {
             } else {
                 mostrarToast('✅ Stock ajustado a ' + ajusteValor, 'verde');
             }
+            // Re-render scroll: si el stock sube desde 0 → producto aparece ahora
+            // Si baja a 0 → producto desaparece del scroll (ya no hay nada que vender)
+            const idAjustado = ajusteProducto.id;
+            if (ajusteValor === 0 || stockAntes === 0) {
+                // Cambio de visibilidad: re-render completo del scroll
+                const term = document.getElementById('buscador').value.trim();
+                const idsEnCarrito = new Set(ventaActual.map(i => i.esPeso ? i.idOriginal : i.id));
+                if (term.length > 0) {
+                    renderResultados(buscarProductos(term), term);
+                } else {
+                    renderResultados(_sortProductos(productos, idsEnCarrito));
+                }
+            } else {
+                // Solo cambió el número de stock — badge quirúrgico alcanza
+                _refreshResultadosBadges(idAjustado);
+            }
+            // Actualizar caché con el nuevo stock
+            _guardarProductosCache(productos);
             cerrarAjuste();
         } else {
             mostrarToast('❌ ' + resp.mensaje, 'rojo');
@@ -8995,7 +9103,7 @@ window.t9Limpiar = function(){};
 
 // Restaurar badge de notificaciones del día al arrancar
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('%c🏪 COPIHUE POS — Sistema listo v365', 'color:#4caf50;font-weight:bold;font-size:1.2em;');
+    console.log('%c🏪 COPIHUE POS — Sistema listo v367', 'color:#4caf50;font-weight:bold;font-size:1.2em;');
     setTimeout(_precargarClientes, 3000); // precarga clientes en background
     setTimeout(() => {
         const arr = _cargarNotifPos ? _cargarNotifPos() : [];
