@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>SendWA — Almacén Copihue ver.19</title>
+<title>SendWA — Almacén Copihue ver.21</title>
 <style>
   /* ===== VARIABLES ===== */
   :root {
@@ -249,10 +249,12 @@
   .prod-card.selected .card-order { display: flex; }
 
   /* Oferta badge */
+  /* Badge como franja entre imagen y texto — flujo normal, sin superposición */
   .badge-oferta {
-    position: absolute; bottom: 50px; left: 0; right: 0;
-    padding: 2px 6px; font-size: 9px; font-weight: 800;
+    display: block; width: 100%;
+    padding: 3px 6px; font-size: 9px; font-weight: 800;
     text-align: center; color: #fff; text-transform: uppercase; letter-spacing: .5px;
+    line-height: 1.4;
   }
   .badge-relampago { background: var(--badge-relampago); }
   .badge-destacado { background: var(--badge-destacado); }
@@ -489,7 +491,7 @@
 <!-- HEADER -->
 <div id="header">
   <h1>📲 SendWA <span>Almacén Copihue</span></h1>
-  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.19</div>
+  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.21</div>
   <button id="btn-dark" title="Modo oscuro">🌙</button>
 </div>
 
@@ -1130,9 +1132,9 @@ function renderGrid() {
          onclick="toggleSelect('${p.id}')">
       ${sinStock ? `<div class="badge-sin-stock">Sin stock</div>` : ''}
       ${imgEl}
-      ${badgeHTML}
       <div class="card-order">${orderNum||''}</div>
       <div class="card-check">✓</div>
+      ${badgeHTML}
       <div class="card-body">
         <div class="card-name">${p.nombre}</div>
         <div class="card-cat">${p.categoria}</div>
@@ -1634,24 +1636,50 @@ function wrapText(ctx, text, x, y, maxW, lineH, maxLines) {
 }
 
 // Dibuja una tarjeta de producto en el canvas con badge y precio oferta
+// Cuenta cuántas líneas ocupa un texto sin dibujarlo
+function countLines(ctx, text, maxW) {
+  const words = text.split(' ');
+  let line = '', lines = 1;
+  for (const w of words) {
+    const test = line ? line + ' ' + w : w;
+    if (ctx.measureText(test).width > maxW && line) { line = w; lines++; }
+    else line = test;
+  }
+  return lines;
+}
+
 async function drawProductCard(ctx, p, x, y, W, H) {
   const _esSinOferta = p._sinOferta === true;
   const oferta = calcularOferta(p);
   const badgeColor = BADGE_COLORS[p.catOferta] || null;
   const tieneOfertaPrecio = oferta && oferta.precio && !_esSinOferta;
 
-  // Zona de texto: más alta si hay precio tachado (nombre 2 líneas + tachado + oferta)
-  const TEXTH = tieneOfertaPrecio ? 96 : 72;
-  const IMGH  = H - TEXTH;
+  // ── Medir nombre ANTES de dibujar para saber cuántas líneas ocupa ──
+  const FS_NOMBRE = Math.max(W * 0.054, 10);
+  const LH_NOMBRE = FS_NOMBRE * 1.28;
+  ctx.font = `bold ${FS_NOMBRE}px Segoe UI`;
+  const nLinesNombre = Math.min(countLines(ctx, p.nombre, W - 14), 2);
 
-  // Fondo blanco
+  // Zonas fijas según contenido
+  const NOMBRE_H  = LH_NOMBRE * nLinesNombre + 6;
+  const FS_ANTES  = Math.max(W * 0.044, 9);
+  const FS_OFERTA = Math.max(W * 0.068, 12);
+  const FS_PRECIO = Math.max(W * 0.070, 12);
+  const PRECIO_H  = tieneOfertaPrecio
+    ? FS_ANTES + 4 + FS_OFERTA + 6   // tachado + oferta
+    : FS_PRECIO + 6;                  // precio normal
+  const PAD_V    = 8;
+  const TEXTH    = PAD_V + NOMBRE_H + PRECIO_H + PAD_V;
+  const IMGH     = H - TEXTH;
+
+  // ── Fondo blanco ──
   ctx.save();
   ctx.shadowColor = 'rgba(0,0,0,0.15)'; ctx.shadowBlur = 8;
   ctx.fillStyle = '#ffffff';
   roundRect(ctx, x, y, W, H, 14); ctx.fill();
   ctx.restore();
 
-  // Marco de color
+  // ── Marco de color ──
   if (!_esSinOferta && badgeColor) {
     ctx.save();
     ctx.strokeStyle = badgeColor; ctx.lineWidth = 4;
@@ -1664,7 +1692,7 @@ async function drawProductCard(ctx, p, x, y, W, H) {
     ctx.restore();
   }
 
-  // Imagen
+  // ── Imagen ──
   try {
     const img = await loadImg(getImgUrl(p));
     ctx.save();
@@ -1673,58 +1701,51 @@ async function drawProductCard(ctx, p, x, y, W, H) {
     ctx.restore();
   } catch {
     ctx.fillStyle = '#e8f0e5'; ctx.fillRect(x, y, W, IMGH);
-    ctx.fillStyle = '#bbb'; ctx.font = `${W*0.22}px serif`; ctx.textAlign = 'center';
-    ctx.fillText(getCatEmoji(p.categoria), x+W/2, y+IMGH/2+W*0.08);
+    ctx.fillStyle = '#bbb';
+    ctx.font = `${W * 0.22}px serif`; ctx.textAlign = 'center';
+    ctx.fillText(getCatEmoji(p.categoria), x + W/2, y + IMGH/2 + W*0.08);
   }
 
-  // Badge encima de la imagen
+  // ── Badge encima de la imagen ──
   if (oferta && badgeColor && !_esSinOferta) {
     ctx.fillStyle = badgeColor;
     ctx.fillRect(x, y, W, 26);
-    ctx.fillStyle = '#fff'; ctx.font = `bold ${Math.max(W*0.052,10)}px Segoe UI`; ctx.textAlign = 'center';
-    ctx.fillText(oferta.etiqueta.toUpperCase(), x+W/2, y+18);
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${Math.max(W*0.052, 10)}px Segoe UI`; ctx.textAlign = 'center';
+    ctx.fillText(oferta.etiqueta.toUpperCase(), x + W/2, y + 18);
   }
 
-  // ── ZONA DE TEXTO: fondo blanco liso debajo de la imagen ──
-  const txtY = y + IMGH;  // baseline de la zona de texto
-  const FS_NOMBRE = Math.max(W*0.054, 10);
-  const LH_NOMBRE = FS_NOMBRE * 1.25;
+  // ── ZONA DE TEXTO ──
+  const txtY = y + IMGH + PAD_V;
+  const mx = x + W/2;
 
-  // Nombre — 2 líneas máximo, centrado
+  // Nombre (ya medido arriba, ahora dibujar)
   ctx.fillStyle = '#1a2e17';
   ctx.font = `bold ${FS_NOMBRE}px Segoe UI`;
   ctx.textAlign = 'center';
-  const nLines = wrapText(ctx, p.nombre, x+W/2, txtY + LH_NOMBRE, W-12, LH_NOMBRE, 2);
-  const afterName = txtY + LH_NOMBRE * (nLines + 0.3);
+  wrapText(ctx, p.nombre, mx, txtY + LH_NOMBRE * 0.85, W - 14, LH_NOMBRE, 2);
+  const afterName = txtY + NOMBRE_H;
 
   // Precio
-  const mx = x + W/2;
   if (tieneOfertaPrecio) {
-    // Precio anterior tachado — gris oscuro suficiente para ver
-    const FS_ANTES = Math.max(W*0.044, 9);
-    ctx.font = `${FS_ANTES}px Segoe UI`;
+    // Tachado
     ctx.fillStyle = '#888888';
-    ctx.textAlign = 'center';
-    const antes = fmt(p.precioVenta);
-    const ty_antes = afterName + FS_ANTES;
-    ctx.fillText(antes, mx, ty_antes);
-    // Línea tachado — más gruesa y bien centrada verticalmente
-    const tw = ctx.measureText(antes).width;
+    ctx.font = `${FS_ANTES}px Segoe UI`; ctx.textAlign = 'center';
+    const antesStr = fmt(p.precioVenta);
+    const ty_a = afterName + FS_ANTES;
+    ctx.fillText(antesStr, mx, ty_a);
+    const tw = ctx.measureText(antesStr).width;
     ctx.beginPath();
-    ctx.strokeStyle = '#777777'; ctx.lineWidth = Math.max(W*0.008, 1.5);
-    const midY = ty_antes - FS_ANTES * 0.35;
-    ctx.moveTo(mx - tw/2, midY); ctx.lineTo(mx + tw/2, midY); ctx.stroke();
-    // Precio oferta — grande, color del badge
-    const FS_OFERTA = Math.max(W*0.068, 12);
-    ctx.font = `bold ${FS_OFERTA}px Segoe UI`;
+    ctx.strokeStyle = '#777'; ctx.lineWidth = Math.max(W * 0.008, 1.5);
+    ctx.moveTo(mx - tw/2, ty_a - FS_ANTES*0.35);
+    ctx.lineTo(mx + tw/2, ty_a - FS_ANTES*0.35); ctx.stroke();
+    // Precio oferta
     ctx.fillStyle = badgeColor || '#c0392b';
-    ctx.fillText(fmt(oferta.precio), mx, ty_antes + FS_OFERTA + 2);
+    ctx.font = `bold ${FS_OFERTA}px Segoe UI`;
+    ctx.fillText(fmt(oferta.precio), mx, ty_a + FS_OFERTA + 2);
   } else {
-    // Solo precio normal — verde, bien posicionado
-    const FS_PRECIO = Math.max(W*0.07, 12);
-    ctx.font = `bold ${FS_PRECIO}px Segoe UI`;
     ctx.fillStyle = '#2d5a22';
-    ctx.textAlign = 'center';
+    ctx.font = `bold ${FS_PRECIO}px Segoe UI`; ctx.textAlign = 'center';
     ctx.fillText(fmt(p.precioVenta), mx, afterName + FS_PRECIO);
   }
 }
