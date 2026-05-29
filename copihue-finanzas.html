@@ -204,8 +204,9 @@ const DIAS_SEM = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
 const CATS_EMOJI = {'SALUD':'💊','TRANSPORTE':'🚗','SUSCRIPCIONES':'📺','CELEBRACIONES':'🎉','MERCADO':'🛒','FAMILIA':'👨‍👩‍👧','NEGOCIO':'🏪','COMPRA GRANDE':'📦','PRESTAMO/AYUDA':'🤝','RETIRO DUEÑO':'💰','PERSONAL':'👤','PAGO SERVICIOS':'🔧','PAGO PROVEEDOR':'🚚'};
 
 // ── ESTADO ──
-let cajaData = [];   // hoja Caja: {fecha, efectivo, posnet, transferencia, fiado, total, tickets}
-let egresosData = [];// hoja CAJA_MOVIMIENTOS: {fecha, hora, tipo, motivo, monto, medio, categoria, obs}
+let cajaData = [];      // hoja Caja: {fecha, efectivo, posnet, transferencia, fiado, total, tickets}
+let egresosData = [];   // hoja CAJA_MOVIMIENTOS: {fecha, hora, tipo, motivo, monto, medio, categoria, obs}
+let comprasData = []; // hoja Historial: {fecha, producto, cantidad, proveedor, costo, total}
 let vista = 'mes';   // 'mes' | 'anio'
 let mesSel = new Date().getMonth();
 let anioSel = new Date().getFullYear();
@@ -246,6 +247,15 @@ function parseFecha(s){
   return new Date(st);
 }
 
+function parseCompraReg(r){
+  const d = parseFecha(r.fecha);
+  if(!d) return null;
+  return {fecha:d, producto:str(r.producto), cantidad:num(r.cantidad),
+          proveedor:str(r.proveedor)||'SIN PROVEEDOR', costo:num(r.costo),
+          precioVenta:num(r.precioVenta), total:num(r.total)||num(r.cantidad)*num(r.costo),
+          vencimiento:str(r.vencimiento)};
+}
+
 function parseCajaReg(r){
   const d = parseFecha(r.fecha);
   if(!d) return null;
@@ -263,19 +273,30 @@ function parseEgrReg(r){
           obs:str(r.observacion||r.obs), vendedor:str(r.vendedor)};
 }
 
+function parseCompraReg(r){
+  const d = parseFecha(r.fecha);
+  if(!d) return null;
+  return {fecha:d, producto:str(r.producto), cantidad:num(r.cantidad),
+          proveedor:str(r.proveedor)||'SIN PROVEEDOR', costo:num(r.costo),
+          total:num(r.total)||num(r.cantidad)*num(r.costo),
+          precioVenta:num(r.precioVenta), vencimiento:str(r.vencimiento)};
+}
+
 async function cargarDatos(){
   if(cargando) return;
   cargando = true;
   document.getElementById('app').innerHTML = '<div class="ldg"><div class="spin"></div>Cargando datos financieros...</div>';
   document.getElementById('hdr-sub').textContent = 'Actualizando…';
   try {
-    const [rCaja, rEgr] = await Promise.all([
+    const [rCaja, rEgr, rHist] = await Promise.all([
       apiFetch('getCajaDiaria', {limite:1000}),
-      apiFetch('getCajaEgresos', {limite:2000})
+      apiFetch('getCajaEgresos', {limite:2000}),
+      apiFetch('getHistorialCompras', {limite:2000})
     ]);
     cajaData = (rCaja.ok ? rCaja.registros : []).map(parseCajaReg).filter(Boolean);
     egresosData = (rEgr.ok ? rEgr.registros : []).map(parseEgrReg).filter(Boolean);
-    const total = cajaData.length + egresosData.length;
+    comprasData = (rHist.ok ? rHist.registros : []).map(parseCompraReg).filter(Boolean);
+    const total = cajaData.length + egresosData.length + comprasData.length;
     document.getElementById('hdr-sub').textContent = total + ' registros · ' + new Date().toLocaleDateString('es-AR');
     toast('✅ ' + total + ' registros cargados');
   } catch(e) {
@@ -292,6 +313,12 @@ async function cargarDatos(){
 }
 
 // ── FILTROS ──
+function getCompPeriodo(){
+  if(vista==='mes') return comprasData.filter(r=>r.fecha.getMonth()===mesSel && r.fecha.getFullYear()===anioSel);
+  return comprasData.filter(r=>r.fecha.getFullYear()===anioSel);
+}
+function getCompMes(m,a){ return comprasData.filter(r=>r.fecha.getMonth()===m && r.fecha.getFullYear()===a); }
+
 function getCajaPeriodo(){
   if(vista==='mes') return cajaData.filter(r=>r.fecha.getMonth()===mesSel && r.fecha.getFullYear()===anioSel);
   return cajaData.filter(r=>r.fecha.getFullYear()===anioSel);
@@ -301,6 +328,8 @@ function getEgrPeriodo(){
   return egresosData.filter(r=>r.fecha.getFullYear()===anioSel);
 }
 function getCajaMes(m,a){ return cajaData.filter(r=>r.fecha.getMonth()===m && r.fecha.getFullYear()===a); }
+function getHistPeriodo(){ if(vista==='mes') return comprasData.filter(r=>r.fecha.getMonth()===mesSel && r.fecha.getFullYear()===anioSel); return comprasData.filter(r=>r.fecha.getFullYear()===anioSel); }
+function getHistMes(m,a){ return comprasData.filter(r=>r.fecha.getMonth()===m && r.fecha.getFullYear()===a); }
 function getEgrMes(m,a){ return egresosData.filter(r=>r.fecha.getMonth()===m && r.fecha.getFullYear()===a); }
 function getMesAnt(){ let m=mesSel-1,a=anioSel; if(m<0){m=11;a--;} return{m,a}; }
 
@@ -346,6 +375,8 @@ function render(){
     ${vista==='mes'?`<button class="tab ${tabActiva==='categorias'?'activo':''}" onclick="setTab('categorias')">🏷️ Categorías</button>
     <button class="tab ${tabActiva==='detalle'?'activo':''}" onclick="setTab('detalle')">📋 Detalle</button>
     <button class="tab ${tabActiva==='calendario'?'activo':''}" onclick="setTab('calendario')">📅 Calendario</button>`:''}
+    <button class="tab ${tabActiva==='compras'?'activo':''}" onclick="setTab('compras')">🛒 Compras</button>
+    <button class="tab ${tabActiva==='proveedores'?'activo':''}" onclick="setTab('compras')">🚚 Proveedores</button>
   </div>`;
 
   if(tabActiva==='resumen') h += buildResumen();
@@ -355,6 +386,8 @@ function render(){
   else if(tabActiva==='categorias') h += buildCategorias();
   else if(tabActiva==='detalle') h += buildDetalle();
   else if(tabActiva==='calendario') h += buildCalendario();
+  else if(tabActiva==='compras') h += buildCompras();
+  else if(tabActiva==='proveedores') h += buildProveedores();
 
   h += '<div class="pb"></div>';
   document.getElementById('app').innerHTML = h;
@@ -362,16 +395,20 @@ function render(){
 
 // ── RESUMEN ──
 function buildResumen(){
-  const caja = getCajaPeriodo(), egrs = getEgrPeriodo();
+  const caja = getCajaPeriodo(), egrs = getEgrPeriodo(), hist = getHistPeriodo();
   const ti = caja.reduce((s,r)=>s+r.total,0);
   const te = egrs.reduce((s,r)=>s+r.monto,0);
-  const neto = ti - te;
+  const tp = hist.reduce((s,r)=>s+r.total,0); // total proveedores
+  const neto = ti - te - tp;
   const tix = caja.reduce((s,r)=>s+r.tickets,0);
   const ef = caja.reduce((s,r)=>s+r.efectivo,0);
   const po = caja.reduce((s,r)=>s+r.posnet,0);
   const tr = caja.reduce((s,r)=>s+r.transferencia,0);
   const fi = caja.reduce((s,r)=>s+r.fiado,0);
-  const pctIng = ti+te>0 ? Math.round(ti/(ti+te)*100) : 50;
+  const totalEgr = te+tp;
+  const pctIng = ti+totalEgr>0 ? Math.round(ti/(ti+totalEgr)*100) : 50;
+  const pctGastos = ti+totalEgr>0 ? Math.round(te/(ti+totalEgr)*100) : 25;
+  const pctProv = 100-pctIng-pctGastos;
 
   let tiA=0,teA=0;
   if(vista==='mes'){
@@ -406,10 +443,15 @@ function buildResumen(){
       <div class="card-sub">${tix} tickets · ${caja.length} días vendidos</div>
     </div>
     <div class="card rg" onclick="setTab('egresos')" style="cursor:pointer">
-      <div class="card-lbl">📉 Egresos ›</div>
+      <div class="card-lbl">📉 Gastos ›</div>
       <div class="card-val">${fmtK(te)}</div>
       ${delta(te,teA)}
       <div class="card-sub">${egrs.length} movimientos</div>
+    </div>
+    <div class="card ag full" onclick="setTab('compras')" style="cursor:pointer">
+      <div class="card-lbl">🛒 Compras a proveedores ›</div>
+      <div class="card-val">${fmtK(getCompPeriodo().reduce((s,r)=>s+r.total,0))}</div>
+      <div class="card-sub">${getCompPeriodo().length} ingresos de stock · ${new Set(getCompPeriodo().map(r=>r.proveedor)).size} proveedores</div>
     </div>
   </div>`;
 
@@ -417,10 +459,18 @@ function buildResumen(){
   h += `<div class="tar">
     <div class="tar-t">📊 Ventas vs Egresos</div>
     <div style="display:flex;justify-content:space-between;font-size:.72rem;font-weight:700;margin-bottom:5px">
-      <span class="pos">Ventas ${pctIng}%</span><span class="neg">Egresos ${100-pctIng}%</span>
+      <span class="pos">Ventas ${pctIng}%</span><span class="neg">Gastos+Stock ${100-pctIng}%</span>
     </div>
-    <div class="comp-bar"><div class="ci" style="width:${pctIng}%"></div><div class="ce" style="width:${100-pctIng}%"></div></div>
-    <div style="display:flex;justify-content:space-between;font-size:.7rem;color:var(--gris);margin-top:4px"><span>${fmt(ti)}</span><span>${fmt(te)}</span></div>
+    <div class="comp-bar">
+      <div class="ci" style="width:${pctIng}%"></div>
+      <div class="ce" style="width:${pctGastos}%"></div>
+      <div style="background:var(--azul);height:10px;width:${pctProv}%"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:.7rem;color:var(--gris);margin-top:4px">
+      <span class="pos">${fmt(ti)}</span>
+      <span class="neg">${fmt(te)}</span>
+      <span style="color:var(--azul)">${fmt(tp)}</span>
+    </div>
   </div>`;
 
   // Métodos de cobro
@@ -728,6 +778,112 @@ function buildDetalle(){
       <div class="mov-monto">−${fmt(e.monto)}</div>
     </div>`;
   });
+  return h;
+}
+
+// ── COMPRAS ──
+function buildCompras(){
+  const comp = getCompPeriodo();
+  const tc = comp.reduce((s,r)=>s+r.total,0);
+  const ti = getCajaPeriodo().reduce((s,r)=>s+r.total,0);
+  const te = getEgrPeriodo().reduce((s,r)=>s+r.monto,0);
+  const neto = ti-te;
+
+  // Por proveedor
+  const porProv = {};
+  comp.forEach(r=>{ porProv[r.proveedor]=(porProv[r.proveedor]||{total:0,items:0}); porProv[r.proveedor].total+=r.total; porProv[r.proveedor].items++; });
+  const provs = Object.entries(porProv).sort((a,b)=>b[1].total-a[1].total);
+  const maxProv = provs[0]?.[1].total||1;
+
+  // Por producto top
+  const porProd = {};
+  comp.forEach(r=>{ porProd[r.producto]=(porProd[r.producto]||{total:0,cantidad:0}); porProd[r.producto].total+=r.total; porProd[r.producto].cantidad+=r.cantidad; });
+  const prods = Object.entries(porProd).sort((a,b)=>b[1].total-a[1].total);
+
+  let h = `<div class="cards">
+    <div class="card ag full">
+      <div class="card-lbl">🛒 Total compras a proveedores</div>
+      <div class="card-val">${fmtK(tc)}</div>
+      <div class="card-sub">${comp.length} ingresos de stock · ${provs.length} proveedores</div>
+    </div>
+    <div class="card">
+      <div class="card-lbl" style="color:var(--gris)">📊 % de ventas</div>
+      <div style="font-size:1.2rem;font-weight:900;color:var(--azul)">${ti?Math.round(tc/ti*100):0}%</div>
+      <div class="card-sub" style="color:var(--gris)">costo sobre facturación</div>
+    </div>
+    <div class="card">
+      <div class="card-lbl" style="color:var(--gris)">💰 % de ganancia</div>
+      <div style="font-size:1.2rem;font-weight:900;color:${neto>0?'var(--rojo)':'var(--gris)}'}">${neto>0?Math.round(tc/neto*100):0}%</div>
+      <div class="card-sub" style="color:var(--gris)">impacto en tu bolsillo</div>
+    </div>
+  </div>`;
+
+  // Por proveedor
+  h += `<div class="tar"><div class="tar-t">🚚 Por proveedor</div>`;
+  if(!provs.length){ h += '<div class="empty">Sin compras en este período</div>'; }
+  else provs.forEach(([prov,d])=>{
+    const pct = tc?Math.round(d.total/tc*100):0;
+    h += `<div class="bw" style="padding:7px 8px;border-radius:10px" onmouseover="this.style.background='#f0f8ff'" onmouseout="this.style.background=''">
+      <div class="bw-hdr">
+        <div class="bw-n">🚚 ${prov}</div>
+        <div style="display:flex;align-items:center;gap:5px">
+          <span class="badge bg-a">${d.items} compras</span>
+          <div class="bw-v" style="color:var(--azul)">${fmt(d.total)}</div>
+        </div>
+      </div>
+      <div class="barra-bg"><div class="barra-f bar-a" style="width:${Math.round(d.total/maxProv*100)}%"></div></div>
+      <div style="font-size:.62rem;color:var(--gris);margin-top:2px">${pct}% del total compras</div>
+    </div>`;
+  });
+  h += '</div>';
+
+  // Top productos por inversión
+  h += `<div class="tar"><div class="tar-t">📦 Top productos por inversión</div>`;
+  prods.slice(0,15).forEach(([prod,d])=>{
+    const pct = tc?Math.round(d.total/tc*100):0;
+    h += `<div class="row">
+      <div class="row-l">${prod}</div>
+      <div style="text-align:right">
+        <div style="font-size:.82rem;font-weight:900;color:var(--azul)">${fmt(d.total)}</div>
+        <div style="font-size:.62rem;color:var(--gris)">${d.cantidad} u · ${pct}%</div>
+      </div>
+    </div>`;
+  });
+  h += '</div>';
+
+  // Comparativa meses
+  const periodos = vista==='mes'
+    ? [-4,-3,-2,-1,0].map(d=>{let m2=mesSel+d,a2=anioSel;if(m2<0){m2+=12;a2--;}return{l:MESES[m2].slice(0,3),total:getCompMes(m2,a2).reduce((s,r)=>s+r.total,0)};})
+    : [0,1,2,3,4,5,6,7,8,9,10,11].map(m2=>({l:MESES[m2].slice(0,3),total:getCompMes(m2,anioSel).reduce((s,r)=>s+r.total,0)}));
+  const maxP = Math.max(...periodos.map(x=>x.total),1);
+  h += `<div class="tar"><div class="tar-t">${vista==='mes'?'📅 Últimos 5 meses':'📆 Compras por mes del año'}</div>`;
+  periodos.forEach(x=>{
+    h += `<div class="dia-row">
+      <div class="dia-lbl">${x.l}</div>
+      <div class="dia-bg"><div class="dia-f bar-a" style="width:${Math.round(x.total/maxP*100)}%"></div></div>
+      <div class="dia-v" style="color:var(--azul)">${fmtK(x.total)}</div>
+    </div>`;
+  });
+  h += '</div>';
+
+  // Movimientos recientes
+  const recientes = [...comp].sort((a,b)=>b.fecha-a.fecha).slice(0,20);
+  h += `<div class="tar"><div class="tar-t">📋 Últimos movimientos <span class="badge bg-a">${comp.length}</span></div>`;
+  recientes.forEach(r=>{
+    h += `<div class="mov" style="border-left-color:var(--azul)">
+      <div class="mov-info">
+        <div class="mov-motivo">${r.producto}</div>
+        <div class="mov-obs">${r.cantidad} unidades · ${r.proveedor}</div>
+        <div class="mov-meta">
+          <span class="mov-tag tag-fecha">${fmtFecha(r.fecha)}</span>
+          <span class="mov-tag" style="background:var(--al);color:var(--azul)">$${fmt(r.costo).replace('$','')} c/u</span>
+          ${r.vencimiento?`<span class="mov-tag tag-cat">📅 Vto: ${r.vencimiento}</span>`:''}
+        </div>
+      </div>
+      <div class="mov-monto" style="color:var(--azul)">${fmt(r.total)}</div>
+    </div>`;
+  });
+  h += '</div>';
   return h;
 }
 
