@@ -4,6 +4,12 @@
   COPIHUE POS — CHANGELOG
 ================================================================================
 
+  v365 — 30/05/2026
+  -----------------
+  • FIX carrito PROMO ACTIVA: cambiarCantidad() no actualizaba precioTotalCalc
+    al cambiar qty → subtotal quedaba congelado en el valor de qty=1.
+    Ahora se recalcula oferta.precioTotal con la nueva cantidad en cada cambio.
+
   v271 — 23/04/2026
   -----------------
   • FIADO: Campo teléfono siempre editable (antes quedaba bloqueado con readonly
@@ -412,7 +418,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v363</title>
+    <title>Copihue — POS v365</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3266,6 +3272,7 @@ function cambiarCantidad(id, delta) {
         if (p) {
             const oferta = calcularOfertaPOS(p, nuevaCant);
             item.price           = oferta.precioUnitario;
+            item.precioTotalCalc = oferta.precioTotal;   // FIX: actualizar total exacto con nueva qty
             item.precioOriginal  = oferta.tipoOferta === 'normal' ? p.normal : (oferta.tieneOferta ? p.price : 0);
             item.precioModificado = oferta.tieneOferta;
             item.ofertaEtiqueta  = oferta.etiqueta || null;
@@ -4872,6 +4879,7 @@ function abrirIngreso(productoPresel) {
     document.getElementById('ingVenta').value = '';
     document.getElementById('ingProveedor').value = '';
     document.getElementById('ingVencimiento').value = '';
+    _limpiarPrecargados();
     document.getElementById('ingInfo').style.display = 'none';
     document.getElementById('ingSugerido').style.display = 'none';
     document.getElementById('ingResultados').style.display = 'none';
@@ -4894,6 +4902,38 @@ function poblarCategoriasIngreso(catActual) {
         return `<button class="cat-btn${activo}" onclick="selIngCategoria('${cat}')" id="ingCatBtn_${cat.replace(/\s/g,'_')}">${cat}</button>`;
     }).join('');
     if (catActual) document.getElementById('ingCategoria').value = catActual;
+}
+
+function _mostrarBadgesPrecargados() {
+    // Muestra un micro-badge naranja "↩ último registro" debajo de cada campo precargado
+    ['ingCosto','ingVenta','ingProveedor','ingVencimiento'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const badgeId = id + '_badge';
+        let badge = document.getElementById(badgeId);
+        if (el.dataset.precargado === '1') {
+            if (!badge) {
+                badge = document.createElement('div');
+                badge.id = badgeId;
+                badge.style.cssText = 'font-size:0.7rem;color:#e65100;margin-top:2px;';
+                badge.textContent = '↩ del último registro';
+                el.parentNode.appendChild(badge);
+            }
+            badge.style.display = '';
+        } else {
+            if (badge) badge.style.display = 'none';
+        }
+    });
+    actualizarResumenIngreso();
+}
+
+function _limpiarPrecargados() {
+    ['ingCosto','ingVenta','ingProveedor','ingVencimiento'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { delete el.dataset.precargado; el.title = ''; }
+        const badge = document.getElementById(id + '_badge');
+        if (badge) badge.style.display = 'none';
+    });
 }
 
 function selIngCategoria(cat) {
@@ -5000,7 +5040,31 @@ function seleccionarProductoIngreso(id) {
     if (!document.getElementById('ingVenta').value) {
         document.getElementById('ingVenta').value = p.price;
     }
-    actualizarResumenIngreso();
+    // Precargar costo, proveedor y vencimiento desde último registro del producto
+    // El usuario solo necesita cambiar la cantidad y confirmar
+    const ingCostoEl    = document.getElementById('ingCosto');
+    const ingProvEl     = document.getElementById('ingProveedor');
+    const ingVencEl     = document.getElementById('ingVencimiento');
+    if (!ingCostoEl.value && p.precioCosto > 0) {
+        ingCostoEl.value = p.precioCosto;
+        ingCostoEl.dataset.precargado = '1';
+        ingCostoEl.title = 'Precargado del último registro';
+    }
+    if (!ingProvEl.value && p.proveedor) {
+        ingProvEl.value = p.proveedor;
+        ingProvEl.dataset.precargado = '1';
+        ingProvEl.title = 'Precargado del último registro';
+    }
+    // Vencimiento: solo precargar si el producto tiene fecha y es futura
+    if (!ingVencEl.value && p.vencimiento) {
+        const hoy = new Date().toISOString().split('T')[0];
+        if (p.vencimiento > hoy) {
+            ingVencEl.value = p.vencimiento;
+            ingVencEl.dataset.precargado = '1';
+            ingVencEl.title = 'Precargado del último registro';
+        }
+    }
+    _mostrarBadgesPrecargados();
 }
 
 function actualizarResumenIngreso() {
@@ -5068,10 +5132,11 @@ function calcularSugeridoIngreso() {
 async function guardarIngreso() {
     const nombre = document.getElementById('ingProducto').value.trim().toUpperCase();
     const cantidad = parseInt(document.getElementById('ingCantidad').value) || 0;
-    const costo = parseFloat(document.getElementById('ingCosto').value) || null;
-    const venta = parseFloat(document.getElementById('ingVenta').value) || null;
-    const proveedor = document.getElementById('ingProveedor').value.trim().toUpperCase() || null;
-    const vencimiento = document.getElementById('ingVencimiento').value || null;
+    const p     = productoIngresoSeleccionado;
+    const costo = parseFloat(document.getElementById('ingCosto').value)    || (p && p.precioCosto > 0 ? p.precioCosto : null);
+    const venta = parseFloat(document.getElementById('ingVenta').value)    || (p ? p.price : null);
+    const proveedor  = document.getElementById('ingProveedor').value.trim().toUpperCase()  || (p && p.proveedor ? p.proveedor : null);
+    const vencimiento = document.getElementById('ingVencimiento').value    || null;
     const errDiv = document.getElementById('ingError');
     errDiv.style.display = 'none';
 
