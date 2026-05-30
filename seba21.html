@@ -4,7 +4,13 @@
   COPIHUE POS — CHANGELOG
 ================================================================================
 
-  v365 — 30/05/2026
+  v366 — 30/05/2026
+  -----------------
+  • FIX peso acumulado: si el mismo producto por peso ya está en el carrito,
+    suma gramos y precio al item existente en vez de crear una fila duplicada.
+    El nombre se actualiza con los gramos totales (ej: "Suprema (1426gr)").
+
+
   -----------------
   • FIX carrito PROMO ACTIVA: cambiarCantidad() no actualizaba precioTotalCalc
     al cambiar qty → subtotal quedaba congelado en el valor de qty=1.
@@ -422,7 +428,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v365</title>
+    <title>Copihue — POS v366</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -4733,17 +4739,28 @@ function confirmarPeso() {
     const costoPorKg = pesoProductoActual.precioCosto || 0;
     const costoCalculado = costoPorKg > 0 ? Math.round((costoPorKg / 1000) * gramos) : 0;
 
-    ventaActual.push({
-        id: `peso_${Date.now()}`,
-        idOriginal: pesoProductoActual.id,
-        name: `${pesoProductoActual.name} (${gramos}gr)`,
-        price: totalPesos,
-        qty: 1,
-        gramos: gramos,
-        stockDisponible: 999,
-        esPeso: true,
-        precioCosto: costoCalculado
-    });
+    // Si ya hay un item de peso del mismo producto, acumular
+    const existente = ventaActual.find(i => i.esPeso && i.idOriginal === pesoProductoActual.id);
+    if (existente) {
+        const gramosNuevos = existente.gramos + gramos;
+        const precioNuevo  = existente.price + totalPesos;
+        existente.gramos   = gramosNuevos;
+        existente.price    = precioNuevo;
+        existente.name     = `${pesoProductoActual.name} (${gramosNuevos}gr)`;
+        existente.precioCosto = (existente.precioCosto || 0) + costoCalculado;
+    } else {
+        ventaActual.push({
+            id: `peso_${Date.now()}`,
+            idOriginal: pesoProductoActual.id,
+            name: `${pesoProductoActual.name} (${gramos}gr)`,
+            price: totalPesos,
+            qty: 1,
+            gramos: gramos,
+            stockDisponible: 999,
+            esPeso: true,
+            precioCosto: costoCalculado
+        });
+    }
 
     cerrarPeso();
     renderVenta();
