@@ -4,7 +4,13 @@
   COPIHUE POS — CHANGELOG
 ================================================================================
 
-  v366 — 30/05/2026
+  v367 — 30/05/2026
+  -----------------
+  • FIX badge PROMO en productos por peso: confirmarPeso() ahora llama
+    calcularOfertaPOS() y agrega ofertaTipo, ofertaEtiqueta, precioOriginal
+    y precioModificado al item — el panel y el modal muestran el badge correcto.
+
+
   -----------------
   • FIX peso acumulado: si el mismo producto por peso ya está en el carrito,
     suma gramos y precio al item existente en vez de crear una fila duplicada.
@@ -428,7 +434,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v366</title>
+    <title>Copihue — POS v367</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -4739,15 +4745,27 @@ function confirmarPeso() {
     const costoPorKg = pesoProductoActual.precioCosto || 0;
     const costoCalculado = costoPorKg > 0 ? Math.round((costoPorKg / 1000) * gramos) : 0;
 
+    // Calcular oferta para badge (promo activa, combo, etc.)
+    const oferta = calcularOfertaPOS(pesoProductoActual, 1);
+    const tieneOferta = oferta.tieneOferta;
+    const precioOrigKg = tieneOferta ? pesoProductoActual.price : 0;
+
     // Si ya hay un item de peso del mismo producto, acumular
     const existente = ventaActual.find(i => i.esPeso && i.idOriginal === pesoProductoActual.id);
     if (existente) {
         const gramosNuevos = existente.gramos + gramos;
         const precioNuevo  = existente.price + totalPesos;
-        existente.gramos   = gramosNuevos;
-        existente.price    = precioNuevo;
-        existente.name     = `${pesoProductoActual.name} (${gramosNuevos}gr)`;
+        existente.gramos      = gramosNuevos;
+        existente.price       = precioNuevo;
+        existente.name        = `${pesoProductoActual.name} (${gramosNuevos}gr)`;
         existente.precioCosto = (existente.precioCosto || 0) + costoCalculado;
+        // Preservar badge si ya lo tenía
+        if (!existente.ofertaEtiqueta && tieneOferta) {
+            existente.ofertaEtiqueta  = oferta.etiqueta || null;
+            existente.ofertaTipo      = oferta.tipoOferta || null;
+            existente.precioOriginal  = precioOrigKg;
+            existente.precioModificado = true;
+        }
     } else {
         ventaActual.push({
             id: `peso_${Date.now()}`,
@@ -4756,9 +4774,13 @@ function confirmarPeso() {
             price: totalPesos,
             qty: 1,
             gramos: gramos,
-            stockDisponible: 999,
+            stockDisponible: pesoProductoActual.stock || 999,
             esPeso: true,
-            precioCosto: costoCalculado
+            precioCosto: costoCalculado,
+            ofertaTipo:      tieneOferta ? oferta.tipoOferta : null,
+            ofertaEtiqueta:  tieneOferta ? oferta.etiqueta  : null,
+            precioOriginal:  precioOrigKg,
+            precioModificado: tieneOferta
         });
     }
 
