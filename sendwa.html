@@ -488,48 +488,66 @@
   <div class="loader-bar"><div class="loader-bar-inner"></div></div>
 </div>
 
-<!-- HEADER -->
+<!-- HEADER compacto con stats + modo selector -->
 <div id="header">
-  <h1>📲 SendWA <span>Almacén Copihue</span></h1>
-  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.21</div>
+  <h1>📲 SendWA <span>Copihue</span></h1>
+  <div id="header-stats">
+    <span class="hstat" id="hstat-sel">✓ 0</span>
+    <span class="hstat" id="hstat-size">0 MB</span>
+    <span class="hstat" id="hstat-warn" style="display:none">⚠️ Límite WA</span>
+  </div>
+  <select id="mode-select" title="Modo de envío">
+    <option value="estado">📸 Estado</option>
+    <option value="grupo">👥 Grupo</option>
+    <option value="rapido">⚡ Rápido</option>
+  </select>
+  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.22</div>
   <button id="btn-dark" title="Modo oscuro">🌙</button>
 </div>
 
-<!-- PANEL SUPERIOR -->
-<div id="top-panel">
-  <div id="mode-tabs">
-    <button class="mode-tab active" data-mode="estado">📸 Estado</button>
-    <button class="mode-tab" data-mode="grupo">👥 Grupo</button>
-    <button class="mode-tab" data-mode="rapido">⚡ Rápido</button>
-  </div>
-  <div id="stats-row">
-    <div class="stat-chip">Sel: <span id="cnt-sel">0</span></div>
-    <div class="stat-chip">Imgs: <span id="cnt-imgs">0</span></div>
-    <div class="stat-chip">~<span id="cnt-size">0</span> MB</div>
-    <div class="stat-chip">Cats: <span id="cnt-cats">0</span></div>
-  </div>
-  <div id="warn-msg">⚠️ Demasiadas imágenes pueden impedir publicar en estado de WhatsApp</div>
-</div>
-
-<!-- FILTROS -->
+<!-- FILTROS — barra compacta con dropdowns por grupo -->
 <div id="filters">
   <div id="search-row">
     <input type="search" id="search-input" placeholder="🔍 Buscar producto…">
     <button id="btn-sel-all">✓ Todo</button>
   </div>
-  <div id="filters-row">
-    <button class="filter-chip active" data-filter="todos">Todos</button>
-    <button class="filter-chip chip-activo" data-filter="activo">⏰ Activos ahora</button>
-    <button class="filter-chip" data-filter="oferta">🔥 Pool ofertas</button>
-    <button class="filter-chip" data-filter="sinoferta">✅ Sin oferta</button>
-    <button class="filter-chip" data-filter="relampago">⚡ Relámpago</button>
-    <button class="filter-chip" data-filter="destacado">🔥 Destacado</button>
-    <button class="filter-chip" data-filter="especial">💜 Especial</button>
-    <button class="filter-chip" data-filter="ultimas">🏷️ Últimas</button>
-    <button class="filter-chip" data-filter="promo">🏷️ Promos</button>
-    <button class="filter-chip" data-filter="combo">🎯 Combos</button>
-    <!-- categorías se insertan dinámicamente -->
+  <div style="display:flex;gap:4px;align-items:center;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;">
+    <!-- Chips rápidos siempre visibles -->
+    <div id="quick-chips" style="display:flex;gap:4px;flex-shrink:0;">
+      <button class="filter-chip active" data-filter="todos">Todos</button>
+      <button class="filter-chip" data-filter="sinoferta">✅ Normal</button>
+      <button class="filter-chip chip-activo" data-filter="activo">⏰ Activos</button>
+    </div>
+
+    <!-- Grupo OFERTAS dropdown -->
+    <div class="nav-group" id="ng-ofertas">
+      <button class="nav-group-btn group-ofertas" onclick="toggleDropdown('dd-ofertas')">🔥 Ofertas ▾</button>
+      <div class="nav-dropdown" id="dd-ofertas">
+        <div class="nav-dropdown-label">Tipo de oferta</div>
+        <div class="nav-chips">
+          <button class="filter-chip oferta-chip" data-filter="oferta">🔥 Pool</button>
+          <button class="filter-chip oferta-chip" data-filter="relampago">⚡ Relámpago</button>
+          <button class="filter-chip oferta-chip" data-filter="destacado">🔥 Destacado</button>
+          <button class="filter-chip oferta-chip" data-filter="especial">💜 Especial</button>
+          <button class="filter-chip oferta-chip" data-filter="ultimas">🏷️ Últimas</button>
+          <button class="filter-chip oferta-chip" data-filter="promo">🏷️ Promos</button>
+          <button class="filter-chip oferta-chip" data-filter="combo">🎯 Combos</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Grupo CATEGORÍAS dropdown -->
+    <div class="nav-group" id="ng-cats">
+      <button class="nav-group-btn group-cats" onclick="toggleDropdown('dd-cats')">🛍️ Categorías ▾</button>
+      <div class="nav-dropdown" id="dd-cats">
+        <div class="nav-dropdown-label">Categoría de producto</div>
+        <div class="nav-chips" id="cat-chips-container">
+          <!-- se insertan dinámicamente -->
+        </div>
+      </div>
+    </div>
   </div>
+  <div id="warn-msg">⚠️ Demasiadas imágenes para estado WA</div>
 </div>
 
 <!-- MAIN GRID -->
@@ -1200,27 +1218,26 @@ function getSelectedProducts() {
 // ============================================================
 function updateStats() {
   const sel = selectedIds.size;
-  const imgs = getSelectedProducts().length;
-  const cats = new Set(getSelectedProducts().map(p=>p.categoria)).size;
-  const sizeMB = (imgs * IMG_SIZE_MB).toFixed(1);
+  const prods = getSelectedProducts();
+  const cats = new Set(prods.map(p=>p.categoria)).size;
+  const sizeMB = (prods.length * IMG_SIZE_MB).toFixed(1);
 
-  document.getElementById('cnt-sel').textContent = sel;
-  document.getElementById('cnt-imgs').textContent = imgs;
-  document.getElementById('cnt-size').textContent = sizeMB;
-  document.getElementById('cnt-cats').textContent = cats;
-
+  document.getElementById('hstat-sel').textContent = sel ? `✓ ${sel}  📦 ${cats}cat` : '✓ 0';
+  document.getElementById('hstat-size').textContent = `${sizeMB} MB`;
+  const hwarn = document.getElementById('hstat-warn');
+  if (hwarn) hwarn.style.display = (prods.length > WA_LIMIT_ESTADO && currentMode === 'estado') ? '' : 'none';
   const warn = document.getElementById('warn-msg');
-  warn.classList.toggle('show', imgs > WA_LIMIT_ESTADO && currentMode === 'estado');
+  warn.classList.toggle('show', prods.length > WA_LIMIT_ESTADO && currentMode === 'estado');
 }
 
 // ============================================================
 // PANEL HEIGHT — recalcular top del main
 // ============================================================
 function recalcLayout() {
-  const panelH = document.getElementById('top-panel').offsetHeight;
+  const headerH  = document.getElementById('header').offsetHeight;
   const filtersH = document.getElementById('filters').offsetHeight;
-  document.getElementById('filters').style.top = (56 + panelH) + 'px';
-  document.getElementById('main').style.paddingTop = (56 + panelH + filtersH + 8) + 'px';
+  document.getElementById('filters').style.top = headerH + 'px';
+  document.getElementById('main').style.paddingTop = (headerH + filtersH + 8) + 'px';
 }
 
 // ============================================================
@@ -2034,21 +2051,33 @@ document.getElementById('search-input').oninput = e => {
   applyFilter();
 };
 
-document.getElementById('filters-row').onclick = e => {
+document.getElementById('filters').onclick = e => {
   const chip = e.target.closest('.filter-chip');
-  if (!chip) return;
+  if (!chip || !chip.dataset.filter) return;
   document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
   chip.classList.add('active');
   currentFilter = chip.dataset.filter;
+  const isOferta = ['oferta','relampago','destacado','especial','ultimas','promo','combo'].includes(currentFilter);
+  const isCat = !isOferta && !['todos','sinoferta','activo'].includes(currentFilter);
+  document.querySelector('.group-ofertas')?.classList.toggle('has-active', isOferta);
+  document.querySelector('.group-cats')?.classList.toggle('has-active', isCat);
+  document.querySelectorAll('.nav-dropdown').forEach(d => d.classList.remove('open'));
   applyFilter();
 };
+window.toggleDropdown = function(id) {
+  const dd = document.getElementById(id);
+  const wasOpen = dd.classList.contains('open');
+  document.querySelectorAll('.nav-dropdown').forEach(d => d.classList.remove('open'));
+  if (!wasOpen) dd.classList.add('open');
+};
+document.addEventListener('click', e => {
+  if (!e.target.closest('.nav-group')) {
+    document.querySelectorAll('.nav-dropdown').forEach(d => d.classList.remove('open'));
+  }
+});
 
-document.getElementById('mode-tabs').onclick = e => {
-  const tab = e.target.closest('.mode-tab');
-  if (!tab) return;
-  document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
-  tab.classList.add('active');
-  currentMode = tab.dataset.mode;
+document.getElementById('mode-select').onchange = e => {
+  currentMode = e.target.value;
   applyFilter();
   updateStats();
 };
@@ -2081,16 +2110,15 @@ function saveRecent() {
 // ============================================================
 function buildCategoryFilters() {
   const cats = [...new Set(allProducts.map(p => p.categoria).filter(Boolean))].sort();
-  const row = document.getElementById('filters-row');
-  const existing = new Set([...row.querySelectorAll('.filter-chip')].map(c => c.dataset.filter));
+  const container = document.getElementById('cat-chips-container');
+  if (!container) return;
+  container.innerHTML = '';
   for (const cat of cats) {
-    const key = norm(cat);
-    if (existing.has(key)) continue;
     const btn = document.createElement('button');
-    btn.className = 'filter-chip';
-    btn.dataset.filter = key;
+    btn.className = 'filter-chip cat-chip';
+    btn.dataset.filter = norm(cat);
     btn.textContent = getCatEmoji(cat) + ' ' + cat;
-    row.appendChild(btn);
+    container.appendChild(btn);
   }
 }
 
@@ -2174,7 +2202,7 @@ async function init() {
 
 // Ajuste dinámico de layout cuando el panel cambia altura
 const panelObs = new ResizeObserver(recalcLayout);
-panelObs.observe(document.getElementById('top-panel'));
+panelObs.observe(document.getElementById('header'));
 panelObs.observe(document.getElementById('filters'));
 
 init();
