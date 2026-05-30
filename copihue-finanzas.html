@@ -250,9 +250,14 @@ function parseFecha(s){
 function parseCompraReg(r){
   const d = parseFecha(r.fecha);
   if(!d) return null;
-  return {fecha:d, producto:str(r.producto), cantidad:num(r.cantidad),
-          proveedor:str(r.proveedor)||'SIN PROVEEDOR', costo:num(r.costo),
-          precioVenta:num(r.precioVenta), total:num(r.total)||num(r.cantidad)*num(r.costo),
+  const cant = num(r.cantidad);
+  if(cant <= 0) return null; // ignorar ajustes de precio sin ingreso real de stock
+  const costo = num(r.costo);
+  const total = num(r.total) || (cant * costo);
+  if(total <= 0 && costo <= 0) return null; // ignorar sin valor
+  return {fecha:d, producto:str(r.producto), cantidad:cant,
+          proveedor:str(r.proveedor)||'SIN PROVEEDOR', costo:costo,
+          precioVenta:num(r.precioVenta), total:total,
           vencimiento:str(r.vencimiento)};
 }
 
@@ -419,7 +424,17 @@ function buildResumen(){
 
   // Alerta si déficit
   let h = '';
-  if(neto < 0){
+  // Detectar mes de inicio del sistema (ventas = 0 o muy pocas)
+  const esMesInicio = caja.length <= 3 && ti < 100000;
+  if(esMesInicio){
+    h += `<div class="alert" style="background:linear-gradient(135deg,#1565c0,#1976d2)">
+      <div class="alert-icon">ℹ️</div>
+      <div>
+        <div class="alert-t">Mes de inicio del sistema</div>
+        <div class="alert-s">Sin ventas registradas — las compras corresponden a la carga inicial de inventario, no a gastos reales del período</div>
+      </div>
+    </div>`;
+  } else if(neto < 0){
     h += `<div class="alert">
       <div class="alert-icon">⚠️</div>
       <div>
