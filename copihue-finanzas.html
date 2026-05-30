@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Copihue · Finanzas</title>
+<title>Copihue · Finanzas v2</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -374,18 +374,19 @@ function render(){
 
   h += `<button class="btn-hoy" onclick="irAHoy()">📅 Ir al período actual</button>`;
 
-  // Tabs — en anual mostramos solo Resumen y Egresos
-  h += `<div class="tabs">
-    <button class="tab ${tabActiva==='resumen'?'activo':''}" onclick="setTab('resumen')">📊 Resumen</button>
-    <button class="tab ${tabActiva==='ingresos'?'activo':''}" onclick="setTab('ingresos')">📈 Ventas</button>
-    <button class="tab ${tabActiva==='egresos'?'activo':''}" onclick="setTab('egresos')">📉 Egresos</button>
-    <button class="tab ${tabActiva==='flujo'?'activo':''}" onclick="setTab('flujo')">🔄 Flujo</button>
-    ${vista==='mes'?`<button class="tab ${tabActiva==='categorias'?'activo':''}" onclick="setTab('categorias')">🏷️ Categorías</button>
-    <button class="tab ${tabActiva==='detalle'?'activo':''}" onclick="setTab('detalle')">📋 Detalle</button>
-    <button class="tab ${tabActiva==='calendario'?'activo':''}" onclick="setTab('calendario')">📅 Calendario</button>`:''}
-    <button class="tab ${tabActiva==='compras'?'activo':''}" onclick="setTab('compras')">🛒 Compras</button>
-    <button class="tab ${tabActiva==='proveedores'?'activo':''}" onclick="setTab('proveedores')">🚚 Proveedores</button>
-  </div>`;
+  // Tabs
+  const tabsMes = vista==='mes' ? [
+    ['categorias','🏷️ Categorías'],['detalle','📋 Detalle'],['calendario','📅 Calendario']
+  ] : [];
+  let tabsHtml = '<div class="tabs">';
+  [['resumen','📊 Resumen'],['ingresos','📈 Ventas'],['egresos','📉 Egresos'],['flujo','🔄 Flujo'],
+   ...tabsMes,
+   ['compras','🛒 Compras'],['proveedores','🚚 Proveedores']
+  ].forEach(([id,lbl])=>{
+    tabsHtml += '<button class="tab '+(tabActiva===id?'activo':'')+'" onclick="setTab(\''+id+'\')">'+lbl+'</button>';
+  });
+  tabsHtml += '</div>';
+  h += tabsHtml;
 
   if(tabActiva==='resumen') h += buildResumen();
   else if(tabActiva==='ingresos') h += buildIngresos();
@@ -835,16 +836,21 @@ function buildCompras(){
   const te = getEgrPeriodo().reduce((s,r)=>s+r.monto,0);
   const neto = ti-te;
 
-  // Por proveedor
-  const porProv = {};
-  comp.forEach(r=>{ porProv[r.proveedor]=(porProv[r.proveedor]||{total:0,items:0}); porProv[r.proveedor].total+=r.total; porProv[r.proveedor].items++; });
-  const provs = Object.entries(porProv).sort((a,b)=>b[1].total-a[1].total);
-  const maxProv = provs[0]?.[1].total||1;
+  // Detectar posibles errores de carga (sin filtrar — la planilla es fuente de verdad)
+  const cantidades = comp.map(r=>r.cantidad).filter(c=>c>0).sort((a,b)=>a-b);
+  const mediana = cantidades[Math.floor(cantidades.length/2)]||1;
+  const sospechosos = comp.filter(r=>r.cantidad > mediana*50 && r.cantidad > 100);
 
-  // Por producto top
+  // Por producto — todos los datos
   const porProd = {};
-  comp.forEach(r=>{ porProd[r.producto]=(porProd[r.producto]||{total:0,cantidad:0}); porProd[r.producto].total+=r.total; porProd[r.producto].cantidad+=r.cantidad; });
+  comp.forEach(r=>{ 
+    if(!porProd[r.producto]) porProd[r.producto]={total:0,cantidad:0,compras:0,ultimaFecha:r.fecha,ultimoCosto:r.costo};
+    porProd[r.producto].total+=r.total; porProd[r.producto].cantidad+=r.cantidad;
+    porProd[r.producto].compras++;
+    if(r.fecha>porProd[r.producto].ultimaFecha){porProd[r.producto].ultimaFecha=r.fecha;porProd[r.producto].ultimoCosto=r.costo;}
+  });
   const prods = Object.entries(porProd).sort((a,b)=>b[1].total-a[1].total);
+  const maxProd = prods[0]?.[1].total||1;
 
   let h = `<div class="cards">
     <div class="card ag full">
@@ -864,34 +870,42 @@ function buildCompras(){
     </div>
   </div>`;
 
-  // Por proveedor
-  h += `<div class="tar"><div class="tar-t">🚚 Por proveedor</div>`;
-  if(!provs.length){ h += '<div class="empty">Sin compras en este período</div>'; }
-  else provs.forEach(([prov,d])=>{
-    const pct = tc?Math.round(d.total/tc*100):0;
-    h += `<div class="bw" style="padding:7px 8px;border-radius:10px" onmouseover="this.style.background='#f0f8ff'" onmouseout="this.style.background=''">
-      <div class="bw-hdr">
-        <div class="bw-n">🚚 ${prov}</div>
-        <div style="display:flex;align-items:center;gap:5px">
-          <span class="badge bg-a">${d.items} compras</span>
-          <div class="bw-v" style="color:var(--azul)">${fmt(d.total)}</div>
+  // Área de alertas de datos sospechosos (sin filtrar nada)
+  if(sospechosos.length > 0){
+    h += '<div style="background:#fff8e1;border:2px solid #f9a825;border-radius:12px;padding:12px;margin-bottom:12px">';
+    h += '<div style="font-size:.72rem;font-weight:900;color:#e65100;margin-bottom:6px">⚠️ POSIBLES ERRORES DE CARGA — verificar en planilla</div>';
+    sospechosos.forEach(s=>{
+      h += `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #ffe082">
+        <div>
+          <div style="font-size:.78rem;font-weight:700;color:#333">${s.producto}</div>
+          <div style="font-size:.65rem;color:#888">${fmtFecha(s.fecha)} · ${s.proveedor}</div>
         </div>
-      </div>
-      <div class="barra-bg"><div class="barra-f bar-a" style="width:${Math.round(d.total/maxProv*100)}%"></div></div>
-      <div style="font-size:.62rem;color:var(--gris);margin-top:2px">${pct}% del total compras</div>
-    </div>`;
-  });
-  h += '</div>';
+        <div style="text-align:right">
+          <div style="font-size:.85rem;font-weight:900;color:#e65100">${Math.round(s.cantidad)} u.</div>
+          <div style="font-size:.62rem;color:#888">mediana: ${Math.round(mediana)} u.</div>
+        </div>
+      </div>`;
+    });
+    h += '<div style="font-size:.62rem;color:#888;margin-top:6px">Los datos se muestran tal cual. Corregí en la planilla si es un error.</div>';
+    h += '</div>';
+  }
 
-  // Top productos por inversión
-  h += `<div class="tar"><div class="tar-t">📦 Top productos por inversión</div>`;
-  prods.slice(0,15).forEach(([prod,d])=>{
+  // Por producto
+  h += `<div class="tar"><div class="tar-t">📦 Por producto <span class="badge bg-a">${prods.length}</span></div>`;
+  if(!prods.length){ h += '<div class="empty">Sin compras en este período</div>'; }
+  else prods.forEach(([prod,d])=>{
     const pct = tc?Math.round(d.total/tc*100):0;
-    h += `<div class="row">
-      <div class="row-l">${prod}</div>
-      <div style="text-align:right">
-        <div style="font-size:.82rem;font-weight:900;color:var(--azul)">${fmt(d.total)}</div>
-        <div style="font-size:.62rem;color:var(--gris)">${d.cantidad} u · ${pct}%</div>
+    h += `<div class="bw" style="padding:8px 10px;border-radius:10px;margin-bottom:2px" onmouseover="this.style.background='#f0f8ff'" onmouseout="this.style.background=''">
+      <div class="bw-hdr">
+        <div class="bw-n" style="font-size:.78rem">${prod}</div>
+        <div class="bw-v" style="color:var(--azul)">${fmt(d.total)}</div>
+      </div>
+      <div class="barra-bg"><div class="barra-f bar-a" style="width:${Math.round(d.total/maxProd*100)}%"></div></div>
+      <div style="display:flex;gap:8px;margin-top:2px">
+        <span style="font-size:.62rem;color:var(--gris)">${d.compras} compra${d.compras>1?'s':''}</span>
+        <span style="font-size:.62rem;color:var(--gris)">· ${Math.round(d.cantidad)} u.</span>
+        <span style="font-size:.62rem;color:var(--gris)">· $${fmt(d.ultimoCosto).replace('$','')} c/u</span>
+        <span class="badge bg-a" style="font-size:.6rem;margin-left:auto">${pct}%</span>
       </div>
     </div>`;
   });
@@ -934,124 +948,118 @@ function buildCompras(){
 }
 
 // ── PROVEEDORES ──
+let proveedorSeleccionado = null; // null = ver lista, 'NOMBRE' = ver detalle
+
 function buildProveedores(){
-  const comp = comprasData; // todos, sin filtro de período — usamos rango de fechas propio
-  const proveedores = ['TODOS', ...new Set(comp.map(r=>r.proveedor).filter(Boolean)).values()].sort();
+  // Usar el período activo (mes o año)
+  const comp = getCompPeriodo(); // fuente de verdad: sin filtros
 
-  // Aplicar filtros
-  let filtrados = comp;
-  if(filtroProveedor !== 'TODOS') filtrados = filtrados.filter(r=>r.proveedor===filtroProveedor);
-  if(filtroFechaDesde){
-    const d = new Date(filtroFechaDesde+'T00:00:00');
-    filtrados = filtrados.filter(r=>r.fecha>=d);
-  }
-  if(filtroFechaHasta){
-    const h = new Date(filtroFechaHasta+'T23:59:59');
-    filtrados = filtrados.filter(r=>r.fecha<=h);
-  }
-  filtrados = [...filtrados].sort((a,b)=>b.fecha-a.fecha);
-
-  const tc = filtrados.reduce((s,r)=>s+r.total,0);
-  const tq = filtrados.reduce((s,r)=>s+r.cantidad,0);
+  // Agrupar por proveedor
+  const porProv = {};
+  comp.forEach(r=>{
+    if(!porProv[r.proveedor]) porProv[r.proveedor]={total:0,cantidad:0,compras:0,productos:new Set(),movs:[]};
+    porProv[r.proveedor].total+=r.total;
+    porProv[r.proveedor].cantidad+=r.cantidad;
+    porProv[r.proveedor].compras++;
+    porProv[r.proveedor].productos.add(r.producto);
+    porProv[r.proveedor].movs.push(r);
+  });
+  const provs = Object.entries(porProv).sort((a,b)=>b[1].total-a[1].total);
+  const tc = comp.reduce((s,r)=>s+r.total,0);
+  const maxP = provs[0]?.[1].total||1;
 
   let h = '';
 
-  // Filtros
-  h += `<div class="tar" style="margin-bottom:10px">
-    <div class="tar-t">🔍 Filtros</div>
-    <div style="margin-bottom:8px">
-      <div style="font-size:.7rem;font-weight:700;color:var(--gris);margin-bottom:4px">Proveedor</div>
-      <select id="filtroProvSel" onchange="filtroProveedor=this.value;render()"
-        style="width:100%;padding:8px 10px;border:1.5px solid var(--borde);border-radius:10px;font-family:inherit;font-size:.82rem;background:#fff;color:var(--texto)">
-        ${proveedores.map(p=>`<option value="${p}" ${filtroProveedor===p?'selected':''}>${p}</option>`).join('')}
-      </select>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-      <div>
-        <div style="font-size:.7rem;font-weight:700;color:var(--gris);margin-bottom:4px">Desde</div>
-        <input type="date" id="filtroDesde" value="${filtroFechaDesde}"
-          onchange="filtroFechaDesde=this.value;render()"
-          style="width:100%;padding:7px 8px;border:1.5px solid var(--borde);border-radius:10px;font-family:inherit;font-size:.78rem;background:#fff">
-      </div>
-      <div>
-        <div style="font-size:.7rem;font-weight:700;color:var(--gris);margin-bottom:4px">Hasta</div>
-        <input type="date" id="filtroHasta" value="${filtroFechaHasta}"
-          onchange="filtroFechaHasta=this.value;render()"
-          style="width:100%;padding:7px 8px;border:1.5px solid var(--borde);border-radius:10px;font-family:inherit;font-size:.78rem;background:#fff">
-      </div>
-    </div>
-    ${(filtroProveedor!=='TODOS'||filtroFechaDesde||filtroFechaHasta)?`
-    <button onclick="filtroProveedor='TODOS';filtroFechaDesde='';filtroFechaHasta='';render()"
-      style="margin-top:8px;width:100%;padding:7px;border:2px solid var(--borde);border-radius:10px;background:#fff;font-size:.75rem;font-weight:700;color:var(--gris);cursor:pointer;font-family:inherit">
-      ✕ Limpiar filtros
-    </button>`:''}
-  </div>`;
-
-  // Totales
-  if(filtrados.length){
-    h += `<div class="cards">
-      <div class="card ag full">
-        <div class="card-lbl">🛒 Total en filtro</div>
-        <div class="card-val">${fmtK(tc)}</div>
-        <div class="card-sub">${filtrados.length} compras · ${Math.round(tq)} unidades</div>
-      </div>
-    </div>`;
+  // Si hay proveedor seleccionado, mostrar su detalle
+  if(proveedorSeleccionado && porProv[proveedorSeleccionado]){
+    const pData = porProv[proveedorSeleccionado];
+    const movs = [...pData.movs].sort((a,b)=>b.fecha-a.fecha);
 
     // Agrupar por producto
-    const porProd = {};
-    filtrados.forEach(r=>{
-      if(!porProd[r.producto]) porProd[r.producto]={total:0,cantidad:0,compras:0,ultimaFecha:r.fecha,ultimoCosto:r.costo,proveedor:r.proveedor};
-      porProd[r.producto].total+=r.total;
-      porProd[r.producto].cantidad+=r.cantidad;
-      porProd[r.producto].compras++;
-      if(r.fecha>porProd[r.producto].ultimaFecha){ porProd[r.producto].ultimaFecha=r.fecha; porProd[r.producto].ultimoCosto=r.costo; }
+    const porProdP = {};
+    movs.forEach(r=>{
+      if(!porProdP[r.producto]) porProdP[r.producto]={total:0,cantidad:0,compras:0,ultimoCosto:r.costo};
+      porProdP[r.producto].total+=r.total; porProdP[r.producto].cantidad+=r.cantidad; porProdP[r.producto].compras++;
+      if(r.costo) porProdP[r.producto].ultimoCosto=r.costo;
     });
-    const prods = Object.entries(porProd).sort((a,b)=>b[1].total-a[1].total);
-    const maxP = prods[0]?.[1].total||1;
+    const prodsP = Object.entries(porProdP).sort((a,b)=>b[1].total-a[1].total);
+    const maxPP = prodsP[0]?.[1].total||1;
 
-    h += `<div class="tar"><div class="tar-t">📦 Por producto <span class="badge bg-a">${prods.length}</span></div>`;
-    prods.forEach(([prod,d])=>{
-      const pct=tc?Math.round(d.total/tc*100):0;
-      h += `<div style="margin-bottom:10px;padding:9px 10px;background:#f8fbff;border-radius:10px;border:1px solid var(--borde)">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
-          <div style="font-size:.8rem;font-weight:700;flex:1;padding-right:8px">${prod}</div>
-          <div style="font-size:.88rem;font-weight:900;color:var(--azul);white-space:nowrap">${fmt(d.total)}</div>
+    h += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <button onclick="proveedorSeleccionado=null;render()" style="background:var(--vl);border:1.5px solid var(--borde);border-radius:20px;padding:5px 12px;font-size:.75rem;font-weight:700;color:var(--vd);cursor:pointer;font-family:inherit">← Volver</button>
+      <div style="font-size:.88rem;font-weight:900">🚚 ${proveedorSeleccionado}</div>
+    </div>`;
+
+    h += `<div class="card ag full" style="border-radius:14px;padding:12px;margin-bottom:10px">
+      <div class="card-lbl">Total del período</div>
+      <div class="card-val">${fmtK(pData.total)}</div>
+      <div class="card-sub">${pData.compras} compras · ${prodsP.length} productos distintos</div>
+    </div>`;
+
+    h += `<div class="tar"><div class="tar-t">📦 Productos comprados</div>`;
+    prodsP.forEach(([prod,d])=>{
+      const pct=pData.total?Math.round(d.total/pData.total*100):0;
+      h += `<div class="bw" style="padding:8px 10px;border-radius:10px;margin-bottom:2px">
+        <div class="bw-hdr">
+          <div class="bw-n" style="font-size:.78rem">${prod}</div>
+          <div class="bw-v" style="color:var(--azul)">${fmt(d.total)}</div>
         </div>
-        <div class="barra-bg" style="margin-bottom:4px"><div class="barra-f bar-a" style="width:${Math.round(d.total/maxP*100)}%"></div></div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <span style="font-size:.65rem;color:var(--gris)">${d.compras} compra${d.compras>1?'s':''}</span>
-          <span style="font-size:.65rem;color:var(--gris)">·</span>
-          <span style="font-size:.65rem;color:var(--gris)">${Math.round(d.cantidad)} u.</span>
-          <span style="font-size:.65rem;color:var(--gris)">·</span>
-          <span style="font-size:.65rem;color:var(--gris)">último costo ${fmt(d.ultimoCosto)}</span>
-          <span style="font-size:.65rem;color:var(--gris)">·</span>
-          <span class="badge bg-a" style="font-size:.6rem">${pct}%</span>
+        <div class="barra-bg"><div class="barra-f bar-a" style="width:${Math.round(d.total/maxPP*100)}%"></div></div>
+        <div style="display:flex;gap:8px;margin-top:2px">
+          <span style="font-size:.62rem;color:var(--gris)">${d.compras} compra${d.compras>1?'s':''} · ${Math.round(d.cantidad)} u.</span>
+          <span style="font-size:.62rem;color:var(--gris)">· $${fmt(d.ultimoCosto).replace('$','')} c/u</span>
+          <span class="badge bg-a" style="font-size:.6rem;margin-left:auto">${pct}%</span>
         </div>
       </div>`;
     });
     h += '</div>';
 
-    // Movimientos detalle
-    h += `<div class="tar"><div class="tar-t">📋 Todos los movimientos <span class="badge bg-a">${filtrados.length}</span></div>`;
-    filtrados.forEach(r=>{
+    h += `<div class="tar"><div class="tar-t">📋 Movimientos <span class="badge bg-a">${movs.length}</span></div>`;
+    movs.forEach(r=>{
       h += `<div class="mov" style="border-left-color:var(--azul)">
         <div class="mov-info">
           <div class="mov-motivo">${r.producto}</div>
-          <div class="mov-obs">${r.cantidad} u. · ${r.proveedor}</div>
           <div class="mov-meta">
             <span class="mov-tag tag-fecha">${fmtFecha(r.fecha)}</span>
-            <span class="mov-tag" style="background:var(--al);color:var(--azul)">${fmt(r.costo)} c/u</span>
-            ${r.vencimiento?`<span class="mov-tag tag-cat">📅 ${r.vencimiento}</span>`:''}
+            <span class="mov-tag" style="background:var(--al);color:var(--azul)">${Math.round(r.cantidad)} u · ${fmt(r.costo)} c/u</span>
+            ${r.vencimiento?'<span class="mov-tag tag-cat">📅 '+r.vencimiento+'</span>':''}
           </div>
         </div>
         <div class="mov-monto" style="color:var(--azul)">${fmt(r.total)}</div>
       </div>`;
     });
     h += '</div>';
-  } else {
-    h += '<div class="empty">Sin compras para este filtro</div>';
+    return h;
   }
 
+  // Vista lista de proveedores del período
+  if(!provs.length){ return '<div class="empty">Sin compras en este período</div>'; }
+
+  h += `<div class="card ag full" style="border-radius:14px;padding:12px;margin-bottom:10px">
+    <div class="card-lbl">🛒 Total compras del período</div>
+    <div class="card-val">${fmtK(tc)}</div>
+    <div class="card-sub">${comp.length} ingresos · ${provs.length} proveedores</div>
+  </div>`;
+
+  h += `<div class="tar"><div class="tar-t">🚚 Proveedores — tocá para ver detalle</div>`;
+  provs.forEach(([prov,d])=>{
+    const pct=tc?Math.round(d.total/tc*100):0;
+    h += `<div onclick="proveedorSeleccionado='${prov.replace(/'/g,"\'")}';render()"
+      style="padding:10px;border-radius:10px;margin-bottom:6px;background:#f8fbff;border:1px solid var(--borde);cursor:pointer"
+      onmouseover="this.style.background='#e3f2fd'" onmouseout="this.style.background='#f8fbff'">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
+        <div style="font-size:.82rem;font-weight:900">🚚 ${prov}</div>
+        <div style="font-size:.88rem;font-weight:900;color:var(--azul)">${fmt(d.total)} ›</div>
+      </div>
+      <div class="barra-bg" style="margin-bottom:4px"><div class="barra-f bar-a" style="width:${Math.round(d.total/maxP*100)}%"></div></div>
+      <div style="display:flex;gap:8px">
+        <span style="font-size:.62rem;color:var(--gris)">${d.compras} compras</span>
+        <span style="font-size:.62rem;color:var(--gris)">· ${d.productos.size} productos</span>
+        <span class="badge bg-a" style="font-size:.6rem;margin-left:auto">${pct}%</span>
+      </div>
+    </div>`;
+  });
+  h += '</div>';
   return h;
 }
 
@@ -1198,7 +1206,7 @@ function cerrarModal(){ const el=document.getElementById('modal-wrap'); if(el) e
 
 // ── ACCIONES ──
 function setVista(v){ vista=v; if(v==='anio'&&['categorias','detalle','calendario'].includes(tabActiva)) tabActiva='resumen'; render(); }
-function setTab(t){ tabActiva=t; diasCal.clear(); filtroCat='TODOS'; filtroBusq=''; render(); }
+function setTab(t){ tabActiva=t; diasCal.clear(); filtroCat='TODOS'; filtroBusq=''; proveedorSeleccionado=null; render(); }
 function navPeriodo(d){
   if(vista==='mes'){ mesSel+=d; if(mesSel<0){mesSel=11;anioSel--;} if(mesSel>11){mesSel=0;anioSel++;} }
   else { anioSel+=d; }
