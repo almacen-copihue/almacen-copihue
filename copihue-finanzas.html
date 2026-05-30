@@ -212,6 +212,9 @@ let mesSel = new Date().getMonth();
 let anioSel = new Date().getFullYear();
 let tabActiva = 'resumen';
 let filtroCat = 'TODOS';
+let filtroProveedor = 'TODOS';
+let filtroFechaDesde = '';
+let filtroFechaHasta = '';
 let filtroBusq = '';
 let diasCal = new Set();
 let cargando = false;
@@ -381,7 +384,7 @@ function render(){
     <button class="tab ${tabActiva==='detalle'?'activo':''}" onclick="setTab('detalle')">📋 Detalle</button>
     <button class="tab ${tabActiva==='calendario'?'activo':''}" onclick="setTab('calendario')">📅 Calendario</button>`:''}
     <button class="tab ${tabActiva==='compras'?'activo':''}" onclick="setTab('compras')">🛒 Compras</button>
-    <button class="tab ${tabActiva==='proveedores'?'activo':''}" onclick="setTab('compras')">🚚 Proveedores</button>
+    <button class="tab ${tabActiva==='proveedores'?'activo':''}" onclick="setTab('proveedores')">🚚 Proveedores</button>
   </div>`;
 
   if(tabActiva==='resumen') h += buildResumen();
@@ -927,6 +930,128 @@ function buildCompras(){
     </div>`;
   });
   h += '</div>';
+  return h;
+}
+
+// ── PROVEEDORES ──
+function buildProveedores(){
+  const comp = comprasData; // todos, sin filtro de período — usamos rango de fechas propio
+  const proveedores = ['TODOS', ...new Set(comp.map(r=>r.proveedor).filter(Boolean)).values()].sort();
+
+  // Aplicar filtros
+  let filtrados = comp;
+  if(filtroProveedor !== 'TODOS') filtrados = filtrados.filter(r=>r.proveedor===filtroProveedor);
+  if(filtroFechaDesde){
+    const d = new Date(filtroFechaDesde+'T00:00:00');
+    filtrados = filtrados.filter(r=>r.fecha>=d);
+  }
+  if(filtroFechaHasta){
+    const h = new Date(filtroFechaHasta+'T23:59:59');
+    filtrados = filtrados.filter(r=>r.fecha<=h);
+  }
+  filtrados = [...filtrados].sort((a,b)=>b.fecha-a.fecha);
+
+  const tc = filtrados.reduce((s,r)=>s+r.total,0);
+  const tq = filtrados.reduce((s,r)=>s+r.cantidad,0);
+
+  let h = '';
+
+  // Filtros
+  h += `<div class="tar" style="margin-bottom:10px">
+    <div class="tar-t">🔍 Filtros</div>
+    <div style="margin-bottom:8px">
+      <div style="font-size:.7rem;font-weight:700;color:var(--gris);margin-bottom:4px">Proveedor</div>
+      <select id="filtroProvSel" onchange="filtroProveedor=this.value;render()"
+        style="width:100%;padding:8px 10px;border:1.5px solid var(--borde);border-radius:10px;font-family:inherit;font-size:.82rem;background:#fff;color:var(--texto)">
+        ${proveedores.map(p=>`<option value="${p}" ${filtroProveedor===p?'selected':''}>${p}</option>`).join('')}
+      </select>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div>
+        <div style="font-size:.7rem;font-weight:700;color:var(--gris);margin-bottom:4px">Desde</div>
+        <input type="date" id="filtroDesde" value="${filtroFechaDesde}"
+          onchange="filtroFechaDesde=this.value;render()"
+          style="width:100%;padding:7px 8px;border:1.5px solid var(--borde);border-radius:10px;font-family:inherit;font-size:.78rem;background:#fff">
+      </div>
+      <div>
+        <div style="font-size:.7rem;font-weight:700;color:var(--gris);margin-bottom:4px">Hasta</div>
+        <input type="date" id="filtroHasta" value="${filtroFechaHasta}"
+          onchange="filtroFechaHasta=this.value;render()"
+          style="width:100%;padding:7px 8px;border:1.5px solid var(--borde);border-radius:10px;font-family:inherit;font-size:.78rem;background:#fff">
+      </div>
+    </div>
+    ${(filtroProveedor!=='TODOS'||filtroFechaDesde||filtroFechaHasta)?`
+    <button onclick="filtroProveedor='TODOS';filtroFechaDesde='';filtroFechaHasta='';render()"
+      style="margin-top:8px;width:100%;padding:7px;border:2px solid var(--borde);border-radius:10px;background:#fff;font-size:.75rem;font-weight:700;color:var(--gris);cursor:pointer;font-family:inherit">
+      ✕ Limpiar filtros
+    </button>`:''}
+  </div>`;
+
+  // Totales
+  if(filtrados.length){
+    h += `<div class="cards">
+      <div class="card ag full">
+        <div class="card-lbl">🛒 Total en filtro</div>
+        <div class="card-val">${fmtK(tc)}</div>
+        <div class="card-sub">${filtrados.length} compras · ${Math.round(tq)} unidades</div>
+      </div>
+    </div>`;
+
+    // Agrupar por producto
+    const porProd = {};
+    filtrados.forEach(r=>{
+      if(!porProd[r.producto]) porProd[r.producto]={total:0,cantidad:0,compras:0,ultimaFecha:r.fecha,ultimoCosto:r.costo,proveedor:r.proveedor};
+      porProd[r.producto].total+=r.total;
+      porProd[r.producto].cantidad+=r.cantidad;
+      porProd[r.producto].compras++;
+      if(r.fecha>porProd[r.producto].ultimaFecha){ porProd[r.producto].ultimaFecha=r.fecha; porProd[r.producto].ultimoCosto=r.costo; }
+    });
+    const prods = Object.entries(porProd).sort((a,b)=>b[1].total-a[1].total);
+    const maxP = prods[0]?.[1].total||1;
+
+    h += `<div class="tar"><div class="tar-t">📦 Por producto <span class="badge bg-a">${prods.length}</span></div>`;
+    prods.forEach(([prod,d])=>{
+      const pct=tc?Math.round(d.total/tc*100):0;
+      h += `<div style="margin-bottom:10px;padding:9px 10px;background:#f8fbff;border-radius:10px;border:1px solid var(--borde)">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
+          <div style="font-size:.8rem;font-weight:700;flex:1;padding-right:8px">${prod}</div>
+          <div style="font-size:.88rem;font-weight:900;color:var(--azul);white-space:nowrap">${fmt(d.total)}</div>
+        </div>
+        <div class="barra-bg" style="margin-bottom:4px"><div class="barra-f bar-a" style="width:${Math.round(d.total/maxP*100)}%"></div></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <span style="font-size:.65rem;color:var(--gris)">${d.compras} compra${d.compras>1?'s':''}</span>
+          <span style="font-size:.65rem;color:var(--gris)">·</span>
+          <span style="font-size:.65rem;color:var(--gris)">${Math.round(d.cantidad)} u.</span>
+          <span style="font-size:.65rem;color:var(--gris)">·</span>
+          <span style="font-size:.65rem;color:var(--gris)">último costo ${fmt(d.ultimoCosto)}</span>
+          <span style="font-size:.65rem;color:var(--gris)">·</span>
+          <span class="badge bg-a" style="font-size:.6rem">${pct}%</span>
+        </div>
+      </div>`;
+    });
+    h += '</div>';
+
+    // Movimientos detalle
+    h += `<div class="tar"><div class="tar-t">📋 Todos los movimientos <span class="badge bg-a">${filtrados.length}</span></div>`;
+    filtrados.forEach(r=>{
+      h += `<div class="mov" style="border-left-color:var(--azul)">
+        <div class="mov-info">
+          <div class="mov-motivo">${r.producto}</div>
+          <div class="mov-obs">${r.cantidad} u. · ${r.proveedor}</div>
+          <div class="mov-meta">
+            <span class="mov-tag tag-fecha">${fmtFecha(r.fecha)}</span>
+            <span class="mov-tag" style="background:var(--al);color:var(--azul)">${fmt(r.costo)} c/u</span>
+            ${r.vencimiento?`<span class="mov-tag tag-cat">📅 ${r.vencimiento}</span>`:''}
+          </div>
+        </div>
+        <div class="mov-monto" style="color:var(--azul)">${fmt(r.total)}</div>
+      </div>`;
+    });
+    h += '</div>';
+  } else {
+    h += '<div class="empty">Sin compras para este filtro</div>';
+  }
+
   return h;
 }
 
