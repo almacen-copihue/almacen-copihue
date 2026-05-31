@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v3.5';
+const CACHE_VERSION = 'v3.6';
 const CACHE_NAME = `almacen-copihue-${CACHE_VERSION}`;
 
 const ESSENTIAL_FILES = [
@@ -27,6 +27,7 @@ const HTML_DINAMICOS = [
     'copihue-config-ofertas.html',
     'copihue-dinero-live.html',
     'copihue-caja-movimientos.html',
+    'copihue-finanzas.html',
 ];
 
 self.addEventListener('install', (event) => {
