@@ -219,10 +219,6 @@
             transform: scale(0.95);
         }
         
-        /* PROMOS / COMBOS — sin botón compartir */
-        #ofertasPromos .share-btn,
-        #ofertasCombos .share-btn { display: none !important; }
-
         /* Grid centrado con flexbox para PROMOS y COMBOS (pueden tener 1-2 items) */
         #promos-grid,
         #combos-grid {
@@ -2809,6 +2805,13 @@ async function cargarConfigSistema() {
         const metaOgDesc = document.getElementById('meta-og-desc');
         if (metaOgDesc && descPlanilla) metaOgDesc.content = descPlanilla;
 
+        // ── COLUMNAS DEL CATÁLOGO ── configurable desde planilla → columnas_catalogo
+        const rowCols = cfg['columnas_catalogo'] || cfg['horario|columnas_catalogo'];
+        if (rowCols) {
+            const valCols = Array.isArray(rowCols) ? rowCols[0] : rowCols;
+            if (valCols && !isNaN(parseInt(valCols))) _aplicarColumnasCatalogo(parseInt(valCols));
+        }
+
         // WA_HORARIO global — sincronizar con teléfono de planilla
         if (_emp.telefono) window.WA_HORARIO = _emp.telefono.replace(/\D/g, '');
 
@@ -2817,8 +2820,26 @@ async function cargarConfigSistema() {
     }
 }
 
-// validarHorario ahora solo mira el estado del interruptor
-function validarHorario(tipo) {
+let _columnasCatalogo = 3; // default — se sobreescribe desde config_sistema → columnas_catalogo
+
+function _aplicarColumnasCatalogo(n) {
+    const cols = Math.min(Math.max(parseInt(n) || 3, 1), 5);
+    _columnasCatalogo = cols;
+    const w = cols <= 2 ? '320px' : cols === 3 ? '280px' : cols === 4 ? '240px' : '200px';
+    const style = document.getElementById('_styleColumnasCatalogo');
+    const css = `
+        .products-grid { grid-template-columns: repeat(${cols}, 1fr) !important; }
+        @media (max-width: 767px) { .products-grid { grid-template-columns: repeat(${Math.min(cols, 2)}, 1fr) !important; } }
+        @media (max-width: 480px)  { .products-grid { grid-template-columns: 1fr !important; } }
+    `;
+    if (style) { style.textContent = css; }
+    else {
+        const s = document.createElement('style');
+        s.id = '_styleColumnasCatalogo';
+        s.textContent = css;
+        document.head.appendChild(s);
+    }
+}
     return OFERTA_ACTIVA[tipo] === true;
 }
 
@@ -4022,24 +4043,6 @@ function processAPIData(apiData) {
 
     // ── DIAGNÓSTICO PROMOS — ver datos CRUDOS que mandó el GAS ──
     // Busca productos con category=PROMOS o categoriaOferta=promo activa
-    const _diagPromos = products.filter(p =>
-        p.category === 'PROMOS' ||
-        String(p.categoriaOferta || '').toLowerCase().includes('promo')
-    );
-    if (_diagPromos.length) {
-        console.warn('🔍 PROMOS raw GAS data (expandir para ver):');
-        console.table(_diagPromos.map(p => ({
-            nombre:          p.name?.substring(0,25),
-            colJ_catOferta:  p.categoriaOferta,   // debe ser 'promo activa'
-            colB_price:      p.price,             // ANTES (precio original)
-            colL_normal:     p.normal,            // AHORA (precio promo)
-            esPromoActiva:   esPromoActiva(p),    // debe ser true
-            ahorra:          (p.price||0)-(p.normal||0)
-        })));
-    } else {
-        console.warn('⚠️ PROMOS: ningún producto con category=PROMOS o categoriaOferta=promo — revisar GAS');
-    }
-    // ── FIN DIAGNÓSTICO ──
     // Ocultar skeleton con fade-out suave para minimizar CLS
     const sk = document.getElementById('skeletonGrid');
     if (sk) {
@@ -4093,7 +4096,8 @@ function renderizarPromos() {
         if (listaPromos.length) {
             contPromos.classList.remove('cls-oculto');
             contPromos.style.marginBottom = '2rem';
-            gridPromos.innerHTML = listaPromos.map(p => _renderCardPromoCombo(p, 'promo')).join('');
+            const _gh = `<div style="flex:0 1 280px;min-width:240px;max-width:340px;height:0;"></div>`;
+            gridPromos.innerHTML = listaPromos.map(p => _renderCardPromoCombo(p, 'promo')).join('') + _gh + _gh + _gh;
         } else {
             contPromos.classList.add('cls-oculto');
             contPromos.style.marginBottom = '';
@@ -4105,7 +4109,7 @@ function renderizarPromos() {
         if (listaCombos.length) {
             contCombos.classList.remove('cls-oculto');
             contCombos.style.marginBottom = '2rem';
-            gridCombos.innerHTML = listaCombos.map(p => _renderCardPromoCombo(p, 'combo')).join('');
+            gridCombos.innerHTML = listaCombos.map(p => _renderCardPromoCombo(p, 'combo')).join('') + _gh + _gh + _gh;
         } else {
             contCombos.classList.add('cls-oculto');
             contCombos.style.marginBottom = '';
@@ -4242,6 +4246,7 @@ function renderizarRecienLlegados() {
         { icono: '⭐', texto: '¡Llegó!' },
     ];
 
+    const GHOST = `<div style="flex:0 1 280px;min-width:240px;max-width:340px;height:0;"></div>`;
     grid.innerHTML = lista.map((p, i) => {
         const prod = products.find(pr => pr.id === p.id);
         const precio = prod ? prod.price : p.precio;
@@ -4279,10 +4284,8 @@ function renderizarRecienLlegados() {
                 <button class="add-to-cart" data-id="${p.id}" onclick="event.stopPropagation();addToCart(${p.id});" style="margin-top:8px;">🛒 Agregar al Carrito</button>
             </div>
         </div>`;
-    }).join('');
+    }).join('') + GHOST + GHOST + GHOST;
 }
-
-function simplificarNombre(nombre) {
     return nombre
         .toLowerCase()
         .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
