@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Copihue · Finanzas v2</title>
+<title>Copihue · Finanzas v3</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -841,31 +841,52 @@ function buildCompras(){
   const mediana = cantidades[Math.floor(cantidades.length/2)]||1;
   const sospechosos = comp.filter(r=>r.cantidad > mediana*50 && r.cantidad > 100);
 
-  // Por producto — todos los datos
-  const porProd = {};
-  comp.forEach(r=>{ 
-    if(!porProd[r.producto]) porProd[r.producto]={total:0,cantidad:0,compras:0,ultimaFecha:r.fecha,ultimoCosto:r.costo};
-    porProd[r.producto].total+=r.total; porProd[r.producto].cantidad+=r.cantidad;
-    porProd[r.producto].compras++;
-    if(r.fecha>porProd[r.producto].ultimaFecha){porProd[r.producto].ultimaFecha=r.fecha;porProd[r.producto].ultimoCosto=r.costo;}
-  });
-  const prods = Object.entries(porProd).sort((a,b)=>b[1].total-a[1].total);
-  const maxProd = prods[0]?.[1].total||1;
+  // Separar almacén vs tecnología/ML
+  const PROVS_TEC = ['TECNOLOGIA','MERCADO LIBRE'];
+  const compAlmacen = comp.filter(r=>!PROVS_TEC.includes(r.proveedor.toUpperCase()));
+  const compTec     = comp.filter(r=> PROVS_TEC.includes(r.proveedor.toUpperCase()));
+
+  function agruparPorProd(lista){
+    const m = {};
+    lista.forEach(r=>{
+      if(!m[r.producto]) m[r.producto]={total:0,cantidad:0,compras:0,ultimaFecha:r.fecha,ultimoCosto:r.costo,proveedor:r.proveedor};
+      m[r.producto].total+=r.total; m[r.producto].cantidad+=r.cantidad; m[r.producto].compras++;
+      if(r.fecha>m[r.producto].ultimaFecha){m[r.producto].ultimaFecha=r.fecha;m[r.producto].ultimoCosto=r.costo;}
+    });
+    return Object.entries(m).sort((a,b)=>b[1].total-a[1].total);
+  }
+
+  const prodsAlm = agruparPorProd(compAlmacen);
+  const prodsTec = agruparPorProd(compTec);
+  const prods    = agruparPorProd(comp); // para compatibilidad
+  const maxProd  = prods[0]?.[1].total||1;
+  const tcAlm    = compAlmacen.reduce((s,r)=>s+r.total,0);
+  const tcTec    = compTec.reduce((s,r)=>s+r.total,0);
 
   let h = `<div class="cards">
     <div class="card ag full">
-      <div class="card-lbl">🛒 Total compras a proveedores</div>
+      <div class="card-lbl">🛒 Total compras del período</div>
       <div class="card-val">${fmtK(tc)}</div>
-      <div class="card-sub">${comp.length} ingresos de stock · ${provs.length} proveedores</div>
+      <div class="card-sub">${comp.length} ingresos · ${new Set(comp.map(r=>r.proveedor)).size} proveedores</div>
+    </div>
+    <div class="card" style="background:linear-gradient(135deg,#1b5e20,#2e7d32);border:none">
+      <div class="card-lbl" style="color:rgba(255,255,255,.8)">🏪 Almacén</div>
+      <div style="font-size:1.1rem;font-weight:900;color:#fff">${fmtK(tcAlm)}</div>
+      <div style="font-size:.62rem;color:rgba(255,255,255,.7);margin-top:2px">${compAlmacen.length} compras · ${ti?Math.round(tcAlm/ti*100):0}% ventas</div>
+    </div>
+    <div class="card" style="background:linear-gradient(135deg,#4a148c,#6a1b9a);border:none">
+      <div class="card-lbl" style="color:rgba(255,255,255,.8)">📱 Tecnología</div>
+      <div style="font-size:1.1rem;font-weight:900;color:#fff">${fmtK(tcTec)}</div>
+      <div style="font-size:.62rem;color:rgba(255,255,255,.7);margin-top:2px">${compTec.length} compras · ML / Tec</div>
     </div>
     <div class="card">
-      <div class="card-lbl" style="color:var(--gris)">📊 % de ventas</div>
-      <div style="font-size:1.2rem;font-weight:900;color:var(--azul)">${ti?Math.round(tc/ti*100):0}%</div>
-      <div class="card-sub" style="color:var(--gris)">costo sobre facturación</div>
+      <div class="card-lbl" style="color:var(--gris)">📊 Almacén / ventas</div>
+      <div style="font-size:1.2rem;font-weight:900;color:var(--azul)">${ti?Math.round(tcAlm/ti*100):0}%</div>
+      <div class="card-sub" style="color:var(--gris)">costo stock sobre facturación</div>
     </div>
     <div class="card">
-      <div class="card-lbl" style="color:var(--gris)">💰 % de ganancia</div>
-      <div style="font-size:1.2rem;font-weight:900;color:${neto>0?'var(--rojo)':'var(--gris)}'}">${neto>0?Math.round(tc/neto*100):0}%</div>
+      <div class="card-lbl" style="color:var(--gris)">💰 Stock / ganancia</div>
+      <div style="font-size:1.2rem;font-weight:900;color:${neto>0?'var(--rojo)':'var(--gris)'}">${neto>0?Math.round(tcAlm/neto*100):0}%</div>
       <div class="card-sub" style="color:var(--gris)">impacto en tu bolsillo</div>
     </div>
   </div>`;
@@ -890,26 +911,42 @@ function buildCompras(){
     h += '</div>';
   }
 
-  // Por producto
-  h += `<div class="tar"><div class="tar-t">📦 Por producto <span class="badge bg-a">${prods.length}</span></div>`;
-  if(!prods.length){ h += '<div class="empty">Sin compras en este período</div>'; }
-  else prods.forEach(([prod,d])=>{
-    const pct = tc?Math.round(d.total/tc*100):0;
-    h += `<div class="bw" style="padding:8px 10px;border-radius:10px;margin-bottom:2px" onmouseover="this.style.background='#f0f8ff'" onmouseout="this.style.background=''">
-      <div class="bw-hdr">
-        <div class="bw-n" style="font-size:.78rem">${prod}</div>
-        <div class="bw-v" style="color:var(--azul)">${fmt(d.total)}</div>
-      </div>
-      <div class="barra-bg"><div class="barra-f bar-a" style="width:${Math.round(d.total/maxProd*100)}%"></div></div>
-      <div style="display:flex;gap:8px;margin-top:2px">
-        <span style="font-size:.62rem;color:var(--gris)">${d.compras} compra${d.compras>1?'s':''}</span>
-        <span style="font-size:.62rem;color:var(--gris)">· ${Math.round(d.cantidad)} u.</span>
-        <span style="font-size:.62rem;color:var(--gris)">· $${fmt(d.ultimoCosto).replace('$','')} c/u</span>
-        <span class="badge bg-a" style="font-size:.6rem;margin-left:auto">${pct}%</span>
-      </div>
+  // Función para renderizar lista de productos
+  function renderProds(lista, total, color, maxV) {
+    if(!lista.length) return '<div class="empty">Sin compras en este período</div>';
+    return lista.map(([prod,d])=>{
+      const pct=total?Math.round(d.total/total*100):0;
+      return `<div class="bw" style="padding:8px 10px;border-radius:10px;margin-bottom:2px" onmouseover="this.style.background='#f8f8ff'" onmouseout="this.style.background=''">
+        <div class="bw-hdr">
+          <div class="bw-n" style="font-size:.78rem">${prod}</div>
+          <div class="bw-v" style="color:${color}">${fmt(d.total)}</div>
+        </div>
+        <div class="barra-bg"><div class="barra-f" style="width:${Math.round(d.total/maxV*100)}%;background:${color}"></div></div>
+        <div style="display:flex;gap:8px;margin-top:2px">
+          <span style="font-size:.62rem;color:var(--gris)">${d.compras} compra${d.compras>1?'s':''} · ${Math.round(d.cantidad)} u. · ${fmt(d.ultimoCosto)} c/u</span>
+          <span style="font-size:.6rem;font-weight:700;color:${color};margin-left:auto">${pct}%</span>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  // Almacén
+  if(prodsAlm.length){
+    const maxA = prodsAlm[0][1].total||1;
+    h += `<div class="tar">
+      <div class="tar-t">🏪 Almacén — productos <span class="badge bg-v">${prodsAlm.length}</span> <span style="float:right;font-size:.75rem;font-weight:900;color:var(--vd)">${fmtK(tcAlm)}</span></div>
+      ${renderProds(prodsAlm, tcAlm, 'var(--verde)', maxA)}
     </div>`;
-  });
-  h += '</div>';
+  }
+
+  // Tecnología / ML
+  if(prodsTec.length){
+    const maxT = prodsTec[0][1].total||1;
+    h += `<div class="tar">
+      <div class="tar-t">📱 Tecnología / Mercado Libre <span class="badge" style="background:#f3e5f5;color:#6a1b9a">${prodsTec.length}</span> <span style="float:right;font-size:.75rem;font-weight:900;color:#6a1b9a">${fmtK(tcTec)}</span></div>
+      ${renderProds(prodsTec, tcTec, '#6a1b9a', maxT)}
+    </div>`;
+  }
 
   // Comparativa meses
   const periodos = vista==='mes'
