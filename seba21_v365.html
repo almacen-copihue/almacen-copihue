@@ -4,16 +4,6 @@
   COPIHUE POS — CHANGELOG
 ================================================================================
 
-  v365 — 30/05/2026
-  -----------------
-  • FIX carrito PROMO ACTIVA: cambiarCantidad() no actualizaba precioTotalCalc
-    al cambiar qty → subtotal quedaba congelado en el valor de qty=1.
-  • FIX badge modal confirmar: colores promo (#6a1b9a) y combo (#00838f) faltaban.
-  • FIX recuperarVenta: pisaba el precio manual (por peso) con oferta.precioUnitario
-    al recuperar carrito de localStorage → badge PROMO desaparecía al recargar.
-  • FIX tieneOferta en modal: agrega caso ofertaTipo promo/combo para mostrar
-    badge aunque el precio haya sido editado manualmente.
-
   v271 — 23/04/2026
   -----------------
   • FIADO: Campo teléfono siempre editable (antes quedaba bloqueado con readonly
@@ -2437,8 +2427,41 @@ window.addEventListener('popstate', function() {
             return;
         }
     }
-    // Sin modal abierto → no hacer nada (quedarse en la página)
+    // Sin modal abierto → preguntar si quiere salir
+    _mostrarConfirmSalir();
 });
+
+// Modal confirmación salir
+function _mostrarConfirmSalir() {
+    let dlg = document.getElementById('_modalSalir');
+    if (!dlg) {
+        dlg = document.createElement('div');
+        dlg.id = '_modalSalir';
+        dlg.style.cssText = `
+            position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:99999;
+            display:flex;align-items:center;justify-content:center;
+        `;
+        dlg.innerHTML = `
+            <div style="background:white;border-radius:16px;padding:28px 24px;max-width:320px;width:90%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.3);">
+                <div style="font-size:2rem;margin-bottom:12px;">🚪</div>
+                <div style="font-weight:800;font-size:1.1rem;color:#1a1a1a;margin-bottom:8px;">¿Querés salir?</div>
+                <div style="font-size:0.88rem;color:#666;margin-bottom:24px;">Si salís perdés la sesión actual y lo que tengas en curso.</div>
+                <div style="display:flex;gap:12px;justify-content:center;">
+                    <button onclick="document.getElementById('_modalSalir').style.display='none';history.pushState({pos:true},'')"
+                        style="flex:1;padding:12px;border-radius:10px;border:2px solid #ddd;background:white;font-size:0.9rem;font-weight:700;cursor:pointer;color:#333;">
+                        Quedarme
+                    </button>
+                    <button onclick="history.go(-2)"
+                        style="flex:1;padding:12px;border-radius:10px;border:none;background:#c0392b;color:white;font-size:0.9rem;font-weight:700;cursor:pointer;">
+                        Salir
+                    </button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(dlg);
+    }
+    dlg.style.display = 'flex';
+}
 
 function activarGuardiaAtras() {}   // no-op — ya no se necesita
 function desactivarGuardiaAtras() {} // no-op
@@ -3276,7 +3299,6 @@ function cambiarCantidad(id, delta) {
         if (p) {
             const oferta = calcularOfertaPOS(p, nuevaCant);
             item.price           = oferta.precioUnitario;
-            item.precioTotalCalc = oferta.precioTotal;   // FIX: actualizar total exacto con nueva qty
             item.precioOriginal  = oferta.tipoOferta === 'normal' ? p.normal : (oferta.tieneOferta ? p.price : 0);
             item.precioModificado = oferta.tieneOferta;
             item.ofertaEtiqueta  = oferta.etiqueta || null;
@@ -3546,14 +3568,11 @@ function _buildDetalleModalHTML() {
     const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
     const items = ventaActual.map((item, idx) => {
         const subtotal    = Math.round(item.price * item.qty);
-        const tieneOferta = (item.precioModificado && item.precioOriginal > item.price)
-                         || (item.ofertaTipo === 'promo' || item.ofertaTipo === 'combo') && !!item.ofertaEtiqueta;
+        const tieneOferta = item.precioModificado && item.precioOriginal > item.price;
 
         const colores = {
             cervecero: '#1565c0', relampago: '#b06000',
-            destacadas: '#ff6f00', especiales: '#00bcd4',
-            ultimas: '#b71c1c', normal: '#43a047',
-            promo: '#6a1b9a', combo: '#00838f'
+            destacadas: '#ff6f00', especiales: '#00bcd4', ultimas: '#b71c1c', normal: '#43a047'
         };
         const col = colores[item.ofertaTipo] || '#f9a825';
 
@@ -4619,15 +4638,11 @@ function recuperarVenta() {
             }
             // Recalcular oferta con los pools actuales
             const oferta = calcularOfertaPOS(p, item.qty);
-            // Si el item fue editado manualmente (precio por peso), preservar ese precio
-            const precioFinal = (item.precioModificado && item.price !== oferta.precioUnitario)
-                ? item.price
-                : oferta.precioUnitario;
             return {
                 ...item,
-                price:           precioFinal,
+                price:           oferta.precioUnitario,
                 precioOriginal:  oferta.tipoOferta === 'normal' ? p.normal : (oferta.tieneOferta ? p.price : 0),
-                precioModificado: oferta.tieneOferta || item.precioModificado,
+                precioModificado: oferta.tieneOferta,
                 ofertaEtiqueta:  oferta.etiqueta || null,
                 ofertaTipo:      oferta.tipoOferta || null,
                 stockDisponible: p.stock
