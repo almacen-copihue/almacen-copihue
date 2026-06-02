@@ -921,23 +921,197 @@ async function init() {
   window.addEventListener('resize', recalcLayout);
 }
 
-  // ===== FUERZA OFERTAS PARA TEST =====
-  // Simula que TODOS los productos tienen oferta (para probar)
-  allProducts.forEach(p => {
-    // Asigna ofertas aleatorias para testing
-    const tipos = ['relampago', 'destacado', 'especial', 'promo', 'combo', 'ultimas'];
-    const tipoRandom = tipos[Math.floor(Math.random() * tipos.length)];
-    p.catOferta = tipoRandom;
-    if (tipoRandom === 'relampago') p.relampago = '2x1';
-    if (tipoRandom === 'destacado') p.destacada = 20;
-    if (tipoRandom === 'especial') p.especial = 10;
-    if (tipoRandom === 'promo' || tipoRandom === 'combo') p.normal = p.precioVenta * 0.8;
-  });
-  // ===== FIN FUERZA OFERTAS =====
+// ============================================================
+// FETCH DATA — igual que v361: productos + getOfertas en paralelo
+// ============================================================
+
+// Pools de ofertas activos (cargados desde getOfertas, igual que seba21)
+const _poolRelampago  = new Set();
+const _poolDestacadas = new Set();
+const _poolEspeciales = new Set();
+const _poolUltimas    = new Set();
+const _poolUltimasData = new Map(); // id → { precioOferta, pct, diasParaVencer }
+
+async function _apiFetch(action) {
+  const r = await fetch(API_URL + '?action=' + action + '&t=' + Date.now(),
+    { redirect: 'follow' });
+  return r.json();
+}
+
+async function fetchData() {
+  try {
+    const r = await fetch(API_URL + '?t=' + Date.now(), { redirect: 'follow' });
+    return await r.json();
+  } catch(e) {
+    console.error('API productos error:', e);
+    return null;
+  }
+}
+
+// Carga pools desde getOfertas — fuente de verdad, igual que seba21 v361
+async function cargarPools() {
+  try {
+    const data = await _apiFetch('getOfertas');
+    if (!data.success) { 
+      console.warn('getOfertas sin success'); 
+      return; 
+    }
+
+    _poolRelampago.clear(); 
+    _poolDestacadas.clear();
+    _poolEspeciales.clear(); 
+    _poolUltimas.clear(); 
+    _poolUltimasData.clear();
+
+    (data.relampagoActivo   || []).forEach(p => _poolRelampago.add(Number(p.id)));
+    (data.destacadasActivas || []).filter(p => p.categoria !== 'CERVEZAS')
+                                  .forEach(p => _poolDestacadas.add(Number(p.id)));
+    (data.especialesActivas || []).filter(p => p.categoria !== 'CERVEZAS')
+                                  .forEach(p => _poolEspeciales.add(Number(p.id)));
+    const ults = data.ultimasSeleccionadasSiempre || data.ultimasSeleccionadas || [];
+    ults.forEach(p => {
+      const id = Number(p.id);
+      _poolUltimas.add(id);
+      _poolUltimasData.set(id, {
+        precioOferta:   p.precioOferta   != null ? p.precioOferta   : null,
+        pct:            p.pct            != null ? p.pct            : null,
+        diasParaVencer: p.diasParaVencer != null ? p.diasParaVencer : null,
+      });
+    });
+
+    console.log(`📊 Pools SendWA — ⚡${_poolRelampago.size} 🔥${_poolDestacadas.size} 🌙${_poolEspeciales.size} 🏷️${_poolUltimas.size}`);
+    
+    // ===== FORZAR OFERTAS ACTIVAS =====
+    window._toggleEstado = window._toggleEstado || {};
+    window._toggleEstado.relampago = true;
+    window._toggleEstado.destacadas = true;
+    window._toggleEstado.especiales = true;
+    window._toggleEstado.ultimas = true;
+    console.log('✅ Ofertas forzadas a ACTIVAS');
+    
+  } catch(e) {
+    console.warn('No se pudieron cargar pools de ofertas:', e.message);
+  }
+}
+
+// ============================================================
+// PARSE PRODUCTS — misma estructura que seba21
+// ============================================================
+function parseProducts(data) {
+  let rows = null;
+  if (Array.isArray(data)) {
+    rows = data;
+  } else if (typeof data === 'object') {
+    for (const k of Object.keys(data)) {
+      if (Array.isArray(data[k]) && data[k].length > 0) { rows = data[k]; break; }
+    }
+  }
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+
+  return rows
+    .filter(r => r && typeof r === 'object')
+    .map((r, i) => {
+      const nombre      = String(r.name || r.nombre || '').trim();
+      const precioVenta = parseFloat(r.price || r.precio || 0);
+      const categoria   = String(r.category || r.categoria || '').trim();
+      const stock       = parseFloat(r.stock ?? 1);
+      const foto        = String(r.image || r.imagen || r.foto || '').trim();
+      const id          = Number(r.id) || (nombre + '_' + i);
+      const vendidos    = parseFloat(r.rotacion || r.vendidos || 0);
+      const relampago   = (r.relampago !== undefined && r.relampago !== null && r.relampago !== '')
+                          ? (isNaN(parseInt(r.relampago)) ? String(r.relampago).trim() : parseInt(r.relampago)) : 0;
+      const destacada   = parseInt(r.destacada) || 0;
+      const especial    = parseInt(r.especial)  || 0;
+      const normal      = parseFloat(r.normal || r.precioNormal || r['$promos/combos'] || 0);
+
+      return { id, nombre, precioVenta, categoria, stock, foto, vendidos,
+               relampago, destacada, especial, normal, catOferta: '', _raw: r };
+    })
+    .filter(p => p.nombre && p.precioVenta > 0);
+}
+
+// ============================================================
+// FUNCIONES QUE FALTABAN
+// ============================================================
+function applyUIColors(data) {
+  const cfg = data.config_ui || data.CONFIG_UI || data.configUI || {};
+  if (cfg.primaryColor) document.documentElement.style.setProperty('--primary', cfg.primaryColor);
+  if (cfg.primaryDark)  document.documentElement.style.setProperty('--primary-dark', cfg.primaryDark);
+  if (cfg.accentColor)  document.documentElement.style.setProperty('--accent', cfg.accentColor);
+}
+
+function buildCategoryFilters() {
+  const cats = [...new Set(allProducts.map(p => p.categoria).filter(Boolean))].sort();
+  const container = document.getElementById('cat-chips-container');
+  if (!container) return;
+  container.innerHTML = '';
+  for (const cat of cats) {
+    const btn = document.createElement('button');
+    btn.className = 'filter-chip cat-chip';
+    btn.dataset.filter = norm(cat);
+    btn.textContent = getCatEmoji(cat) + ' ' + cat;
+    container.appendChild(btn);
+  }
+}
+
+// ============================================================
+// INIT
+// ============================================================
+window.toggleSelect = toggleSelect;
+
+// Botón atrás del celular
+history.pushState({ sendwa: true }, '', location.href);
+window.addEventListener('popstate', (e) => {
+  if (document.getElementById('collage-modal').classList.contains('open')) {
+    document.getElementById('collage-modal').classList.remove('open');
+    history.pushState({ sendwa: true }, '', location.href);
+    return;
+  }
+  if (selectedIds.size > 0) {
+    selectedIds.clear(); selectionOrder = [];
+    renderGrid();
+    toast('Selección limpiada');
+    history.pushState({ sendwa: true }, '', location.href);
+    return;
+  }
+  if (currentFilter !== 'todos' || currentSearch) {
+    currentFilter = 'todos'; currentSearch = '';
+    document.getElementById('search-input').value = '';
+    document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+    document.querySelector('.filter-chip[data-filter="todos"]')?.classList.add('active');
+    applyFilter();
+    history.pushState({ sendwa: true }, '', location.href);
+    return;
+  }
+  history.pushState({ sendwa: true }, '', location.href);
+});
+
+async function init() {
+  const [data] = await Promise.all([fetchData(), cargarPools()]);
+  document.getElementById('loader').style.display = 'none';
+
+  if (!data) {
+    document.getElementById('grid').innerHTML = `
+      <div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--text-muted)">
+        ❌ No se pudo conectar con el catálogo.<br>
+        <small>Verificá tu conexión e intentá recargar.</small>
+      </div>`;
+    return;
+  }
+
+  applyUIColors(data);
+  allProducts = parseProducts(data);
+
+  if (!allProducts.length) {
+    document.getElementById('grid').innerHTML = `
+      <div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--text-muted)">
+        ⚠️ No se encontraron productos en el catálogo.
+      </div>`;
+    return;
+  }
 
   buildCategoryFilters();
 
-  // Restaurar selección reciente
   if (recentSelection.length) {
     recentSelection.forEach(id => {
       if (allProducts.find(p => String(p.id) === String(id))) {
@@ -950,10 +1124,12 @@ async function init() {
   applyFilter();
   recalcLayout();
   window.addEventListener('resize', recalcLayout);
-  
-  console.log('✅ Inicializado con OFERTAS DE PRUEBA activas');
 }
 
+const panelObs = new ResizeObserver(recalcLayout);
+panelObs.observe(document.getElementById('header'));
+
+init();
 // ============================================================
 // FETCH DATA — igual que v361: productos + getOfertas en paralelo
 // ============================================================
