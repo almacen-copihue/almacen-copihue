@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
+<title>SendWA — Almacén Copihue</title>
+<style>
+  * {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+  }
+  
+  :root {
+    --primary: #4CAF50;
+    --primary-dark: #2E7D32;
+    --accent: #FF5722;
+    --bg: #f5f5f5;
+    --card-bg: #ffffff;
+    --text: #212121;
+    --text-muted: #757575;
+    --border: #e0e0e0;
+    --selected: #E8F5E9;
+    --selected-border: #4CAF50;
+  }
+  
+  [data-theme="dark"] {
+    --bg: #121212;
+    --card-bg: #1e1e1e;
+    --text: #ffffff;
+    --text-muted: #b0b0b0;
+    --border: #333333;
+    --selected: #1a3a1a;
+  }
+  
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    margin: 0;
+    padding: 0;
+    padding-bottom: 80px;
+  }
+  
+  .header {
+    position: sticky;
+    top: 0;
+    background: var(--primary-dark);
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    z-index: 100;
+  }
+  
+  .header h1 {
+    color: white;
+    font-size: 18px;
+    margin: 0;
+  }
+  
+  .header h1 small {
+    font-size: 10px;
+    opacity: 0.8;
+  }
+  
+  .header-stats {
+    display: flex;
+    gap: 12px;
+    background: rgba(255,255,255,0.2);
+    padding: 4px 10px;
+    border-radius: 20px;
+  }
+  
+  .header-stats span {
+    color: white;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  
+  .search-bar {
+    padding: 8px 12px;
+    background: var(--card-bg);
+    border-bottom: 1px solid var(--border);
+  }
+  
+  .search-input {
+    width: 100%;
+    padding: 10px 16px;
+    border-radius: 30px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+  }
+  
+  .filters-bar {
+    background: var(--card-bg);
+    padding: 8px 12px;
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    white-space: nowrap;
+    border-bottom: 1px solid var(--border);
+  }
+  
+  .filters-bar::-webkit-scrollbar {
+    display: none;
+  }
+  
+  .filter-chip {
+    padding: 6px 14px;
+    border-radius: 20px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  
+  .filter-chip.active {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: white;
+  }
+  
+  .products-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    padding: 8px;
+  }
+  
+  @media (min-width: 500px) {
+    .products-grid { grid-template-columns: repeat(3, 1fr); }
+  }
+  
+  @media (min-width: 700px) {
+    .products-grid { grid-template-columns: repeat(4, 1fr); }
+  }
+  
+  .product-card {
+    background: var(--card-bg);
+    border-radius: 12px;
+    overflow: hidden;
+    border: 2px solid var(--border);
+    cursor: pointer;
+    position: relative;
+  }
+  
+  .product-card.selected {
+    border-color: var(--selected-border);
+    background: var(--selected);
+  }
+  
+  .product-image {
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: cover;
+    background: #e0e0e0;
+  }
+  
+  .product-info {
+    padding: 6px;
+    text-align: center;
+  }
+  
+  .product-name {
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.3;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  
+  .product-category {
+    font-size: 9px;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+  
+  .product-price {
+    font-size: 12px;
+    font-weight: 700;
+    margin-top: 4px;
+  }
+  
+  .old-price {
+    font-size: 10px;
+    text-decoration: line-through;
+    color: var(--text-muted);
+    margin-right: 4px;
+  }
+  
+  .offer-price {
+    color: var(--accent);
+  }
+  
+  .offer-badge {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    background: var(--accent);
+    color: white;
+    font-size: 8px;
+    font-weight: bold;
+    padding: 2px 6px;
+    border-radius: 10px;
+    z-index: 1;
+  }
+  
+  .check-mark {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 20px;
+    height: 20px;
+    background: var(--selected-border);
+    color: white;
+    border-radius: 50%;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+  }
+  
+  .product-card.selected .check-mark {
+    display: flex;
+  }
+  
+  .order-number {
+    position: absolute;
+    bottom: 4px;
+    right: 4px;
+    width: 18px;
+    height: 18px;
+    background: var(--primary-dark);
+    color: white;
+    border-radius: 50%;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+  }
+  
+  .product-card.selected .order-number {
+    display: flex;
+  }
+  
+  .category-separator {
+    grid-column: 1 / -1;
+    background: var(--primary-dark);
+    color: white;
+    padding: 6px 12px;
+    border-radius: 8px;
+    margin: 4px 0;
+    font-size: 12px;
+    font-weight: bold;
+    text-align: center;
+  }
+  
+  .fab-container {
+    position: fixed;
+    bottom: 20px;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: space-between;
+    padding: 0 16px;
+    z-index: 100;
+    pointer-events: none;
+  }
+  
+  .fab-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: auto;
+  }
+  
+  .fab {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: var(--primary-dark);
+    color: white;
+    border: none;
+    font-size: 22px;
+    cursor: pointer;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+  }
+  
+  .fab:active { transform: scale(0.95); }
+  .fab.secondary { background: var(--accent); }
+  .fab.small { width: 40px; height: 40px; font-size: 18px; }
+  
+  .tools-panel {
+    position: fixed;
+    bottom: 80px;
+    right: 16px;
+    background: var(--card-bg);
+    border-radius: 16px;
+    padding: 8px;
+    display: none;
+    flex-direction: column;
+    gap: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    z-index: 95;
+    border: 1px solid var(--border);
+  }
+  
+  .tools-panel.open { display: flex; }
+  
+  .tool-btn {
+    padding: 8px 14px;
+    border-radius: 25px;
+    background: var(--primary);
+    color: white;
+    border: none;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    text-align: center;
+  }
+  
+  .modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.8);
+    z-index: 200;
+    align-items: flex-end;
+  }
+  
+  .modal.open { display: flex; }
+  
+  .modal-sheet {
+    background: var(--card-bg);
+    border-radius: 20px 20px 0 0;
+    width: 100%;
+    max-height: 85vh;
+    overflow-y: auto;
+    padding: 16px;
+  }
+  
+  .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  
+  .close-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--bg);
+    border: none;
+    font-size: 18px;
+    cursor: pointer;
+  }
+  
+  .mode-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  
+  .mode-tab {
+    flex: 1;
+    padding: 8px;
+    border-radius: 25px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    font-weight: 600;
+    text-align: center;
+    cursor: pointer;
+    color: var(--text);
+  }
+  
+  .mode-tab.active {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+  }
+  
+  .format-row {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    margin: 12px 0;
+  }
+  
+  .format-btn {
+    padding: 6px 12px;
+    border-radius: 20px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    font-size: 10px;
+    white-space: nowrap;
+    cursor: pointer;
+    color: var(--text);
+  }
+  
+  .format-btn.active {
+    background: var(--primary);
+    color: white;
+  }
+  
+  .canvas-container {
+    text-align: center;
+    margin: 12px 0;
+  }
+  
+  .canvas-container canvas {
+    max-width: 100%;
+    max-height: 50vh;
+    border-radius: 12px;
+  }
+  
+  .action-buttons {
+    display: flex;
+    gap: 12px;
+    margin-top: 12px;
+  }
+  
+  .action-buttons button {
+    flex: 1;
+    padding: 10px;
+    border-radius: 25px;
+    border: none;
+    font-weight: bold;
+    cursor: pointer;
+  }
+  
+  #loader {
+    position: fixed; inset: 0; z-index: 300;
+    background: var(--bg); display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 12px;
+  }
+  
+  #toast {
+    position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%);
+    background: #333; color: white; padding: 8px 16px; border-radius: 20px;
+    font-size: 12px; z-index: 400; display: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="loader">
+  <div style="font-size: 40px;">🛒</div>
+  <div style="font-weight: 600; color: var(--text-muted);">Cargando catálogo real...</div>
+</div>
+
+<div class="header">
+  <h1>SendWA <small>Copihue</small></h1>
+  <div class="header-stats">
+    <span id="statSel">✓ 0</span>
+    <span id="statSize">0 Chars</span>
+  </div>
+  <button id="themeToggle" style="background:none; border:none; color:white; font-size:18px; cursor:pointer;">🌙</button>
+</div>
+
+<div class="search-bar">
+  <input type="text" id="searchInput" class="search-input" placeholder="Buscar productos por nombre...">
+</div>
+
+<div class="filters-bar" id="filtersBar">
+  <div class="filter-chip active" id="chip-all" onclick="selectFilter('all')">📍 Todo</div>
+  <div class="filter-chip" id="chip-ofertas" onclick="selectFilter('ofertas')">🔥 Ofertas</div>
+</div>
+
+<div class="products-grid" id="productsGrid"></div>
+
+<div class="fab-container">
+  <div class="fab-group">
+    <button class="fab" id="clearBtn" title="Limpiar Selección">🧹</button>
+  </div>
+  <div class="fab-group">
+    <button class="fab secondary" id="toolsBtn" title="Herramientas">🛠️</button>
+  </div>
+</div>
+
+<div class="tools-panel" id="toolsPanel">
+  <button class="tool-btn" id="sendWaBtn" style="background:#25D366;">💬 Enviar WhatsApp</button>
+  <button class="tool-btn" id="openCollageBtn" style="background:#2980b9;">🎨 Crear Collage</button>
+</div>
+
+<div class="modal" id="modal">
+  <div class="modal-sheet">
+    <div class="modal-header">
+      <h3 style="margin:0;">Diseñador de Estados</h3>
+      <button class="close-btn" id="closeModalBtn">✕</button>
+    </div>
+    
+    <div class="mode-tabs">
+      <div class="mode-tab active" id="tab-estado" onclick="setCollageMode('estado')">📸 Estado WA</div>
+      <div class="mode-tab" id="tab-lista" onclick="setCollageMode('lista')">👥 Lista/Grupo</div>
+    </div>
+    
+    <div class="format-row">
+      <button class="format-btn active" data-format="1080x1920">Vertical (1080x1920)</button>
+      <button class="format-btn" data-format="1080x1080">Cuadrado (1080x1080)</button>
+    </div>
+    
+    <div class="canvas-container">
+      <canvas id="canvas"></canvas>
+    </div>
+    
+    <div class="action-buttons">
+      <button id="downloadBtn" style="background:var(--primary); color:white;">💾 Guardar Imagen</button>
+      <button id="closeModalBtn2" style="background:var(--bg); color:var(--text);">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  // Variables globales y configs heredadas de ver.21
+  const API_URL = "https://script.google.com/macros/s/AKfycbz08wZfO0LgXmDcl4x79N26VpZ37zT7wR0Yq-bA3B2-Mh2G3S6z7Wp_DGAObe2U7g/exec";
+  let allProducts = [];
+  let selectedIds = new Set();
+  let selectionOrder = [];
+  let currentCategoryFilter = 'all';
+  let currentFormat = { w: 1080, h: 1920 };
+  let activeCollageMode = 'estado';
+
+  // Helper de nombres para la lectura correcta de fotos desde GitHub
+  function slugFoto(name) {
+    if(!name) return '';
+    return name.toLowerCase()
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Limpia acentos
+      .replace(/[^a-z0-9\s-]/g, "") // Saca símbolos extraños
+      .replace(/\s+/g, "-") // Reemplaza espacios por guiones
+      .replace(/-+/g, "-")
+      .trim();
+  }
+
+  // URL de la Imagen: Prioriza Link del Sheets o construye el path limpio de GitHub
+  function getImgUrl(p) {
+    if (p.foto && p.foto.startsWith('http')) return p.foto;
+    return `imagenes-productos/${slugFoto(p.nombre)}.jpg`;
+  }
+
+  // Conexión y Fetch de Datos de Planilla
+  async function fetchData() {
+    try {
+      const res = await fetch(API_URL);
+      const json = await res.json();
+      return json;
+    } catch (e) {
+      console.error("Error cargando API:", e);
+      return null;
+    }
+  }
+
+  function parseProducts(data) {
+    if (!data || !data.productos) return [];
+    return data.productos.map((p, idx) => ({
+      id: p.id || String(idx + 1),
+      nombre: p.nombre || '',
+      precio: parseFloat(p.precio) || 0,
+      precioAntes: parseFloat(p.precioAntes) || 0,
+      categoria: p.categoria || 'Otros',
+      oferta: p.oferta || '',
+      foto: p.foto || '',
+      stock: p.stock !== undefined ? p.stock : true
+    }));
+  }
+
+  // Renderizado dinámico de tarjetas
+  function renderGrid() {
+    const grid = document.getElementById('productsGrid');
+    grid.innerHTML = '';
+    
+    const searchVal = document.getElementById('searchInput').value.toLowerCase();
+    
+    // Agrupar por categoría para mantener el orden visual limpio
+    let filtered = allProducts.filter(p => {
+      const matchSearch = p.nombre.toLowerCase().includes(searchVal);
+      if (!matchSearch) return false;
+      
+      if (currentCategoryFilter === 'ofertas') return !!p.oferta;
+      if (currentCategoryFilter !== 'all' && p.categoria !== currentCategoryFilter) return false;
+      return true;
+    });
+
+    let lastCat = '';
+    filtered.forEach(p => {
+      if (currentCategoryFilter === 'all' && p.categoria !== lastCat) {
+        lastCat = p.categoria;
+        const separator = document.createElement('div');
+        separator.className = 'category-separator';
+        separator.innerText = lastCat.toUpperCase();
+        grid.appendChild(separator);
+      }
+
+      const isSelected = selectedIds.has(p.id);
+      const ord = selectionOrder.indexOf(p.id) + 1;
+      
+      const card = document.createElement('div');
+      card.className = `product-card ${isSelected ? 'selected' : ''}`;
+      card.onclick = () => toggleSelect(p.id);
+
+      let badgeHtml = p.oferta ? `<div class="offer-badge">${p.oferta}</div>` : '';
+      let priceHtml = p.precioAntes > p.precio 
+        ? `<div class="product-price"><span class="old-price">$${p.precioAntes}</span><span class="offer-price">$${p.precio}</span></div>`
+        : `<div class="product-price">$${p.precio}</div>`;
+
+      card.innerHTML = `
+        ${badgeHtml}
+        <div class="check-mark">✓</div>
+        <div class="order-number" style="display:${isSelected ? 'flex':'none'}">${ord}</div>
+        <img class="product-image" src="${getImgUrl(p)}" onerror="this.onerror=null; this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'100\' height=\'100\'><rect width=\'100\' height=\'100\' fill=\'%23e0e0e0\'/><text x=\'50%\' y=\'55%\' font-size=\'30\' text-anchor=\'middle\'>📦</text></svg>';" alt="${p.nombre}">
+        <div class="product-info">
+          <div class="product-name">${p.nombre}</div>
+          <div class="product-category">${p.categoria}</div>
+          ${priceHtml}
+        </div>
+      `;
+      grid.appendChild(card);
+    });
+  }
+
+  function toggleSelect(id) {
+    if (selectedIds.has(id)) {
+      selectedIds.delete(id);
+      selectionOrder = selectionOrder.filter(sid => sid !== id);
+    } else {
+      selectedIds.add(id);
+      selectionOrder.push(id);
+    }
+    updateStats();
+    renderGrid();
+  }
+
+  function updateStats() {
+    document.getElementById('statSel').innerText = `✓ ${selectedIds.size}`;
+    
+    // Simular construcción del texto de WhatsApp para medir caracteres en tiempo real
+    let text = `*ALMACÉN COPIHUE* 🛒\n\n`;
+    selectionOrder.forEach(id => {
+      const p = allProducts.find(prod => prod.id === id);
+      if(p) text += `• ${p.nombre} -> *$${p.precio}*\n`;
+    });
+    document.getElementById('statSize').innerText = `${text.length} Chars`;
+  }
+
+  function buildFilters(products) {
+    const bar = document.getElementById('filtersBar');
+    const cats = [...new Set(products.map(p => p.categoria))];
+    
+    cats.forEach(c => {
+      const chip = document.createElement('div');
+      chip.className = 'filter-chip';
+      chip.id = `chip-${slugFoto(c)}`;
+      chip.innerText = c;
+      chip.onclick = () => selectFilter(c);
+      bar.appendChild(chip);
+    });
+  }
+
+  function selectFilter(cat) {
+    currentCategoryFilter = cat;
+    document.querySelectorAll('.filter-chip').forEach(el => el.classList.remove('active'));
+    
+    if (cat === 'all') document.getElementById('chip-all').classList.add('active');
+    else if (cat === 'ofertas') document.getElementById('chip-ofertas').classList.add('active');
+    else document.getElementById(`chip-${slugFoto(cat)}`).classList.add('active');
+    
+    renderGrid();
+  }
+
+  // Generador de Texto para WhatsApp adaptado a la UI simplificada
+  function generateWaText() {
+    if(selectedIds.size === 0) return "No seleccionaste productos.";
+    let txt = `*ALMACÉN COPIHUE* 🏔️\n*Ofertas y Variedad*\n_Precios sujetos a disponibilidad_\n\n`;
+    
+    selectionOrder.forEach(id => {
+      const p = allProducts.find(prod => prod.id === id);
+      if (p) {
+        txt += `▪️ *${p.nombre}*\n  💵 *Precio:* $${p.precio}\n`;
+        if(p.oferta) txt += `  🔥 _${p.oferta}_\n`;
+        txt += `\n`;
+      }
+    });
+    txt += `📲 Pedidos al WhatsApp\n¡Gracias por elegirnos!`;
+    return encodeURIComponent(txt);
+  }
+
+  // Dibujado interactivo del Canvas del Collage
+  function renderCollage() {
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    canvas.width = currentFormat.w;
+    canvas.height = currentFormat.h;
+    
+    // Fondo Estético Patagónico/Limpio
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    ctx.fillStyle = isDark ? '#1e1e1e' : '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Título Encabezado
+    ctx.fillStyle = '#2E7D32';
+    ctx.fillRect(0, 0, canvas.width, 140);
+    
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 48px sans-serif';
+    ctx.fillText("ALMACÉN COPIHUE", 50, 90);
+    
+    // Renderizar lista seleccionada en filas estéticas
+    let y = 220;
+    ctx.fillStyle = isDark ? '#ffffff' : '#212121';
+    
+    const itemsToDraw = selectionOrder.slice(0, 8); // Máximo de productos visibles en collage dinámico
+    if(itemsToDraw.length === 0) {
+      ctx.font = '32px sans-serif';
+      ctx.fillStyle = '#757575';
+      ctx.fillText("Seleccioná productos en la app para verlos acá", 50, canvas.height/2);
+      return;
+    }
+
+    itemsToDraw.forEach((id) => {
+      const p = allProducts.find(prod => prod.id === id);
+      if (p) {
+        ctx.fillStyle = isDark ? '#ffffff' : '#212121';
+        ctx.font = 'bold 32px sans-serif';
+        ctx.fillText(`• ${p.nombre}`, 60, y);
+        
+        ctx.fillStyle = '#FF5722';
+        ctx.font = 'bold 34px sans-serif';
+        ctx.fillText(`$${p.precio}`, canvas.width - 200, y);
+        
+        y += 70;
+      }
+    });
+  }
+
+  function setCollageMode(mode) {
+    activeCollageMode = mode;
+    document.getElementById('tab-estado').classList.toggle('active', mode === 'estado');
+    document.getElementById('tab-lista').classList.toggle('active', mode === 'lista');
+    renderCollage();
+  }
+
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.innerText = msg;
+    t.style.display = 'block';
+    setTimeout(() => t.style.display = 'none', 2000);
+  }
+
+  // Inicialización de Eventos y Lógica de UI
+  document.getElementById('searchInput').oninput = renderGrid;
+  
+  document.getElementById('toolsBtn').onclick = () => {
+    document.getElementById('toolsPanel').classList.toggle('open');
+  };
+  
+  document.getElementById('sendWaBtn').onclick = () => {
+    if(selectedIds.size === 0) { showToast("Seleccioná productos primero"); return; }
+    window.open(`https://wa.me/?text=${generateWaText()}`, '_blank');
+  };
+
+  document.getElementById('clearBtn').onclick = () => {
+    selectedIds.clear();
+    selectionOrder = [];
+    updateStats();
+    renderGrid();
+    showToast("Selección limpia");
+  };
+
+  document.getElementById('openCollageBtn').onclick = () => {
+    document.getElementById('modal').classList.add('open');
+    renderCollage();
+  };
+
+  document.getElementById('closeModalBtn').onclick = () => document.getElementById('modal').classList.remove('open');
+  document.getElementById('closeModalBtn2').onclick = () => document.getElementById('modal').classList.remove('open');
+
+  document.querySelectorAll('.format-btn').forEach(btn => {
+    btn.onclick = () => {
+      document.querySelectorAll('.format-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const [w, h] = btn.dataset.format.split('x').map(Number);
+      currentFormat = { w, h };
+      renderCollage();
+    };
+  });
+
+  document.getElementById('downloadBtn').onclick = () => {
+    const canvas = document.getElementById('canvas');
+    const link = document.createElement('a');
+    link.download = `copihue_promo_${Date.now()}.jpg`;
+    link.href = canvas.toDataURL('image/jpeg', 0.9);
+    link.click();
+    showToast('¡Imagen guardada con éxito!');
+  };
+
+  document.getElementById('themeToggle').onclick = () => {
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    document.documentElement.setAttribute('data-theme', isDark ? 'light' : 'dark');
+    document.getElementById('themeToggle').innerText = isDark ? '🌙' : '☀️';
+    renderCollage();
+  };
+
+  // Arranque Principal en paralelo
+  async function init() {
+    const rawData = await fetchData();
+    document.getElementById('loader').style.display = 'none';
+    
+    if (rawData) {
+      allProducts = parseProducts(rawData);
+      buildFilters(allProducts);
+      renderGrid();
+    } else {
+      document.getElementById('productsGrid').innerHTML = `<div style="padding:20px; text-align:center; grid-column:1/-1;">❌ Error de red con Google Sheets.</div>`;
+    }
+  }
+
+  init();
+</script>
+</body>
+</html>
