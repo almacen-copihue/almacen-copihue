@@ -312,7 +312,7 @@ function claveHoy() {
   return LS_KEY + d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 }
 function yaJugoHoy() { return parseInt(localStorage.getItem(claveHoy())||'0') >= MAX_DIA; }
-function registrarJugada() {
+function registrarJugadaLocal() {
   const k = claveHoy();
   localStorage.setItem(k, String((parseInt(localStorage.getItem(k)||'0')+1)));
   Object.keys(localStorage).filter(k2=>k2.startsWith(LS_KEY)&&k2!==k).forEach(k2=>localStorage.removeItem(k2));
@@ -501,7 +501,7 @@ function checkReveal(canvas, idx) {
 function verificarResultado() {
   if(!cells.every(c=>c.revealed)) return;
   gameOver = true;
-  registrarJugada();
+  registrarJugadaLocal();
 
   const nombres = cells.map(c => normNombre(c.premio.nombre));
   const win = LINEAS.find(([a,b,c]) => nombres[a]===nombres[b] && nombres[b]===nombres[c]);
@@ -510,21 +510,26 @@ function verificarResultado() {
   document.getElementById('btnNew').style.display    = '';
   document.getElementById('btnCatalogo2').style.display = '';
 
+  const dispositivo = (navigator.userAgent+'|'+screen.width+'x'+screen.height).slice(0,80);
+
   if(win) {
     const premio = cells[win[0]].premio;
     document.getElementById('resultBanner').className = 'result-banner ganador';
     document.getElementById('resultText').textContent = `🎉 ¡Ganaste! ${premio.nombre}`;
     document.getElementById('resultSub').textContent  = `Valor: $${premio.precio.toLocaleString('es-AR')}`;
     actualizarBtnGroup(true);
-    mostrarCodigoYWA(premio);
+    mostrarCodigoYWA(premio);  // registra ganador en GAS
     lanzarConfetti();
   } else {
     document.getElementById('resultBanner').className = 'result-banner';
     document.getElementById('resultText').textContent = '😔 Sin suerte esta vez';
     document.getElementById('resultSub').textContent  = 'Volvé mañana · Mirá las ofertas';
     actualizarBtnGroup(false);
+    // Registrar jugada perdedora en GAS (fire & forget)
+    fetchGAS('registrarJugada', { dispositivo }).catch(()=>{});
   }
 }
+
 
 function actualizarBtnGroup(ganador) {
   const g = document.getElementById('btnGroup');
