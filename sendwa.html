@@ -708,7 +708,7 @@ const SEP_LABELS = {
   'higiene personal': '🧴 HIGIENE PERSONAL',
 };
 
-// Tabla de ofertas relámpago — idéntica a seba21 v361
+// Tabla de ofertas relámpago
 const OFERTAS_RELAMPAGO = {
   '1':  { nombre:'2x1',   tipo:'nxm', cantidad:2, pagas:1   },
   '2':  { nombre:'3x2',   tipo:'nxm', cantidad:3, pagas:2   },
@@ -724,53 +724,6 @@ const OFERTAS_RELAMPAGO = {
   '15': { nombre:'30off', tipo:'pct', descuento:30           },
 };
 
-// Calcula precio oferta y etiqueta para mostrar en la tarjeta (qty=1 para vista)
-// Lógica idéntica a calcularOfertaPOS de seba21 v361
-function calcularOferta(p) {
-  const precio = p.precioVenta;
-  const cat    = p.catOferta;
-  if (!cat) return null;
-
-  // RELÁMPAGO
-  if (cat === 'relampago' && p.relampago) {
-    const key = String(p.relampago);
-    const cfg = OFERTAS_RELAMPAGO[key];
-    if (cfg && cfg.tipo === 'pct') {
-      return { precio: Math.round(precio * (1 - cfg.descuento / 100)), etiqueta: `⚡ -${cfg.descuento}% OFF` };
-    } else if (cfg && cfg.tipo === 'nxm') {
-      return { precio: null, etiqueta: `⚡ ${cfg.nombre.toUpperCase()}` }; // NxM: sin precio unitario fijo
-    }
-    // fallback string
-    const match = key.match(/(\d+)x(\d+)/i);
-    if (match) return { precio: null, etiqueta: `⚡ ${match[1]}X${match[2]}` };
-    return { precio: null, etiqueta: '⚡ RELÁMPAGO' };
-  }
-  // ÚLTIMAS UNIDADES — precio viene de getOfertas (poolUltimas tiene {pct,precioOferta})
-  if (cat === 'ultimas') {
-    const ult = _poolUltimasData.get(Number(p.id));
-    if (ult && ult.precioOferta != null) {
-      const pct = ult.pct != null ? ult.pct : Math.round((1 - ult.precioOferta / precio) * 100);
-      return { precio: ult.precioOferta, etiqueta: `🏷️ -${pct}% ÚLTIMAS` };
-    }
-    return { precio: Math.round(precio * 0.9), etiqueta: '🏷️ -10% ÚLTIMAS' };
-  }
-  // DESTACADAS — p.destacada = porcentaje directo
-  if (cat === 'destacado' && p.destacada > 0) {
-    return { precio: Math.round(precio * (1 - p.destacada / 100)), etiqueta: `🔥 -${p.destacada}% OFF` };
-  }
-  // ESPECIALES — siempre 10%
-  if (cat === 'especial' && p.especial > 0) {
-    return { precio: Math.round(precio * 0.9), etiqueta: '💜 -10% OFF' };
-  }
-  // PROMO ACTIVA / COMBO ACTIVO — precio en col L (campo normal de la API)
-  if ((cat === 'promo' || cat === 'combo') && p.normal > 0 && p.normal < precio) {
-    const pct = Math.round((1 - p.normal / precio) * 100);
-    const icono = cat === 'combo' ? '🎯' : '🏷️';
-    return { precio: p.normal, etiqueta: `${icono} ${cat.toUpperCase()} -${pct}% OFF` };
-  }
-  return null;
-}
-
 // ============================================================
 // STATE
 // ============================================================
@@ -781,7 +734,7 @@ let currentFilter = 'todos';
 let currentSearch = '';
 let currentMode = 'estado';
 let uiColors = {};
-let selectionOrder = []; // para mantener orden de selección
+let selectionOrder = [];
 let recentSelection = JSON.parse(localStorage.getItem('sendwa_recent') || '[]');
 
 // ============================================================
@@ -794,7 +747,6 @@ function fmt(n) {
 function norm(s) {
   return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
-// Igual que simplificarNombre() del POS — genera el slug del archivo de imagen
 function slugFoto(nombre) {
   return String(nombre).toLowerCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -803,7 +755,6 @@ function slugFoto(nombre) {
     .replace(/-+/g, '-')
     .trim();
 }
-// URL de imagen: usa el campo image si viene con URL, sino construye path local igual que el POS
 function getImgUrl(p) {
   if (p.foto && p.foto.startsWith('http')) return p.foto;
   return `imagenes-productos/${slugFoto(p.nombre)}.jpg`;
@@ -817,14 +768,14 @@ function toast(msg, ms = 2000) {
 }
 
 // ============================================================
-// SISTEMA DE HORARIOS — copiado de seba21 v361
+// SISTEMA DE HORARIOS
 // ============================================================
 let _configCache = null;
 const _toggleEstado = { relampago: null, destacadas: null, especiales: null, ultimas: null };
 
 function _diaActualIdx() {
   const d = new Date(new Date().toLocaleString('en-US',{timeZone:'America/Argentina/Buenos_Aires'}));
-  return (d.getDay() + 6) % 7; // 0=Lun … 6=Dom
+  return (d.getDay() + 6) % 7;
 }
 
 const _horarioCache = {};
@@ -863,78 +814,27 @@ function _dentroDeHorario(cfg, tipo, diaIdx) {
   } catch(e){ return false; }
 }
 
-// Resuelve si un tipo de oferta está activo AHORA (forzado o por horario)
-// Igual que _tipoActivo en seba21 v361
 function _tipoActivoAhora(tipo) {
   const estado = _toggleEstado[tipo];
   if (estado === true)  return true;
   if (estado === false) return false;
-  // Si no hay estado definido, asumir TRUE (mostrar ofertas)
   if (estado === undefined) return true;
-  // Si está en null (auto horario) pero no tenemos config, mostrar igual
-  if (estado === null) return true; // Cambiado de false a true
-  
-  // Si llegamos aquí, intentar con horarios (pero no tienes config)
+  if (estado === null) return true;
   if (_configCache) return _dentroDeHorario(_configCache, tipo, _diaActualIdx());
-  return true; // Por defecto: mostrar ofertas
-}
-
-async function init() {
-  // Cargar productos Y pools en paralelo (sin _cargarConfig)
-  const [data] = await Promise.all([fetchData(), cargarPools()]);
-  document.getElementById('loader').style.display = 'none';
-
-  if (!data) {
-    document.getElementById('grid').innerHTML = `
-      <div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--text-muted)">
-        ❌ No se pudo conectar con el catálogo.<br>
-        <small>Verificá tu conexión e intentá recargar.</small>
-      </div>`;
-    return;
-  }
-
-  applyUIColors(data);
-  allProducts = parseProducts(data);
-
-  if (!allProducts.length) {
-    document.getElementById('grid').innerHTML = `
-      <div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--text-muted)">
-        ⚠️ No se encontraron productos en el catálogo.
-      </div>`;
-    return;
-  }
-
-  buildCategoryFilters();
-
-  // Restaurar selección reciente
-  if (recentSelection.length) {
-    recentSelection.forEach(id => {
-      if (allProducts.find(p => String(p.id) === String(id))) {
-        selectedIds.add(id);
-        selectionOrder.push(id);
-      }
-    });
-  }
-
-  applyFilter();
-  recalcLayout();
-  window.addEventListener('resize', recalcLayout);
+  return true;
 }
 
 // ============================================================
-// FETCH DATA — igual que v361: productos + getOfertas en paralelo
+// FETCH DATA
 // ============================================================
-
-// Pools de ofertas activos (cargados desde getOfertas, igual que seba21)
 const _poolRelampago  = new Set();
 const _poolDestacadas = new Set();
 const _poolEspeciales = new Set();
 const _poolUltimas    = new Set();
-const _poolUltimasData = new Map(); // id → { precioOferta, pct, diasParaVencer }
+const _poolUltimasData = new Map();
 
 async function _apiFetch(action) {
-  const r = await fetch(API_URL + '?action=' + action + '&t=' + Date.now(),
-    { redirect: 'follow' });
+  const r = await fetch(API_URL + '?action=' + action + '&t=' + Date.now(), { redirect: 'follow' });
   return r.json();
 }
 
@@ -948,14 +848,10 @@ async function fetchData() {
   }
 }
 
-// Carga pools desde getOfertas — fuente de verdad, igual que seba21 v361
 async function cargarPools() {
   try {
     const data = await _apiFetch('getOfertas');
-    if (!data.success) { 
-      console.warn('getOfertas sin success'); 
-      return; 
-    }
+    if (!data.success) { console.warn('getOfertas sin success'); return; }
 
     _poolRelampago.clear(); 
     _poolDestacadas.clear();
@@ -981,7 +877,6 @@ async function cargarPools() {
 
     console.log(`📊 Pools SendWA — ⚡${_poolRelampago.size} 🔥${_poolDestacadas.size} 🌙${_poolEspeciales.size} 🏷️${_poolUltimas.size}`);
     
-    // ===== FORZAR OFERTAS ACTIVAS =====
     window._toggleEstado = window._toggleEstado || {};
     window._toggleEstado.relampago = true;
     window._toggleEstado.destacadas = true;
@@ -994,9 +889,6 @@ async function cargarPools() {
   }
 }
 
-// ============================================================
-// PARSE PRODUCTS — misma estructura que seba21
-// ============================================================
 function parseProducts(data) {
   let rows = null;
   if (Array.isArray(data)) {
@@ -1030,9 +922,74 @@ function parseProducts(data) {
     .filter(p => p.nombre && p.precioVenta > 0);
 }
 
-// ============================================================
-// FUNCIONES QUE FALTABAN
-// ============================================================
+function calcularOferta(p) {
+  const precio = p.precioVenta;
+  const cat    = p.catOferta;
+  if (!cat) return null;
+
+  if (cat === 'relampago' && p.relampago) {
+    const key = String(p.relampago);
+    const cfg = OFERTAS_RELAMPAGO[key];
+    if (cfg && cfg.tipo === 'pct') {
+      return { precio: Math.round(precio * (1 - cfg.descuento / 100)), etiqueta: `⚡ -${cfg.descuento}% OFF` };
+    } else if (cfg && cfg.tipo === 'nxm') {
+      return { precio: null, etiqueta: `⚡ ${cfg.nombre.toUpperCase()}` };
+    }
+    const match = key.match(/(\d+)x(\d+)/i);
+    if (match) return { precio: null, etiqueta: `⚡ ${match[1]}X${match[2]}` };
+    return { precio: null, etiqueta: '⚡ RELÁMPAGO' };
+  }
+  if (cat === 'ultimas') {
+    const ult = _poolUltimasData.get(Number(p.id));
+    if (ult && ult.precioOferta != null) {
+      const pct = ult.pct != null ? ult.pct : Math.round((1 - ult.precioOferta / precio) * 100);
+      return { precio: ult.precioOferta, etiqueta: `🏷️ -${pct}% ÚLTIMAS` };
+    }
+    return { precio: Math.round(precio * 0.9), etiqueta: '🏷️ -10% ÚLTIMAS' };
+  }
+  if (cat === 'destacado' && p.destacada > 0) {
+    return { precio: Math.round(precio * (1 - p.destacada / 100)), etiqueta: `🔥 -${p.destacada}% OFF` };
+  }
+  if (cat === 'especial' && p.especial > 0) {
+    return { precio: Math.round(precio * 0.9), etiqueta: '💜 -10% OFF' };
+  }
+  if ((cat === 'promo' || cat === 'combo') && p.normal > 0 && p.normal < precio) {
+    const pct = Math.round((1 - p.normal / precio) * 100);
+    const icono = cat === 'combo' ? '🎯' : '🏷️';
+    return { precio: p.normal, etiqueta: `${icono} ${cat.toUpperCase()} -${pct}% OFF` };
+  }
+  return null;
+}
+
+function resolveOfertas(products, modo = 'pool') {
+  return products.map(p => {
+    const pid = Number(p.id);
+    const rawCat = String(p._raw?.categoriaOferta || '').toUpperCase().trim();
+    let catOferta = '';
+    if      (rawCat === 'PROMO ACTIVA') catOferta = 'promo';
+    else if (rawCat === 'COMBO ACTIVO') catOferta = 'combo';
+    else {
+      const enPoolR = p.relampago && _poolRelampago.has(pid);
+      const enPoolD = p.destacada > 0 && _poolDestacadas.has(pid);
+      const enPoolE = p.especial  > 0 && _poolEspeciales.has(pid);
+      const enPoolU = _poolUltimas.has(pid);
+
+      if (modo === 'activo') {
+        if      (enPoolR && _tipoActivoAhora('relampago'))  catOferta = 'relampago';
+        else if (enPoolU && _tipoActivoAhora('ultimas'))     catOferta = 'ultimas';
+        else if (enPoolD && _tipoActivoAhora('destacadas'))  catOferta = 'destacado';
+        else if (enPoolE && _tipoActivoAhora('especiales'))  catOferta = 'especial';
+      } else {
+        if      (enPoolR) catOferta = 'relampago';
+        else if (enPoolU) catOferta = 'ultimas';
+        else if (enPoolD) catOferta = 'destacado';
+        else if (enPoolE) catOferta = 'especial';
+      }
+    }
+    return { ...p, catOferta };
+  });
+}
+
 function applyUIColors(data) {
   const cfg = data.config_ui || data.CONFIG_UI || data.configUI || {};
   if (cfg.primaryColor) document.documentElement.style.setProperty('--primary', cfg.primaryColor);
@@ -1040,6 +997,1018 @@ function applyUIColors(data) {
   if (cfg.accentColor)  document.documentElement.style.setProperty('--accent', cfg.accentColor);
 }
 
+function sortProducts(products, mode) {
+  const sorted = [...products];
+  sorted.sort((a, b) => {
+    const pa = PRIORITY_ORDER[a.catOferta] ?? 7;
+    const pb = PRIORITY_ORDER[b.catOferta] ?? 7;
+    if (pa !== pb) return pa - pb;
+    return (b.vendidos || 0) - (a.vendidos || 0);
+  });
+  const filtroEsGeneral = (currentFilter === 'todos' || currentFilter === 'oferta' || currentFilter === 'activo');
+  if (mode === 'estado' && filtroEsGeneral) {
+    return interleavedSort(sorted);
+  }
+  return sorted;
+}
+
+function interleavedSort(sorted) {
+  const result = [];
+  const byPriority = {};
+  for (const p of sorted) {
+    const key = p.catOferta || 'normal';
+    if (!byPriority[key]) byPriority[key] = [];
+    byPriority[key].push(p);
+  }
+  const keys = Object.keys(byPriority).sort((a,b) => (PRIORITY_ORDER[a]||6)-(PRIORITY_ORDER[b]||6));
+  let maxLen = Math.max(...Object.values(byPriority).map(a=>a.length));
+  for (let i = 0; i < maxLen; i++) {
+    for (const k of keys) {
+      if (byPriority[k][i]) result.push(byPriority[k][i]);
+    }
+  }
+  return result;
+}
+
+function getModoResolucion() {
+  if (currentFilter === 'activo') return 'activo';
+  return 'pool';
+}
+
+function applyFilter() {
+  const modoRes = getModoResolucion();
+  const resolved = resolveOfertas(allProducts, modoRes);
+
+  let f = resolved.filter(p => {
+    switch (currentFilter) {
+      case 'oferta':    return !!p.catOferta;
+      case 'activo':    return !!p.catOferta;
+      case 'sinoferta': {
+        const enPool = resolveOfertas([p], 'pool')[0].catOferta;
+        return !enPool;
+      }
+      case 'relampago': return p.catOferta === 'relampago';
+      case 'destacado': return p.catOferta === 'destacado';
+      case 'especial':  return p.catOferta === 'especial';
+      case 'ultimas':   return p.catOferta === 'ultimas';
+      case 'promo':     return p.catOferta === 'promo';
+      case 'combo':     return p.catOferta === 'combo';
+      default:
+        if (currentFilter === '' || currentFilter === 'todos') return p.stock > 0;
+        return norm(p.categoria) === norm(currentFilter);
+    }
+  });
+
+  if (currentSearch) {
+    const q = norm(currentSearch);
+    f = f.filter(p => norm(p.nombre).includes(q) || norm(p.categoria).includes(q));
+  }
+  filteredProducts = sortProducts(f, currentMode);
+  renderGrid();
+}
+
+function getCatEmoji(cat) {
+  const map = {bebidas:'🥤',limpieza:'🧹',snacks:'🍪',lacteos:'🥛',carnes:'🥩',frutas:'🍎',panaderia:'🍞',ferreteria:'🔧'};
+  return map[norm(cat)] || '🛍️';
+}
+
+function insertSeparators(products) {
+  const result = [];
+  let lastCat = null;
+  let rachaCat = 0;
+  for (const p of products) {
+    const cat = norm(p.categoria);
+    if (cat !== lastCat) {
+      if (lastCat === null || rachaCat >= 2) {
+        const label = SEP_LABELS[cat] || (getCatEmoji(cat) + ' ' + (p.categoria||'').toUpperCase());
+        result.push({ _sep: true, label, cat });
+      }
+      rachaCat = 1;
+      lastCat = cat;
+    } else {
+      rachaCat++;
+    }
+    result.push(p);
+  }
+  return result;
+}
+
+function renderGrid() {
+  const grid = document.getElementById('grid');
+  const withSeps = insertSeparators(filteredProducts);
+  
+  if (filteredProducts.length === 0) {
+    grid.innerHTML = '';
+    document.getElementById('empty-state').style.display = 'block';
+    return;
+  }
+  document.getElementById('empty-state').style.display = 'none';
+
+  grid.innerHTML = withSeps.map((p, i) => {
+    if (p._sep) {
+      return `<div class="separator-card">${p.label}</div>`;
+    }
+    const sel = selectedIds.has(String(p.id));
+    const orderNum = selectionOrder.indexOf(String(p.id)) + 1;
+    const sinStock = p.stock <= 0;
+    const oferta   = calcularOferta(p);
+    const badgeColor = BADGE_COLORS[p.catOferta] || '';
+
+    const imgUrl = getImgUrl(p);
+    const imgEl = `<img class="card-img" src="${imgUrl}" alt="${p.nombre}" loading="lazy"
+                     onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                   <div class="card-img-placeholder" style="display:none">${getCatEmoji(p.categoria)}</div>`;
+
+    const precioHTML = oferta
+      ? `<div class="card-price-oferta">
+           <span class="price-antes">${fmt(p.precioVenta)}</span>
+           <span class="price-oferta" style="color:${badgeColor}">${oferta.precio ? fmt(oferta.precio) : ''}</span>
+         </div>`
+      : `<div class="card-price">${fmt(p.precioVenta)}</div>`;
+
+    const badgeHTML = oferta
+      ? `<div class="badge-oferta" style="background:${badgeColor}">${oferta.etiqueta}</div>`
+      : '';
+
+    return `
+    <div class="prod-card ${sel?'selected':''} ${sinStock?'sin-stock':''}"
+         data-id="${p.id}" data-idx="${filteredProducts.indexOf(p)}"
+         onclick="toggleSelect('${p.id}')">
+      ${sinStock ? `<div class="badge-sin-stock">Sin stock</div>` : ''}
+      ${imgEl}
+      <div class="card-order">${orderNum||''}</div>
+      <div class="card-check">✓</div>
+      ${badgeHTML}
+      <div class="card-body">
+        <div class="card-name">${p.nombre}</div>
+        <div class="card-cat">${p.categoria}</div>
+        ${precioHTML}
+      </div>
+    </div>`;
+  }).join('');
+
+  updateStats();
+}
+
+function toggleSelect(id) {
+  id = String(id);
+  if (selectedIds.has(id)) {
+    selectedIds.delete(id);
+    selectionOrder = selectionOrder.filter(x => x !== id);
+  } else {
+    selectedIds.add(id);
+    selectionOrder.push(id);
+  }
+  updateStats();
+  document.querySelectorAll('.prod-card').forEach(el => {
+    const eid = String(el.dataset.id);
+    const sel = selectedIds.has(eid);
+    el.classList.toggle('selected', sel);
+    const orderEl = el.querySelector('.card-order');
+    if (orderEl) orderEl.textContent = sel ? (selectionOrder.indexOf(eid)+1) : '';
+  });
+  saveRecent();
+}
+
+function selectAll() {
+  const allVisible = filteredProducts.filter(p => p && !p._sep).map(p => String(p.id));
+  const allSel = allVisible.length > 0 && allVisible.every(id => selectedIds.has(id));
+  const filterName = currentFilter === 'todos' ? 'todos' :
+    document.querySelector(`.filter-chip[data-filter="${currentFilter}"]`)?.textContent?.trim() || currentFilter;
+
+  if (allSel) {
+    allVisible.forEach(id => { selectedIds.delete(id); selectionOrder = selectionOrder.filter(x=>x!==id); });
+    toast(`Deseleccionados: ${filterName}`);
+  } else {
+    allVisible.forEach(id => { if(!selectedIds.has(id)) { selectedIds.add(id); selectionOrder.push(id); } });
+    toast(`✓ ${allVisible.length} productos — ${filterName}`);
+  }
+  renderGrid();
+}
+
+function getSelectedProducts() {
+  return selectionOrder
+    .map(id => allProducts.find(p => String(p.id) === String(id)))
+    .filter(Boolean);
+}
+
+function updateStats() {
+  const sel = selectedIds.size;
+  const prods = getSelectedProducts();
+  const cats = new Set(prods.map(p=>p.categoria)).size;
+  const sizeMB = (prods.length * IMG_SIZE_MB).toFixed(1);
+
+  document.getElementById('hstat-sel').textContent = sel ? `✓ ${sel}  📦 ${cats}cat` : '✓ 0';
+  document.getElementById('hstat-size').textContent = `${sizeMB} MB`;
+  const hwarn = document.getElementById('hstat-warn');
+  if (hwarn) hwarn.style.display = (prods.length > WA_LIMIT_ESTADO && currentMode === 'estado') ? '' : 'none';
+  const warn = document.getElementById('warn-msg');
+  warn.classList.toggle('show', prods.length > WA_LIMIT_ESTADO && currentMode === 'estado');
+}
+
+function recalcLayout() {
+  const headerH = document.getElementById('header').offsetHeight;
+  document.getElementById('main').style.paddingTop = (headerH + 46) + 'px';
+}
+
+function generateText(mode) {
+  const prodsRaw = getSelectedProducts();
+  if (!prodsRaw.length) return '❌ Ningún producto seleccionado.';
+  const prods = resolveOfertas(prodsRaw);
+
+  const conOferta = prods.filter(p => p.catOferta).length;
+  const tiposPresentes = [...new Set(prods.map(p=>p.catOferta).filter(Boolean))];
+  const tituloOferta = {
+    relampago:'⚡ OFERTAS RELÁMPAGO', ultimas:'🏷️ ÚLTIMAS UNIDADES',
+    destacado:'🔥 OFERTAS DESTACADAS', especial:'💜 PRECIOS ESPECIALES',
+    promo:'🏷️ PROMOS DEL DÍA', combo:'🎯 COMBOS'
+  };
+
+  let header = '';
+  if (mode === 'rapido') {
+    header = `📲 *ALMACÉN COPIHUE*\n`;
+  } else if (tiposPresentes.length === 1 && tituloOferta[tiposPresentes[0]]) {
+    header = `📲 *ALMACÉN COPIHUE* 📲\n${tituloOferta[tiposPresentes[0]]}\n`;
+  } else if (conOferta > 0) {
+    header = `🛒 *ALMACÉN COPIHUE* 🛒\n🔥 ¡OFERTAS DEL DÍA! 🔥\n`;
+  } else {
+    header = `🛒 *ALMACÉN COPIHUE* 🛒\n`;
+  }
+
+  function labelOferta(p, of) {
+    if (!of) return '';
+    const cat = p.catOferta;
+    if (cat === 'relampago') {
+      const cfg = OFERTAS_RELAMPAGO[String(p.relampago)];
+      if (cfg && cfg.tipo === 'nxm') {
+        if (cfg.cantidad === 2 && cfg.pagas === 1.5) return ' _(2da unidad 50% OFF)_';
+        return ` _(${cfg.nombre.toUpperCase()})_`;
+      }
+      return of.etiqueta ? ` _${of.etiqueta}_` : '';
+    }
+    if (cat === 'destacado') return of.etiqueta ? ` _${of.etiqueta}_` : '';
+    if (cat === 'especial')  return ' _(-10% especial)_';
+    if (cat === 'ultimas')   return of.etiqueta ? ` _${of.etiqueta}_` : ' _(últimas unidades)_';
+    if (cat === 'promo')     return of.etiqueta ? ` _${of.etiqueta}_` : ' _(promo)_';
+    if (cat === 'combo')     return of.etiqueta ? ` _${of.etiqueta}_` : ' _(combo)_';
+    return '';
+  }
+
+  let lines = [];
+
+  if (mode === 'rapido') {
+    for (const p of prods) {
+      const of = calcularOferta(p);
+      const precio = of && of.precio ? fmt(of.precio) : fmt(p.precioVenta);
+      const e = getCatEmoji(p.categoria);
+      lines.push(`${e} ${p.nombre} — *${precio}*`);
+    }
+  } else {
+    const grupos = {};
+    for (const p of prods) {
+      const cat = p.categoria || 'Varios';
+      if (!grupos[cat]) grupos[cat] = [];
+      grupos[cat].push(p);
+    }
+    for (const [cat, ps] of Object.entries(grupos)) {
+      const emoji = getCatEmoji(cat);
+      lines.push(`\n${emoji} *${cat.toUpperCase()}*`);
+      for (const p of ps) {
+        const of = calcularOferta(p);
+        const precioFinal = of && of.precio ? fmt(of.precio) : fmt(p.precioVenta);
+        const precioAntes  = of && of.precio ? ` ~${fmt(p.precioVenta)}~` : '';
+        const labelOf = labelOferta(p, of);
+        if (mode === 'grupo') {
+          lines.push(`• *${p.nombre}*${labelOf}\n  ${precioAntes ? precioAntes + ' → ' : ''}*${precioFinal}*`);
+        } else {
+          lines.push(`• ${p.nombre}${labelOf} — *${precioFinal}*${precioAntes ? ` ~(antes ${fmt(p.precioVenta)})~` : ''}`);
+        }
+      }
+    }
+  }
+
+  const footer = mode === 'grupo'
+    ? '\n\n📦 *Hacemos pedidos a domicilio*\n💬 Consultá por WhatsApp\n⏰ Ofertas por tiempo limitado'
+    : '\n\n📦 Pedidos por WhatsApp';
+
+  return header + lines.join('\n') + footer;
+}
+
+// ============================================================
+// ACTIONS (eventos básicos)
+// ============================================================
+function on(id, fn) { const el = document.getElementById(id); if (el) el.onclick = fn; }
+
+on('btn-copy', async () => {
+  const txt = generateText(currentMode);
+  try {
+    await navigator.clipboard.writeText(txt);
+    toast('📋 Texto copiado al portapapeles');
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = txt; document.body.appendChild(ta);
+    ta.select(); document.execCommand('copy');
+    document.body.removeChild(ta);
+    toast('📋 Texto copiado');
+  }
+});
+
+on('btn-wa', () => {
+  if (!selectedIds.size) { toast('⚠️ Seleccioná al menos un producto'); return; }
+  const txt = generateText(currentMode);
+  const url = 'https://wa.me/?text=' + encodeURIComponent(txt);
+  window.open(url, '_blank');
+});
+
+on('btn-dl', async () => {
+  const prods = getSelectedProducts();
+  if (!prods.length) { toast('⚠️ Sin imágenes para descargar'); return; }
+  const conBadge = confirm('¿Descargar con badge de oferta?\n\nOK = Con badge (tarjeta completa)\nCancelar = Solo la foto original');
+  if (conBadge) {
+    toast(`⬇️ Generando ${Math.min(prods.length,12)} tarjetas…`, 4000);
+    const resolved = resolveOfertas(prods);
+    const cvs = document.getElementById('collage-canvas');
+    for (const p of resolved.slice(0,12)) {
+      await drawSingle(p);
+      const a = document.createElement('a');
+      a.href = cvs.toDataURL('image/jpeg', .93);
+      a.download = norm(p.nombre) + '_oferta.jpg';
+      a.click();
+      await new Promise(r => setTimeout(r, 350));
+    }
+    return;
+  }
+  toast(`⬇️ Descargando ${prods.length} imagen(es)…`, 3000);
+  for (const p of prods.slice(0, 20)) {
+    try {
+      const a = document.createElement('a');
+      a.href = getImgUrl(p); a.download = norm(p.nombre) + '.jpg';
+      a.target = '_blank'; a.click();
+      await new Promise(r => setTimeout(r, 400));
+    } catch {}
+  }
+});
+
+// ============================================================
+// COLLAGE (funciones necesarias)
+// ============================================================
+let _collageMode = 'collage';
+let _singleIdx   = 0;
+let _collageProds = [];
+
+async function loadImg(src) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => res(img);
+    img.onerror = () => rej(new Error('img error'));
+    img.src = src;
+    setTimeout(() => rej(new Error('timeout')), 5000);
+  });
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.arcTo(x+w,y,x+w,y+r,r);
+  ctx.lineTo(x+w,y+h-r); ctx.arcTo(x+w,y+h,x+w-r,y+h,r);
+  ctx.lineTo(x+r,y+h); ctx.arcTo(x,y+h,x,y+h-r,r);
+  ctx.lineTo(x,y+r); ctx.arcTo(x,y,x+r,y,r);
+  ctx.closePath();
+}
+
+function wrapText(ctx, text, x, y, maxW, lineH, maxLines) {
+  const words = text.split(' ');
+  let line = '';
+  let lines = [];
+  for (const w of words) {
+    const test = line ? line + ' ' + w : w;
+    if (ctx.measureText(test).width > maxW && line) { lines.push(line); line = w; }
+    else line = test;
+  }
+  if (line) lines.push(line);
+  lines = lines.slice(0, maxLines);
+  lines.forEach((l, i) => ctx.fillText(l, x, y + i * lineH));
+  return lines.length;
+}
+
+function countLines(ctx, text, maxW) {
+  const words = text.split(' ');
+  let line = '', lines = 1;
+  for (const w of words) {
+    const test = line ? line + ' ' + w : w;
+    if (ctx.measureText(test).width > maxW && line) { line = w; lines++; }
+    else line = test;
+  }
+  return lines;
+}
+
+async function drawProductCard(ctx, p, x, y, W, H) {
+  const _esSinOferta = p._sinOferta === true;
+  const oferta = calcularOferta(p);
+  const badgeColor = BADGE_COLORS[p.catOferta] || null;
+  const tieneOfertaPrecio = oferta && oferta.precio && !_esSinOferta;
+
+  const FS_NOMBRE = Math.max(W * 0.054, 10);
+  const LH_NOMBRE = FS_NOMBRE * 1.28;
+  ctx.font = `bold ${FS_NOMBRE}px Segoe UI`;
+  const nLinesNombre = Math.min(countLines(ctx, p.nombre, W - 14), 2);
+  const NOMBRE_H  = LH_NOMBRE * nLinesNombre + 6;
+  const FS_ANTES  = Math.max(W * 0.044, 9);
+  const FS_OFERTA = Math.max(W * 0.068, 12);
+  const FS_PRECIO = Math.max(W * 0.070, 12);
+  const PRECIO_H  = tieneOfertaPrecio ? FS_ANTES + 4 + FS_OFERTA + 6 : FS_PRECIO + 6;
+  const PAD_V    = 8;
+  const TEXTH    = PAD_V + NOMBRE_H + PRECIO_H + PAD_V;
+  const IMGH     = H - TEXTH;
+
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.15)'; ctx.shadowBlur = 8;
+  ctx.fillStyle = '#ffffff';
+  roundRect(ctx, x, y, W, H, 14); ctx.fill();
+  ctx.restore();
+
+  if (!_esSinOferta && badgeColor) {
+    ctx.save();
+    ctx.strokeStyle = badgeColor; ctx.lineWidth = 4;
+    roundRect(ctx, x+2, y+2, W-4, H-4, 12); ctx.stroke();
+    ctx.restore();
+  } else if (_esSinOferta) {
+    ctx.save();
+    ctx.strokeStyle = '#cccccc'; ctx.lineWidth = 2;
+    roundRect(ctx, x+2, y+2, W-4, H-4, 12); ctx.stroke();
+    ctx.restore();
+  }
+
+  try {
+    const img = await loadImg(getImgUrl(p));
+    ctx.save();
+    roundRect(ctx, x, y, W, IMGH, 14); ctx.clip();
+    ctx.drawImage(img, x, y, W, IMGH);
+    ctx.restore();
+  } catch {
+    ctx.fillStyle = '#e8f0e5'; ctx.fillRect(x, y, W, IMGH);
+    ctx.fillStyle = '#bbb';
+    ctx.font = `${W * 0.22}px serif`; ctx.textAlign = 'center';
+    ctx.fillText(getCatEmoji(p.categoria), x + W/2, y + IMGH/2 + W*0.08);
+  }
+
+  if (oferta && badgeColor && !_esSinOferta) {
+    ctx.fillStyle = badgeColor;
+    ctx.fillRect(x, y, W, 26);
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${Math.max(W*0.052, 10)}px Segoe UI`; ctx.textAlign = 'center';
+    ctx.fillText(oferta.etiqueta.toUpperCase(), x + W/2, y + 18);
+  }
+
+  const txtY = y + IMGH + PAD_V;
+  const mx = x + W/2;
+  ctx.fillStyle = '#1a2e17';
+  ctx.font = `bold ${FS_NOMBRE}px Segoe UI`;
+  ctx.textAlign = 'center';
+  wrapText(ctx, p.nombre, mx, txtY + LH_NOMBRE * 0.85, W - 14, LH_NOMBRE, 2);
+  const afterName = txtY + NOMBRE_H;
+
+  if (tieneOfertaPrecio) {
+    ctx.fillStyle = '#888888';
+    ctx.font = `${FS_ANTES}px Segoe UI`;
+    const antesStr = fmt(p.precioVenta);
+    const ty_a = afterName + FS_ANTES;
+    ctx.fillText(antesStr, mx, ty_a);
+    const tw = ctx.measureText(antesStr).width;
+    ctx.beginPath();
+    ctx.strokeStyle = '#777'; ctx.lineWidth = Math.max(W * 0.008, 1.5);
+    ctx.moveTo(mx - tw/2, ty_a - FS_ANTES*0.35);
+    ctx.lineTo(mx + tw/2, ty_a - FS_ANTES*0.35); ctx.stroke();
+    ctx.fillStyle = badgeColor || '#c0392b';
+    ctx.font = `bold ${FS_OFERTA}px Segoe UI`;
+    ctx.fillText(fmt(oferta.precio), mx, ty_a + FS_OFERTA + 2);
+  } else {
+    ctx.fillStyle = '#2d5a22';
+    ctx.font = `bold ${FS_PRECIO}px Segoe UI`;
+    ctx.fillText(fmt(p.precioVenta), mx, afterName + FS_PRECIO);
+  }
+}
+
+async function drawSingleFmt(p, W=1080, H=1080) {
+  if (!p) return;
+  const cvs = document.getElementById('collage-canvas');
+  cvs.width=W; cvs.height=H;
+  const ctx = cvs.getContext('2d');
+
+  const oferta = calcularOferta(p);
+  const badgeColor = BADGE_COLORS[p.catOferta] || null;
+  const tieneOfertaPrecio = oferta && oferta.precio;
+
+  const bgColors = { relampago:['#7b1212','#c0392b'], ultimas:['#7d3700','#d35400'],
+    destacado:['#6b4200','#d68910'], especial:['#3b1a6b','#6c3483'],
+    promo:['#4a0e6b','#7b1fa2'], combo:['#5d1800','#bf360c'] };
+  const [c1,c2] = bgColors[p.catOferta] || ['#1a3a16','#2d5a22'];
+  const grd=ctx.createLinearGradient(0,0,W,H);
+  grd.addColorStop(0,c1); grd.addColorStop(1,c2);
+  ctx.fillStyle=grd; ctx.fillRect(0,0,W,H);
+
+  const HDRH = 80;
+  const BADGEH = oferta ? 54 : 0;
+  const NAMEH = 80;
+  const PRICEH = tieneOfertaPrecio ? 100 : 72;
+  const FTRH = 60;
+  const IMGH = H - HDRH - BADGEH - NAMEH - PRICEH - FTRH;
+  const IMGPAD = 24;
+
+  const hdrColor = badgeColor || '#1a3a16';
+  ctx.fillStyle = hdrColor; ctx.fillRect(0,0,W,HDRH);
+  ctx.fillStyle='#fff'; ctx.font='bold 30px Segoe UI'; ctx.textAlign='center';
+  ctx.fillText('🛒 ALMACÉN COPIHUE', W/2, 52);
+
+  let curY = HDRH;
+  if (oferta && badgeColor) {
+    ctx.fillStyle = badgeColor; ctx.fillRect(0, curY, W, BADGEH);
+    ctx.fillStyle='#fff'; ctx.font='bold 28px Segoe UI'; ctx.textAlign='center';
+    ctx.fillText(oferta.etiqueta.toUpperCase(), W/2, curY+36);
+    curY += BADGEH;
+  }
+
+  const imgAreaY = curY;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(IMGPAD, imgAreaY + IMGPAD, W - IMGPAD*2, IMGH - IMGPAD*2);
+  try {
+    const img = await loadImg(getImgUrl(p));
+    const areaW = W - IMGPAD*4, areaH = IMGH - IMGPAD*4;
+    const scale = Math.min(areaW/img.width, areaH/img.height);
+    const dw = img.width*scale, dh = img.height*scale;
+    const dx = (W-dw)/2, dy = imgAreaY + IMGPAD*2 + (areaH-dh)/2;
+    ctx.drawImage(img, dx, dy, dw, dh);
+  } catch {
+    ctx.fillStyle='#e8f0e5'; ctx.fillRect(IMGPAD, imgAreaY+IMGPAD, W-IMGPAD*2, IMGH-IMGPAD*2);
+    ctx.fillStyle='#aaa'; ctx.font=`160px serif`; ctx.textAlign='center';
+    ctx.fillText(getCatEmoji(p.categoria), W/2, imgAreaY+IMGH/2+50);
+  }
+  curY += IMGH;
+
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, curY, W, NAMEH);
+  ctx.fillStyle = '#1a2e17'; ctx.font = 'bold 32px Segoe UI'; ctx.textAlign='center';
+  wrapText(ctx, p.nombre, W/2, curY+28, W-40, 36, 2);
+  curY += NAMEH;
+
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, curY, W, PRICEH);
+  const mx = W/2;
+  if (tieneOfertaPrecio) {
+    ctx.fillStyle='#888'; ctx.font='28px Segoe UI';
+    const antes = fmt(p.precioVenta);
+    const ty_a = curY + 36;
+    ctx.fillText(antes, mx, ty_a);
+    const tw = ctx.measureText(antes).width;
+    ctx.beginPath(); ctx.strokeStyle='#888'; ctx.lineWidth=2.5;
+    ctx.moveTo(mx-tw/2, ty_a-10); ctx.lineTo(mx+tw/2, ty_a-10); ctx.stroke();
+    ctx.fillStyle = badgeColor||'#c0392b'; ctx.font='bold 56px Segoe UI';
+    ctx.fillText(fmt(oferta.precio), mx, curY+88);
+  } else {
+    ctx.fillStyle='#2d5a22'; ctx.font='bold 56px Segoe UI';
+    ctx.fillText(fmt(p.precioVenta), mx, curY+58);
+  }
+  curY += PRICEH;
+
+  ctx.fillStyle='rgba(0,0,0,.5)'; ctx.fillRect(0,curY,W,FTRH);
+  ctx.fillStyle='#fff'; ctx.font='bold 22px Segoe UI'; ctx.textAlign='center';
+  ctx.fillText('📦 Pedidos por WhatsApp', W/2, curY+38);
+}
+
+async function drawSingle(p) { return drawSingleFmt(p, 1080, 1080); }
+
+on('btn-collage', () => {
+  const base = getSelectedProducts();
+  if (!base.length) { toast('⚠️ Seleccioná al menos un producto primero'); return; }
+  const prods = resolveOfertas(base, getModoResolucion());
+  if (currentFilter === 'sinoferta') prods.forEach(p => p._sinOferta = true);
+  _collageProds = prods;
+  _singleIdx    = 0;
+  openCollageModal('collage');
+});
+
+function openCollageModal(mode) {
+  _collageMode = mode;
+  document.getElementById('collage-modal').classList.add('open');
+  const picker = document.getElementById('single-picker');
+  const layoutBar = document.getElementById('single-layout-bar');
+  const btnTodas = document.getElementById('btn-dl-todas');
+  if (mode === 'single') {
+    picker.style.display = 'block';
+    layoutBar.classList.add('show');
+    buildSinglePicker(_collageProds);
+    if (_collageProds.length > 1) {
+      btnTodas.classList.add('show');
+      btnTodas.textContent = `⬇️ Descargar TODAS (${_collageProds.length} fotos)`;
+    } else {
+      btnTodas.classList.remove('show');
+    }
+  } else {
+    picker.style.display = 'none';
+    layoutBar.classList.remove('show');
+    btnTodas.classList.remove('show');
+  }
+  renderCollageMode();
+}
+
+function buildSinglePicker(prods) {
+  const list = document.getElementById('single-picker-list');
+  list.innerHTML = prods.map((p, i) => {
+    const url = getImgUrl(p);
+    return `<div class="single-thumb ${i===_singleIdx?'active':''}" onclick="selectSingleProd(${i})">
+      <img src="${url}" onerror="this.src=''">
+      <span>${p.nombre.slice(0,16)}</span>
+    </div>`;
+  }).join('');
+}
+window.selectSingleProd = (i) => {
+  _singleIdx = i;
+  document.querySelectorAll('.single-thumb').forEach((el,j)=>el.classList.toggle('active',j===i));
+  renderCollageMode();
+};
+
+let _singleLayout = 'clasico';
+let _singleFormat = { w: 1080, h: 1080 };
+
+async function renderCollageMode() {
+  if (_collageMode === 'collage')  await drawCollage(_collageProds);
+  if (_collageMode === 'single')   await drawSingleLayout(_collageProds[_singleIdx], _singleLayout);
+  if (_collageMode === 'historia') await drawHistoria(_collageProds);
+}
+
+async function drawSingleLayout(p, layout) {
+  if (!p) return;
+  const fmt_size = _singleFormat || { w:1080, h:1080 };
+  if (layout === 'clasico')    return drawSingleFmt(p, fmt_size.w, fmt_size.h);
+  if (layout === 'expandido')  return drawSingleExpandidoFmt(p, fmt_size.w, fmt_size.h);
+  if (layout === 'h2')         return drawSingleH2Fmt(p, fmt_size.w, fmt_size.h);
+  if (layout === 'v2')         return drawSingleV2Fmt(p, fmt_size.w, fmt_size.h);
+  return drawSingleFmt(p, fmt_size.w, fmt_size.h);
+}
+
+async function drawSingleExpandidoFmt(p, W=1080, H=1080) {
+  const cvs = document.getElementById('collage-canvas');
+  cvs.width=W; cvs.height=H;
+  const ctx = cvs.getContext('2d');
+  const oferta = calcularOferta(p);
+  const badgeColor = BADGE_COLORS[p.catOferta] || null;
+
+  try {
+    const img = await loadImg(getImgUrl(p));
+    const scale = Math.max(W/img.width, H/img.height);
+    const dw=img.width*scale, dh=img.height*scale;
+    ctx.drawImage(img, (W-dw)/2, (H-dh)/2, dw, dh);
+  } catch {
+    const grd=ctx.createLinearGradient(0,0,W,H);
+    grd.addColorStop(0,'#1a3a16'); grd.addColorStop(1,'#2d5a22');
+    ctx.fillStyle=grd; ctx.fillRect(0,0,W,H);
+  }
+
+  const ovH = 340;
+  const ov = ctx.createLinearGradient(0, H-ovH, 0, H);
+  ov.addColorStop(0,'rgba(0,0,0,0)'); ov.addColorStop(1,'rgba(0,0,0,.85)');
+  ctx.fillStyle=ov; ctx.fillRect(0,H-ovH,W,ovH);
+
+  if (oferta && badgeColor) {
+    ctx.fillStyle=badgeColor; ctx.beginPath();
+    roundRect(ctx,16,16,300,48,10); ctx.fill();
+    ctx.fillStyle='#fff'; ctx.font='bold 24px Segoe UI'; ctx.textAlign='left';
+    ctx.fillText(oferta.etiqueta.toUpperCase(), 28, 48);
+  }
+  ctx.fillStyle='rgba(0,0,0,.5)'; ctx.beginPath();
+  roundRect(ctx,W-240,16,224,48,10); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.font='bold 18px Segoe UI'; ctx.textAlign='center';
+  ctx.fillText('🛒 ALMACÉN COPIHUE', W-128, 47);
+
+  ctx.fillStyle='#fff'; ctx.font='bold 42px Segoe UI'; ctx.textAlign='center';
+  wrapText(ctx, p.nombre, W/2, H-ovH+80, W-60, 48, 2);
+
+  if (oferta && oferta.precio) {
+    ctx.fillStyle='rgba(255,255,255,.6)'; ctx.font='28px Segoe UI';
+    const antes=fmt(p.precioVenta);
+    ctx.fillText(antes, W/2, H-120);
+    const tw=ctx.measureText(antes).width;
+    ctx.beginPath(); ctx.strokeStyle='rgba(255,255,255,.6)'; ctx.lineWidth=2;
+    ctx.moveTo(W/2-tw/2,H-132); ctx.lineTo(W/2+tw/2,H-132); ctx.stroke();
+    ctx.fillStyle='#fff'; ctx.font='bold 64px Segoe UI';
+    ctx.fillText(fmt(oferta.precio), W/2, H-52);
+  } else {
+    ctx.fillStyle='#fff'; ctx.font='bold 64px Segoe UI';
+    ctx.fillText(fmt(p.precioVenta), W/2, H-52);
+  }
+}
+
+async function drawSingleH2Fmt(p, W=1080, H=600) {
+  const prods = _collageProds.slice(_singleIdx, _singleIdx+2);
+  if (prods.length < 2) return drawSingleFmt(p, W, H);
+  const cvs = document.getElementById('collage-canvas');
+  cvs.width=W; cvs.height=H;
+  const ctx = cvs.getContext('2d');
+  const grd=ctx.createLinearGradient(0,0,W,H);
+  grd.addColorStop(0,'#1a3a16'); grd.addColorStop(1,'#2d5a22');
+  ctx.fillStyle=grd; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='rgba(0,0,0,.3)'; ctx.fillRect(0,0,W,50);
+  ctx.fillStyle='#fff'; ctx.font='bold 22px Segoe UI'; ctx.textAlign='center';
+  ctx.fillText('🛒 ALMACÉN COPIHUE', W/2, 34);
+  const PAD=10, HDRH=50, FTRH=40;
+  const cw=Math.floor((W-PAD*3)/2), ch=H-HDRH-FTRH-PAD*2;
+  for (let i=0;i<2;i++) {
+    await drawProductCard(ctx, prods[i], PAD+i*(cw+PAD), HDRH+PAD, cw, ch);
+  }
+  ctx.fillStyle='rgba(0,0,0,.4)'; ctx.fillRect(0,H-FTRH,W,FTRH);
+  ctx.fillStyle='#fff'; ctx.font='bold 16px Segoe UI'; ctx.textAlign='center';
+  ctx.fillText('📦 Pedidos por WhatsApp', W/2, H-FTRH+26);
+}
+
+async function drawSingleV2Fmt(p, W=1080, H=1080) {
+  const prods = _collageProds.slice(_singleIdx, _singleIdx+2);
+  if (prods.length < 2) return drawSingleFmt(p, W, H);
+  const cvs = document.getElementById('collage-canvas');
+  cvs.width=W; cvs.height=H;
+  const ctx = cvs.getContext('2d');
+  const grd=ctx.createLinearGradient(0,0,W,H);
+  grd.addColorStop(0,'#1a3a16'); grd.addColorStop(1,'#2d5a22');
+  ctx.fillStyle=grd; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='rgba(0,0,0,.3)'; ctx.fillRect(0,0,W,50);
+  ctx.fillStyle='#fff'; ctx.font='bold 22px Segoe UI'; ctx.textAlign='center';
+  ctx.fillText('🛒 ALMACÉN COPIHUE', W/2, 34);
+  const PAD=10, HDRH=50, FTRH=40;
+  const cw=W-PAD*2, ch=Math.floor((H-HDRH-FTRH-PAD*3)/2);
+  for (let i=0;i<2;i++) {
+    await drawProductCard(ctx, prods[i], PAD, HDRH+PAD+i*(ch+PAD), cw, ch);
+  }
+  ctx.fillStyle='rgba(0,0,0,.4)'; ctx.fillRect(0,H-FTRH,W,FTRH);
+  ctx.fillStyle='#fff'; ctx.font='bold 16px Segoe UI'; ctx.textAlign='center';
+  ctx.fillText('📦 Pedidos por WhatsApp', W/2, H-FTRH+26);
+}
+
+async function drawCollage(prods) {
+  const n = Math.min(prods.length, 12);
+  const cols = n <= 2 ? 1 : n <= 4 ? 2 : 3;
+  const rows = Math.ceil(n / cols);
+  const CW = 1080, CH = 1080;
+  const HDRH = 72, FTRH = 44;
+  const PAD  = 8;
+  const gridW = CW - PAD * (cols + 1);
+  const gridH = CH - HDRH - FTRH - PAD * (rows + 1);
+  const CARD_W = Math.floor(gridW / cols);
+  const CARD_H = Math.floor(gridH / rows);
+  const cvs = document.getElementById('collage-canvas');
+  cvs.width = CW; cvs.height = CH;
+  const ctx = cvs.getContext('2d');
+  const grd = ctx.createLinearGradient(0,0,CW,CH);
+  grd.addColorStop(0,'#1a3a16'); grd.addColorStop(1,'#2d5a22');
+  ctx.fillStyle = grd; ctx.fillRect(0,0,CW,CH);
+  const tiposEnCollage = [...new Set(prods.slice(0,n).map(p=>p.catOferta).filter(Boolean))];
+  const titleMap = {
+    relampago:'⚡ OFERTAS RELÁMPAGO', ultimas:'🏷️ ÚLTIMAS UNIDADES',
+    destacado:'🔥 DESTACADOS', especial:'💜 ESPECIALES',
+    promo:'🏷️ PROMOS', combo:'🎯 COMBOS'
+  };
+  const collageTitle = tiposEnCollage.length === 1 && titleMap[tiposEnCollage[0]]
+    ? titleMap[tiposEnCollage[0]]
+    : tiposEnCollage.length > 1 ? '🔥 OFERTAS DEL DÍA' : '🛒 PRODUCTOS DESTACADOS';
+  const hdrColorMap = { relampago:'#c0392b', ultimas:'#d35400', destacado:'#d68910',
+    especial:'#6c3483', promo:'#6c3483', combo:'#bf360c' };
+  const hdrColor = hdrColorMap[tiposEnCollage[0]] || '#1a3a16';
+  ctx.fillStyle = hdrColor; ctx.fillRect(0,0,CW,HDRH);
+  ctx.fillStyle='#fff'; ctx.font='bold 26px Segoe UI'; ctx.textAlign='center';
+  ctx.fillText('🛒 ALMACÉN COPIHUE', CW/2, 30);
+  ctx.font='bold 18px Segoe UI'; ctx.fillStyle='rgba(255,255,255,.95)';
+  ctx.fillText(collageTitle, CW/2, 56);
+  for (let i = 0; i < n; i++) {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const x = PAD + col * (CARD_W + PAD);
+    const y = HDRH + PAD + row * (CARD_H + PAD);
+    await drawProductCard(ctx, prods[i], x, y, CARD_W, CARD_H);
+  }
+  ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.fillRect(0, CH-FTRH, CW, FTRH);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 16px Segoe UI'; ctx.textAlign = 'center';
+  ctx.fillText('📦 Hacemos pedidos  •  💬 Consultas por WhatsApp', CW/2, CH-FTRH+28);
+}
+
+async function drawHistoria(prods) {
+  const n=Math.min(prods.length, 6), cols=n<=4?2:3, rows=Math.ceil(n/cols);
+  const W=1080, H=1920;
+  const CARD=Math.floor((W-60-(cols-1)*12)/cols);
+  const startY=260;
+  const cvs = document.getElementById('historia-canvas');
+  cvs.width=W; cvs.height=H; cvs.style.display='block';
+  const ctx=cvs.getContext('2d');
+  const grd=ctx.createLinearGradient(0,0,W,H);
+  grd.addColorStop(0,'#0f2b0b'); grd.addColorStop(1,'#1a3a16');
+  ctx.fillStyle=grd; ctx.fillRect(0,0,W,H);
+  const _tiposH = [...new Set(prods.map(p=>p.catOferta).filter(Boolean))];
+  const _titleH = { relampago:'⚡ OFERTAS RELÁMPAGO', ultimas:'🏷️ ÚLTIMAS UNIDADES',
+    destacado:'🔥 DESTACADOS', especial:'💜 ESPECIALES', promo:'🏷️ PROMOS', combo:'🎯 COMBOS' };
+  const _hTitulo = _tiposH.length===1 && _titleH[_tiposH[0]] ? _titleH[_tiposH[0]] : '🔥 OFERTAS DEL DÍA';
+  const _hColorMap = { relampago:'#c0392b', ultimas:'#d35400', destacado:'#d68910',
+    especial:'#6c3483', promo:'#6c3483', combo:'#bf360c' };
+  ctx.fillStyle = _hColorMap[_tiposH[0]] || '#0f2b0b';
+  ctx.fillRect(0,0,W,220);
+  ctx.fillStyle='#fff'; ctx.font='bold 64px Segoe UI'; ctx.textAlign='center';
+  ctx.fillText('🛒 ALMACÉN COPIHUE', W/2, 100);
+  ctx.font='bold 44px Segoe UI'; ctx.fillStyle='rgba(255,255,255,.95)';
+  ctx.fillText(_hTitulo, W/2, 170);
+  for (let i=0;i<n;i++) {
+    const col=i%cols, row=Math.floor(i/cols);
+    const x=30+col*(CARD+12), y=startY+row*(CARD+12);
+    await drawProductCard(ctx, prods[i], x, y, CARD, CARD);
+  }
+  ctx.fillStyle='#25D366'; ctx.fillRect(0,H-150,W,150);
+  ctx.fillStyle='#fff'; ctx.font='bold 52px Segoe UI'; ctx.textAlign='center';
+  ctx.fillText('📲 Pedidos por WhatsApp', W/2, H-80);
+  ctx.font='36px Segoe UI';
+  ctx.fillText('Almacén Copihue', W/2, H-30);
+  const cvs2=document.getElementById('collage-canvas');
+  const scale=Math.min(700/W, 700/H);
+  cvs2.width=Math.round(W*scale); cvs2.height=Math.round(H*scale);
+  const ctx2=cvs2.getContext('2d');
+  ctx2.drawImage(cvs, 0,0, cvs2.width, cvs2.height);
+}
+
+on('btn-dl-todas', async () => {
+  const prods = _collageProds;
+  if (!prods.length) return;
+  toast(`⬇️ Descargando ${prods.length} imágenes…`, prods.length*600+1000);
+  const savedIdx = _singleIdx;
+  for (let i=0; i<prods.length; i++) {
+    _singleIdx = i;
+    await drawSingleLayout(prods[i], _singleLayout);
+    const cvs = document.getElementById('collage-canvas');
+    const a = document.createElement('a');
+    a.href = cvs.toDataURL('image/jpeg', .92);
+    a.download = `copihue_${norm(prods[i].nombre).slice(0,30)}.jpg`;
+    a.click();
+    await new Promise(r => setTimeout(r, 500));
+  }
+  _singleIdx = savedIdx;
+  await drawSingleLayout(prods[savedIdx], _singleLayout);
+  toast(`✅ ${prods.length} imágenes descargadas`);
+});
+
+on('btn-collage-dl', () => {
+  const a = document.createElement('a');
+  const isHistoria = _collageMode === 'historia';
+  const src = isHistoria
+    ? document.getElementById('historia-canvas').toDataURL('image/jpeg',.95)
+    : document.getElementById('collage-canvas').toDataURL('image/jpeg',.92);
+  a.href = src;
+  a.download = `copihue_${_collageMode}.jpg`;
+  a.click();
+});
+on('btn-collage-close', () => {
+  document.getElementById('collage-modal').classList.remove('open');
+  document.getElementById('historia-canvas').style.display = 'none';
+});
+
+// ============================================================
+// IA SUGGEST y otros eventos
+// ============================================================
+on('btn-clear-sel', () => {
+  if (!selectedIds.size) { toast('No hay productos seleccionados'); return; }
+  selectedIds.clear(); selectionOrder = [];
+  renderGrid();
+  toast('🗑️ Selección limpiada');
+});
+
+document.getElementById('btn-sel-todo').onclick = selectAll;
+document.getElementById('btn-sel-add').onclick = () => {
+  const allVisible = filteredProducts.filter(p => p && !p._sep).map(p => String(p.id));
+  let added = 0;
+  allVisible.forEach(id => { if (!selectedIds.has(id)) { selectedIds.add(id); selectionOrder.push(id); added++; } });
+  toast(added ? `➕ ${added} agregados` : 'Ya están todos seleccionados');
+  renderGrid();
+};
+document.getElementById('btn-sel-remove').onclick = () => {
+  const visible = new Set(filteredProducts.filter(p => p && !p._sep).map(p => String(p.id)));
+  let removed = 0;
+  visible.forEach(id => { if (selectedIds.has(id)) { selectedIds.delete(id); selectionOrder = selectionOrder.filter(x=>x!==id); removed++; } });
+  toast(removed ? `➖ ${removed} quitados` : 'Ninguno estaba seleccionado');
+  renderGrid();
+};
+
+document.getElementById('tools-toggle').onclick = () => {
+  document.getElementById('tools-panel').classList.toggle('open');
+  document.getElementById('tools-toggle').classList.toggle('open');
+};
+
+on('btn-ia-suggest', async () => {
+  if (!selectedIds.size) {
+    const best = allProducts
+      .filter(p => p.catOferta && p.stock > 0)
+      .sort((a,b) => (PRIORITY_ORDER[a.catOferta]||6) - (PRIORITY_ORDER[b.catOferta]||6))
+      .slice(0, currentMode === 'estado' ? 12 : 20);
+    selectedIds.clear(); selectionOrder = [];
+    best.forEach(p => { selectedIds.add(p.id); selectionOrder.push(p.id); });
+    toast(`✨ IA seleccionó ${best.length} productos sugeridos`);
+    renderGrid();
+    return;
+  }
+  const prods = getSelectedProducts();
+  const reordered = interleavedSort(sortProducts(prods, 'estado'));
+  selectionOrder = reordered.map(p => p.id);
+  toast('✨ Secuencia optimizada por IA');
+  renderGrid();
+});
+
+// ============================================================
+// FILTROS UI
+// ============================================================
+document.addEventListener('click', e => {
+  const chip = e.target.closest('.filter-chip');
+  if (!chip || !chip.dataset.filter) return;
+  currentFilter = chip.dataset.filter;
+  document.querySelectorAll('.filter-chip').forEach(c =>
+    c.classList.toggle('active', c.dataset.filter === currentFilter));
+  document.querySelectorAll('.filter-panel').forEach(p => p.classList.remove('open'));
+  document.querySelectorAll('.filter-fab').forEach(b => b.classList.remove('fab-active','fab-active-cat'));
+  closeSearch();
+  applyFilter();
+});
+
+window.setFilter = function(filter) {
+  document.querySelectorAll('.filter-panel').forEach(p => p.classList.remove('open'));
+  closeSearch();
+  currentFilter = filter;
+  currentSearch = '';
+  const si = document.getElementById('search-input');
+  if (si) si.value = '';
+  document.querySelectorAll('.filter-chip').forEach(c =>
+    c.classList.toggle('active', c.dataset.filter === filter));
+  document.querySelectorAll('.filter-fab').forEach(b => b.classList.remove('fab-active','fab-active-cat'));
+  document.getElementById('fab-todos')?.classList.add('fab-active');
+  applyFilter();
+};
+
+window.toggleFilterPanel = function(panelId, fabId) {
+  const panel = document.getElementById(panelId);
+  const fab   = document.getElementById(fabId);
+  const wasOpen = panel.classList.contains('open');
+  document.querySelectorAll('.filter-panel').forEach(p => p.classList.remove('open'));
+  document.querySelectorAll('.filter-fab').forEach(b => { b.classList.remove('fab-active','fab-active-cat'); });
+  if (!wasOpen) {
+    const rect = fab.getBoundingClientRect();
+    panel.style.left = Math.max(4, rect.left) + 'px';
+    panel.style.top  = (rect.bottom + 5) + 'px';
+    panel.classList.add('open');
+    requestAnimationFrame(() => {
+      const pr = panel.getBoundingClientRect();
+      if (pr.right > window.innerWidth - 4)
+        panel.style.left = (window.innerWidth - pr.width - 4) + 'px';
+    });
+    fab.classList.add(panelId === 'panel-cats' ? 'fab-active-cat' : 'fab-active');
+  }
+};
+
+window.toggleSearch = function() {
+  const open = document.getElementById('search-overlay').classList.toggle('open');
+  if (open) setTimeout(() => document.getElementById('search-input')?.focus(), 80);
+};
+window.closeSearch = function() {
+  document.getElementById('search-overlay').classList.remove('open');
+};
+document.getElementById('search-overlay')?.addEventListener('click', e => {
+  if (e.target.id === 'search-overlay') closeSearch();
+});
+document.addEventListener('click', e => {
+  if (!e.target.closest('.filter-panel') && !e.target.closest('#filter-fabs')) {
+    document.querySelectorAll('.filter-panel').forEach(p => p.classList.remove('open'));
+    document.querySelectorAll('.filter-fab').forEach(b => b.classList.remove('fab-active','fab-active-cat'));
+  }
+});
+
+document.getElementById('mode-select').onchange = e => {
+  currentMode = e.target.value;
+  applyFilter();
+  updateStats();
+};
+
+document.getElementById('btn-sel-all')?.addEventListener('click', selectAll);
+
+// ============================================================
+// DARK MODE
+// ============================================================
+const storedTheme = localStorage.getItem('sendwa_theme');
+if (storedTheme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+
+document.getElementById('btn-dark').onclick = () => {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  document.documentElement.setAttribute('data-theme', isDark ? 'light' : 'dark');
+  document.getElementById('btn-dark').textContent = isDark ? '🌙' : '☀️';
+  localStorage.setItem('sendwa_theme', isDark ? 'light' : 'dark');
+};
+if (storedTheme === 'dark') document.getElementById('btn-dark').textContent = '☀️';
+
+// ============================================================
+// RECENT SELECTION
+// ============================================================
+function saveRecent() {
+  localStorage.setItem('sendwa_recent', JSON.stringify([...selectedIds].slice(0, 50)));
+}
+
+// ============================================================
+// CATEGORÍAS DINÁMICAS
+// ============================================================
 function buildCategoryFilters() {
   const cats = [...new Set(allProducts.map(p => p.categoria).filter(Boolean))].sort();
   const container = document.getElementById('cat-chips-container');
@@ -1055,11 +2024,10 @@ function buildCategoryFilters() {
 }
 
 // ============================================================
-// INIT
+// INIT FINAL
 // ============================================================
 window.toggleSelect = toggleSelect;
 
-// Botón atrás del celular
 history.pushState({ sendwa: true }, '', location.href);
 window.addEventListener('popstate', (e) => {
   if (document.getElementById('collage-modal').classList.contains('open')) {
@@ -1126,1492 +2094,6 @@ async function init() {
   window.addEventListener('resize', recalcLayout);
 }
 
-const panelObs = new ResizeObserver(recalcLayout);
-panelObs.observe(document.getElementById('header'));
-
-init();
-// ============================================================
-// FETCH DATA — igual que v361: productos + getOfertas en paralelo
-// ============================================================
-
-// Pools de ofertas activos (cargados desde getOfertas, igual que seba21)
-const _poolRelampago  = new Set();
-const _poolDestacadas = new Set();
-const _poolEspeciales = new Set();
-const _poolUltimas    = new Set();
-const _poolUltimasData = new Map(); // id → { precioOferta, pct, diasParaVencer }
-
-async function _apiFetch(action) {
-  const r = await fetch(API_URL + '?action=' + action + '&t=' + Date.now(),
-    { redirect: 'follow' });
-  return r.json();
-}
-
-async function fetchData() {
-  try {
-    const r = await fetch(API_URL + '?t=' + Date.now(), { redirect: 'follow' });
-    return await r.json();
-  } catch(e) {
-    console.error('API productos error:', e);
-    return null;
-  }
-}
-
-// Carga pools desde getOfertas — fuente de verdad, igual que seba21 v361
-async function cargarPools() {
-  try {
-    const response = await fetch(API_URL + '?action=getOfertas&t=' + Date.now());
-    const rawData = await response.text(); // Primero como texto
-    
-    console.log('Respuesta raw de getOfertas:', rawData);
-    
-    // Limpiar posibles caracteres extraños
-    let cleanData = rawData.trim();
-    
-    // Si empieza con llaves pero tiene texto antes, extraer JSON
-    const jsonMatch = cleanData.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      cleanData = jsonMatch[0];
-    }
-    
-    const data = JSON.parse(cleanData);
-    
-    if (!data.success) { 
-      console.warn('getOfertas sin success'); 
-      return; 
-    }
-
-    _poolRelampago.clear(); 
-    _poolDestacadas.clear();
-    _poolEspeciales.clear(); 
-    _poolUltimas.clear(); 
-    _poolUltimasData.clear();
-
-    (data.relampagoActivo   || []).forEach(p => _poolRelampago.add(Number(p.id)));
-    (data.destacadasActivas || []).filter(p => p.categoria !== 'CERVEZAS')
-                                  .forEach(p => _poolDestacadas.add(Number(p.id)));
-    (data.especialesActivas || []).filter(p => p.categoria !== 'CERVEZAS')
-                                  .forEach(p => _poolEspeciales.add(Number(p.id)));
-    const ults = data.ultimasSeleccionadasSiempre || data.ultimasSeleccionadas || [];
-    ults.forEach(p => {
-      const id = Number(p.id);
-      _poolUltimas.add(id);
-      _poolUltimasData.set(id, {
-        precioOferta:   p.precioOferta   != null ? p.precioOferta   : null,
-        pct:            p.pct            != null ? p.pct            : null,
-        diasParaVencer: p.diasParaVencer != null ? p.diasParaVencer : null,
-      });
-    });
-
-    console.log(`📊 Pools SendWA — ⚡${_poolRelampago.size} 🔥${_poolDestacadas.size} 🌙${_poolEspeciales.size} 🏷️${_poolUltimas.size}`);
-    console.log('IDs en relampago:', [..._poolRelampago]);
-    console.log('IDs en destacadas:', [..._poolDestacadas]);
-    console.log('IDs en especiales:', [..._poolEspeciales]);
-    console.log('IDs en ultimas:', [..._poolUltimas]);
-    
-  } catch(e) {
-    console.warn('Error en cargarPools:', e.message);
-    console.warn('Respuesta completa:', e);
-  }
-}
-// ============================================================
-// PARSE PRODUCTS — misma estructura que seba21
-// ============================================================
-function parseProducts(data) {
-  let rows = null;
-  if (Array.isArray(data)) {
-    rows = data;
-  } else if (typeof data === 'object') {
-    for (const k of Object.keys(data)) {
-      if (Array.isArray(data[k]) && data[k].length > 0) { rows = data[k]; break; }
-    }
-  }
-  if (!Array.isArray(rows) || rows.length === 0) return [];
-
-  return rows
-    .filter(r => r && typeof r === 'object')
-    .map((r, i) => {
-      const nombre      = String(r.name || r.nombre || '').trim();
-      const precioVenta = parseFloat(r.price || r.precio || 0);
-      const categoria   = String(r.category || r.categoria || '').trim();
-      const stock       = parseFloat(r.stock ?? 1);
-      const foto        = String(r.image || r.imagen || r.foto || '').trim();
-      const id          = Number(r.id) || (nombre + '_' + i);
-      const vendidos    = parseFloat(r.rotacion || r.vendidos || 0);
-      // campos numéricos directos igual que seba21
-      const relampago   = (r.relampago !== undefined && r.relampago !== null && r.relampago !== '')
-                          ? (isNaN(parseInt(r.relampago)) ? String(r.relampago).trim() : parseInt(r.relampago)) : 0;
-      const destacada   = parseInt(r.destacada) || 0;
-      const especial    = parseInt(r.especial)  || 0;
-      // col L: precio promo/combo (campo normal en la API = $promos/combos)
-      const normal      = parseFloat(r.normal || r.precioNormal || r['$promos/combos'] || 0);
-
-      // catOferta se resuelve en resolveOfertas() contra los pools activos
-      return { id, nombre, precioVenta, categoria, stock, foto, vendidos,
-               relampago, destacada, especial, normal, catOferta: '', _raw: r };
-    })
-    .filter(p => p.nombre && p.precioVenta > 0);
-}
-
-// resolveOfertas — tres modos:
-//   'pool'   → en el pool configurado (independiente de horario) — filtro "Con ofertas"
-//   'activo' → solo los activos AHORA según horario/forzados (igual que seba21) — filtro "Activos ahora"
-//   'collage'→ igual que 'pool' (para el canvas)
-function resolveOfertas(products, modo = 'pool') {
-  return products.map(p => {
-    const pid = Number(p.id);
-    const rawCat = String(p._raw?.categoriaOferta || '').toUpperCase().trim();
-    let catOferta = '';
-    // PROMO / COMBO siempre directo de col J — no tienen horario
-    if      (rawCat === 'PROMO ACTIVA') catOferta = 'promo';
-    else if (rawCat === 'COMBO ACTIVO') catOferta = 'combo';
-    else {
-      // Para relampago/destacado/especial/ultimas: chequear pool
-      const enPoolR = p.relampago && _poolRelampago.has(pid);
-      const enPoolD = p.destacada > 0 && _poolDestacadas.has(pid);
-      const enPoolE = p.especial  > 0 && _poolEspeciales.has(pid);
-      const enPoolU = _poolUltimas.has(pid);
-
-      if (modo === 'activo') {
-        // Solo los activos según horario/forzado — igual que seba21
-        if      (enPoolR && _tipoActivoAhora('relampago'))  catOferta = 'relampago';
-        else if (enPoolU && _tipoActivoAhora('ultimas'))     catOferta = 'ultimas';
-        else if (enPoolD && _tipoActivoAhora('destacadas'))  catOferta = 'destacado';
-        else if (enPoolE && _tipoActivoAhora('especiales'))  catOferta = 'especial';
-      } else {
-        // modo 'pool' o 'collage': en el pool = tiene oferta, sin importar horario
-        if      (enPoolR) catOferta = 'relampago';
-        else if (enPoolU) catOferta = 'ultimas';
-        else if (enPoolD) catOferta = 'destacado';
-        else if (enPoolE) catOferta = 'especial';
-      }
-    }
-    return { ...p, catOferta };
-  });
-}
-
-// Aplica colores de CONFIG_UI si vienen en la respuesta
-function applyUIColors(data) {
-  const cfg = data.config_ui || data.CONFIG_UI || data.configUI || {};
-  if (cfg.primaryColor) document.documentElement.style.setProperty('--primary', cfg.primaryColor);
-  if (cfg.primaryDark)  document.documentElement.style.setProperty('--primary-dark', cfg.primaryDark);
-  if (cfg.accentColor)  document.documentElement.style.setProperty('--accent', cfg.accentColor);
-}
-
-// ============================================================
-// SORT & FILTER
-// ============================================================
-function sortProducts(products, mode) {
-  const sorted = [...products];
-  sorted.sort((a, b) => {
-    const pa = PRIORITY_ORDER[a.catOferta] ?? 7;
-    const pb = PRIORITY_ORDER[b.catOferta] ?? 7;
-    if (pa !== pb) return pa - pb;
-    return (b.vendidos || 0) - (a.vendidos || 0);
-  });
-
-  // interleavedSort solo en modo "todos" — si hay filtro activo los productos
-  // ya son del mismo tipo, mezclar solo introduce productos de otros grupos
-  const filtroEsGeneral = (currentFilter === 'todos' || currentFilter === 'oferta' || currentFilter === 'activo');
-  if (mode === 'estado' && filtroEsGeneral) {
-    return interleavedSort(sorted);
-  }
-  return sorted;
-}
-
-function interleavedSort(sorted) {
-  // Mezclar para evitar misma categoría seguida
-  const result = [];
-  const byPriority = {};
-  for (const p of sorted) {
-    const key = p.catOferta || 'normal';
-    if (!byPriority[key]) byPriority[key] = [];
-    byPriority[key].push(p);
-  }
-  const keys = Object.keys(byPriority).sort((a,b) => (PRIORITY_ORDER[a]||6)-(PRIORITY_ORDER[b]||6));
-  let maxLen = Math.max(...Object.values(byPriority).map(a=>a.length));
-  for (let i = 0; i < maxLen; i++) {
-    for (const k of keys) {
-      if (byPriority[k][i]) result.push(byPriority[k][i]);
-    }
-  }
-  return result;
-}
-
-// Modo de resolución según filtro actual
-function getModoResolucion() {
-  if (currentFilter === 'activo') return 'activo';
-  return 'pool';
-}
-
-function applyFilter() {
-  const modoRes = getModoResolucion();
-  const resolved = resolveOfertas(allProducts, modoRes);
-
-  let f = resolved.filter(p => {
-    switch (currentFilter) {
-      // ── Con oferta (pool) — en el pool sin importar horario ──
-      case 'oferta':    return !!p.catOferta;
-      // ── Activos ahora — horario seba21 sincronizado ──
-      case 'activo':    return !!p.catOferta;
-      // ── Sin oferta — precio normal puro ──
-      case 'sinoferta': {
-        // Chequear contra AMBOS modos para asegurar que no tiene nada
-        const enPool = resolveOfertas([p], 'pool')[0].catOferta;
-        return !enPool;
-      }
-      case 'relampago': return p.catOferta === 'relampago';
-      case 'destacado': return p.catOferta === 'destacado';
-      case 'especial':  return p.catOferta === 'especial';
-      case 'ultimas':   return p.catOferta === 'ultimas';
-      case 'promo':     return p.catOferta === 'promo';
-      case 'combo':     return p.catOferta === 'combo';
-      default:
-        if (currentFilter === '' || currentFilter === 'todos') return p.stock > 0;
-        return norm(p.categoria) === norm(currentFilter);
-    }
-  });
-
-  if (currentSearch) {
-    const q = norm(currentSearch);
-    f = f.filter(p => norm(p.nombre).includes(q) || norm(p.categoria).includes(q));
-  }
-  filteredProducts = sortProducts(f, currentMode);
-  renderGrid();
-}
-
-// ============================================================
-// RENDER
-// ============================================================
-function getCatEmoji(cat) {
-  const map = {bebidas:'🥤',limpieza:'🧹',snacks:'🍪',lacteos:'🥛',carnes:'🥩',frutas:'🍎',panaderia:'🍞',ferreteria:'🔧'};
-  return map[norm(cat)] || '🛍️';
-}
-
-function insertSeparators(products) {
-  // Separadores solo cuando los productos están ordenados por categoría
-  // (filtro "todos" con interleave mezcla — no poner separadores ahí)
-  // Lógica: separador cuando cambia la categoría Y la racha anterior
-  // tenía al menos 2 del mismo grupo (evita separadores por producto mezclado)
-
-  const result = [];
-  let lastCat = null;
-  let rachaCat = 0; // cuántos seguidos de la misma categoría
-
-  for (const p of products) {
-    const cat = norm(p.categoria);
-
-    if (cat !== lastCat) {
-      // Solo poner separador si la categoría anterior tuvo racha real (>=2)
-      // O si es el primer producto (lastCat === null)
-      if (lastCat === null || rachaCat >= 2) {
-        const label = SEP_LABELS[cat] || (getCatEmoji(cat) + ' ' + (p.categoria||'').toUpperCase());
-        result.push({ _sep: true, label, cat });
-      }
-      rachaCat = 1;
-      lastCat = cat;
-    } else {
-      rachaCat++;
-    }
-    result.push(p);
-  }
-  return result;
-}
-
-function renderGrid() {
-  const grid = document.getElementById('grid');
-  const withSeps = insertSeparators(filteredProducts);
-  
-  if (filteredProducts.length === 0) {
-    grid.innerHTML = '';
-    document.getElementById('empty-state').style.display = 'block';
-    return;
-  }
-  document.getElementById('empty-state').style.display = 'none';
-
-  grid.innerHTML = withSeps.map((p, i) => {
-    if (p._sep) {
-      return `<div class="separator-card">${p.label}</div>`;
-    }
-    const sel = selectedIds.has(String(p.id));
-    const orderNum = selectionOrder.indexOf(String(p.id)) + 1;
-    const sinStock = p.stock <= 0;
-    const oferta   = calcularOferta(p);
-    const badgeColor = BADGE_COLORS[p.catOferta] || '';
-
-    const imgUrl = getImgUrl(p);
-    const imgEl = `<img class="card-img" src="${imgUrl}" alt="${p.nombre}" loading="lazy"
-                     onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
-                   <div class="card-img-placeholder" style="display:none">${getCatEmoji(p.categoria)}</div>`;
-
-    // Precio: si tiene oferta muestra precio oferta + tachado original
-    const precioHTML = oferta
-      ? `<div class="card-price-oferta">
-           <span class="price-antes">${fmt(p.precioVenta)}</span>
-           <span class="price-oferta" style="color:${badgeColor}">${oferta.precio ? fmt(oferta.precio) : ''}</span>
-         </div>`
-      : `<div class="card-price">${fmt(p.precioVenta)}</div>`;
-
-    // Badge con etiqueta real de la oferta
-    const badgeHTML = oferta
-      ? `<div class="badge-oferta" style="background:${badgeColor}">${oferta.etiqueta}</div>`
-      : '';
-
-    return `
-    <div class="prod-card ${sel?'selected':''} ${sinStock?'sin-stock':''}"
-         data-id="${p.id}" data-idx="${filteredProducts.indexOf(p)}"
-         onclick="toggleSelect('${p.id}')">
-      ${sinStock ? `<div class="badge-sin-stock">Sin stock</div>` : ''}
-      ${imgEl}
-      <div class="card-order">${orderNum||''}</div>
-      <div class="card-check">✓</div>
-      ${badgeHTML}
-      <div class="card-body">
-        <div class="card-name">${p.nombre}</div>
-        <div class="card-cat">${p.categoria}</div>
-        ${precioHTML}
-      </div>
-    </div>`;
-  }).join('');
-
-  updateStats();
-}
-
-// ============================================================
-// SELECTION
-// ============================================================
-function toggleSelect(id) {
-  id = String(id); // normalizar siempre a string
-  if (selectedIds.has(id)) {
-    selectedIds.delete(id);
-    selectionOrder = selectionOrder.filter(x => x !== id);
-  } else {
-    selectedIds.add(id);
-    selectionOrder.push(id);
-  }
-  updateStats();
-  document.querySelectorAll('.prod-card').forEach(el => {
-    const eid = String(el.dataset.id);
-    const sel = selectedIds.has(eid);
-    el.classList.toggle('selected', sel);
-    const orderEl = el.querySelector('.card-order');
-    if (orderEl) orderEl.textContent = sel ? (selectionOrder.indexOf(eid)+1) : '';
-  });
-  saveRecent();
-}
-
-function selectAll() {
-  // Solo los productos visibles según filtro activo (sin separadores)
-  const allVisible = filteredProducts.filter(p => p && !p._sep).map(p => String(p.id));
-  const allSel = allVisible.length > 0 && allVisible.every(id => selectedIds.has(id));
-
-  // Nombre del filtro activo para el toast
-  const filterName = currentFilter === 'todos' ? 'todos' :
-    document.querySelector(`.filter-chip[data-filter="${currentFilter}"]`)?.textContent?.trim() || currentFilter;
-
-  if (allSel) {
-    // Deseleccionar solo los visibles
-    allVisible.forEach(id => { selectedIds.delete(id); selectionOrder = selectionOrder.filter(x=>x!==id); });
-    toast(`Deseleccionados: ${filterName}`);
-  } else {
-    allVisible.forEach(id => { if(!selectedIds.has(id)) { selectedIds.add(id); selectionOrder.push(id); } });
-    toast(`✓ ${allVisible.length} productos — ${filterName}`);
-  }
-  renderGrid();
-}
-
-function getSelectedProducts() {
-  return selectionOrder
-    .map(id => allProducts.find(p => String(p.id) === String(id)))
-    .filter(Boolean);
-}
-
-// ============================================================
-// STATS
-// ============================================================
-function updateStats() {
-  const sel = selectedIds.size;
-  const prods = getSelectedProducts();
-  const cats = new Set(prods.map(p=>p.categoria)).size;
-  const sizeMB = (prods.length * IMG_SIZE_MB).toFixed(1);
-
-  document.getElementById('hstat-sel').textContent = sel ? `✓ ${sel}  📦 ${cats}cat` : '✓ 0';
-  document.getElementById('hstat-size').textContent = `${sizeMB} MB`;
-  const hwarn = document.getElementById('hstat-warn');
-  if (hwarn) hwarn.style.display = (prods.length > WA_LIMIT_ESTADO && currentMode === 'estado') ? '' : 'none';
-  const warn = document.getElementById('warn-msg');
-  warn.classList.toggle('show', prods.length > WA_LIMIT_ESTADO && currentMode === 'estado');
-}
-
-// ============================================================
-// PANEL HEIGHT — recalcular top del main
-// ============================================================
-function recalcLayout() {
-  const headerH = document.getElementById('header').offsetHeight;
-  document.getElementById('main').style.paddingTop = (headerH + 46) + 'px';
-}
-
-// ============================================================
-// TEXTO AUTOMÁTICO
-// ============================================================
-function generateText(mode) {
-  const prodsRaw = getSelectedProducts();
-  if (!prodsRaw.length) return '❌ Ningún producto seleccionado.';
-  // Resolver ofertas
-  const prods = resolveOfertas(prodsRaw);
-
-  // ── Contar cuántos tienen oferta para elegir encabezado ──
-  const conOferta = prods.filter(p => p.catOferta).length;
-  const tiposPresentes = [...new Set(prods.map(p=>p.catOferta).filter(Boolean))];
-  const tituloOferta = {
-    relampago:'⚡ OFERTAS RELÁMPAGO', ultimas:'🏷️ ÚLTIMAS UNIDADES',
-    destacado:'🔥 OFERTAS DESTACADAS', especial:'💜 PRECIOS ESPECIALES',
-    promo:'🏷️ PROMOS DEL DÍA', combo:'🎯 COMBOS'
-  };
-
-  // Encabezado dinámico
-  let header = '';
-  if (mode === 'rapido') {
-    header = `📲 *ALMACÉN COPIHUE*
-`;
-  } else if (tiposPresentes.length === 1 && tituloOferta[tiposPresentes[0]]) {
-    header = `📲 *ALMACÉN COPIHUE* 📲
-${tituloOferta[tiposPresentes[0]]}
-`;
-  } else if (conOferta > 0) {
-    header = `🛒 *ALMACÉN COPIHUE* 🛒
-🔥 ¡OFERTAS DEL DÍA! 🔥
-`;
-  } else {
-    header = `🛒 *ALMACÉN COPIHUE* 🛒
-`;
-  }
-
-  // ── Etiqueta legible del tipo de oferta ──
-  function labelOferta(p, of) {
-    if (!of) return '';
-    const cat = p.catOferta;
-    if (cat === 'relampago') {
-      // NxM → explicar la promo
-      const cfg = OFERTAS_RELAMPAGO[String(p.relampago)];
-      if (cfg && cfg.tipo === 'nxm') {
-        if (cfg.cantidad === 2 && cfg.pagas === 1.5) return ' _(2da unidad 50% OFF)_';
-        return ` _(${cfg.nombre.toUpperCase()})_`;
-      }
-      return of.etiqueta ? ` _${of.etiqueta}_` : '';
-    }
-    if (cat === 'destacado') return of.etiqueta ? ` _${of.etiqueta}_` : '';
-    if (cat === 'especial')  return ' _(-10% especial)_';
-    if (cat === 'ultimas')   return of.etiqueta ? ` _${of.etiqueta}_` : ' _(últimas unidades)_';
-    if (cat === 'promo')     return of.etiqueta ? ` _${of.etiqueta}_` : ' _(promo)_';
-    if (cat === 'combo')     return of.etiqueta ? ` _${of.etiqueta}_` : ' _(combo)_';
-    return '';
-  }
-
-  let lines = [];
-
-  if (mode === 'rapido') {
-    // Lista rápida: emoji + nombre + precio
-    for (const p of prods) {
-      const of = calcularOferta(p);
-      const precio = of && of.precio ? fmt(of.precio) : fmt(p.precioVenta);
-      const e = getCatEmoji(p.categoria);
-      lines.push(`${e} ${p.nombre} — *${precio}*`);
-    }
-  } else {
-    // Agrupar por categoría
-    const grupos = {};
-    for (const p of prods) {
-      const cat = p.categoria || 'Varios';
-      if (!grupos[cat]) grupos[cat] = [];
-      grupos[cat].push(p);
-    }
-    for (const [cat, ps] of Object.entries(grupos)) {
-      const emoji = getCatEmoji(cat);
-      // Separador de categoría siempre (en grupo más visible, en estado más compacto)
-      lines.push(`\n${emoji} *${cat.toUpperCase()}*`);
-      for (const p of ps) {
-        const of = calcularOferta(p);
-        const precioFinal = of && of.precio ? fmt(of.precio) : fmt(p.precioVenta);
-        const precioAntes  = of && of.precio ? ` ~${fmt(p.precioVenta)}~` : '';
-        const labelOf = labelOferta(p, of);
-        if (mode === 'grupo') {
-          // Formato detallado para grupos
-          lines.push(`• *${p.nombre}*${labelOf}\n  ${precioAntes ? precioAntes + ' → ' : ''}*${precioFinal}*`);
-        } else {
-          // Estado: más compacto
-          lines.push(`• ${p.nombre}${labelOf} — *${precioFinal}*${precioAntes ? ` ~(antes ${fmt(p.precioVenta)})~` : ''}`);
-        }
-      }
-    }
-  }
-
-  // Footer según modo
-  const footer = mode === 'grupo'
-    ? '\n\n📦 *Hacemos pedidos a domicilio*\n💬 Consultá por WhatsApp\n⏰ Ofertas por tiempo limitado'
-    : '\n\n📦 Pedidos por WhatsApp';
-
-  return header + lines.join('\n') + footer;
-}
-
-// ============================================================
-// ACTIONS — helpers defensivos para elementos del FAB
-// ============================================================
-function on(id, fn) { const el = document.getElementById(id); if (el) el.onclick = fn; }
-
-on('btn-copy', async () => {
-  const txt = generateText(currentMode);
-  try {
-    await navigator.clipboard.writeText(txt);
-    toast('📋 Texto copiado al portapapeles');
-  } catch {
-    // fallback
-    const ta = document.createElement('textarea');
-    ta.value = txt; document.body.appendChild(ta);
-    ta.select(); document.execCommand('copy');
-    document.body.removeChild(ta);
-    toast('📋 Texto copiado');
-  }
-});
-
-on('btn-wa', () => {
-  if (!selectedIds.size) { toast('⚠️ Seleccioná al menos un producto'); return; }
-  const txt = generateText(currentMode);
-  const url = 'https://wa.me/?text=' + encodeURIComponent(txt);
-  window.open(url, '_blank');
-});
-
-on('btn-dl', async () => {
-  const prods = getSelectedProducts();
-  if (!prods.length) { toast('⚠️ Sin imágenes para descargar'); return; }
-  // Preguntar si quiere con badge o foto original
-  const conBadge = confirm('¿Descargar con badge de oferta?\n\nOK = Con badge (tarjeta completa)\nCancelar = Solo la foto original');
-  if (conBadge) {
-    // Usar drawSingle (que quedó perfecto) para cada producto
-    toast(`⬇️ Generando ${Math.min(prods.length,12)} tarjetas…`, 4000);
-    const resolved = resolveOfertas(prods);
-    const cvs = document.getElementById('collage-canvas');
-    for (const p of resolved.slice(0,12)) {
-      await drawSingle(p);  // mismo render que "1 Foto"
-      const a = document.createElement('a');
-      a.href = cvs.toDataURL('image/jpeg', .93);
-      a.download = norm(p.nombre) + '_oferta.jpg';
-      a.click();
-      await new Promise(r => setTimeout(r, 350));
-    }
-    return;
-  }
-  toast(`⬇️ Descargando ${prods.length} imagen(es)…`, 3000);
-  for (const p of prods.slice(0, 20)) {
-    try {
-      const a = document.createElement('a');
-      a.href = getImgUrl(p); a.download = norm(p.nombre) + '.jpg';
-      a.target = '_blank'; a.click();
-      await new Promise(r => setTimeout(r, 400));
-    } catch {}
-  }
-});
-
-// ============================================================
-// COLLAGE — modos: collage (multi), single (1 foto), historia
-// ============================================================
-let _collageMode = 'collage';
-let _singleIdx   = 0;
-let _collageProds = [];
-
-on('btn-collage', () => {
-  const base = getSelectedProducts();
-  if (!base.length) { toast('⚠️ Seleccioná al menos un producto primero'); return; }
-  // Resolver con modo actual para que el canvas sepa qué tipo de oferta mostrar
-  const prods = resolveOfertas(base, getModoResolucion());
-  // Marcar sin oferta para el marco del canvas
-  if (currentFilter === 'sinoferta') prods.forEach(p => p._sinOferta = true);
-  _collageProds = prods;
-  _singleIdx    = 0;
-  openCollageModal('collage');
-});
-
-// Tabs de modo
-document.getElementById('collage-mode-tabs').onclick = e => {
-  const tab = e.target.closest('.collage-tab');
-  if (!tab) return;
-  document.querySelectorAll('.collage-tab').forEach(t => t.classList.remove('active'));
-  tab.classList.add('active');
-  openCollageModal(tab.dataset.cmode);
-};
-
-function openCollageModal(mode) {
-  _collageMode = mode;
-  document.getElementById('collage-modal').classList.add('open');
-  const picker = document.getElementById('single-picker');
-  const layoutBar = document.getElementById('single-layout-bar');
-  const btnTodas = document.getElementById('btn-dl-todas');
-  if (mode === 'single') {
-    picker.style.display = 'block';
-    layoutBar.classList.add('show');
-    buildSinglePicker(_collageProds);
-    // Mostrar btn descargar todas si hay más de 1
-    if (_collageProds.length > 1) {
-      btnTodas.classList.add('show');
-      btnTodas.textContent = `⬇️ Descargar TODAS (${_collageProds.length} fotos)`;
-    } else {
-      btnTodas.classList.remove('show');
-    }
-  } else {
-    picker.style.display = 'none';
-    layoutBar.classList.remove('show');
-    btnTodas.classList.remove('show');
-  }
-  renderCollageMode();
-}
-
-function buildSinglePicker(prods) {
-  const list = document.getElementById('single-picker-list');
-  list.innerHTML = prods.map((p, i) => {
-    const url = getImgUrl(p);
-    return `<div class="single-thumb ${i===_singleIdx?'active':''}" onclick="selectSingleProd(${i})">
-      <img src="${url}" onerror="this.src=''">
-      <span>${p.nombre.slice(0,16)}</span>
-    </div>`;
-  }).join('');
-}
-window.selectSingleProd = (i) => {
-  _singleIdx = i;
-  document.querySelectorAll('.single-thumb').forEach((el,j)=>el.classList.toggle('active',j===i));
-  renderCollageMode();
-};
-
-let _singleLayout = 'clasico'; // clasico | h2 | v2 | expandido
-
-async function renderCollageMode() {
-  if (_collageMode === 'collage')  await drawCollage(_collageProds);
-  if (_collageMode === 'single')   await drawSingleLayout(_collageProds[_singleIdx], _singleLayout);
-  if (_collageMode === 'historia') await drawHistoria(_collageProds);
-}
-
-let _singleFormat = { w: 1080, h: 1080 }; // formato activo
-
-// Wiring ESTILO
-document.getElementById('layout-estilo-row').onclick = e => {
-  const btn = e.target.closest('.layout-btn');
-  if (!btn) return;
-  _singleLayout = btn.dataset.layout;
-  document.querySelectorAll('#layout-estilo-row .layout-btn').forEach(b => b.classList.toggle('active', b===btn));
-  renderCollageMode();
-};
-
-// Wiring FORMATO
-document.getElementById('layout-format-row').onclick = e => {
-  const btn = e.target.closest('.layout-btn');
-  if (!btn || !btn.dataset.format) return;
-  const [fw, fh] = btn.dataset.format.split('x').map(Number);
-  _singleFormat = { w: fw, h: fh };
-  document.querySelectorAll('#layout-format-row .layout-btn').forEach(b => b.classList.toggle('active', b===btn));
-  renderCollageMode();
-};
-
-// Wrapper que elige variante de drawSingle según layout Y aplica formato
-async function drawSingleLayout(p, layout) {
-  if (!p) return;
-  const fmt_size = _singleFormat || { w:1080, h:1080 };
-  if (layout === 'clasico')    return drawSingleFmt(p, fmt_size.w, fmt_size.h);
-  if (layout === 'expandido')  return drawSingleExpandidoFmt(p, fmt_size.w, fmt_size.h);
-  if (layout === 'h2')         return drawSingleH2Fmt(p, fmt_size.w, fmt_size.h);
-  if (layout === 'v2')         return drawSingleV2Fmt(p, fmt_size.w, fmt_size.h);
-  return drawSingleFmt(p, fmt_size.w, fmt_size.h);
-}
-
-// Alias para compatibilidad
-async function drawSingle(p) { return drawSingleFmt(p, 1080, 1080); }
-
-// ── LAYOUT EXPANDIDO — foto ocupa casi todo, texto superpuesto abajo ──
-async function drawSingleExpandidoFmt(p, W=1080, H=1080) {
-  const cvs = document.getElementById('collage-canvas');
-  cvs.width=W; cvs.height=H;
-  const ctx = cvs.getContext('2d');
-  const oferta = calcularOferta(p);
-  const badgeColor = BADGE_COLORS[p.catOferta] || null;
-
-  // Foto ocupa TODO el canvas (cover)
-  try {
-    const img = await loadImg(getImgUrl(p));
-    const scale = Math.max(W/img.width, H/img.height);
-    const dw=img.width*scale, dh=img.height*scale;
-    ctx.drawImage(img, (W-dw)/2, (H-dh)/2, dw, dh);
-  } catch {
-    const grd=ctx.createLinearGradient(0,0,W,H);
-    grd.addColorStop(0,'#1a3a16'); grd.addColorStop(1,'#2d5a22');
-    ctx.fillStyle=grd; ctx.fillRect(0,0,W,H);
-  }
-
-  // Overlay gradiente abajo
-  const ovH = 340;
-  const ov = ctx.createLinearGradient(0, H-ovH, 0, H);
-  ov.addColorStop(0,'rgba(0,0,0,0)'); ov.addColorStop(1,'rgba(0,0,0,.85)');
-  ctx.fillStyle=ov; ctx.fillRect(0,H-ovH,W,ovH);
-
-  // Badge arriba izquierda
-  if (oferta && badgeColor) {
-    ctx.fillStyle=badgeColor; ctx.beginPath();
-    ctx.roundRect(16,16,300,48,10); ctx.fill();
-    ctx.fillStyle='#fff'; ctx.font='bold 24px Segoe UI'; ctx.textAlign='left';
-    ctx.fillText(oferta.etiqueta.toUpperCase(), 28, 48);
-  }
-  // Logo tienda arriba derecha
-  ctx.fillStyle='rgba(0,0,0,.5)'; ctx.beginPath();
-  ctx.roundRect(W-240,16,224,48,10); ctx.fill();
-  ctx.fillStyle='#fff'; ctx.font='bold 18px Segoe UI'; ctx.textAlign='center';
-  ctx.fillText('🛒 ALMACÉN COPIHUE', W-128, 47);
-
-  // Nombre
-  ctx.fillStyle='#fff'; ctx.font='bold 42px Segoe UI'; ctx.textAlign='center';
-  wrapText(ctx, p.nombre, W/2, H-ovH+80, W-60, 48, 2);
-
-  // Precio
-  if (oferta && oferta.precio) {
-    ctx.fillStyle='rgba(255,255,255,.6)'; ctx.font='28px Segoe UI';
-    const antes=fmt(p.precioVenta);
-    ctx.fillText(antes, W/2, H-120);
-    const tw=ctx.measureText(antes).width;
-    ctx.beginPath(); ctx.strokeStyle='rgba(255,255,255,.6)'; ctx.lineWidth=2;
-    ctx.moveTo(W/2-tw/2,H-132); ctx.lineTo(W/2+tw/2,H-132); ctx.stroke();
-    ctx.fillStyle='#fff'; ctx.font='bold 64px Segoe UI';
-    ctx.fillText(fmt(oferta.precio), W/2, H-52);
-  } else {
-    ctx.fillStyle='#fff'; ctx.font='bold 64px Segoe UI'; ctx.textAlign='center';
-    ctx.fillText(fmt(p.precioVenta), W/2, H-52);
-  }
-}
-
-// ── LAYOUT HORIZONTAL 2 — si hay 2+ productos, los muestra lado a lado ──
-async function drawSingleH2Fmt(p, W=1080, H=600) {
-  const prods = _collageProds.slice(_singleIdx, _singleIdx+2);
-  if (prods.length < 2) return drawSingleFmt(p, W, H);
-  const cvs = document.getElementById('collage-canvas');
-  cvs.width=W; cvs.height=H;
-  const ctx = cvs.getContext('2d');
-  const grd=ctx.createLinearGradient(0,0,W,H);
-  grd.addColorStop(0,'#1a3a16'); grd.addColorStop(1,'#2d5a22');
-  ctx.fillStyle=grd; ctx.fillRect(0,0,W,H);
-  // Header
-  ctx.fillStyle='rgba(0,0,0,.3)'; ctx.fillRect(0,0,W,50);
-  ctx.fillStyle='#fff'; ctx.font='bold 22px Segoe UI'; ctx.textAlign='center';
-  ctx.fillText('🛒 ALMACÉN COPIHUE', W/2, 34);
-  // 2 cards lado a lado
-  const PAD=10, HDRH=50, FTRH=40;
-  const cw=Math.floor((W-PAD*3)/2), ch=H-HDRH-FTRH-PAD*2;
-  for (let i=0;i<2;i++) {
-    await drawProductCard(ctx, prods[i], PAD+i*(cw+PAD), HDRH+PAD, cw, ch);
-  }
-  ctx.fillStyle='rgba(0,0,0,.4)'; ctx.fillRect(0,H-FTRH,W,FTRH);
-  ctx.fillStyle='#fff'; ctx.font='bold 16px Segoe UI'; ctx.textAlign='center';
-  ctx.fillText('📦 Pedidos por WhatsApp', W/2, H-FTRH+26);
-}
-
-// ── LAYOUT VERTICAL 2 — 2 productos apilados ──
-async function drawSingleV2Fmt(p, W=1080, H=1080) {
-  const prods = _collageProds.slice(_singleIdx, _singleIdx+2);
-  if (prods.length < 2) return drawSingleFmt(p, W, H);
-  const cvs = document.getElementById('collage-canvas');
-  cvs.width=W; cvs.height=H;
-  const ctx = cvs.getContext('2d');
-  const grd=ctx.createLinearGradient(0,0,W,H);
-  grd.addColorStop(0,'#1a3a16'); grd.addColorStop(1,'#2d5a22');
-  ctx.fillStyle=grd; ctx.fillRect(0,0,W,H);
-  ctx.fillStyle='rgba(0,0,0,.3)'; ctx.fillRect(0,0,W,50);
-  ctx.fillStyle='#fff'; ctx.font='bold 22px Segoe UI'; ctx.textAlign='center';
-  ctx.fillText('🛒 ALMACÉN COPIHUE', W/2, 34);
-  const PAD=10, HDRH=50, FTRH=40;
-  const cw=W-PAD*2, ch=Math.floor((H-HDRH-FTRH-PAD*3)/2);
-  for (let i=0;i<2;i++) {
-    await drawProductCard(ctx, prods[i], PAD, HDRH+PAD+i*(ch+PAD), cw, ch);
-  }
-  ctx.fillStyle='rgba(0,0,0,.4)'; ctx.fillRect(0,H-FTRH,W,FTRH);
-  ctx.fillStyle='#fff'; ctx.font='bold 16px Segoe UI'; ctx.textAlign='center';
-  ctx.fillText('📦 Pedidos por WhatsApp', W/2, H-FTRH+26);
-}
-
-// ── HELPERS CANVAS ──────────────────────────────────────────────
-function loadImg(src) {
-  return new Promise((res, rej) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => res(img);
-    img.onerror = () => rej(new Error('img error'));
-    img.src = src;
-    setTimeout(() => rej(new Error('timeout')), 5000);
-  });
-}
-function roundRect(ctx, x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.arcTo(x+w,y,x+w,y+r,r);
-  ctx.lineTo(x+w,y+h-r); ctx.arcTo(x+w,y+h,x+w-r,y+h,r);
-  ctx.lineTo(x+r,y+h); ctx.arcTo(x,y+h,x,y+h-r,r);
-  ctx.lineTo(x,y+r); ctx.arcTo(x,y,x+r,y,r);
-  ctx.closePath();
-}
-function wrapText(ctx, text, x, y, maxW, lineH, maxLines) {
-  const words = text.split(' ');
-  let line = '';
-  let lines = [];
-  for (const w of words) {
-    const test = line ? line + ' ' + w : w;
-    if (ctx.measureText(test).width > maxW && line) { lines.push(line); line = w; }
-    else line = test;
-  }
-  if (line) lines.push(line);
-  lines = lines.slice(0, maxLines);
-  lines.forEach((l, i) => ctx.fillText(l, x, y + i * lineH));
-  return lines.length;
-}
-
-// Dibuja una tarjeta de producto en el canvas con badge y precio oferta
-// Cuenta cuántas líneas ocupa un texto sin dibujarlo
-function countLines(ctx, text, maxW) {
-  const words = text.split(' ');
-  let line = '', lines = 1;
-  for (const w of words) {
-    const test = line ? line + ' ' + w : w;
-    if (ctx.measureText(test).width > maxW && line) { line = w; lines++; }
-    else line = test;
-  }
-  return lines;
-}
-
-async function drawProductCard(ctx, p, x, y, W, H) {
-  const _esSinOferta = p._sinOferta === true;
-  const oferta = calcularOferta(p);
-  const badgeColor = BADGE_COLORS[p.catOferta] || null;
-  const tieneOfertaPrecio = oferta && oferta.precio && !_esSinOferta;
-
-  // ── Medir nombre ANTES de dibujar para saber cuántas líneas ocupa ──
-  const FS_NOMBRE = Math.max(W * 0.054, 10);
-  const LH_NOMBRE = FS_NOMBRE * 1.28;
-  ctx.font = `bold ${FS_NOMBRE}px Segoe UI`;
-  const nLinesNombre = Math.min(countLines(ctx, p.nombre, W - 14), 2);
-
-  // Zonas fijas según contenido
-  const NOMBRE_H  = LH_NOMBRE * nLinesNombre + 6;
-  const FS_ANTES  = Math.max(W * 0.044, 9);
-  const FS_OFERTA = Math.max(W * 0.068, 12);
-  const FS_PRECIO = Math.max(W * 0.070, 12);
-  const PRECIO_H  = tieneOfertaPrecio
-    ? FS_ANTES + 4 + FS_OFERTA + 6   // tachado + oferta
-    : FS_PRECIO + 6;                  // precio normal
-  const PAD_V    = 8;
-  const TEXTH    = PAD_V + NOMBRE_H + PRECIO_H + PAD_V;
-  const IMGH     = H - TEXTH;
-
-  // ── Fondo blanco ──
-  ctx.save();
-  ctx.shadowColor = 'rgba(0,0,0,0.15)'; ctx.shadowBlur = 8;
-  ctx.fillStyle = '#ffffff';
-  roundRect(ctx, x, y, W, H, 14); ctx.fill();
-  ctx.restore();
-
-  // ── Marco de color ──
-  if (!_esSinOferta && badgeColor) {
-    ctx.save();
-    ctx.strokeStyle = badgeColor; ctx.lineWidth = 4;
-    roundRect(ctx, x+2, y+2, W-4, H-4, 12); ctx.stroke();
-    ctx.restore();
-  } else if (_esSinOferta) {
-    ctx.save();
-    ctx.strokeStyle = '#cccccc'; ctx.lineWidth = 2;
-    roundRect(ctx, x+2, y+2, W-4, H-4, 12); ctx.stroke();
-    ctx.restore();
-  }
-
-  // ── Imagen ──
-  try {
-    const img = await loadImg(getImgUrl(p));
-    ctx.save();
-    roundRect(ctx, x, y, W, IMGH, 14); ctx.clip();
-    ctx.drawImage(img, x, y, W, IMGH);
-    ctx.restore();
-  } catch {
-    ctx.fillStyle = '#e8f0e5'; ctx.fillRect(x, y, W, IMGH);
-    ctx.fillStyle = '#bbb';
-    ctx.font = `${W * 0.22}px serif`; ctx.textAlign = 'center';
-    ctx.fillText(getCatEmoji(p.categoria), x + W/2, y + IMGH/2 + W*0.08);
-  }
-
-  // ── Badge encima de la imagen ──
-  if (oferta && badgeColor && !_esSinOferta) {
-    ctx.fillStyle = badgeColor;
-    ctx.fillRect(x, y, W, 26);
-    ctx.fillStyle = '#fff';
-    ctx.font = `bold ${Math.max(W*0.052, 10)}px Segoe UI`; ctx.textAlign = 'center';
-    ctx.fillText(oferta.etiqueta.toUpperCase(), x + W/2, y + 18);
-  }
-
-  // ── ZONA DE TEXTO ──
-  const txtY = y + IMGH + PAD_V;
-  const mx = x + W/2;
-
-  // Nombre (ya medido arriba, ahora dibujar)
-  ctx.fillStyle = '#1a2e17';
-  ctx.font = `bold ${FS_NOMBRE}px Segoe UI`;
-  ctx.textAlign = 'center';
-  wrapText(ctx, p.nombre, mx, txtY + LH_NOMBRE * 0.85, W - 14, LH_NOMBRE, 2);
-  const afterName = txtY + NOMBRE_H;
-
-  // Precio
-  if (tieneOfertaPrecio) {
-    // Tachado
-    ctx.fillStyle = '#888888';
-    ctx.font = `${FS_ANTES}px Segoe UI`; ctx.textAlign = 'center';
-    const antesStr = fmt(p.precioVenta);
-    const ty_a = afterName + FS_ANTES;
-    ctx.fillText(antesStr, mx, ty_a);
-    const tw = ctx.measureText(antesStr).width;
-    ctx.beginPath();
-    ctx.strokeStyle = '#777'; ctx.lineWidth = Math.max(W * 0.008, 1.5);
-    ctx.moveTo(mx - tw/2, ty_a - FS_ANTES*0.35);
-    ctx.lineTo(mx + tw/2, ty_a - FS_ANTES*0.35); ctx.stroke();
-    // Precio oferta
-    ctx.fillStyle = badgeColor || '#c0392b';
-    ctx.font = `bold ${FS_OFERTA}px Segoe UI`;
-    ctx.fillText(fmt(oferta.precio), mx, ty_a + FS_OFERTA + 2);
-  } else {
-    ctx.fillStyle = '#2d5a22';
-    ctx.font = `bold ${FS_PRECIO}px Segoe UI`; ctx.textAlign = 'center';
-    ctx.fillText(fmt(p.precioVenta), mx, afterName + FS_PRECIO);
-  }
-}
-
-// ── MODO COLLAGE — hasta 3x4=12 productos, canvas 1080x1080 ────────
-async function drawCollage(prods) {
-  const n = Math.min(prods.length, 12);
-
-  // Layout: hasta 12 productos en 3 cols × hasta 4 filas
-  // Para menos de 4 usamos 2 cols para que las tarjetas sean más grandes
-  const cols = n <= 2 ? 1 : n <= 4 ? 2 : 3;
-  const rows = Math.ceil(n / cols);
-
-  // Canvas siempre 1080x1080
-  const CW = 1080, CH = 1080;
-  const HDRH = 72, FTRH = 44;
-  const PAD  = 8;
-  const gridW = CW - PAD * (cols + 1);
-  const gridH = CH - HDRH - FTRH - PAD * (rows + 1);
-  const CARD_W = Math.floor(gridW / cols);
-  const CARD_H = Math.floor(gridH / rows);
-
-  const cvs = document.getElementById('collage-canvas');
-  cvs.width = CW; cvs.height = CH;
-  const ctx = cvs.getContext('2d');
-
-  // BG
-  const grd = ctx.createLinearGradient(0,0,CW,CH);
-  grd.addColorStop(0,'#1a3a16'); grd.addColorStop(1,'#2d5a22');
-  ctx.fillStyle = grd; ctx.fillRect(0,0,CW,CH);
-
-  // Header dinámico
-  const tiposEnCollage = [...new Set(prods.slice(0,n).map(p=>p.catOferta).filter(Boolean))];
-  const titleMap = {
-    relampago:'⚡ OFERTAS RELÁMPAGO', ultimas:'🏷️ ÚLTIMAS UNIDADES',
-    destacado:'🔥 DESTACADOS', especial:'💜 ESPECIALES',
-    promo:'🏷️ PROMOS', combo:'🎯 COMBOS'
-  };
-  const collageTitle = tiposEnCollage.length === 1 && titleMap[tiposEnCollage[0]]
-    ? titleMap[tiposEnCollage[0]]
-    : tiposEnCollage.length > 1 ? '🔥 OFERTAS DEL DÍA' : '🛒 PRODUCTOS DESTACADOS';
-  const hdrColorMap = { relampago:'#c0392b', ultimas:'#d35400', destacado:'#d68910',
-    especial:'#6c3483', promo:'#6c3483', combo:'#bf360c' };
-  const hdrColor = hdrColorMap[tiposEnCollage[0]] || '#1a3a16';
-  ctx.fillStyle = hdrColor; ctx.fillRect(0,0,CW,HDRH);
-  ctx.fillStyle='#fff'; ctx.font='bold 26px Segoe UI'; ctx.textAlign='center';
-  ctx.fillText('🛒 ALMACÉN COPIHUE', CW/2, 30);
-  ctx.font='bold 18px Segoe UI'; ctx.fillStyle='rgba(255,255,255,.95)';
-  ctx.fillText(collageTitle, CW/2, 56);
-
-  // Cards
-  for (let i = 0; i < n; i++) {
-    const col = i % cols;
-    const row = Math.floor(i / cols);
-    const x = PAD + col * (CARD_W + PAD);
-    const y = HDRH + PAD + row * (CARD_H + PAD);
-    await drawProductCard(ctx, prods[i], x, y, CARD_W, CARD_H);
-  }
-
-  // Footer
-  ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.fillRect(0, CH-FTRH, CW, FTRH);
-  ctx.fillStyle = '#fff'; ctx.font = 'bold 16px Segoe UI'; ctx.textAlign = 'center';
-  ctx.fillText('📦 Hacemos pedidos  •  💬 Consultas por WhatsApp', CW/2, CH-FTRH+28);
-}
-
-// ── MODO 1 FOTO ──────────────────────────────────────────────────
-async function drawSingleFmt(p, W=1080, H=1080) {
-  if (!p) return;
-  const cvs = document.getElementById('collage-canvas');
-  cvs.width=W; cvs.height=H;
-  const ctx = cvs.getContext('2d');
-
-  const oferta = calcularOferta(p);
-  const badgeColor = BADGE_COLORS[p.catOferta] || null;
-  const tieneOfertaPrecio = oferta && oferta.precio;
-
-  // BG degradado según tipo
-  const bgColors = { relampago:['#7b1212','#c0392b'], ultimas:['#7d3700','#d35400'],
-    destacado:['#6b4200','#d68910'], especial:['#3b1a6b','#6c3483'],
-    promo:['#4a0e6b','#7b1fa2'], combo:['#5d1800','#bf360c'] };
-  const [c1,c2] = bgColors[p.catOferta] || ['#1a3a16','#2d5a22'];
-  const grd=ctx.createLinearGradient(0,0,W,H);
-  grd.addColorStop(0,c1); grd.addColorStop(1,c2);
-  ctx.fillStyle=grd; ctx.fillRect(0,0,W,H);
-
-  // ── Zonas ──
-  const HDRH = 80;   // header tienda
-  const BADGEH = oferta ? 54 : 0;  // badge oferta
-  const NAMEH = 80;  // nombre 2 líneas
-  const PRICEH = tieneOfertaPrecio ? 100 : 72; // precio (con tachado o sin)
-  const FTRH = 60;
-  const IMGH = H - HDRH - BADGEH - NAMEH - PRICEH - FTRH;
-  const IMGPAD = 24; // margen interno de la imagen
-
-  // Header
-  const hdrColor = badgeColor || '#1a3a16';
-  ctx.fillStyle = hdrColor; ctx.fillRect(0,0,W,HDRH);
-  ctx.fillStyle='#fff'; ctx.font='bold 30px Segoe UI'; ctx.textAlign='center';
-  ctx.fillText('🛒 ALMACÉN COPIHUE', W/2, 52);
-
-  // Badge oferta
-  let curY = HDRH;
-  if (oferta && badgeColor) {
-    ctx.fillStyle = badgeColor; ctx.fillRect(0, curY, W, BADGEH);
-    ctx.fillStyle='#fff'; ctx.font='bold 28px Segoe UI'; ctx.textAlign='center';
-    ctx.fillText(oferta.etiqueta.toUpperCase(), W/2, curY+36);
-    curY += BADGEH;
-  }
-
-  // Imagen con margen interno — usa contain para que no se corte
-  const imgAreaY = curY;
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(IMGPAD, imgAreaY + IMGPAD, W - IMGPAD*2, IMGH - IMGPAD*2);
-  try {
-    const img = await loadImg(getImgUrl(p));
-    // contain: escalar manteniendo ratio dentro del área con padding
-    const areaW = W - IMGPAD*4, areaH = IMGH - IMGPAD*4;
-    const scale = Math.min(areaW/img.width, areaH/img.height);
-    const dw = img.width*scale, dh = img.height*scale;
-    const dx = (W-dw)/2, dy = imgAreaY + IMGPAD*2 + (areaH-dh)/2;
-    ctx.drawImage(img, dx, dy, dw, dh);
-  } catch {
-    ctx.fillStyle='#e8f0e5'; ctx.fillRect(IMGPAD, imgAreaY+IMGPAD, W-IMGPAD*2, IMGH-IMGPAD*2);
-    ctx.fillStyle='#aaa'; ctx.font=`160px serif`; ctx.textAlign='center';
-    ctx.fillText(getCatEmoji(p.categoria), W/2, imgAreaY+IMGH/2+50);
-  }
-  curY += IMGH;
-
-  // Nombre — sobre fondo blanco
-  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, curY, W, NAMEH);
-  ctx.fillStyle = '#1a2e17'; ctx.font = 'bold 32px Segoe UI'; ctx.textAlign='center';
-  wrapText(ctx, p.nombre, W/2, curY+28, W-40, 36, 2);
-  curY += NAMEH;
-
-  // Precio
-  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, curY, W, PRICEH);
-  const mx = W/2;
-  if (tieneOfertaPrecio) {
-    // Precio anterior tachado
-    ctx.fillStyle='#888'; ctx.font='28px Segoe UI'; ctx.textAlign='center';
-    const antes = fmt(p.precioVenta);
-    const ty_a = curY + 36;
-    ctx.fillText(antes, mx, ty_a);
-    const tw = ctx.measureText(antes).width;
-    ctx.beginPath(); ctx.strokeStyle='#888'; ctx.lineWidth=2.5;
-    ctx.moveTo(mx-tw/2, ty_a-10); ctx.lineTo(mx+tw/2, ty_a-10); ctx.stroke();
-    // Precio oferta grande
-    ctx.fillStyle = badgeColor||'#c0392b'; ctx.font='bold 56px Segoe UI';
-    ctx.fillText(fmt(oferta.precio), mx, curY+88);
-  } else {
-    ctx.fillStyle='#2d5a22'; ctx.font='bold 56px Segoe UI'; ctx.textAlign='center';
-    ctx.fillText(fmt(p.precioVenta), mx, curY+58);
-  }
-  curY += PRICEH;
-
-  // Footer
-  ctx.fillStyle='rgba(0,0,0,.5)'; ctx.fillRect(0,curY,W,FTRH);
-  ctx.fillStyle='#fff'; ctx.font='bold 22px Segoe UI'; ctx.textAlign='center';
-  ctx.fillText('📦 Pedidos por WhatsApp', W/2, curY+38);
-}
-
-// ── MODO HISTORIA 1080x1920 ──────────────────────────────────────
-async function drawHistoria(prods) {
-  const n=Math.min(prods.length, 6), cols=n<=4?2:3, rows=Math.ceil(n/cols);
-  const W=1080, H=1920;
-  const CARD=Math.floor((W-60-(cols-1)*12)/cols);
-  const startY=260;
-  const cvs = document.getElementById('historia-canvas');
-  cvs.width=W; cvs.height=H; cvs.style.display='block';
-  const ctx=cvs.getContext('2d');
-
-  // BG
-  const grd=ctx.createLinearGradient(0,0,W,H);
-  grd.addColorStop(0,'#0f2b0b'); grd.addColorStop(1,'#1a3a16');
-  ctx.fillStyle=grd; ctx.fillRect(0,0,W,H);
-
-  // Header dinámico
-  const _tiposH = [...new Set(prods.map(p=>p.catOferta).filter(Boolean))];
-  const _titleH = { relampago:'⚡ OFERTAS RELÁMPAGO', ultimas:'🏷️ ÚLTIMAS UNIDADES',
-    destacado:'🔥 DESTACADOS', especial:'💜 ESPECIALES', promo:'🏷️ PROMOS', combo:'🎯 COMBOS' };
-  const _hTitulo = _tiposH.length===1 && _titleH[_tiposH[0]] ? _titleH[_tiposH[0]] : '🔥 OFERTAS DEL DÍA';
-  const _hColorMap = { relampago:'#c0392b', ultimas:'#d35400', destacado:'#d68910',
-    especial:'#6c3483', promo:'#6c3483', combo:'#bf360c' };
-  ctx.fillStyle = _hColorMap[_tiposH[0]] || '#0f2b0b';
-  ctx.fillRect(0,0,W,220);
-  ctx.fillStyle='#fff'; ctx.font='bold 64px Segoe UI'; ctx.textAlign='center';
-  ctx.fillText('🛒 ALMACÉN COPIHUE', W/2, 100);
-  ctx.font='bold 44px Segoe UI'; ctx.fillStyle='rgba(255,255,255,.95)';
-  ctx.fillText(_hTitulo, W/2, 170);
-
-  for (let i=0;i<n;i++) {
-    const col=i%cols, row=Math.floor(i/cols);
-    const x=30+col*(CARD+12), y=startY+row*(CARD+12);
-    await drawProductCard(ctx, prods[i], x, y, CARD, CARD);
-  }
-
-  // Footer WA
-  ctx.fillStyle='#25D366'; ctx.fillRect(0,H-150,W,150);
-  ctx.fillStyle='#fff'; ctx.font='bold 52px Segoe UI'; ctx.textAlign='center';
-  ctx.fillText('📲 Pedidos por WhatsApp', W/2, H-80);
-  ctx.font='36px Segoe UI';
-  ctx.fillText('Almacén Copihue', W/2, H-30);
-
-  // Mostrar en canvas principal también (preview)
-  const cvs2=document.getElementById('collage-canvas');
-  const scale=Math.min(700/W, 700/H);
-  cvs2.width=Math.round(W*scale); cvs2.height=Math.round(H*scale);
-  const ctx2=cvs2.getContext('2d');
-  ctx2.drawImage(cvs, 0,0, cvs2.width, cvs2.height);
-}
-
-// Descargar TODAS: itera cada producto con el layout actual
-on('btn-dl-todas', async () => {
-  const prods = _collageProds;
-  if (!prods.length) return;
-  toast(`⬇️ Descargando ${prods.length} imágenes…`, prods.length*600+1000);
-  const savedIdx = _singleIdx;
-  for (let i=0; i<prods.length; i++) {
-    _singleIdx = i;
-    await drawSingleLayout(prods[i], _singleLayout);
-    const cvs = document.getElementById('collage-canvas');
-    const a = document.createElement('a');
-    a.href = cvs.toDataURL('image/jpeg', .92);
-    a.download = `copihue_${norm(prods[i].nombre).slice(0,30)}.jpg`;
-    a.click();
-    await new Promise(r => setTimeout(r, 500));
-  }
-  _singleIdx = savedIdx;
-  // Restaurar canvas
-  await drawSingleLayout(prods[savedIdx], _singleLayout);
-  toast(`✅ ${prods.length} imágenes descargadas`);
-});
-
-on('btn-collage-dl', () => {
-  const a = document.createElement('a');
-  const isHistoria = _collageMode === 'historia';
-  const src = isHistoria
-    ? document.getElementById('historia-canvas').toDataURL('image/jpeg',.95)
-    : document.getElementById('collage-canvas').toDataURL('image/jpeg',.92);
-  a.href = src;
-  a.download = `copihue_${_collageMode}.jpg`;
-  a.click();
-});
-on('btn-collage-close', () => {
-  document.getElementById('collage-modal').classList.remove('open');
-  document.getElementById('historia-canvas').style.display = 'none';
-});
-
-// ============================================================
-// IA SUGGEST
-// ============================================================
-on('btn-clear-sel', () => {
-  if (!selectedIds.size) { toast('No hay productos seleccionados'); return; }
-  selectedIds.clear(); selectionOrder = [];
-  renderGrid();
-  toast('🗑️ Selección limpiada');
-});
-
-// ─── SEL-FAB ────────────────────────────────────────────────
-document.getElementById('btn-sel-todo').onclick = selectAll;
-document.getElementById('btn-sel-add').onclick = () => {
-  const allVisible = filteredProducts.filter(p => p && !p._sep).map(p => String(p.id));
-  let added = 0;
-  allVisible.forEach(id => { if (!selectedIds.has(id)) { selectedIds.add(id); selectionOrder.push(id); added++; } });
-  toast(added ? `➕ ${added} agregados` : 'Ya están todos seleccionados');
-  renderGrid();
-};
-document.getElementById('btn-sel-remove').onclick = () => {
-  const visible = new Set(filteredProducts.filter(p => p && !p._sep).map(p => String(p.id)));
-  let removed = 0;
-  visible.forEach(id => { if (selectedIds.has(id)) { selectedIds.delete(id); selectionOrder = selectionOrder.filter(x=>x!==id); removed++; } });
-  toast(removed ? `➖ ${removed} quitados` : 'Ninguno estaba seleccionado');
-  renderGrid();
-};
-// ─── TOOLS-FAB ──────────────────────────────────────────────
-document.getElementById('tools-toggle').onclick = () => {
-  document.getElementById('tools-panel').classList.toggle('open');
-  document.getElementById('tools-toggle').classList.toggle('open');
-};
-on('btn-clear-sel', () => {
-  selectedIds.clear(); selectionOrder = [];
-  renderGrid();
-  toast('🗑️ Selección limpiada');
-});
-
-on('btn-ia-suggest', async () => {
-  if (!selectedIds.size) {
-    // Auto-seleccionar mejores según prioridad
-    const best = allProducts
-      .filter(p => p.catOferta && p.stock > 0)
-      .sort((a,b) => (PRIORITY_ORDER[a.catOferta]||6) - (PRIORITY_ORDER[b.catOferta]||6))
-      .slice(0, currentMode === 'estado' ? 12 : 20);
-    selectedIds.clear(); selectionOrder = [];
-    best.forEach(p => { selectedIds.add(p.id); selectionOrder.push(p.id); });
-    toast(`✨ IA seleccionó ${best.length} productos sugeridos`);
-    renderGrid();
-    return;
-  }
-
-  // Re-ordenar seleccionados por prioridad + variedad
-  const prods = getSelectedProducts();
-  const reordered = interleavedSort(sortProducts(prods, 'estado'));
-  selectionOrder = reordered.map(p => p.id);
-  toast('✨ Secuencia optimizada por IA');
-  renderGrid();
-});
-
-// ============================================================
-// FILTROS UI — search manejado inline en el HTML
-
-document.addEventListener('click', e => {
-  const chip = e.target.closest('.filter-chip');
-  if (!chip || !chip.dataset.filter) return;
-  currentFilter = chip.dataset.filter;
-  document.querySelectorAll('.filter-chip').forEach(c =>
-    c.classList.toggle('active', c.dataset.filter === currentFilter));
-  document.querySelectorAll('.filter-panel').forEach(p => p.classList.remove('open'));
-  document.querySelectorAll('.filter-fab').forEach(b => b.classList.remove('fab-active','fab-active-cat'));
-  closeSearch();
-  applyFilter();
-});
-window.setFilter = function(filter) {
-  document.querySelectorAll('.filter-panel').forEach(p => p.classList.remove('open'));
-  closeSearch();
-  currentFilter = filter;
-  currentSearch = '';
-  const si = document.getElementById('search-input');
-  if (si) si.value = '';
-  document.querySelectorAll('.filter-chip').forEach(c =>
-    c.classList.toggle('active', c.dataset.filter === filter));
-  document.querySelectorAll('.filter-fab').forEach(b => b.classList.remove('fab-active','fab-active-cat'));
-  document.getElementById('fab-todos')?.classList.add('fab-active');
-  applyFilter();
-};
-
-window.toggleFilterPanel = function(panelId, fabId) {
-  const panel = document.getElementById(panelId);
-  const fab   = document.getElementById(fabId);
-  const wasOpen = panel.classList.contains('open');
-  document.querySelectorAll('.filter-panel').forEach(p => p.classList.remove('open'));
-  document.querySelectorAll('.filter-fab').forEach(b => { b.classList.remove('fab-active','fab-active-cat'); });
-  if (!wasOpen) {
-    const rect = fab.getBoundingClientRect();
-    panel.style.left = Math.max(4, rect.left) + 'px';
-    panel.style.top  = (rect.bottom + 5) + 'px';
-    panel.classList.add('open');
-    requestAnimationFrame(() => {
-      const pr = panel.getBoundingClientRect();
-      if (pr.right > window.innerWidth - 4)
-        panel.style.left = (window.innerWidth - pr.width - 4) + 'px';
-    });
-    fab.classList.add(panelId === 'panel-cats' ? 'fab-active-cat' : 'fab-active');
-  }
-};
-window.toggleSearch = function() {
-  const open = document.getElementById('search-overlay').classList.toggle('open');
-  if (open) setTimeout(() => document.getElementById('search-input')?.focus(), 80);
-};
-window.closeSearch = function() {
-  document.getElementById('search-overlay').classList.remove('open');
-};
-document.getElementById('search-overlay')?.addEventListener('click', e => {
-  if (e.target.id === 'search-overlay') closeSearch();
-});
-document.addEventListener('click', e => {
-  if (!e.target.closest('.filter-panel') && !e.target.closest('#filter-fabs')) {
-    document.querySelectorAll('.filter-panel').forEach(p => p.classList.remove('open'));
-    document.querySelectorAll('.filter-fab').forEach(b => b.classList.remove('fab-active','fab-active-cat'));
-  }
-});
-
-document.getElementById('mode-select').onchange = e => {
-  currentMode = e.target.value;
-  applyFilter();
-  updateStats();
-};
-
-document.getElementById('btn-sel-all')?.addEventListener('click', selectAll);
-
-// ============================================================
-// DARK MODE
-// ============================================================
-const stored = localStorage.getItem('sendwa_theme');
-if (stored === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
-
-document.getElementById('btn-dark').onclick = () => {
-  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-  document.documentElement.setAttribute('data-theme', isDark ? 'light' : 'dark');
-  document.getElementById('btn-dark').textContent = isDark ? '🌙' : '☀️';
-  localStorage.setItem('sendwa_theme', isDark ? 'light' : 'dark');
-};
-if (stored === 'dark') document.getElementById('btn-dark').textContent = '☀️';
-
-// ============================================================
-// RECENT SELECTION
-// ============================================================
-function saveRecent() {
-  localStorage.setItem('sendwa_recent', JSON.stringify([...selectedIds].slice(0, 50)));
-}
-
-// ============================================================
-// CATEGORÍAS DINÁMICAS EN FILTROS
-// ============================================================
-function buildCategoryFilters() {
-  const cats = [...new Set(allProducts.map(p => p.categoria).filter(Boolean))].sort();
-  const container = document.getElementById('cat-chips-container');
-  if (!container) return;
-  container.innerHTML = '';
-  for (const cat of cats) {
-    const btn = document.createElement('button');
-    btn.className = 'filter-chip cat-chip';
-    btn.dataset.filter = norm(cat);
-    btn.textContent = getCatEmoji(cat) + ' ' + cat;
-    container.appendChild(btn);
-  }
-}
-async function cargarPools() {
-  try {
-    const data = await _apiFetch('getOfertas');
-    if (!data.success) { console.warn('getOfertas sin success'); return; }
-
-    _poolRelampago.clear(); _poolDestacadas.clear();
-    _poolEspeciales.clear(); _poolUltimas.clear(); _poolUltimasData.clear();
-
-    (data.relampagoActivo   || []).forEach(p => _poolRelampago.add(Number(p.id)));
-    (data.destacadasActivas || []).filter(p => p.categoria !== 'CERVEZAS')
-                                  .forEach(p => _poolDestacadas.add(Number(p.id)));
-    (data.especialesActivas || []).filter(p => p.categoria !== 'CERVEZAS')
-                                  .forEach(p => _poolEspeciales.add(Number(p.id)));
-    const ults = data.ultimasSeleccionadasSiempre || data.ultimasSeleccionadas || [];
-    ults.forEach(p => {
-      const id = Number(p.id);
-      _poolUltimas.add(id);
-      _poolUltimasData.set(id, {
-        precioOferta:   p.precioOferta   != null ? p.precioOferta   : null,
-        pct:            p.pct            != null ? p.pct            : null,
-        diasParaVencer: p.diasParaVencer != null ? p.diasParaVencer : null,
-      });
-    });
-
-    console.log(`📊 Pools SendWA — ⚡${_poolRelampago.size} 🔥${_poolDestacadas.size} 🌙${_poolEspeciales.size} 🏷️${_poolUltimas.size}`);
-    
-    // ===== NUEVO: FORZAR OFERTAS ACTIVAS =====
-    // Esto hace que las ofertas se muestren SIN depender de horarios
-    window._toggleEstado = window._toggleEstado || {};
-    window._toggleEstado.relampago = true;
-    window._toggleEstado.destacadas = true;
-    window._toggleEstado.especiales = true;
-    window._toggleEstado.ultimas = true;
-    console.log('✅ Ofertas forzadas a ACTIVAS');
-    // ===== FIN NUEVO =====
-    
-  } catch(e) {
-    console.warn('No se pudieron cargar pools de ofertas:', e.message);
-  }
-}
-
-// ============================================================
-// INIT
-// ============================================================
-window.toggleSelect = toggleSelect; // expose to onclick
-
-// Botón atrás del celular — evitar salir de la app
-history.pushState({ sendwa: true }, '', location.href);
-window.addEventListener('popstate', (e) => {
-  // Si hay modal de collage abierto, cerrarlo
-  if (document.getElementById('collage-modal').classList.contains('open')) {
-    document.getElementById('collage-modal').classList.remove('open');
-    history.pushState({ sendwa: true }, '', location.href);
-    return;
-  }
-  // Si hay selección activa, limpiarla
-  if (selectedIds.size > 0) {
-    selectedIds.clear(); selectionOrder = [];
-    renderGrid();
-    toast('Selección limpiada');
-    history.pushState({ sendwa: true }, '', location.href);
-    return;
-  }
-  // Si hay filtro activo, volver a todos
-  if (currentFilter !== 'todos' || currentSearch) {
-    currentFilter = 'todos'; currentSearch = '';
-    document.getElementById('search-input').value = '';
-    document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
-    document.querySelector('.filter-chip[data-filter="todos"]').classList.add('active');
-    applyFilter();
-    history.pushState({ sendwa: true }, '', location.href);
-    return;
-  }
-  // Ya en estado neutro — quedarse en la página
-  history.pushState({ sendwa: true }, '', location.href);
-});
-
-async function init() {
-  // Cargar productos Y pools en paralelo — igual que seba21
-  const [data] = await Promise.all([fetchData(), cargarPools(), _cargarConfig()]);
-  document.getElementById('loader').style.display = 'none';
-
-  if (!data) {
-    document.getElementById('grid').innerHTML = `
-      <div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--text-muted)">
-        ❌ No se pudo conectar con el catálogo.<br>
-        <small>Verificá tu conexión e intentá recargar.</small>
-      </div>`;
-    return;
-  }
-
-  applyUIColors(data);
-  allProducts = parseProducts(data);
-
-  if (!allProducts.length) {
-    document.getElementById('grid').innerHTML = `
-      <div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--text-muted)">
-        ⚠️ No se encontraron productos en el catálogo.
-      </div>`;
-    return;
-  }
-
-  buildCategoryFilters();
-
-  // Restaurar selección reciente
-  if (recentSelection.length) {
-    recentSelection.forEach(id => {
-      if (allProducts.find(p => String(p.id) === String(id))) {
-        selectedIds.add(id);
-        selectionOrder.push(id);
-      }
-    });
-  }
-
-  applyFilter();
-  recalcLayout();
-  window.addEventListener('resize', recalcLayout);
-}
-
-// Ajuste dinámico de layout cuando el panel cambia altura
 const panelObs = new ResizeObserver(recalcLayout);
 panelObs.observe(document.getElementById('header'));
 
