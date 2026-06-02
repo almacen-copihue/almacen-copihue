@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Copihue — Fiados v13</title>
+<title>Copihue — Fiados v15</title>
 <meta name="theme-color" content="#1b5e20">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -318,7 +318,11 @@ function abrirCli(nom){
 
 function renderFiados(){
   const pend=_cliData.filter(f=>f.estado!=='PAGADO');
-  const pagados=_cliData.filter(f=>f.estado==='PAGADO').sort((a,b)=>(b.fechaPago||'').localeCompare(a.fechaPago||''));
+  const pagados=_cliData.filter(f=>f.estado==='PAGADO').sort((a,b)=>{
+    const fa=new Date(a.fechaPago||'2000-01-01');
+    const fb=new Date(b.fechaPago||'2000-01-01');
+    return fb-fa; // más reciente primero
+  });
   const totPend=pend.reduce((s,f)=>s+parseFloat(f.total||0),0);
   const hoy=new Date();hoy.setHours(0,0,0,0);
 
@@ -417,7 +421,9 @@ async function abrirDet(ticket,idFiado){
     const fiad=_cliData.find(f=>f.idFiado===idFiado);
     const pagoInfo=fiad&&fiad.estado==='PAGADO'
       ?`<div class="det-pagado">✅ Cobrado el ${_fmt(fiad.fechaPago)}${fiad.metodoPago?' · '+fiad.metodoPago:''}</div>`:'';
-
+    const abonoInfo=fiad&&fiad.totalAbonado>0&&fiad.estado!=='PAGADO'
+      ?`<div class="det-pagado" style="background:#fff8e1;color:#e65100;border-color:#ffe082">💵 Abonado: ${fmt(fiad.totalAbonado)} · Saldo pendiente: ${fmt(fiad.total)}</div>`
+      :'';
     let itemsHtml='';
     (d.items||[]).forEach(it=>{
       const cant=String(it.cantidad||'').replace(/\.0$/,'');
@@ -488,7 +494,7 @@ async function abrirDet(ticket,idFiado){
       <div class="det-hdr">
         <div class="det-ticket">🎫 Ticket #${d.ticket}</div>
         <div class="det-sub">📅 ${fLabel}${hLabel?' · 🕐 '+hLabel+'hs':''}<br>👤 ${_cliNom}${_cliTel?' · 📞 '+_cliTel:''}<br>${d.metodoPago?'💳 '+d.metodoPago:''}${d.vendedor?' · 🧑 '+d.vendedor:''}</div>
-        ${pagoInfo}
+        ${pagoInfo}${abonoInfo}
       </div>
       ${itemsHtml}
       <div class="total-row"><span class="tl">💰 Total</span><span class="tm">${fmt(d.total)}</span></div>
@@ -591,14 +597,8 @@ async function confirmarCob(){
       // Abono: mostrar recordatorio de texto para compartir
       abrirRec();
     } else {
-      // Cobro total: abrir detalle del ticket para enviar comprobante completo
-      const cobrado=selArr.map(id=>_cliData.find(f=>f.idFiado===id)||selF.find(f=>f.idFiado===id)).filter(Boolean);
-      const primero=cobrado[0];
-      if(primero?.ticket&&primero.ticket.trim()!==''){
-        abrirDet(primero.ticket, primero.idFiado);
-      } else {
-        abrirRec();
-      }
+      // Cobro total: mostrar comprobante de pago (no el ticket de compra)
+      abrirRec();
     }
   }catch(e){
     toast('❌ '+e.message,'r');
