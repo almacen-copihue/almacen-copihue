@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Copihue — Fiados v21</title>
+<title>Copihue — Fiados v22</title>
 <meta name="theme-color" content="#1b5e20">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -240,6 +240,9 @@ const API_URL='https://script.google.com/macros/s/AKfycbzWZzDvdGfW8vd2-FpQolT852
 // ── Estado ─────────────────────────────────────────
 let _todos=[], _cliNom='', _cliTel='', _cliData=[];
 let _sel=new Set(), _met='EFECTIVO', _recTxt='', _montoFull=0;
+let _todosClientes=[]; // todos los clientes de hoja Clientes
+let _showSinDeuda=false; // toggle sección sin deuda
+let _busqCliente=''; // búsqueda unificada
 
 // ── Helpers ────────────────────────────────────────
 const fmt=n=>'$'+Math.round(n).toLocaleString('es-AR');
@@ -281,14 +284,18 @@ async function _api(action,data){
 
 // ── CARGAR ──────────────────────────────────────────
 async function cargar(){
-  _sel.clear();_recTxt='';
+  _sel.clear();_recTxt='';_busqCliente='';
   ir('clientes');
   document.getElementById('cuerpoClientes').innerHTML='<div class="ldg"><div class="spin"></div>Consultando planilla...</div>';
   setHdrSub('cargando');
   try{
-    const d=await _api('listarFiados');
-    if(!d.ok)throw new Error(d.error||'Error al cargar');
-    _todos=(d.fiados||[]).map(f=>({...f,fecha:_normFecha(f.fecha),fechaPago:_normFecha(f.fechaPago),fechaVencimiento:_normFecha(f.fechaVencimiento)}));
+    const [dFia, dCli]=await Promise.all([
+      _api('listarFiados'),
+      _api('listarClientes')
+    ]);
+    if(!dFia.ok)throw new Error(dFia.error||'Error al cargar');
+    _todos=(dFia.fiados||[]).map(f=>({...f,fecha:_normFecha(f.fecha),fechaPago:_normFecha(f.fechaPago),fechaVencimiento:_normFecha(f.fechaVencimiento)}));
+    _todosClientes=(dCli.ok&&dCli.clientes)||[];
     renderClientes();
   }catch(e){
     document.getElementById('cuerpoClientes').innerHTML=`<div class="empty"><div class="icon">❌</div>${e.message}</div>`;
@@ -301,27 +308,68 @@ function renderClientes(){
   const pend=_todos.filter(f=>f.estado!=='PAGADO');
   const map={};
   pend.forEach(f=>{if(!map[f.cliente])map[f.cliente]={nom:f.cliente,tel:f.telefono||'',fiados:[],tot:0};map[f.cliente].fiados.push(f);map[f.cliente].tot+=parseFloat(f.total||0);});
-  const clis=Object.values(map).sort((a,b)=>b.tot-a.tot);
+  let clis=Object.values(map).sort((a,b)=>b.tot-a.tot);
   const totG=clis.reduce((s,c)=>s+c.tot,0);
-  setHdrSub(clis.length+' cliente'+(clis.length!==1?'s':'')+' · '+fmt(totG)+' pendiente');
 
-  if(!clis.length){document.getElementById('cuerpoClientes').innerHTML='<div class="empty"><div class="icon">✅</div>No hay fiados pendientes</div>';return;}
+  // Clientes sin deuda: están en _todosClientes pero no en map
+  const nomConDeuda=new Set(Object.keys(map).map(n=>n.toUpperCase()));
+  let sinDeuda=_todosClientes.filter(c=>!nomConDeuda.has((c.nombre||'').toUpperCase()));
 
+  // Aplicar búsqueda a ambos grupos
+  const q=_busqCliente.toLowerCase().trim();
+  if(q){
+    clis=clis.filter(c=>c.nom.toLowerCase().includes(q)||(c.tel||'').includes(q));
+    sinDeuda=sinDeuda.filter(c=>(c.nombre||'').toLowerCase().includes(q)||(c.telefono||'').includes(q));
+  }
+
+  setHdrSub(clis.length+' con deuda · '+sinDeuda.length+' sin deuda · '+fmt(totG));
+
+  let html=
+    // Buscador unificado
+    `<div style="padding:10px 12px 4px">
+      <input type="text" placeholder="🔍 Buscar cliente..." value="${_busqCliente}"
+        oninput="_busqCliente=this.value;renderClientes()"
+        style="width:100%;padding:9px 13px;border:1.5px solid var(--borde);border-radius:12px;font-size:.85rem;font-family:inherit;box-sizing:border-box">
+    </div>`;
+
+  // Resumen
+  html+=`<div class="resumen"><div><div class="lbl">Total deuda general</div><div class="sub">${pend.length} fiado${pend.length!==1?'s':''} en ${clis.length} cliente${clis.length!==1?'s':''}</div></div><div class="monto">${fmt(totG)}</div></div>`;
+
+  // Sección CON DEUDA
   const hoy=new Date();hoy.setHours(0,0,0,0);
-  let html=`<div class="resumen"><div><div class="lbl">Total deuda general</div><div class="sub">${pend.length} fiado${pend.length!==1?'s':''} en ${clis.length} cliente${clis.length!==1?'s':''}</div></div><div class="monto">${fmt(totG)}</div></div>`;
+  if(clis.length){
+    html+=`<div class="sec-lbl" style="color:var(--rojo)">🔴 CON DEUDA (${clis.length})</div>`;
+    clis.forEach((c,idx)=>{
+      const venc=c.fiados.filter(f=>f.estado==='VENCIDO').length;
+      const prox=c.fiados.filter(f=>{if(!f.fechaVencimiento)return false;const d=new Date(f.fechaVencimiento+'T12:00:00');const dias=Math.round((d-hoy)/86400000);return dias>=0&&dias<=3;}).length;
+      const bdg=venc>0?`<span class="bdg bdg-r">🔴 ${venc} vencido${venc>1?'s':''}</span>`:prox>0?`<span class="bdg bdg-o">⏰ Vence pronto</span>`:`<span class="bdg bdg-g">${c.fiados.length} fiado${c.fiados.length>1?'s':''}</span>`;
+      html+=`<div class="cli-card" data-idx="${idx}"><div><div class="cli-nombre">${c.nom}</div><div class="cli-tel">${c.tel?'📞 '+c.tel:'Sin teléfono'} <button onclick="event.stopPropagation();abrirEditCli('${safeEnc(c.nom)}','${c.tel||''}')" style="background:none;border:none;cursor:pointer;font-size:.8rem;padding:0 4px;color:var(--vd)">✏️</button></div><div style="margin-top:3px">${bdg}</div></div><div class="cli-deuda">${fmt(c.tot)}</div></div>`;
+    });
+  } else if(!q){
+    html+='<div class="empty"><div class="icon">✅</div>No hay fiados pendientes</div>';
+  }
 
-  clis.forEach((c,idx)=>{
-    const venc=c.fiados.filter(f=>f.estado==='VENCIDO').length;
-    const prox=c.fiados.filter(f=>{if(!f.fechaVencimiento)return false;const d=new Date(f.fechaVencimiento+'T12:00:00');const dias=Math.round((d-hoy)/86400000);return dias>=0&&dias<=3;}).length;
-    const bdg=venc>0?`<span class="bdg bdg-r">🔴 ${venc} vencido${venc>1?'s':''}</span>`:prox>0?`<span class="bdg bdg-o">⏰ Vence pronto</span>`:`<span class="bdg bdg-g">${c.fiados.length} fiado${c.fiados.length>1?'s':''}</span>`;
-    // Guardamos índice numérico para evitar problemas con caracteres especiales en onclick inline
-    html+=`<div class="cli-card" data-idx="${idx}"><div><div class="cli-nombre">${c.nom}</div><div class="cli-tel">${c.tel?'📞 '+c.tel:'Sin teléfono'} <button onclick="event.stopPropagation();abrirEditCli('${safeEnc(c.nom)}','${c.tel||''}')" style="background:none;border:none;cursor:pointer;font-size:.8rem;padding:0 4px;color:var(--vd)">✏️</button></div><div style="margin-top:3px">${bdg}</div></div><div class="cli-deuda">${fmt(c.tot)}</div></div>`;
-  });
+  // Sección SIN DEUDA — colapsable
+  html+=`<div class="sec-lbl" style="cursor:pointer;color:var(--verde)" onclick="_showSinDeuda=!_showSinDeuda;renderClientes()">
+    ${_showSinDeuda?'▲':'▼'} ✅ SIN DEUDA (${sinDeuda.length})
+  </div>`;
+  if(_showSinDeuda){
+    if(!sinDeuda.length){
+      html+='<div class="empty" style="font-size:.78rem">Sin clientes en este grupo</div>';
+    } else {
+      sinDeuda.forEach((c,idx)=>{
+        const nom=c.nombre||'';const tel=c.telefono||'';
+        html+=`<div class="cli-card" style="opacity:.75" data-sin="${idx}"><div><div class="cli-nombre">${nom}</div><div class="cli-tel">${tel?'📞 '+tel:'Sin teléfono'} <button onclick="event.stopPropagation();abrirEditCli('${safeEnc(nom)}','${tel}')" style="background:none;border:none;cursor:pointer;font-size:.8rem;padding:0 4px;color:var(--vd)">✏️</button></div></div><div style="font-size:.72rem;color:#aaa">Sin deuda</div></div>`;
+      });
+    }
+  }
+
   document.getElementById('cuerpoClientes').innerHTML=html;
-  // Event delegation — robusto con cualquier nombre
-  document.querySelectorAll('.cli-card').forEach(el=>{
+  // Event listeners — solo tarjetas con deuda abren fiados
+  document.querySelectorAll('.cli-card[data-idx]').forEach(el=>{
     el.addEventListener('click',()=>abrirCli(clis[parseInt(el.dataset.idx)].nom));
   });
+  // Tarjetas sin deuda no abren fiados (sin historial pendiente)
 }
 
 // ── ABRIR CLIENTE ──────────────────────────────────
@@ -735,12 +783,12 @@ function volverClis(){_sel.clear();renderClientes();ir('clientes');}
 function volverFiados(){ir('fiados',_cliNom);}
 async function recargarCli(){
   try{
-    const d=await _api('listarFiados');
-    if(!d.ok)throw new Error(d.error);
-    _todos=(d.fiados||[]).map(f=>({...f,fecha:_normFecha(f.fecha),fechaPago:_normFecha(f.fechaPago),fechaVencimiento:_normFecha(f.fechaVencimiento)}));
+    const [dFia,dCli]=await Promise.all([_api('listarFiados'),_api('listarClientes')]);
+    if(!dFia.ok)throw new Error(dFia.error);
+    _todos=(dFia.fiados||[]).map(f=>({...f,fecha:_normFecha(f.fecha),fechaPago:_normFecha(f.fechaPago),fechaVencimiento:_normFecha(f.fechaVencimiento)}));
+    _todosClientes=(dCli.ok&&dCli.clientes)||[];
     _cliData=_todos.filter(f=>f.cliente===_cliNom);
     _sel.clear();
-    // Si estamos en vista clientes, re-renderizar lista; sino renderizar fiados del cliente
     const enClientes=document.getElementById('vistaClientes')?.classList.contains('activa');
     if(enClientes) renderClientes(); else renderFiados();
     toast('✅ Actualizado','v');
