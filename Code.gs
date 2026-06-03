@@ -1661,6 +1661,9 @@ function doGet(e) {
     if (e && e.parameter && e.parameter.action === 'entregarPremioRaspadita') {
       return respuestaJSON(entregarPremioRaspadita(e.parameter.codigo || ''));
     }
+    if (e && e.parameter && e.parameter.action === 'listarPendientesRaspadita') {
+      return respuestaJSON(listarPendientesRaspadita());
+    }
     // ── FIN RASPADITA ───────────────────────────────────────────
 
     // ── GET PRODUCTOS (carga la tienda) ──
@@ -3820,7 +3823,7 @@ function registrarGanador(datos) {
     var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     var codigo = 'COP-';
     for (var i = 0; i < 5; i++) codigo += chars.charAt(Math.floor(Math.random() * chars.length));
-    sh.appendRow([fecha, hora, String(datos.dispositivo||''), 'GANADOR', String(datos.premio||''), parseFloat(datos.precio||0), codigo, 'PENDIENTE']);
+    sh.appendRow([fecha, hora, String(datos.dispositivo||''), 'GANADOR', String(datos.premio||''), parseFloat(datos.precio||0), codigo, 'PENDIENTE', 'NO']);
     SpreadsheetApp.flush();
     return { ok: true, codigo: codigo };
   } catch(err) {
@@ -3835,7 +3838,7 @@ function registrarJugada(datos) {
     var ahora = new Date();
     var fecha = Utilities.formatDate(ahora, tz, 'yyyy-MM-dd');
     var hora  = Utilities.formatDate(ahora, tz, 'HH:mm:ss');
-    sh.appendRow([fecha, hora, String(datos.dispositivo||''), 'PERDEDOR', '', '', '', '']);
+    sh.appendRow([fecha, hora, String(datos.dispositivo||''), 'PERDEDOR', '', '', '', '', '']);
     SpreadsheetApp.flush();
     return { ok: true };
   } catch(err) {
@@ -3847,7 +3850,7 @@ function registrarJugada(datos) {
 function _getJuegoStats_() {
   var ss = SpreadsheetApp.openById(SS_ID);
   var sh = ss.getSheetByName('JUEGO_STATS');
-  var headers = ['Fecha','Hora','Dispositivo','Resultado','Premio','Precio','Código','Estado'];
+  var headers = ['Fecha','Hora','Dispositivo','Resultado','Premio','Precio','Código','Estado','Entregado'];
   if (!sh) {
     sh = ss.insertSheet('JUEGO_STATS');
     sh.getRange(1,1,1,headers.length).setValues([headers]);
@@ -3861,34 +3864,69 @@ function _getJuegoStats_() {
   return sh;
 }
 
+// ========== RASPADITA — Helper: leer JUEGO_STATS ==========
+// Columnas: 0=Fecha 1=Hora 2=Dispositivo 3=Resultado 4=Premio 5=Precio 6=Código 7=Estado 8=Entregado
+function _raspSheet_() {
+  var ss = SpreadsheetApp.openById(SS_ID);
+  return ss.getSheetByName('JUEGO_STATS');
+}
+
+function _raspFila_(sh, codigo) {
+  var datos = sh.getDataRange().getValues();
+  for (var i = 1; i < datos.length; i++) {
+    var cod = String(datos[i][6] || '').trim().toUpperCase();
+    if (cod === codigo && datos[i][3] === 'GANADOR') return i + 1; // fila 1-indexed
+  }
+  return -1;
+}
+
+function _raspObj_(row) {
+  return {
+    fecha:  String(row[0] || ''),
+    hora:   String(row[1] || ''),
+    premio: String(row[4] || ''),
+    precio: row[5] || 0,
+    codigo: String(row[6] || '').trim().toUpperCase(),
+    estado: String(row[7] || 'PENDIENTE'),
+    entregado: String(row[8] || 'NO')
+  };
+}
+
 // ========== RASPADITA — Buscar código ==========
 function buscarCodigoRaspadita(codigo) {
   try {
     codigo = String(codigo).trim().toUpperCase();
     if (!codigo) return { ok: false, error: 'Código vacío' };
-    var ss = SpreadsheetApp.openById(SS_ID);
-    var sh = ss.getSheetByName('JUEGO_STATS');
+    var sh = _raspSheet_();
     if (!sh || sh.getLastRow() < 2) return { ok: false, error: 'Sin registros' };
     var datos = sh.getDataRange().getValues();
-    // Columnas: 0=Fecha, 1=Hora, 2=Dispositivo, 3=Resultado, 4=Premio, 5=Precio, 6=Código, 7=Estado
     for (var i = 1; i < datos.length; i++) {
       var cod = String(datos[i][6] || '').trim().toUpperCase();
       if (cod === codigo && datos[i][3] === 'GANADOR') {
-        return {
-          ok: true,
-          ganador: {
-            fila:      i + 1,
-            fecha:     String(datos[i][0] || ''),
-            hora:      String(datos[i][1] || ''),
-            premio:    String(datos[i][4] || ''),
-            precio:    datos[i][5] || 0,
-            codigo:    cod,
-            estado:    String(datos[i][7] || 'PENDIENTE')
-          }
-        };
+        return { ok: true, ganador: _raspObj_(datos[i]) };
       }
     }
     return { ok: false, error: 'Código no encontrado' };
+  } catch(err) {
+    return { ok: false, error: err.toString() };
+  }
+}
+
+// ========== RASPADITA — Listar pendientes ==========
+function listarPendientesRaspadita() {
+  try {
+    var sh = _raspSheet_();
+    if (!sh || sh.getLastRow() < 2) return { ok: true, pendientes: [] };
+    var datos   = sh.getDataRange().getValues();
+    var pending = [];
+    for (var i = 1; i < datos.length; i++) {
+      if (datos[i][3] !== 'GANADOR') continue;
+      var estado = String(datos[i][7] || 'PENDIENTE');
+      if (estado === 'PENDIENTE') pending.push(_raspObj_(datos[i]));
+    }
+    // Más recientes primero
+    pending.reverse();
+    return { ok: true, pendientes: pending };
   } catch(err) {
     return { ok: false, error: err.toString() };
   }
@@ -3899,20 +3937,14 @@ function entregarPremioRaspadita(codigo) {
   try {
     codigo = String(codigo).trim().toUpperCase();
     if (!codigo) return { ok: false, error: 'Código vacío' };
-    var ss = SpreadsheetApp.openById(SS_ID);
-    var sh = ss.getSheetByName('JUEGO_STATS');
+    var sh = _raspSheet_();
     if (!sh || sh.getLastRow() < 2) return { ok: false, error: 'Sin registros' };
-    var datos = sh.getDataRange().getValues();
-    for (var i = 1; i < datos.length; i++) {
-      var cod = String(datos[i][6] || '').trim().toUpperCase();
-      if (cod === codigo && datos[i][3] === 'GANADOR') {
-        // Col 8 = Estado (índice 7, columna H)
-        sh.getRange(i + 1, 8).setValue('ENTREGADO');
-        SpreadsheetApp.flush();
-        return { ok: true };
-      }
-    }
-    return { ok: false, error: 'Código no encontrado' };
+    var fila = _raspFila_(sh, codigo);
+    if (fila < 0) return { ok: false, error: 'Código no encontrado' };
+    sh.getRange(fila, 8).setValue('ENTREGADO'); // col H = Estado
+    sh.getRange(fila, 9).setValue('SI');         // col I = Entregado SI/NO
+    SpreadsheetApp.flush();
+    return { ok: true };
   } catch(err) {
     return { ok: false, error: err.toString() };
   }
