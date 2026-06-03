@@ -4,15 +4,7 @@
   COPIHUE POS — CHANGELOG
 ================================================================================
 
-  v369 — 31/05/2026
-  -----------------
-  • FIX precioOriginal en peso: los gramos se calculaban con price ($17.200)
-    pero el cliente paga a normal ($16.100) → gramos inflados → precioOriginal
-    igual a price → ahorro = $0. Ahora gramosReales = totalPesos / normal × 1000
-    y precioOriginal = gramosReales × price / 1000. Ejemplo 1292gr:
-    tachado $22.662, pagado $20.801, ahorro $1.861.
-
-
+  v368 — 30/05/2026
   -----------------
   • FIX precio tachado en modal para productos por peso: precioOriginal ahora
     es proporcional a los gramos reales (price/kg ÷ 1000 × gramos) en vez
@@ -4756,30 +4748,30 @@ function confirmarPeso() {
     const totalPesos = parseInt(pesoValor, 10) || 0;
     if (totalPesos <= 0 || !pesoProductoActual) return;
 
-    const precioPorKg = pesoProductoActual.price;
+    // Calcular oferta ANTES de usar el precio por kg
+    const oferta = calcularOfertaPOS(pesoProductoActual, 1);
+    const tieneOferta = oferta.tieneOferta;
+
+    // Si hay promo/combo activo, usar precio promo como precio por kg
+    const precioPorKg = tieneOferta ? oferta.precioUnitario : pesoProductoActual.price;
     const gramos = precioPorKg > 0 ? Math.round((totalPesos / precioPorKg) * 1000) : 0;
     const costoPorKg = pesoProductoActual.precioCosto || 0;
     const costoCalculado = costoPorKg > 0 ? Math.round((costoPorKg / 1000) * gramos) : 0;
-
-    const oferta = calcularOfertaPOS(pesoProductoActual, 1);
-    const tieneOferta = oferta.tieneOferta;
-    // Precio por kg que paga el cliente (promo si tiene, normal si no)
-    const precioPorKgPromo = tieneOferta ? (pesoProductoActual.normal || precioPorKg) : precioPorKg;
-    // Gramos reales: basados en lo que pagó el cliente al precio promo
-    const gramosReales = precioPorKgPromo > 0 ? Math.round((totalPesos / precioPorKgPromo) * 1000) : gramos;
-    // precioOriginal proporcional: gramosReales × precio sin descuento / 1000
+    // precioOriginal proporcional a los gramos reales (precio sin descuento × gramos / 1000)
     const precioOrigProporcional = tieneOferta
-        ? Math.round((pesoProductoActual.price / 1000) * gramosReales)
+        ? Math.round((pesoProductoActual.price / 1000) * gramos)
         : 0;
 
+    // Si ya hay un item de peso del mismo producto, acumular
     const existente = ventaActual.find(i => i.esPeso && i.idOriginal === pesoProductoActual.id);
     if (existente) {
-        const gramosNuevos = existente.gramos + gramosReales;
+        const gramosNuevos = existente.gramos + gramos;
         const precioNuevo  = existente.price + totalPesos;
         existente.gramos      = gramosNuevos;
         existente.price       = precioNuevo;
         existente.name        = `${pesoProductoActual.name} (${gramosNuevos}gr)`;
         existente.precioCosto = (existente.precioCosto || 0) + costoCalculado;
+        // Preservar badge si ya lo tenía; actualizar precioOriginal acumulando proporcional
         if (tieneOferta) {
             existente.ofertaEtiqueta   = oferta.etiqueta || existente.ofertaEtiqueta;
             existente.ofertaTipo       = oferta.tipoOferta || existente.ofertaTipo;
@@ -4790,10 +4782,10 @@ function confirmarPeso() {
         ventaActual.push({
             id: `peso_${Date.now()}`,
             idOriginal: pesoProductoActual.id,
-            name: `${pesoProductoActual.name} (${gramosReales}gr)`,
+            name: `${pesoProductoActual.name} (${gramos}gr)`,
             price: totalPesos,
             qty: 1,
-            gramos: gramosReales,
+            gramos: gramos,
             stockDisponible: pesoProductoActual.stock || 999,
             esPeso: true,
             precioCosto: costoCalculado,

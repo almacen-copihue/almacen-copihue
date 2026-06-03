@@ -4,6 +4,36 @@
   COPIHUE POS — CHANGELOG
 ================================================================================
 
+  v368 — 30/05/2026
+  -----------------
+  • FIX precio tachado en modal para productos por peso: precioOriginal ahora
+    es proporcional a los gramos reales (price/kg ÷ 1000 × gramos) en vez
+    del precio por kg entero. Así: 936gr × $17.200/kg = $16.099 tachado,
+    ahorro = $16.099 - $15.138 = $961. Se acumula correctamente al agregar
+    más peso del mismo producto.
+
+
+  -----------------
+  • FIX badge PROMO en productos por peso: confirmarPeso() ahora llama
+    calcularOfertaPOS() y agrega ofertaTipo, ofertaEtiqueta, precioOriginal
+    y precioModificado al item — el panel y el modal muestran el badge correcto.
+
+
+  -----------------
+  • FIX peso acumulado: si el mismo producto por peso ya está en el carrito,
+    suma gramos y precio al item existente en vez de crear una fila duplicada.
+    El nombre se actualiza con los gramos totales (ej: "Suprema (1426gr)").
+
+
+  -----------------
+  • FIX carrito PROMO ACTIVA: cambiarCantidad() no actualizaba precioTotalCalc
+    al cambiar qty → subtotal quedaba congelado en el valor de qty=1.
+  • FIX badge modal confirmar: colores promo (#6a1b9a) y combo (#00838f) faltaban.
+  • FIX recuperarVenta: pisaba el precio manual (por peso) con oferta.precioUnitario
+    al recuperar carrito de localStorage → badge PROMO desaparecía al recargar.
+  • FIX tieneOferta en modal: agrega caso ofertaTipo promo/combo para mostrar
+    badge aunque el precio haya sido editado manualmente.
+
   v271 — 23/04/2026
   -----------------
   • FIADO: Campo teléfono siempre editable (antes quedaba bloqueado con readonly
@@ -412,7 +442,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v365</title>
+    <title>Copihue — POS v369</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2427,41 +2457,8 @@ window.addEventListener('popstate', function() {
             return;
         }
     }
-    // Sin modal abierto → preguntar si quiere salir
-    _mostrarConfirmSalir();
+    // Sin modal abierto → no hacer nada (quedarse en la página)
 });
-
-// Modal confirmación salir
-function _mostrarConfirmSalir() {
-    let dlg = document.getElementById('_modalSalir');
-    if (!dlg) {
-        dlg = document.createElement('div');
-        dlg.id = '_modalSalir';
-        dlg.style.cssText = `
-            position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:99999;
-            display:flex;align-items:center;justify-content:center;
-        `;
-        dlg.innerHTML = `
-            <div style="background:white;border-radius:16px;padding:28px 24px;max-width:320px;width:90%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.3);">
-                <div style="font-size:2rem;margin-bottom:12px;">🚪</div>
-                <div style="font-weight:800;font-size:1.1rem;color:#1a1a1a;margin-bottom:8px;">¿Querés salir?</div>
-                <div style="font-size:0.88rem;color:#666;margin-bottom:24px;">Si salís perdés la sesión actual y lo que tengas en curso.</div>
-                <div style="display:flex;gap:12px;justify-content:center;">
-                    <button onclick="document.getElementById('_modalSalir').style.display='none';history.pushState({pos:true},'')"
-                        style="flex:1;padding:12px;border-radius:10px;border:2px solid #ddd;background:white;font-size:0.9rem;font-weight:700;cursor:pointer;color:#333;">
-                        Quedarme
-                    </button>
-                    <button onclick="history.go(-2)"
-                        style="flex:1;padding:12px;border-radius:10px;border:none;background:#c0392b;color:white;font-size:0.9rem;font-weight:700;cursor:pointer;">
-                        Salir
-                    </button>
-                </div>
-            </div>
-        `;
-        document.body.appendChild(dlg);
-    }
-    dlg.style.display = 'flex';
-}
 
 function activarGuardiaAtras() {}   // no-op — ya no se necesita
 function desactivarGuardiaAtras() {} // no-op
@@ -3299,6 +3296,7 @@ function cambiarCantidad(id, delta) {
         if (p) {
             const oferta = calcularOfertaPOS(p, nuevaCant);
             item.price           = oferta.precioUnitario;
+            item.precioTotalCalc = oferta.precioTotal;   // FIX: actualizar total exacto con nueva qty
             item.precioOriginal  = oferta.tipoOferta === 'normal' ? p.normal : (oferta.tieneOferta ? p.price : 0);
             item.precioModificado = oferta.tieneOferta;
             item.ofertaEtiqueta  = oferta.etiqueta || null;
@@ -3568,11 +3566,14 @@ function _buildDetalleModalHTML() {
     const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
     const items = ventaActual.map((item, idx) => {
         const subtotal    = Math.round(item.price * item.qty);
-        const tieneOferta = item.precioModificado && item.precioOriginal > item.price;
+        const tieneOferta = (item.precioModificado && item.precioOriginal > item.price)
+                         || (item.ofertaTipo === 'promo' || item.ofertaTipo === 'combo') && !!item.ofertaEtiqueta;
 
         const colores = {
             cervecero: '#1565c0', relampago: '#b06000',
-            destacadas: '#ff6f00', especiales: '#00bcd4', ultimas: '#b71c1c', normal: '#43a047'
+            destacadas: '#ff6f00', especiales: '#00bcd4',
+            ultimas: '#b71c1c', normal: '#43a047',
+            promo: '#6a1b9a', combo: '#00838f'
         };
         const col = colores[item.ofertaTipo] || '#f9a825';
 
@@ -4638,11 +4639,15 @@ function recuperarVenta() {
             }
             // Recalcular oferta con los pools actuales
             const oferta = calcularOfertaPOS(p, item.qty);
+            // Si el item fue editado manualmente (precio por peso), preservar ese precio
+            const precioFinal = (item.precioModificado && item.price !== oferta.precioUnitario)
+                ? item.price
+                : oferta.precioUnitario;
             return {
                 ...item,
-                price:           oferta.precioUnitario,
+                price:           precioFinal,
                 precioOriginal:  oferta.tipoOferta === 'normal' ? p.normal : (oferta.tieneOferta ? p.price : 0),
-                precioModificado: oferta.tieneOferta,
+                precioModificado: oferta.tieneOferta || item.precioModificado,
                 ofertaEtiqueta:  oferta.etiqueta || null,
                 ofertaTipo:      oferta.tipoOferta || null,
                 stockDisponible: p.stock
@@ -4743,22 +4748,53 @@ function confirmarPeso() {
     const totalPesos = parseInt(pesoValor, 10) || 0;
     if (totalPesos <= 0 || !pesoProductoActual) return;
 
-    const precioPorKg = pesoProductoActual.price;
+    // Calcular oferta ANTES de usar el precio por kg
+    const oferta = calcularOfertaPOS(pesoProductoActual, 1);
+    const tieneOferta = oferta.tieneOferta;
+
+    // Si hay promo/combo activo, usar precio promo como precio por kg
+    const precioPorKg = tieneOferta ? oferta.precioUnitario : pesoProductoActual.price;
     const gramos = precioPorKg > 0 ? Math.round((totalPesos / precioPorKg) * 1000) : 0;
     const costoPorKg = pesoProductoActual.precioCosto || 0;
     const costoCalculado = costoPorKg > 0 ? Math.round((costoPorKg / 1000) * gramos) : 0;
+    // precioOriginal proporcional a los gramos reales (precio sin descuento × gramos / 1000)
+    const precioOrigProporcional = tieneOferta
+        ? Math.round((pesoProductoActual.price / 1000) * gramos)
+        : 0;
 
-    ventaActual.push({
-        id: `peso_${Date.now()}`,
-        idOriginal: pesoProductoActual.id,
-        name: `${pesoProductoActual.name} (${gramos}gr)`,
-        price: totalPesos,
-        qty: 1,
-        gramos: gramos,
-        stockDisponible: 999,
-        esPeso: true,
-        precioCosto: costoCalculado
-    });
+    // Si ya hay un item de peso del mismo producto, acumular
+    const existente = ventaActual.find(i => i.esPeso && i.idOriginal === pesoProductoActual.id);
+    if (existente) {
+        const gramosNuevos = existente.gramos + gramos;
+        const precioNuevo  = existente.price + totalPesos;
+        existente.gramos      = gramosNuevos;
+        existente.price       = precioNuevo;
+        existente.name        = `${pesoProductoActual.name} (${gramosNuevos}gr)`;
+        existente.precioCosto = (existente.precioCosto || 0) + costoCalculado;
+        // Preservar badge si ya lo tenía; actualizar precioOriginal acumulando proporcional
+        if (tieneOferta) {
+            existente.ofertaEtiqueta   = oferta.etiqueta || existente.ofertaEtiqueta;
+            existente.ofertaTipo       = oferta.tipoOferta || existente.ofertaTipo;
+            existente.precioOriginal   = (existente.precioOriginal || 0) + precioOrigProporcional;
+            existente.precioModificado = true;
+        }
+    } else {
+        ventaActual.push({
+            id: `peso_${Date.now()}`,
+            idOriginal: pesoProductoActual.id,
+            name: `${pesoProductoActual.name} (${gramos}gr)`,
+            price: totalPesos,
+            qty: 1,
+            gramos: gramos,
+            stockDisponible: pesoProductoActual.stock || 999,
+            esPeso: true,
+            precioCosto: costoCalculado,
+            ofertaTipo:      tieneOferta ? oferta.tipoOferta : null,
+            ofertaEtiqueta:  tieneOferta ? oferta.etiqueta  : null,
+            precioOriginal:  precioOrigProporcional,
+            precioModificado: tieneOferta
+        });
+    }
 
     cerrarPeso();
     renderVenta();
