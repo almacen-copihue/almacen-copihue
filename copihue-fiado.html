@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Copihue — Fiados v19</title>
+<title>Copihue — Fiados v20</title>
 <meta name="theme-color" content="#1b5e20">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -214,6 +214,24 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
   </div>
 </div>
 
+<!-- Modal editar cliente -->
+<div class="modal-ov" id="modalEditCli" onclick="if(event.target===this)cerrarEditCli()">
+  <div class="modal-sh">
+    <div class="modal-tit">✏️ Editar cliente <button onclick="cerrarEditCli()">✕</button></div>
+    <div style="padding:4px 0 12px">
+      <label style="font-size:.78rem;font-weight:700;color:var(--gris);display:block;margin-bottom:4px">Nombre</label>
+      <input id="editCliNom" type="text" style="width:100%;padding:9px 12px;border:1.5px solid var(--borde);border-radius:10px;font-size:.9rem;font-family:inherit;box-sizing:border-box">
+      <label style="font-size:.78rem;font-weight:700;color:var(--gris);display:block;margin:10px 0 4px">Teléfono</label>
+      <input id="editCliTel" type="tel" style="width:100%;padding:9px 12px;border:1.5px solid var(--borde);border-radius:10px;font-size:.9rem;font-family:inherit;box-sizing:border-box">
+      <input type="hidden" id="editCliOrig">
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn-cancel" onclick="cerrarEditCli()">Cancelar</button>
+      <button class="btn-confirm" id="btnEditCli" onclick="confirmarEditCli()">✅ Guardar</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script>
@@ -297,7 +315,7 @@ function renderClientes(){
     const prox=c.fiados.filter(f=>{if(!f.fechaVencimiento)return false;const d=new Date(f.fechaVencimiento+'T12:00:00');const dias=Math.round((d-hoy)/86400000);return dias>=0&&dias<=3;}).length;
     const bdg=venc>0?`<span class="bdg bdg-r">🔴 ${venc} vencido${venc>1?'s':''}</span>`:prox>0?`<span class="bdg bdg-o">⏰ Vence pronto</span>`:`<span class="bdg bdg-g">${c.fiados.length} fiado${c.fiados.length>1?'s':''}</span>`;
     // Guardamos índice numérico para evitar problemas con caracteres especiales en onclick inline
-    html+=`<div class="cli-card" data-idx="${idx}"><div><div class="cli-nombre">${c.nom}</div><div class="cli-tel">${c.tel?'📞 '+c.tel:'Sin teléfono'}</div><div style="margin-top:3px">${bdg}</div></div><div class="cli-deuda">${fmt(c.tot)}</div></div>`;
+    html+=`<div class="cli-card" data-idx="${idx}"><div><div class="cli-nombre">${c.nom}</div><div class="cli-tel">${c.tel?'📞 '+c.tel:'Sin teléfono'} <button onclick="event.stopPropagation();abrirEditCli('${safeEnc(c.nom)}','${c.tel||''}')" style="background:none;border:none;cursor:pointer;font-size:.8rem;padding:0 4px;color:var(--vd)">✏️</button></div><div style="margin-top:3px">${bdg}</div></div><div class="cli-deuda">${fmt(c.tot)}</div></div>`;
   });
   document.getElementById('cuerpoClientes').innerHTML=html;
   // Event delegation — robusto con cualquier nombre
@@ -673,6 +691,43 @@ function ir(vista,titulo){
   }
 }
 function setHdrSub(txt){const s=document.getElementById('hdrSub');if(s)s.textContent=txt;}
+function abrirEditCli(nomEnc,tel){
+  document.getElementById('editCliOrig').value=decodeURIComponent(nomEnc);
+  document.getElementById('editCliNom').value=decodeURIComponent(nomEnc);
+  document.getElementById('editCliTel').value=tel||'';
+  const btn=document.getElementById('btnEditCli');
+  btn.disabled=false; btn.textContent='✅ Guardar';
+  document.getElementById('modalEditCli').classList.add('open');
+}
+function cerrarEditCli(){
+  document.getElementById('modalEditCli').classList.remove('open');
+}
+async function confirmarEditCli(){
+  const nomOrig=document.getElementById('editCliOrig').value.trim();
+  const nomNuevo=document.getElementById('editCliNom').value.trim();
+  const telNuevo=document.getElementById('editCliTel').value.trim();
+  if(!nomNuevo){alert('El nombre no puede estar vacío');return;}
+  const btn=document.getElementById('btnEditCli');
+  btn.disabled=true; btn.textContent='⏳ Guardando...';
+  try{
+    const r=await _api('actualizarCliente',{
+      nombreOriginal:nomOrig,
+      nombreNuevo:nomNuevo,
+      telefonoNuevo:telNuevo
+    });
+    if(r.success){
+      cerrarEditCli();
+      await recargarCli();
+    } else {
+      alert('❌ '+(r.mensaje||'Error al guardar'));
+      btn.disabled=false; btn.textContent='✅ Guardar';
+    }
+  }catch(e){
+    alert('❌ Sin conexión');
+    btn.disabled=false; btn.textContent='✅ Guardar';
+  }
+}
+
 function volverClis(){_sel.clear();renderClientes();ir('clientes');}
 function volverFiados(){ir('fiados',_cliNom);}
 async function recargarCli(){
