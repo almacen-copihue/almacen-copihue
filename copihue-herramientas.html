@@ -213,7 +213,7 @@
 
   <!-- FOOTER -->
   <div id="footer">
-    <button class="btn-footer" id="btn-reload" onclick="cargar()">🔄 Recargar</button>
+    <button class="btn-footer" id="btn-reload" onclick="cargar(true)">🔄 Recargar</button>
   </div>
 
 <script>
@@ -228,7 +228,25 @@ let _todas = [];       // lista completa cargada
 let _filtro = '';      // búsqueda activa
 
 // ── CARGA ──────────────────────────────────────────────────────────────────
-async function cargar() {
+const CACHE_KEY = 'copihue_herramientas_cache';
+const CACHE_TTL = 10 * 60 * 1000; // 10 minutos
+
+function cargarCache() {
+  try {
+    const raw = sessionStorage.getItem(CACHE_KEY);
+    if (!raw) return false;
+    const c = JSON.parse(raw);
+    if (Date.now() - c.ts > CACHE_TTL) return false;
+    _todas = c.herramientas;
+    const mins = Math.round((Date.now() - c.ts) / 60000);
+    setSub(_todas.filter(h=>h.activo!==false).length + ' herramientas · hace ' + (mins===0?'<1':mins) + 'min');
+    renderizar();
+    return true;
+  } catch(e) { return false; }
+}
+
+async function cargar(forzar=false) {
+  if (!forzar && cargarCache()) return;
   setSub('Conectando...');
   setEstado('⏳', 'Cargando desde planilla...');
   try {
@@ -236,12 +254,18 @@ async function cargar() {
     const d = await r.json();
     if (d.ok && Array.isArray(d.herramientas) && d.herramientas.length > 0) {
       _todas = d.herramientas;
+      try { sessionStorage.setItem(CACHE_KEY, JSON.stringify({ts: Date.now(), herramientas: _todas})); } catch(e){}
       renderizar();
     } else {
       setEstado('⚠️', 'Sin herramientas en planilla', 'Verificar hoja HERRAMIENTAS en Sheets');
       setSub('Error al cargar');
     }
   } catch(e) {
+    // Si falla la red, intentar usar caché vencido
+    try {
+      const raw = sessionStorage.getItem(CACHE_KEY);
+      if (raw) { _todas = JSON.parse(raw).herramientas; renderizar(); setSub('Sin conexión · datos anteriores'); return; }
+    } catch(e2){}
     setEstado('📵', 'Sin conexión con el servidor', 'Revisá conexión y tocá Recargar');
     setSub('Sin conexión');
   }

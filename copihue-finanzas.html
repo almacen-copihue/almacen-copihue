@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Copihue · Finanzas v12</title>
+<title>Copihue · Finanzas v13</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -187,7 +187,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
 
 <div class="hdr">
   <div class="hdr-icon">💰</div>
-  <div><div class="hdr-t">Copihue · Finanzas <span id="ver-badge" style="font-size:.6rem;background:rgba(255,255,255,.25);padding:2px 7px;border-radius:10px;font-weight:900;letter-spacing:.5px">v10</span></div><div class="hdr-s" id="hdr-sub">Panel financiero</div></div>
+  <div><div class="hdr-t">Copihue · Finanzas <span id="ver-badge" style="font-size:.6rem;background:rgba(255,255,255,.25);padding:2px 7px;border-radius:10px;font-weight:900;letter-spacing:.5px">v13</span></div><div class="hdr-s" id="hdr-sub">Panel financiero</div></div>
   <button class="btn-back" onclick="location.href='./copihue-herramientas.html'">← Volver</button>
 </div>
 
@@ -286,8 +286,44 @@ function parseEgrReg(r){
           obs:str(r.observacion||r.obs), vendedor:str(r.vendedor)};
 }
 
-async function cargarDatos(){
+const SS_CACHE_KEY = 'copihue_finanzas_cache';
+const SS_CACHE_TTL = 5 * 60 * 1000; // 5 minutos
+
+function guardarCacheSession(){
+  try {
+    sessionStorage.setItem(SS_CACHE_KEY, JSON.stringify({
+      ts: Date.now(),
+      caja: cajaData.map(r=>({...r, fecha:r.fecha.toISOString()})),
+      egresos: egresosData.map(r=>({...r, fecha:r.fecha.toISOString()})),
+      compras: comprasData.map(r=>({...r, fecha:r.fecha.toISOString()})),
+      inventario: inventarioData
+    }));
+  } catch(e){}
+}
+
+function cargarCacheSession(){
+  try {
+    const raw = sessionStorage.getItem(SS_CACHE_KEY);
+    if(!raw) return false;
+    const cache = JSON.parse(raw);
+    if(Date.now() - cache.ts > SS_CACHE_TTL) return false;
+    cajaData    = cache.caja.map(r=>({...r, fecha:new Date(r.fecha)}));
+    egresosData = cache.egresos.map(r=>({...r, fecha:new Date(r.fecha)}));
+    comprasData = cache.compras.map(r=>({...r, fecha:new Date(r.fecha)}));
+    inventarioData = cache.inventario || inventarioData;
+    return true;
+  } catch(e){ return false; }
+}
+
+async function cargarDatos(forzar=false){
   if(cargando) return;
+  // Intentar cargar desde sessionStorage si los datos son recientes
+  if(!forzar && cargarCacheSession()){
+    const mins = Math.round((Date.now() - JSON.parse(sessionStorage.getItem(SS_CACHE_KEY)||'{}').ts||0)/60000);
+    document.getElementById('hdr-sub').textContent = (cajaData.length+egresosData.length+comprasData.length) + ' registros · hace ' + mins + 'min';
+    render();
+    return;
+  }
   cargando = true;
   document.getElementById('app').innerHTML = '<div class="ldg"><div class="spin"></div>Cargando datos financieros...</div>';
   document.getElementById('hdr-sub').textContent = 'Actualizando…';
@@ -302,6 +338,7 @@ async function cargarDatos(){
     egresosData = (rEgr.ok ? rEgr.registros : []).map(parseEgrReg).filter(Boolean);
     comprasData = (rHist.ok ? rHist.registros : []).map(parseCompraReg).filter(Boolean);
     if(rInv.ok) inventarioData = rInv;
+    guardarCacheSession();
     const total = cajaData.length + egresosData.length + comprasData.length;
     document.getElementById('hdr-sub').textContent = total + ' registros · ' + new Date().toLocaleDateString('es-AR');
     toast('✅ ' + total + ' registros cargados');
@@ -310,7 +347,7 @@ async function cargarDatos(){
       <div style="font-size:2rem">❌</div>
       <div style="color:var(--rojo);font-weight:700;margin:8px 0">No se pudo cargar</div>
       <div style="color:var(--gris);font-size:.78rem;margin-bottom:14px">${e.message}</div>
-      <button onclick="cargarDatos()" style="background:var(--verde);color:#fff;border:none;border-radius:12px;padding:10px 20px;font-size:.82rem;font-weight:700;cursor:pointer;font-family:inherit">🔄 Reintentar</button>
+      <button onclick="cargarDatos(true)" style="background:var(--verde);color:#fff;border:none;border-radius:12px;padding:10px 20px;font-size:.82rem;font-weight:700;cursor:pointer;font-family:inherit">🔄 Reintentar</button>
     </div>`;
     cargando = false; return;
   }
