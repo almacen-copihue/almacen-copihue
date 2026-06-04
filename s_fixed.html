@@ -427,10 +427,10 @@ function slugify(name) {
 }
 
 function getImgUrl(product) {
-  // 1. Si la API ya devuelve una URL completa, usarla
-  if (product.image && product.image.startsWith('http')) return product.image;
-  if (product.foto  && product.foto.startsWith('http'))  return product.foto;
-  // 2. Ruta relativa Vercel — igual que sendwa.html y el catálogo
+  // Campos posibles: image (raw API), foto (mapeado en parseProducts), nombre
+  const rawUrl = product.image || product.foto || '';
+  if (rawUrl.startsWith('http')) return rawUrl;
+  // Ruta relativa Vercel — misma lógica que sendwa.html
   const nombre = product.name || product.nombre || '';
   if (nombre) return `imagenes-productos/${slugify(nombre)}.jpg`;
   return null;
@@ -467,7 +467,15 @@ async function loadOffers() {
       (data.relampagoActivo || []).forEach(p => offerPools.relampago.add(Number(p.id)));
       (data.destacadasActivas || []).forEach(p => offerPools.destacado.add(Number(p.id)));
       (data.especialesActivas || []).forEach(p => offerPools.especial.add(Number(p.id)));
-      console.log('Ofertas cargadas:', {
+      const ults = data.ultimasSeleccionadasSiempre || data.ultimasSeleccionadas || [];
+      ults.forEach(p => offerPools.ultimas.add(Number(p.id)));
+      console.log('Pools cargados:', {
+        relampago: offerPools.relampago.size,
+        destacado: offerPools.destacado.size,
+        especial: offerPools.especial.size,
+        ultimas: offerPools.ultimas.size
+      });
+      if (false) console.log('Ofertas cargadas:', {
         relampago: offerPools.relampago.size,
         destacado: offerPools.destacado.size,
         especial: offerPools.especial.size
@@ -498,15 +506,32 @@ async function loadProducts() {
     
     if (offerPools.relampago.has(Number(id))) {
       offerType = 'relampago';
-      const val = r.relampago;
-      if (val && [11,12,13,14,15].includes(parseInt(val))) {
-        discountPrice = Math.round(price * (1 - parseInt(val) / 100));
+      const val = parseInt(r.relampago) || 0;
+      // Porcentaje directo (10%-30%)
+      if ([11,12,13,14,15].includes(val)) {
+        discountPrice = Math.round(price * (1 - (val - 10 + (val===11?10:val===12?15:val===13?20:val===14?25:30)) / 100));
       }
+      // Tabla correcta: 11=10%, 12=15%, 13=20%, 14=25%, 15=30%
+      const pctMap = {11:10, 12:15, 13:20, 14:25, 15:30};
+      if (pctMap[val] !== undefined) {
+        discountPrice = Math.round(price * (1 - pctMap[val]/100));
+      }
+      // NxM — mostrar precio por unidad promedio
+      const nxmMap = {1:0.5, 2:0.667, 3:0.75, 4:0.8, 5:0.833, 6:0.857, 10:0.75};
+      if (nxmMap[val] !== undefined) {
+        discountPrice = Math.round(price * nxmMap[val]);
+      }
+      // Si no hay código conocido, mostrar igual con badge pero sin precio alternativo
+      if (!discountPrice) discountPrice = price;
     } else if (offerPools.destacado.has(Number(id))) {
       offerType = 'destacado';
-      discountPrice = Math.round(price * 0.85);
+      const pct = parseFloat(r.destacada) || 15;
+      discountPrice = Math.round(price * (1 - pct/100));
     } else if (offerPools.especial.has(Number(id))) {
       offerType = 'especial';
+      discountPrice = Math.round(price * 0.9); // siempre 10%
+    } else if (offerPools.ultimas && offerPools.ultimas.has(Number(id))) {
+      offerType = 'ultimas';
       discountPrice = Math.round(price * 0.9);
     }
     
@@ -516,8 +541,11 @@ async function loadProducts() {
       price: price,
       category: String(r.category || r.categoria || '').trim(),
       foto: String(r.image || r.imagen || r.foto || ''),
+      stock: parseFloat(r.stock ?? 1),
       offerType: offerType,
-      discountPrice: discountPrice
+      discountPrice: discountPrice,
+      relampago: r.relampago,
+      destacadaPct: parseFloat(r.destacada) || 15,
     };
   }).filter(p => p.name && p.price > 0);
 }
@@ -555,8 +583,21 @@ function applyFilters() {
 // RENDER
 // ============================================
 function getOfferLabel(type) {
-  const labels = { relampago:'⚡ Relámpago', destacado:'⭐ Destacado', especial:'💜 Especial' };
+  const nxmLabels = {1:'⚡ 2x1',2:'⚡ 3x2',3:'⚡ 4x3',4:'⚡ 5x4',5:'⚡ 6x5',6:'⚡ 7x6',10:'⚡ 2da 50%'};
+  const pctLabels = {11:'⚡ -10% OFF',12:'⚡ -15% OFF',13:'⚡ -20% OFF',14:'⚡ -25% OFF',15:'⚡ -30% OFF'};
+  const labels = { relampago:'⚡ Relámpago', destacado:'🔥 Destacado', especial:'💜 Especial', ultimas:'🏷️ Últimas' };
   return labels[type] || '';
+}
+function getOfferLabelFull(p) {
+  if (!p.offerType) return '';
+  if (p.offerType === 'relampago') {
+    const val = parseInt(p.relampago) || 0;
+    return nxmLabels[val] || pctLabels[val] || '⚡ Relámpago';
+  }
+  if (p.offerType === 'destacado') return `🔥 -${p.destacadaPct||15}% OFF`;
+  if (p.offerType === 'especial')  return '💜 -10% OFF';
+  if (p.offerType === 'ultimas')   return '🏷️ Últimas';
+  return labels[p.offerType] || '';
 }
 
 function renderProducts() {
@@ -567,20 +608,29 @@ function renderProducts() {
     return;
   }
   
+  // Ordenar por categoría para que los separadores sean continuos
+  const sorted = [...filteredProducts].sort((a,b) => {
+    // Productos con oferta primero, luego por categoría
+    if (a.offerType && !b.offerType) return -1;
+    if (!a.offerType && b.offerType) return 1;
+    return a.category.localeCompare(b.category);
+  });
+
   let html = '';
-  let lastCat = '';
+  let lastCat = null;
   
-  filteredProducts.forEach(p => {
+  sorted.forEach(p => {
     const catNorm = normalize(p.category);
-    if (catNorm !== lastCat && lastCat !== '') {
-      html += `<div style="grid-column:1/-1;background:var(--primary-dark);color:white;padding:6px;border-radius:8px;margin:4px 0;text-align:center;font-size:12px;">${getCatEmoji(p.category)} ${p.category.toUpperCase()}</div>`;
+    if (catNorm !== lastCat) {
+      html += `<div style="grid-column:1/-1;background:var(--primary-dark);color:white;padding:6px 12px;border-radius:8px;margin:6px 0 2px;text-align:center;font-size:12px;font-weight:700;">${getCatEmoji(p.category)} ${p.category.toUpperCase()}</div>`;
+      lastCat = catNorm;
     }
-    lastCat = catNorm;
     
     const selected = selectedIds.has(p.id);
     const order = selectionOrder.indexOf(p.id) + 1;
-    const hasOffer = p.offerType && p.discountPrice;
-    const offerLabel = getOfferLabel(p.offerType);
+    const hasOffer = !!p.offerType;
+    const hasDiscount = p.offerType && p.discountPrice && p.discountPrice < p.price;
+    const offerLabel = getOfferLabelFull(p);
     const imgUrl = getImgUrl(p);
     
     html += `
@@ -593,7 +643,7 @@ function renderProducts() {
           <div class="product-name">${p.name}</div>
           <div class="product-cat">${p.category}</div>
           <div class="product-price">
-            ${hasOffer ? `<span class="old-price">${formatPrice(p.price)}</span><span class="offer-price">${formatPrice(p.discountPrice)}</span>` : formatPrice(p.price)}
+            ${hasDiscount ? `<span class="old-price">${formatPrice(p.price)}</span><span class="offer-price">${formatPrice(p.discountPrice)}</span>` : formatPrice(p.price)}
           </div>
         </div>
       </div>
@@ -670,17 +720,19 @@ function generateWAText() {
 function init() {
   document.getElementById('loader').classList.remove('hidden');
   
-  Promise.all([loadOffers(), loadProducts().then(prods => allProducts = prods)]).then(() => {
-    document.getElementById('loader').classList.add('hidden');
-    
-    if (!allProducts.length) {
-      document.getElementById('productsGrid').innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;">❌ Error cargando productos</div>';
-      return;
-    }
-    
-    console.log('Productos cargados:', allProducts.length);
-    applyFilters();
-  });
+  // Ofertas PRIMERO para que los pools estén listos cuando parseProducts los consulte
+  loadOffers()
+    .then(() => loadProducts())
+    .then(prods => {
+      allProducts = prods;
+      document.getElementById('loader').classList.add('hidden');
+      if (!allProducts.length) {
+        document.getElementById('productsGrid').innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;">❌ Error cargando productos</div>';
+        return;
+      }
+      console.log('Productos cargados:', allProducts.length, '— con oferta:', allProducts.filter(p=>p.offerType).length);
+      applyFilters();
+    });
   
   // Filtros
   document.querySelectorAll('.filter-chip').forEach(btn => {
