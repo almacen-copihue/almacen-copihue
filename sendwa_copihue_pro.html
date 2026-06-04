@@ -319,23 +319,24 @@ function getMargen(p){
   return Math.round(((p.price - p.costo) / p.price) * 100);
 }
 function getOfertaLabel(p){
-  if(p.relampago > 0) return `⚡ -${p.relampago}%`;
-  if(p.destacada > 0) return `⭐ DEST`;
-  if(p.especial) return `💙 ESP`;
+  const c = p.categoriaOferta;
+  if(c.startsWith('relampago')) return `⚡ ${c.replace('relampago','').trim()}`;
+  if(c === 'destacada') return `⭐ DEST`;
+  if(c === 'especial') return `💙 ESP`;
   return '';
 }
 function getBadgeClass(p){
-  if(p.stock === 0) return 'badge out';
-  if(p.relampago > 0) return 'badge';
-  if(p.destacada > 0) return 'badge dest';
-  if(p.especial) return 'badge esp';
+  const c = p.categoriaOferta;
+  if(c.startsWith('relampago')) return 'badge';
+  if(c === 'destacada') return 'badge dest';
+  if(c === 'especial') return 'badge esp';
   return '';
 }
 function getPrecioAntes(p){
-  if(p.relampago > 0 || p.destacada > 0 || p.especial) return p.normal || 0;
+  if(isOfertaActiva(p)) return p.normal || 0;
   return 0;
 }
-function hasOferta(p){ return p.relampago > 0 || p.destacada > 0 || p.especial > 0; }
+function hasOferta(p){ return isOfertaActiva(p); }
 function fmt$(n){ return '$' + Number(n).toLocaleString('es-AR'); }
 
 // ─── INIT ─────────────────────────────────────────────────
@@ -368,25 +369,35 @@ function parseProduct(p, i){
     destacada: parseFloat(p.destacada) || 0,
     especial: p.especial ? 1 : 0,
     normal: parseFloat(p.normal || p.precioAntes) || 0,
-    image: p.image || p.foto || ''
+    image: p.image || p.foto || '',
+    categoriaOferta: (p.categoriaOferta || '').toLowerCase().trim()
   };
 }
+
+// categoriaOferta (col J) es la fuente de verdad para ofertas activas
+// Valores posibles: "sin oferta", "sin stock", "relampago X%", "especial", "destacada"
+function isOfertaActiva(p){
+  const c = p.categoriaOferta;
+  return c && c !== 'sin oferta' && c !== 'sin stock' && c !== '';
+}
+function tieneStock(p){ return p.stock > 0 && p.categoriaOferta !== 'sin stock'; }
 
 // ─── FILTRADO Y ORDENADO ──────────────────────────────────
 function getFiltered(){
   const q = document.getElementById('searchInp').value.toLowerCase();
-  let ps = [...allProds];
+  // Filtro base: stock > 0 siempre (excepto que se busque explícitamente sin stock)
+  let ps = allProds.filter(p => tieneStock(p));
 
   if(q) ps = ps.filter(p => p.name.toLowerCase().includes(q));
 
-  if(currentTab === 'ofertas') ps = ps.filter(p => hasOferta(p));
+  if(currentTab === 'ofertas') ps = ps.filter(p => isOfertaActiva(p));
   else if(currentTab !== 'all') ps = ps.filter(p => p.category === currentTab);
 
   smartFilters.forEach(f => {
     if(f === 'rotacion')   ps = ps.filter(p => p.rotacion >= 4);
     if(f === 'stock-bajo') ps = ps.filter(p => p.stock > 0 && p.stock <= p.stockMin + 2);
     if(f === 'margen')     ps = ps.filter(p => getMargen(p) !== null && getMargen(p) >= 50);
-    if(f === 'sin-oferta') ps = ps.filter(p => !hasOferta(p));
+    if(f === 'sin-oferta') ps = ps.filter(p => !isOfertaActiva(p));
     if(f === 'criticos')   ps = ps.filter(p => p.prioridad && p.prioridad.includes('EMPUJAR YA'));
   });
 
@@ -439,7 +450,6 @@ function render(){
       : fmt$(p.price);
 
     let badgeHtml = (ofLabel && bClass) ? `<div class="${bClass}">${ofLabel}</div>` : '';
-    if(p.stock === 0) badgeHtml = `<div class="badge out">SIN STOCK</div>`;
 
     let stockHtml = (p.stock > 0 && p.stock <= p.stockMin + 2)
       ? `<div class="stock-low">⚠️ ${p.stock} uds</div>` : '';
@@ -758,66 +768,67 @@ document.getElementById('searchInp').addEventListener('input', render);
 // ─── DATOS LOCALES (fallback si la API no responde) ───────
 function getLocalData(){
   return [
-    {id:"1",name:"YERBA PIPORE TRADICIONAL 500GR",price:3600,category:"ALMACEN",stock:11,costo:1650,rotacion:3,prioridad:"EMPUJAR",stockMin:5,relampago:0,destacada:0,especial:0,normal:3000,image:""},
-    {id:"2",name:"YERBA BUENAS Y SANTAS 500GR",price:3500,category:"ALMACEN",stock:8,costo:1999,rotacion:2,prioridad:"EMPUJAR",stockMin:1,relampago:0,destacada:0,especial:1,normal:3000,image:""},
-    {id:"3",name:"SALSA LISTA NOEL PIZZA 340GR",price:2000,category:"ALMACEN",stock:3,costo:1086,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:12,destacada:0,especial:0,normal:1700,image:""},
-    {id:"4",name:"QUESO RALLADO LA QUESERA 40GR",price:1500,category:"HELADERA Y CONGELADOS",stock:28,costo:619,rotacion:4,prioridad:"EMPUJAR",stockMin:8,relampago:12,destacada:0,especial:0,normal:1275,image:""},
-    {id:"5",name:"PURE DE PAPAS MAGGI 125GR",price:3600,category:"ALMACEN",stock:19,costo:1769,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:12,destacada:0,especial:0,normal:3060,image:""},
-    {id:"6",name:"PICADILLO SWIFT 90GR",price:1700,category:"ALMACEN",stock:7,costo:840,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:12,destacada:0,especial:0,normal:1445,image:""},
-    {id:"7",name:"PATE DE FOIE SWIFT 90GR",price:1800,category:"ALMACEN",stock:1,costo:1205,rotacion:3,prioridad:"EMPUJAR SUAVE",stockMin:3,relampago:12,destacada:0,especial:0,normal:1530,image:""},
-    {id:"8",name:"LEVADURA MI PAN 10GR",price:1000,category:"PANADERIA",stock:4,costo:498,rotacion:4,prioridad:"EMPUJAR",stockMin:4,relampago:12,destacada:0,especial:0,normal:850,image:""},
-    {id:"9",name:"GASEOSA CUNNINGTON 2,25L CLASICA COLA",price:5000,category:"BEBIDAS",stock:9,costo:3519,rotacion:2,prioridad:"EMPUJAR",stockMin:1,relampago:0,destacada:0,especial:1,normal:4500,image:""},
-    {id:"10",name:"GALLETITAS SURTIDAS BAGLEY 400GR",price:5500,category:"DULCES Y SNACKS",stock:4,costo:2159,rotacion:5,prioridad:"NORMAL",stockMin:10,relampago:12,destacada:0,especial:0,normal:4675,image:""},
-    {id:"11",name:"GALLETITAS COFLER RELLENAS BON O BON 85GR",price:2000,category:"DULCES Y SNACKS",stock:3,costo:1000,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:0,especial:0,normal:2000,image:""},
-    {id:"12",name:"GALLETITAS COFLER COOKIES 120GR",price:2500,category:"DULCES Y SNACKS",stock:3,costo:1399,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:0,especial:1,normal:2250,image:""},
-    {id:"13",name:"GALLETITAS CHOCOLINA ORIGINAL 250GR",price:3500,category:"DULCES Y SNACKS",stock:6,costo:1694,rotacion:2,prioridad:"EMPUJAR",stockMin:3,relampago:0,destacada:0,especial:1,normal:3150,image:""},
-    {id:"14",name:"GALLETITAS CHOCOLINA ORIGINAL 170GR",price:2800,category:"DULCES Y SNACKS",stock:3,costo:1378,rotacion:2,prioridad:"EMPUJAR",stockMin:3,relampago:0,destacada:0,especial:1,normal:2520,image:""},
-    {id:"15",name:"DETERGENTE 300ML",price:3500,category:"LIMPIEZA",stock:7,costo:1300,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:0,especial:1,normal:3150,image:""},
-    {id:"16",name:"AZUCAR LEDESMA CLASICA 1KG",price:2100,category:"ALMACEN",stock:10,costo:1302,rotacion:4,prioridad:"EMPUJAR",stockMin:6,relampago:0,destacada:0,especial:1,normal:1890,image:""},
-    {id:"17",name:"ARROZ 1KG MOLINOS ALA NO SE PASA",price:4500,category:"ALMACEN",stock:1,costo:2500,rotacion:2,prioridad:"EMPUJAR SUAVE",stockMin:3,relampago:11,destacada:0,especial:0,normal:4050,image:""},
-    {id:"18",name:"ALFAJOR COFLER BLOCK 60GR",price:2500,category:"DULCES Y SNACKS",stock:37,costo:1284,rotacion:3,prioridad:"EMPUJAR YA",stockMin:2,relampago:0,destacada:0,especial:1,normal:2250,image:""},
-    {id:"19",name:"ALFAJOR 3 BON O BON 60GR",price:2600,category:"DULCES Y SNACKS",stock:11,costo:1800,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:15,destacada:0,especial:0,normal:1819,image:""},
-    {id:"20",name:"SALCHICHAS PATY FUN 6U",price:3000,category:"HELADERA Y CONGELADOS",stock:6,costo:1400,rotacion:4,prioridad:"EMPUJAR YA",stockMin:2,relampago:12,destacada:0,especial:0,normal:2550,image:""},
-    {id:"21",name:"RAZA GATO CARNE PESCADO ARROZ 1KG",price:6600,category:"ALMACEN",stock:7,costo:0,rotacion:2,prioridad:"EMPUJAR",stockMin:1,relampago:0,destacada:20,especial:0,normal:5280,image:""},
-    {id:"22",name:"PURE DE TOMATE NOEL 520GR",price:2000,category:"ALMACEN",stock:18,costo:700,rotacion:3,prioridad:"EMPUJAR",stockMin:3,relampago:0,destacada:15,especial:0,normal:1700,image:""},
-    {id:"23",name:"PURE DE TOMATE ARCOR 520GR",price:2000,category:"ALMACEN",stock:9,costo:699,rotacion:2,prioridad:"EMPUJAR",stockMin:3,relampago:0,destacada:20,especial:0,normal:1600,image:""},
-    {id:"24",name:"PAPEL HIGIENICO ROSAL 4 ROLLOS 30MT",price:1500,category:"HIGIENE PERSONAL",stock:6,costo:800,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:15,especial:0,normal:1275,image:""},
-    {id:"25",name:"PAPEL HIGIENICO HIGIENOL FRESH 4 ROLLOS",price:3500,category:"HIGIENE PERSONAL",stock:18,costo:1299,rotacion:3,prioridad:"EMPUJAR",stockMin:3,relampago:0,destacada:20,especial:0,normal:2800,image:""},
-    {id:"26",name:"MAYONESA NATURA 250GR",price:2600,category:"ALMACEN",stock:6,costo:1259,rotacion:3,prioridad:"EMPUJAR",stockMin:1,relampago:0,destacada:20,especial:0,normal:2080,image:""},
-    {id:"27",name:"MAYONESA HELLMANNS 237G",price:2700,category:"ALMACEN",stock:7,costo:997,rotacion:3,prioridad:"EMPUJAR",stockMin:7,relampago:0,destacada:20,especial:0,normal:2160,image:""},
-    {id:"28",name:"MANTECA PRIMER PREMIO 100GR",price:2500,category:"HELADERA Y CONGELADOS",stock:0,costo:1300,rotacion:4,prioridad:"NORMAL",stockMin:5,relampago:0,destacada:25,especial:0,normal:0,image:""},
-    {id:"29",name:"HELADO FRUTILLA PALITO GRIDO",price:1500,category:"HELADERA Y CONGELADOS",stock:8,costo:1000,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:15,especial:0,normal:1275,image:""},
-    {id:"30",name:"HELADO CHOCOLATE PALITO GRIDO",price:1500,category:"HELADERA Y CONGELADOS",stock:12,costo:730,rotacion:4,prioridad:"EMPUJAR",stockMin:2,relampago:0,destacada:15,especial:0,normal:1275,image:""},
-    {id:"31",name:"HELADO AGUA NARANJA PALITO GRIDO",price:1200,category:"HELADERA Y CONGELADOS",stock:7,costo:500,rotacion:2,prioridad:"EMPUJAR",stockMin:2,relampago:0,destacada:15,especial:0,normal:1020,image:""},
-    {id:"32",name:"HELADO AGUA LIMON PALITO GRIDO",price:1200,category:"HELADERA Y CONGELADOS",stock:8,costo:700,rotacion:4,prioridad:"EMPUJAR",stockMin:3,relampago:0,destacada:15,especial:0,normal:1020,image:""},
-    {id:"34",name:"HAMBURGUESAS BURGER SWIFT 4U",price:7500,category:"HELADERA Y CONGELADOS",stock:9,costo:4800,rotacion:5,prioridad:"EMPUJAR YA",stockMin:2,relampago:0,destacada:0,especial:1,normal:6750,image:""},
-    {id:"35",name:"GALLETAS MINI PITUSAS MERENGUE 120GR",price:2000,category:"DULCES Y SNACKS",stock:1,costo:1387,rotacion:3,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:15,especial:0,normal:1700,image:""},
-    {id:"36",name:"ALFAJOR TRIPLE FANTOCHE NEGRO",price:2000,category:"DULCES Y SNACKS",stock:34,costo:700,rotacion:4,prioridad:"EMPUJAR YA",stockMin:5,relampago:0,destacada:15,especial:0,normal:1700,image:""},
-    {id:"37",name:"ALFAJOR TRIPLE FANTOCHE BLANCO",price:2000,category:"DULCES Y SNACKS",stock:33,costo:750,rotacion:2,prioridad:"EMPUJAR YA",stockMin:1,relampago:0,destacada:15,especial:0,normal:1700,image:""},
-    {id:"38",name:"VINO TORO BOTELLON",price:5300,category:"BEBIDAS",stock:26,costo:2000,rotacion:5,prioridad:"EMPUJAR",stockMin:9,relampago:0,destacada:0,especial:1,normal:4770,image:""},
-    {id:"39",name:"VINO CAJA TINTO TORO 1L",price:4400,category:"BEBIDAS",stock:9,costo:1900,rotacion:5,prioridad:"EMPUJAR SUAVE",stockMin:6,relampago:0,destacada:0,especial:1,normal:3960,image:""},
-    {id:"40",name:"VINO CAJA TINTO TERMIDOR 1L",price:4400,category:"BEBIDAS",stock:14,costo:2239,rotacion:5,prioridad:"EMPUJAR",stockMin:3,relampago:0,destacada:0,especial:1,normal:3960,image:""},
-    {id:"41",name:"VINO ALMA MORA MALBEC 750ML",price:9850,category:"BEBIDAS",stock:8,costo:4600,rotacion:4,prioridad:"EMPUJAR",stockMin:4,relampago:0,destacada:0,especial:1,normal:8865,image:""},
-    {id:"42",name:"VINO ALMA MORA CABERNET SAUVIGNON 750ML",price:9850,category:"BEBIDAS",stock:6,costo:6559,rotacion:3,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:0,especial:1,normal:8865,image:""},
-    {id:"43",name:"SAL FINA DOS ESTRELLAS 500GR",price:1200,category:"ALMACEN",stock:23,costo:600,rotacion:2,prioridad:"EMPUJAR",stockMin:1,relampago:0,destacada:0,especial:1,normal:1080,image:""},
-    {id:"44",name:"QUESO LA PAULINA BARRA SANDWICH X KG",price:16999,category:"HELADERA Y CONGELADOS",stock:0,costo:11500,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:0,especial:1,normal:15299,image:""},
-    {id:"45",name:"POLENTA PRESTO PRONTA 500GR",price:2500,category:"ALMACEN",stock:6,costo:1200,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:0,especial:1,normal:2250,image:""},
-    {id:"46",name:"POETT FLORES DE PRIMAVERA 900ML",price:2900,category:"LIMPIEZA",stock:3,costo:1935,rotacion:2,prioridad:"EMPUJAR",stockMin:3,relampago:0,destacada:0,especial:1,normal:2610,image:""},
-    {id:"47",name:"PATE DE FOIE PALADINI 90GR",price:1600,category:"ALMACEN",stock:5,costo:1000,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:0,especial:1,normal:1440,image:""},
-    {id:"48",name:"PAPAS FRITAS CORTE TRADICIONAL 55GR",price:2500,category:"DULCES Y SNACKS",stock:28,costo:1627,rotacion:4,prioridad:"EMPUJAR YA",stockMin:5,relampago:0,destacada:0,especial:1,normal:2250,image:""},
-    {id:"49",name:"NATURA SAVORA 250GR",price:2500,category:"ALMACEN",stock:6,costo:809,rotacion:2,prioridad:"EMPUJAR YA",stockMin:1,relampago:0,destacada:0,especial:1,normal:2250,image:""},
-    {id:"50",name:"MISKY 50GR CHOCOLATE CON LECHE",price:3300,category:"DULCES Y SNACKS",stock:7,costo:1200,rotacion:3,prioridad:"EMPUJAR",stockMin:4,relampago:0,destacada:0,especial:1,normal:2970,image:""},
-    {id:"51",name:"MISKY 50GR CHOCOLATE BLANCO",price:3300,category:"DULCES Y SNACKS",stock:7,costo:1200,rotacion:4,prioridad:"EMPUJAR",stockMin:5,relampago:0,destacada:0,especial:1,normal:2970,image:""},
-    {id:"52",name:"MINI PEPITOS 50GR",price:1500,category:"DULCES Y SNACKS",stock:2,costo:820,rotacion:2,prioridad:"EMPUJAR",stockMin:3,relampago:0,destacada:0,especial:1,normal:1350,image:""},
-    {id:"53",name:"MINI OREO 50GR",price:1500,category:"DULCES Y SNACKS",stock:2,costo:1000,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:0,especial:1,normal:1350,image:""},
-    {id:"54",name:"LENTEJAS LISETTA 400GR",price:2200,category:"ALMACEN",stock:3,costo:1300,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:0,especial:1,normal:1980,image:""},
-    {id:"55",name:"LENTEJAS INCA 350GR LATA",price:2200,category:"ALMACEN",stock:5,costo:1130,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:0,especial:1,normal:1980,image:""},
-    {id:"56",name:"LECHE LAS TRES NIÑAS 1L CLASICA",price:3700,category:"HELADERA Y CONGELADOS",stock:14,costo:1849,rotacion:4,prioridad:"EMPUJAR",stockMin:3,relampago:0,destacada:0,especial:1,normal:3330,image:""},
-    {id:"57",name:"LECHE LA SERENISIMA 1L",price:4100,category:"HELADERA Y CONGELADOS",stock:10,costo:1985,rotacion:3,prioridad:"EMPUJAR YA",stockMin:3,relampago:0,destacada:0,especial:1,normal:3690,image:""},
-    {id:"58",name:"LAVANDINA 1 LT CLASICA",price:2500,category:"LIMPIEZA",stock:3,costo:979,rotacion:3,prioridad:"EMPUJAR",stockMin:4,relampago:0,destacada:0,especial:1,normal:2250,image:""},
-    {id:"59",name:"LA PARMESANA CHIMICHURRI 15GR",price:1300,category:"CONDIMENTOS",stock:3,costo:1000,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:0,especial:1,normal:1170,image:""},
-    {id:"60",name:"JARDINERA INCA 350GR EN LATA",price:1900,category:"ALMACEN",stock:4,costo:1200,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:0,especial:1,normal:1710,image:""},
-    {id:"61",name:"JABON EN POLVO 800GR",price:3000,category:"LIMPIEZA",stock:6,costo:1400,rotacion:2,prioridad:"EMPUJAR",stockMin:3,relampago:0,destacada:0,especial:1,normal:2700,image:""}
+    {id:"1",name:"YERBA PIPORE TRADICIONAL 500GR",price:3600,category:"ALMACEN",stock:11,costo:1650,rotacion:3,prioridad:"EMPUJAR",stockMin:5,relampago:0,destacada:0,especial:0,normal:3000,image:"",categoriaOferta:"sin oferta"},
+    {id:"2",name:"YERBA BUENAS Y SANTAS 500GR",price:3500,category:"ALMACEN",stock:8,costo:1999,rotacion:2,prioridad:"EMPUJAR",stockMin:1,relampago:0,destacada:0,especial:1,normal:3000,image:"",categoriaOferta:"especial"},
+    {id:"3",name:"SALSA LISTA NOEL PIZZA 340GR",price:2000,category:"ALMACEN",stock:3,costo:1086,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:12,destacada:0,especial:0,normal:1700,image:"",categoriaOferta:"relampago 15%"},
+    {id:"4",name:"QUESO RALLADO LA QUESERA 40GR",price:1500,category:"HELADERA Y CONGELADOS",stock:28,costo:619,rotacion:4,prioridad:"EMPUJAR",stockMin:8,relampago:12,destacada:0,especial:0,normal:1275,image:"",categoriaOferta:"relampago 15%"},
+    {id:"5",name:"PURE DE PAPAS MAGGI 125GR",price:3600,category:"ALMACEN",stock:19,costo:1769,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:12,destacada:0,especial:0,normal:3060,image:"",categoriaOferta:"relampago 15%"},
+    {id:"6",name:"PICADILLO SWIFT 90GR",price:1700,category:"ALMACEN",stock:7,costo:840,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:12,destacada:0,especial:0,normal:1445,image:"",categoriaOferta:"relampago 15%"},
+    {id:"7",name:"PATE DE FOIE SWIFT 90GR",price:1800,category:"ALMACEN",stock:1,costo:1205,rotacion:3,prioridad:"EMPUJAR SUAVE",stockMin:3,relampago:12,destacada:0,especial:0,normal:1530,image:"",categoriaOferta:"relampago 15%"},
+    {id:"8",name:"LEVADURA MI PAN 10GR",price:1000,category:"PANADERIA",stock:4,costo:498,rotacion:4,prioridad:"EMPUJAR",stockMin:4,relampago:12,destacada:0,especial:0,normal:850,image:"",categoriaOferta:"relampago 15%"},
+    {id:"9",name:"GASEOSA CUNNINGTON 2,25L CLASICA COLA",price:5000,category:"BEBIDAS",stock:9,costo:3519,rotacion:2,prioridad:"EMPUJAR",stockMin:1,relampago:0,destacada:0,especial:1,normal:4500,image:"",categoriaOferta:"especial"},
+    {id:"10",name:"GALLETITAS SURTIDAS BAGLEY 400GR",price:5500,category:"DULCES Y SNACKS",stock:4,costo:2159,rotacion:5,prioridad:"NORMAL",stockMin:10,relampago:12,destacada:0,especial:0,normal:4675,image:"",categoriaOferta:"relampago 15%"},
+    {id:"11",name:"GALLETITAS COFLER RELLENAS BON O BON 85GR",price:2000,category:"DULCES Y SNACKS",stock:3,costo:1000,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:0,especial:0,normal:2000,image:"",categoriaOferta:"sin oferta"},
+    {id:"12",name:"GALLETITAS COFLER COOKIES 120GR",price:2500,category:"DULCES Y SNACKS",stock:3,costo:1399,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:0,especial:1,normal:2250,image:"",categoriaOferta:"especial"},
+    {id:"13",name:"GALLETITAS CHOCOLINA ORIGINAL 250GR",price:3500,category:"DULCES Y SNACKS",stock:6,costo:1694,rotacion:2,prioridad:"EMPUJAR",stockMin:3,relampago:0,destacada:0,especial:1,normal:3150,image:"",categoriaOferta:"especial"},
+    {id:"14",name:"GALLETITAS CHOCOLINA ORIGINAL 170GR",price:2800,category:"DULCES Y SNACKS",stock:3,costo:1378,rotacion:2,prioridad:"EMPUJAR",stockMin:3,relampago:0,destacada:0,especial:1,normal:2520,image:"",categoriaOferta:"especial"},
+    {id:"15",name:"DETERGENTE 300ML",price:3500,category:"LIMPIEZA",stock:7,costo:1300,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:0,especial:1,normal:3150,image:"",categoriaOferta:"especial"},
+    {id:"16",name:"AZUCAR LEDESMA CLASICA 1KG",price:2100,category:"ALMACEN",stock:10,costo:1302,rotacion:4,prioridad:"EMPUJAR",stockMin:6,relampago:0,destacada:0,especial:1,normal:1890,image:"",categoriaOferta:"especial"},
+    {id:"17",name:"ARROZ 1KG MOLINOS ALA NO SE PASA",price:4500,category:"ALMACEN",stock:1,costo:2500,rotacion:2,prioridad:"EMPUJAR SUAVE",stockMin:3,relampago:11,destacada:0,especial:0,normal:4050,image:"",categoriaOferta:"relampago 10%"},
+    {id:"18",name:"ALFAJOR COFLER BLOCK 60GR",price:2500,category:"DULCES Y SNACKS",stock:37,costo:1284,rotacion:3,prioridad:"EMPUJAR YA",stockMin:2,relampago:0,destacada:0,especial:1,normal:2250,image:"",categoriaOferta:"especial"},
+    {id:"19",name:"ALFAJOR 3 BON O BON 60GR",price:2600,category:"DULCES Y SNACKS",stock:11,costo:1800,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:15,destacada:0,especial:0,normal:1819,image:"",categoriaOferta:"relampago 30%"},
+    {id:"20",name:"SALCHICHAS PATY FUN 6U",price:3000,category:"HELADERA Y CONGELADOS",stock:6,costo:1400,rotacion:4,prioridad:"EMPUJAR YA",stockMin:2,relampago:12,destacada:0,especial:0,normal:2550,image:"",categoriaOferta:"relampago 15%"},
+    {id:"21",name:"RAZA GATO CARNE PESCADO ARROZ 1KG",price:6600,category:"ALMACEN",stock:7,costo:0,rotacion:2,prioridad:"EMPUJAR",stockMin:1,relampago:0,destacada:20,especial:0,normal:5280,image:"",categoriaOferta:"destacada"},
+    {id:"22",name:"PURE DE TOMATE NOEL 520GR",price:2000,category:"ALMACEN",stock:18,costo:700,rotacion:3,prioridad:"EMPUJAR",stockMin:3,relampago:0,destacada:15,especial:0,normal:1700,image:"",categoriaOferta:"destacada"},
+    {id:"23",name:"PURE DE TOMATE ARCOR 520GR",price:2000,category:"ALMACEN",stock:9,costo:699,rotacion:2,prioridad:"EMPUJAR",stockMin:3,relampago:0,destacada:20,especial:0,normal:1600,image:"",categoriaOferta:"destacada"},
+    {id:"24",name:"PAPEL HIGIENICO ROSAL 4 ROLLOS 30MT",price:1500,category:"HIGIENE PERSONAL",stock:6,costo:800,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:15,especial:0,normal:1275,image:"",categoriaOferta:"destacada"},
+    {id:"25",name:"PAPEL HIGIENICO HIGIENOL FRESH 4 ROLLOS",price:3500,category:"HIGIENE PERSONAL",stock:18,costo:1299,rotacion:3,prioridad:"EMPUJAR",stockMin:3,relampago:0,destacada:20,especial:0,normal:2800,image:"",categoriaOferta:"destacada"},
+    {id:"26",name:"MAYONESA NATURA 250GR",price:2600,category:"ALMACEN",stock:6,costo:1259,rotacion:3,prioridad:"EMPUJAR",stockMin:1,relampago:0,destacada:20,especial:0,normal:2080,image:"",categoriaOferta:"destacada"},
+    {id:"27",name:"MAYONESA HELLMANNS 237G",price:2700,category:"ALMACEN",stock:7,costo:997,rotacion:3,prioridad:"EMPUJAR",stockMin:7,relampago:0,destacada:20,especial:0,normal:2160,image:"",categoriaOferta:"destacada"},
+    {id:"28",name:"MANTECA PRIMER PREMIO 100GR",price:2500,category:"HELADERA Y CONGELADOS",stock:0,costo:1300,rotacion:4,prioridad:"NORMAL",stockMin:5,relampago:0,destacada:25,especial:0,normal:0,image:"",categoriaOferta:"sin stock"},
+    {id:"29",name:"HELADO FRUTILLA PALITO GRIDO",price:1500,category:"HELADERA Y CONGELADOS",stock:8,costo:1000,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:15,especial:0,normal:1275,image:"",categoriaOferta:"destacada"},
+    {id:"30",name:"HELADO CHOCOLATE PALITO GRIDO",price:1500,category:"HELADERA Y CONGELADOS",stock:12,costo:730,rotacion:4,prioridad:"EMPUJAR",stockMin:2,relampago:0,destacada:15,especial:0,normal:1275,image:"",categoriaOferta:"destacada"},
+    {id:"31",name:"HELADO AGUA NARANJA PALITO GRIDO",price:1200,category:"HELADERA Y CONGELADOS",stock:7,costo:500,rotacion:2,prioridad:"EMPUJAR",stockMin:2,relampago:0,destacada:15,especial:0,normal:1020,image:"",categoriaOferta:"destacada"},
+    {id:"32",name:"HELADO AGUA LIMON PALITO GRIDO",price:1200,category:"HELADERA Y CONGELADOS",stock:8,costo:700,rotacion:4,prioridad:"EMPUJAR",stockMin:3,relampago:0,destacada:15,especial:0,normal:1020,image:"",categoriaOferta:"destacada"},
+    {id:"33",name:"HELADO AGUA FRUTILLA PALITO GRIDO",price:1200,category:"HELADERA Y CONGELADOS",stock:0,costo:700,rotacion:2,prioridad:"NORMAL",stockMin:1,relampago:0,destacada:15,especial:0,normal:0,image:"",categoriaOferta:"sin stock"},
+    {id:"34",name:"HAMBURGUESAS BURGER SWIFT 4U",price:7500,category:"HELADERA Y CONGELADOS",stock:9,costo:4800,rotacion:5,prioridad:"EMPUJAR YA",stockMin:2,relampago:0,destacada:0,especial:1,normal:6750,image:"",categoriaOferta:"especial"},
+    {id:"35",name:"GALLETAS MINI PITUSAS MERENGUE 120GR",price:2000,category:"DULCES Y SNACKS",stock:1,costo:1387,rotacion:3,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:15,especial:0,normal:1700,image:"",categoriaOferta:"destacada"},
+    {id:"36",name:"ALFAJOR TRIPLE FANTOCHE NEGRO",price:2000,category:"DULCES Y SNACKS",stock:34,costo:700,rotacion:4,prioridad:"EMPUJAR YA",stockMin:5,relampago:0,destacada:15,especial:0,normal:1700,image:"",categoriaOferta:"destacada"},
+    {id:"37",name:"ALFAJOR TRIPLE FANTOCHE BLANCO",price:2000,category:"DULCES Y SNACKS",stock:33,costo:750,rotacion:2,prioridad:"EMPUJAR YA",stockMin:1,relampago:0,destacada:15,especial:0,normal:1700,image:"",categoriaOferta:"destacada"},
+    {id:"38",name:"VINO TORO BOTELLON",price:5300,category:"BEBIDAS",stock:26,costo:2000,rotacion:5,prioridad:"EMPUJAR",stockMin:9,relampago:0,destacada:0,especial:1,normal:4770,image:"",categoriaOferta:"especial"},
+    {id:"39",name:"VINO CAJA TINTO TORO 1L",price:4400,category:"BEBIDAS",stock:9,costo:1900,rotacion:5,prioridad:"EMPUJAR SUAVE",stockMin:6,relampago:0,destacada:0,especial:1,normal:3960,image:"",categoriaOferta:"especial"},
+    {id:"40",name:"VINO CAJA TINTO TERMIDOR 1L",price:4400,category:"BEBIDAS",stock:14,costo:2239,rotacion:5,prioridad:"EMPUJAR",stockMin:3,relampago:0,destacada:0,especial:1,normal:3960,image:"",categoriaOferta:"especial"},
+    {id:"41",name:"VINO ALMA MORA MALBEC 750ML",price:9850,category:"BEBIDAS",stock:8,costo:4600,rotacion:4,prioridad:"EMPUJAR",stockMin:4,relampago:0,destacada:0,especial:1,normal:8865,image:"",categoriaOferta:"especial"},
+    {id:"42",name:"VINO ALMA MORA CABERNET SAUVIGNON 750ML",price:9850,category:"BEBIDAS",stock:6,costo:6559,rotacion:3,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:0,especial:1,normal:8865,image:"",categoriaOferta:"especial"},
+    {id:"43",name:"SAL FINA DOS ESTRELLAS 500GR",price:1200,category:"ALMACEN",stock:23,costo:600,rotacion:2,prioridad:"EMPUJAR",stockMin:1,relampago:0,destacada:0,especial:1,normal:1080,image:"",categoriaOferta:"especial"},
+    {id:"44",name:"QUESO LA PAULINA BARRA SANDWICH X KG",price:16999,category:"HELADERA Y CONGELADOS",stock:0,costo:11500,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:0,especial:1,normal:15299,image:"",categoriaOferta:"sin stock"},
+    {id:"45",name:"POLENTA PRESTO PRONTA 500GR",price:2500,category:"ALMACEN",stock:6,costo:1200,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:0,especial:1,normal:2250,image:"",categoriaOferta:"especial"},
+    {id:"46",name:"POETT FLORES DE PRIMAVERA 900ML",price:2900,category:"LIMPIEZA",stock:3,costo:1935,rotacion:2,prioridad:"EMPUJAR",stockMin:3,relampago:0,destacada:0,especial:1,normal:2610,image:"",categoriaOferta:"especial"},
+    {id:"47",name:"PATE DE FOIE PALADINI 90GR",price:1600,category:"ALMACEN",stock:5,costo:1000,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:0,especial:1,normal:1440,image:"",categoriaOferta:"especial"},
+    {id:"48",name:"PAPAS FRITAS CORTE TRADICIONAL 55GR",price:2500,category:"DULCES Y SNACKS",stock:28,costo:1627,rotacion:4,prioridad:"EMPUJAR YA",stockMin:5,relampago:0,destacada:0,especial:1,normal:2250,image:"",categoriaOferta:"especial"},
+    {id:"49",name:"NATURA SAVORA 250GR",price:2500,category:"ALMACEN",stock:6,costo:809,rotacion:2,prioridad:"EMPUJAR YA",stockMin:1,relampago:0,destacada:0,especial:1,normal:2250,image:"",categoriaOferta:"especial"},
+    {id:"50",name:"MISKY 50GR CHOCOLATE CON LECHE",price:3300,category:"DULCES Y SNACKS",stock:7,costo:1200,rotacion:3,prioridad:"EMPUJAR",stockMin:4,relampago:0,destacada:0,especial:1,normal:2970,image:"",categoriaOferta:"especial"},
+    {id:"51",name:"MISKY 50GR CHOCOLATE BLANCO",price:3300,category:"DULCES Y SNACKS",stock:7,costo:1200,rotacion:4,prioridad:"EMPUJAR",stockMin:5,relampago:0,destacada:0,especial:1,normal:2970,image:"",categoriaOferta:"especial"},
+    {id:"52",name:"MINI PEPITOS 50GR",price:1500,category:"DULCES Y SNACKS",stock:2,costo:820,rotacion:2,prioridad:"EMPUJAR",stockMin:3,relampago:0,destacada:0,especial:1,normal:1350,image:"",categoriaOferta:"especial"},
+    {id:"53",name:"MINI OREO 50GR",price:1500,category:"DULCES Y SNACKS",stock:2,costo:1000,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:0,especial:1,normal:1350,image:"",categoriaOferta:"especial"},
+    {id:"54",name:"LENTEJAS LISETTA 400GR",price:2200,category:"ALMACEN",stock:3,costo:1300,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:0,especial:1,normal:1980,image:"",categoriaOferta:"especial"},
+    {id:"55",name:"LENTEJAS INCA 350GR LATA",price:2200,category:"ALMACEN",stock:5,costo:1130,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:0,especial:1,normal:1980,image:"",categoriaOferta:"especial"},
+    {id:"56",name:"LECHE LAS TRES NIÑAS 1L CLASICA",price:3700,category:"HELADERA Y CONGELADOS",stock:14,costo:1849,rotacion:4,prioridad:"EMPUJAR",stockMin:3,relampago:0,destacada:0,especial:1,normal:3330,image:"",categoriaOferta:"especial"},
+    {id:"57",name:"LECHE LA SERENISIMA 1L",price:4100,category:"HELADERA Y CONGELADOS",stock:10,costo:1985,rotacion:3,prioridad:"EMPUJAR YA",stockMin:3,relampago:0,destacada:0,especial:1,normal:3690,image:"",categoriaOferta:"especial"},
+    {id:"58",name:"LAVANDINA 1 LT CLASICA",price:2500,category:"LIMPIEZA",stock:3,costo:979,rotacion:3,prioridad:"EMPUJAR",stockMin:4,relampago:0,destacada:0,especial:1,normal:2250,image:"",categoriaOferta:"especial"},
+    {id:"59",name:"LA PARMESANA CHIMICHURRI 15GR",price:1300,category:"CONDIMENTOS",stock:3,costo:1000,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:0,especial:1,normal:1170,image:"",categoriaOferta:"especial"},
+    {id:"60",name:"JARDINERA INCA 350GR EN LATA",price:1900,category:"ALMACEN",stock:4,costo:1200,rotacion:2,prioridad:"NORMAL",stockMin:0,relampago:0,destacada:0,especial:1,normal:1710,image:"",categoriaOferta:"especial"},
+    {id:"61",name:"JABON EN POLVO 800GR",price:3000,category:"LIMPIEZA",stock:6,costo:1400,rotacion:2,prioridad:"EMPUJAR",stockMin:3,relampago:0,destacada:0,especial:1,normal:2700,image:"",categoriaOferta:"especial"}
   ];
 }
 
