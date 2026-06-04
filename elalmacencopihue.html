@@ -53,6 +53,18 @@
   • FIADO: _confirmarFiadoSinTel() nueva función para el flujo sin teléfono,
     evita duplicar validaciones y mantiene el guard _fiadoEnProceso.
 
+  v373 — 04/06/2026 — Ahorro real en peso con promo (precio/kg sin promo)
+  ------------------
+  • FIX/FEATURE: Items por peso con promo ahora muestran el ahorro real:
+    ahorro = (precioNormalKg - precioPromoKg) × gramos / 1000
+    Ejemplo: kg normal $17.200, kg promo $16.100, 1047gr pesados:
+      → paga $16.857 (a precio promo)
+      → ahorra −$1.152 (vs precio normal)
+      → badge muestra: $16.100/kg + −$1.152 en verde
+    Se guarda precioNormalKg = producto.normal en el item para el cálculo.
+    Aplicado en carrito scroll y modal de confirmación.
+  • FIX: gramos siempre entero (Math.round ya aplicado). Sin decimales en display.
+
   v372 — 04/06/2026 — Fix badge gramos en scroll — ancho dinámico por dígitos
   ------------------
   • FIX: Badge rojo de gramos sobre la imagen del producto en el scroll
@@ -519,7 +531,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v372</title>
+    <title>Copihue — POS v373</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3560,13 +3572,20 @@ function _renderVentaCompleta(ligero) {
         // ── Columna de precio ──────────────────────────────────────
         let precioColHTML;
         if (tieneOferta && esPesoItem) {
-            // Peso con promo: mostrar precio pagado + referencia del precio/kg
+            // Peso con promo: precio pagado + precio/kg + ahorro si hay precio normal
+            const normalKg = item.precioNormalKg || 0;
+            const ahorroKg = (normalKg > 0 && item.precioOrigKg > 0)
+                ? Math.round((normalKg - item.precioOrigKg) * item.gramos / 1000)
+                : 0;
             const refKg = item.precioOrigKg
                 ? `<div style="font-size:0.6rem;color:#999;margin-top:1px;">$${item.precioOrigKg.toLocaleString('es-AR')}/kg</div>`
                 : '';
+            const ahorroHTML = ahorroKg > 0
+                ? `<div style="font-size:0.6rem;color:#2e7d32;font-weight:700;">−$${ahorroKg.toLocaleString('es-AR')}</div>`
+                : '';
             precioColHTML = `<div style="flex-shrink:0;text-align:right;min-width:64px;">
                 <span class="item-precio-con-oferta" style="color:${colOferta||'var(--verde-oscuro)'}">$${precioUnit.toLocaleString('es-AR')}</span>
-                ${refKg}
+                ${refKg}${ahorroHTML}
               </div>`;
         } else if (tieneOferta) {
             // Item normal con oferta: precio tachado + precio con oferta + ahorro
@@ -3731,12 +3750,17 @@ function _buildDetalleModalHTML() {
 
         const precioColModal = tieneOferta
             ? (!!item.esPeso
-                // Peso con promo: precio pagado + referencia /kg (no hay "ahorro" en pesos)
+                // Peso con promo: precio pagado + ref /kg + ahorro real
                 ? `<div style="text-align:right;min-width:72px;flex-shrink:0;">
                     <span style="font-weight:800;font-size:0.9rem;color:${col};">
                         $${subtotal.toLocaleString('es-AR')}
                     </span>
                     ${item.precioOrigKg ? `<span style="font-size:0.55rem;color:#999;display:block;">$${item.precioOrigKg.toLocaleString('es-AR')}/kg</span>` : ''}
+                    ${(item.precioNormalKg > 0 && item.precioOrigKg > 0)
+                        ? `<span style="font-size:0.55rem;background:#e8f5e9;color:#2e7d32;border-radius:4px;padding:0 4px;display:block;font-weight:700;">
+                            −$${Math.round((item.precioNormalKg - item.precioOrigKg) * item.gramos / 1000).toLocaleString('es-AR')}
+                           </span>`
+                        : ''}
                    </div>`
                 // Item normal con oferta: precio tachado + precio con oferta + ahorro
                 : `<div style="text-align:right;min-width:72px;flex-shrink:0;">
@@ -4926,6 +4950,7 @@ function confirmarPeso() {
             existente.ofertaEtiqueta   = oferta.etiqueta || null;
             existente.ofertaTipo       = oferta.tipoOferta || null;
             existente.precioOrigKg     = precioOrigKg;
+            existente.precioNormalKg   = pesoProductoActual.normal || 0;
             existente.precioModificado = true;
         }
     } else {
@@ -4942,7 +4967,8 @@ function confirmarPeso() {
             precioCosto: costoCalculado,
             ofertaTipo:      tieneOferta ? oferta.tipoOferta : null,
             ofertaEtiqueta:  tieneOferta ? oferta.etiqueta   : null,
-            precioOrigKg:    precioOrigKg,   // precio del kg sin promo (referencia)
+            precioOrigKg:    precioOrigKg,          // precio/kg con promo (lo que se pesó)
+            precioNormalKg:  pesoProductoActual.normal || 0, // precio/kg sin promo
             precioModificado: tieneOferta
         });
     }
@@ -9252,7 +9278,7 @@ window.t9Limpiar = function(){};
 
 // Restaurar badge de notificaciones del día al arrancar
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('%c🏪 COPIHUE POS — Sistema listo v372', 'color:#4caf50;font-weight:bold;font-size:1.2em;');
+    console.log('%c🏪 COPIHUE POS — Sistema listo v373', 'color:#4caf50;font-weight:bold;font-size:1.2em;');
     setTimeout(_precargarClientes, 3000); // precarga clientes en background
     setTimeout(() => {
         const arr = _cargarNotifPos ? _cargarNotifPos() : [];
