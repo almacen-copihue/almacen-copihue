@@ -11389,7 +11389,7 @@ async function cargarHistorialSalidas() {
 // ═══════════════════════════════════════════════════════════════
 //  RASPADITA — ENTREGAR PREMIO
 // ═══════════════════════════════════════════════════════════════
-let _raspCodigoActual = null;  // código activo en tab búsqueda
+let _raspCodigoActual = null;
 
 function abrirRaspadita() {
   _raspCodigoActual = null;
@@ -11401,7 +11401,7 @@ function abrirRaspadita() {
   btn.style.display = ''; btn.disabled = false;
   btn.textContent = '✅ Marcar como ENTREGADO';
   document.getElementById('modalRaspadita').classList.add('open');
-  raspCambiarTab(1);  // abrir siempre en tab pendientes
+  raspCambiarTab(1);
 }
 
 function cerrarRaspadita() {
@@ -11424,8 +11424,7 @@ async function cargarPendientesRaspadita() {
   document.getElementById('raspListaVacia').style.display    = 'none';
   document.getElementById('raspListaItems').style.display    = 'none';
   try {
-    const r   = await fetch(API_URL + '?action=listarPendientesRaspadita&t=' + Date.now());
-    const res = await r.json();
+    const res = await _apiFetch('listarPendientesRaspadita');
     document.getElementById('raspListaCargando').style.display = 'none';
     if (!res.ok || !res.pendientes || res.pendientes.length === 0) {
       document.getElementById('raspListaVacia').style.display = '';
@@ -11449,7 +11448,7 @@ async function cargarPendientesRaspadita() {
     `).join('');
     lista.style.display = '';
   } catch(e) {
-    document.getElementById('raspListaCargando').innerHTML = '<div style="color:#c0392b;font-size:0.85rem;padding:10px;">❌ Error de conexión</div>';
+    document.getElementById('raspListaCargando').innerHTML = '<div style="color:#c0392b;font-size:0.85rem;padding:10px;">❌ ' + e.message + '</div>';
   }
 }
 
@@ -11461,8 +11460,7 @@ async function buscarCodigoRaspadita() {
   _raspMostrarEstado('🔍 Buscando...', '#888');
   document.getElementById('raspPanel').style.display = 'none';
   try {
-    const r   = await fetch(API_URL + '?action=buscarCodigoRaspadita&codigo=' + encodeURIComponent(codigo));
-    const res = await r.json();
+    const res = await _apiFetch('buscarCodigoRaspadita', null, '&codigo=' + encodeURIComponent(codigo));
     if (!res.ok || !res.ganador) {
       _raspMostrarEstado('❌ Código no encontrado. Verificá que esté bien escrito.', '#c0392b'); return;
     }
@@ -11484,7 +11482,7 @@ async function buscarCodigoRaspadita() {
     document.getElementById('raspPanel').style.display     = '';
     document.getElementById('raspMsgEntregado').style.display = 'none';
   } catch(e) {
-    _raspMostrarEstado('❌ Error de conexión. Intentá de nuevo.', '#c0392b');
+    _raspMostrarEstado('❌ ' + e.message, '#c0392b');
   }
 }
 
@@ -11492,24 +11490,20 @@ async function entregarPremioRaspadita(codigoOverride) {
   const codigo = codigoOverride || _raspCodigoActual ||
                  document.getElementById('raspCodigoInput').value.trim().toUpperCase();
   if (!codigo) return;
-
-  // Si viene de la lista, buscar el botón del ítem y deshabilitarlo
   if (codigoOverride) {
-    const btns = document.querySelectorAll('#raspListaItems button');
-    btns.forEach(b => { if(b.getAttribute('onclick') && b.getAttribute('onclick').includes(codigoOverride)) {
-      b.textContent='⏳...'; b.disabled=true;
-    }});
+    document.querySelectorAll('#raspListaItems button').forEach(b => {
+      if (b.getAttribute('onclick') && b.getAttribute('onclick').includes(codigoOverride)) {
+        b.textContent='⏳...'; b.disabled=true;
+      }
+    });
   } else {
     const btn = document.getElementById('raspBtnEntregar');
     btn.textContent='⏳ Guardando...'; btn.disabled=true;
   }
-
   try {
-    const r   = await fetch(API_URL + '?action=entregarPremioRaspadita&codigo=' + encodeURIComponent(codigo));
-    const res = await r.json();
+    const res = await _apiFetch('entregarPremioRaspadita', null, '&codigo=' + encodeURIComponent(codigo));
     if (res.ok) {
       if (codigoOverride) {
-        // Refrescar la lista
         await cargarPendientesRaspadita();
       } else {
         document.getElementById('raspBtnEntregar').style.display = 'none';
@@ -11525,7 +11519,7 @@ async function entregarPremioRaspadita(codigoOverride) {
       }
     }
   } catch(e) {
-    _raspMostrarEstado('❌ Error de conexión.', '#c0392b');
+    _raspMostrarEstado('❌ ' + e.message, '#c0392b');
     if (!codigoOverride) {
       const btn = document.getElementById('raspBtnEntregar');
       btn.textContent='✅ Marcar como ENTREGADO'; btn.disabled=false;
@@ -11545,12 +11539,18 @@ function _raspMostrarEstado(msg, color) {
 const TRAG_BASE_URL = 'https://almacen-copihue.vercel.app/tragamonedas.html';
 
 function abrirTragamonedas() {
+  // Reset completo cada vez que se abre
   document.getElementById('tragMontoInput').value          = '';
   document.getElementById('tragMontoAviso').style.display  = 'none';
   document.getElementById('tragResultado').style.display   = 'none';
-  document.getElementById('tragBtnGenerar').style.display  = '';
-  document.getElementById('tragBtnGenerar').disabled       = true;
-  document.getElementById('tragBtnGenerar').style.opacity  = '0.5';
+  document.getElementById('tragQR').innerHTML              = '';
+  document.getElementById('tragCodigo').textContent        = '';
+  document.getElementById('tragLink').textContent          = '';
+  const btn = document.getElementById('tragBtnGenerar');
+  btn.style.display   = '';
+  btn.disabled        = true;
+  btn.style.opacity   = '0.5';
+  btn.textContent     = '🎰 Generar código para el cliente';
   document.getElementById('modalTragamonedas').classList.add('open');
   setTimeout(() => document.getElementById('tragMontoInput').focus(), 300);
 }
@@ -11571,8 +11571,7 @@ async function tragGenerarCodigo() {
   const btn = document.getElementById('tragBtnGenerar');
   btn.textContent = '⏳ Generando...'; btn.disabled = true; btn.style.opacity = '0.6';
   try {
-    const r   = await fetch(API_URL + '?action=generarCodigoTragamonedas');
-    const res = await r.json();
+    const res = await _apiFetch('generarCodigoTragamonedas');
     if (!res.ok) throw new Error(res.error || 'Error al generar código');
     const codigo  = res.codigo;
     const gameURL = TRAG_BASE_URL + '?code=' + codigo;
