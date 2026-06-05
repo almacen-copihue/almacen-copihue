@@ -368,15 +368,48 @@ function simplificarNombre(n){
 function getImg(p){ return `imagenes-productos/${simplificarNombre(p.name)}.jpg`; }
 function fmt$(n){ return '$'+Number(n).toLocaleString('es-AR'); }
 function getMargen(p){ if(!p.precioCosto||p.precioCosto<=0)return null; return Math.round(((p.price-p.precioCosto)/p.price)*100); }
-function isOfertaActiva(p){ const c=(p.catOferta||'').toUpperCase(); return c&&c!=='SIN OFERTA'&&c!=='SIN STOCK'&&c!==''; }
-function getBadgeInfo(p){
-  const c=(p.catOferta||'').toUpperCase();
-  if(c.startsWith('RELAMPAGO'))return{cls:'badge-r',lbl:'⚡ '+c.replace('RELAMPAGO','').trim(),color:'#E53935'};
-  if(c==='DESTACADA')return{cls:'badge-d',lbl:'⭐ DEST',color:'#7B1FA2'};
-  if(c==='ESPECIAL')return{cls:'badge-e',lbl:'💙 ESP',color:'#1565C0'};
-  return null;
+// Oferta activa = catOferta viene de col J y NO es vacío / SIN OFERTA / SIN STOCK
+// Es la ÚNICA fuente de verdad — igual que seba21
+function isOfertaActiva(p){
+  const c = (p.catOferta||'').toUpperCase().trim();
+  return c !== '' && c !== 'SIN OFERTA' && c !== 'SIN STOCK';
 }
-function getPrecioAntes(p){ return isOfertaActiva(p)&&p.normal>0?p.normal:0; }
+// Badge SOLO si la oferta está activa (catOferta lo confirma)
+function getBadgeInfo(p){
+  if(!isOfertaActiva(p)) return null;   // ← sin oferta activa = sin badge
+  const c = (p.catOferta||'').toUpperCase().trim();
+  if(c.startsWith('RELAMPAGO')) return {cls:'badge-r', lbl:'⚡ '+c.replace('RELAMPAGO','').trim(), color:'#E53935'};
+  if(c==='DESTACADA')           return {cls:'badge-d', lbl:'⭐ DEST',  color:'#7B1FA2'};
+  if(c==='ESPECIAL')            return {cls:'badge-e', lbl:'💙 ESP',   color:'#1565C0'};
+  // cualquier otro valor activo (ej: "COMBO", "2X1", etc.)
+  return {cls:'badge-r', lbl:'🏷️ '+c, color:'#E65100'};
+}
+function getPrecioAntes(p){ return isOfertaActiva(p) && p.normal > 0 ? p.normal : 0; }
+
+// Log de pools en consola (llamado después de cargar)
+function logPoolsConsola(prods){
+  const pools = {};
+  prods.forEach(p => {
+    const c = (p.catOferta||'').toUpperCase().trim();
+    if(!pools[c]) pools[c] = [];
+    pools[c].push(p);
+  });
+  console.group('🏷️  POOLS DE OFERTAS ACTIVAS');
+  let totalActivas = 0;
+  Object.keys(pools).sort().forEach(cat => {
+    const activos = pools[cat].filter(p => isOfertaActiva(p));
+    if(activos.length){
+      totalActivas += activos.length;
+      console.group(`  ${cat} (${activos.length} productos con stock)`);
+      activos.forEach(p => console.log(`    [${p.id}] ${p.name} — ${fmt$(p.price)}${p.normal>0?' (antes '+fmt$(p.normal)+')':''}`));
+      console.groupEnd();
+    }
+  });
+  console.log(`  ──────────────────────────────`);
+  console.log(`  TOTAL OFERTAS ACTIVAS CON STOCK: ${totalActivas}`);
+  console.log(`  SIN OFERTA: ${prods.filter(p=>!isOfertaActiva(p)).length} productos`);
+  console.groupEnd();
+}
 
 // ─── TEMAS DE COLOR ──────────────────────────────────────────────────────────
 const THEMES = [
@@ -506,6 +539,9 @@ async function init(){
     actualizarTabs(Object.keys(catMap).filter(c => catMap[c].conStock > 0).sort());
 
     if(!allProds.length) throw new Error('vacío tras filtrar stock');
+
+    // Log de pools en consola del navegador
+    logPoolsConsola(allProds);
 
   } catch(e) {
     logAdd(`\n❌ ERROR API: ${e.message}`);
