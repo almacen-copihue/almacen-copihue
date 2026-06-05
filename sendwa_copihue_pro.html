@@ -176,6 +176,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
     <div class="pill" id="statSel">✓ 0</div>
     <div class="pill" id="statChars">0c</div>
   </div>
+  <button class="hdr-btn" onclick="showLog()" title="Ver log de carga">📋</button>
   <button class="hdr-btn" onclick="toggleDark()">🌙</button>
 </div>
 
@@ -183,17 +184,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
   <input class="search-inp" id="searchInp" placeholder="🔍 Buscar productos...">
 </div>
 
-<div class="tabs">
-  <button class="tab active" data-tab="all"                   onclick="setTab('all')">📍 Todo</button>
-  <button class="tab" data-tab="ofertas"                      onclick="setTab('ofertas')">🔥 Ofertas</button>
-  <button class="tab" data-tab="ALMACEN"                      onclick="setTab('ALMACEN')">🛒 Almacén</button>
-  <button class="tab" data-tab="BEBIDAS"                      onclick="setTab('BEBIDAS')">🍶 Bebidas</button>
-  <button class="tab" data-tab="DULCES Y SNACKS"              onclick="setTab('DULCES Y SNACKS')">🍫 Dulces</button>
-  <button class="tab" data-tab="HELADERA Y CONGELADOS"        onclick="setTab('HELADERA Y CONGELADOS')">❄️ Heladera</button>
-  <button class="tab" data-tab="LIMPIEZA"                     onclick="setTab('LIMPIEZA')">🧹 Limpieza</button>
-  <button class="tab" data-tab="HIGIENE PERSONAL"             onclick="setTab('HIGIENE PERSONAL')">🧴 Higiene</button>
-  <button class="tab" data-tab="PANADERIA"                    onclick="setTab('PANADERIA')">🍞 Panad.</button>
-  <button class="tab" data-tab="CONDIMENTOS"                  onclick="setTab('CONDIMENTOS')">🧂 Condim.</button>
+<div class="tabs" id="mainTabs">
+  <button class="tab active" data-tab="all"     onclick="setTab('all')">📍 Todo</button>
+  <button class="tab"        data-tab="ofertas" onclick="setTab('ofertas')">🔥 Ofertas</button>
 </div>
 
 <div class="smart-bar" id="smartBar">
@@ -341,6 +334,23 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
   </div>
 </div>
 
+<!-- ═══ PANEL LOG ═══ -->
+<div class="panel" id="logPanel" style="max-height:80vh">
+  <div class="panel-hdr">
+    <h3>📋 Log de carga</h3>
+    <button class="panel-close" onclick="closePanels()">✕</button>
+  </div>
+  <div class="panel-body" style="padding:10px 14px 20px">
+    <pre id="logContent" style="font-family:'Courier New',monospace;font-size:10px;line-height:1.6;
+         color:#212121;white-space:pre;overflow-x:auto;background:#f5f5f5;
+         border:1px solid #e0e0e0;border-radius:8px;padding:10px;max-height:60vh;overflow-y:auto"></pre>
+    <button class="btn-main btn-copy" style="margin-top:8px"
+      onclick="navigator.clipboard.writeText(document.getElementById('logContent').textContent).then(()=>showToast('📋 Log copiado'))">
+      📋 Copiar log
+    </button>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -394,25 +404,155 @@ function selectTheme(id){
   renderCurrentImg();
 }
 
+// ─── LOG ─────────────────────────────────────────────────────────────────────
+let _logLines = [];
+function logAdd(msg){ _logLines.push(msg); console.log(msg); }
+function showLog(){
+  const panel = document.getElementById('logPanel');
+  document.getElementById('logContent').textContent = _logLines.join('\n');
+  panel.classList.add('open');
+  document.getElementById('overlay').classList.add('show');
+}
+
 // ─── INIT ────────────────────────────────────────────────────────────────────
 async function init(){
+  _logLines=[];
+  logAdd('═══════════════════════════════════');
+  logAdd('  SendWA Copihue — LOG DE CARGA');
+  logAdd('  ' + new Date().toLocaleString('es-AR'));
+  logAdd('═══════════════════════════════════');
+  let fuenteDatos = 'API';
+
   try{
+    logAdd('\n📡 Conectando a Google Sheets...');
     const r=await fetch(API_URL+'?cache='+Date.now(),{redirect:'follow'});
     const data=await r.json();
     const arr=data.productos||data;
-    allProds=arr.filter(p=>p.name&&parseInt(p.price)>0).map(p=>({
-      id:String(p.id), name:String(p.name).trim(), price:parseInt(p.price)||0,
-      stock:parseInt(p.stock)||0, category:String(p.category||'ALMACEN').trim().toUpperCase(),
-      rotacion:parseInt(p.rotacion)||3, vencimiento:p.vencimiento||'',
-      precioCosto:parseInt(p.precioCosto||p.costo)||0, stockMin:parseInt(p.stockMin)||0,
-      relampago:p.relampago, destacada:parseInt(p.destacada)||0, especial:parseInt(p.especial)||0,
-      normal:parseInt(p.normal)||0, catOferta:String(p.categoriaOferta||'').trim().toUpperCase(),
-      prioridad:String(p.prioridad||'').trim()
-    })).filter(p=>p.stock>0);
-    if(!allProds.length)throw new Error('vacío');
-  }catch(e){ allProds=FALLBACK_DATA.filter(p=>p.stock>0); }
+    logAdd(`✅ Respuesta recibida. Filas raw: ${arr.length}`);
+
+    // Map idéntico a seba21 cargarProductos()
+    const mapped = arr
+      .filter(p => p.name && p.price > 0)
+      .map(p => ({
+        id:         String(p.id),
+        name:       String(p.name).trim(),
+        price:      parseInt(p.price) || 0,
+        stock:      parseInt(p.stock) || 0,
+        image:      `imagenes-productos/${simplificarNombre(String(p.name).trim())}.jpg`,
+        category:   String(p.category || 'SIN CATEGORIA').trim().toUpperCase(),
+        rotacion:   parseInt(p.rotacion) || 3,
+        vencimiento: p.vencimiento || '',
+        diaCritico: (p.diaCritico || '').toLowerCase().trim(),
+        precioCosto: parseInt(p.precioCosto) || 0,
+        stockMin:   parseInt(p.stockMin) || 0,
+        relampago:  (p.relampago !== undefined && p.relampago !== null && p.relampago !== '')
+                      ? (isNaN(parseInt(p.relampago)) ? String(p.relampago).trim() : parseInt(p.relampago))
+                      : 0,
+        destacada:  parseInt(p.destacada) || 0,
+        especial:   parseInt(p.especial) || 0,
+        normal:     parseInt(p.normal) || 0,
+        catOferta:  String(p.categoriaOferta || '').trim().toUpperCase(),
+        prioridad:  String(p.prioridad || '').trim()
+      }));
+
+    logAdd(`📦 Productos válidos (nombre + precio): ${mapped.length}`);
+
+    // ── Categorías reales ──────────────────────────────────────────
+    const catMap = {};
+    mapped.forEach(p => {
+      if(!catMap[p.category]) catMap[p.category] = {total:0, conStock:0};
+      catMap[p.category].total++;
+      if(p.stock > 0) catMap[p.category].conStock++;
+    });
+    logAdd('\n📂 CATEGORÍAS REALES (de la planilla):');
+    Object.keys(catMap).sort().forEach(cat => {
+      const c = catMap[cat];
+      logAdd(`   ${cat.padEnd(30)} total:${String(c.total).padStart(4)}  stock>0:${String(c.conStock).padStart(4)}`);
+    });
+
+    // ── Totales globales ──────────────────────────────────────────
+    const totalAll   = mapped.length;
+    const conStock   = mapped.filter(p => p.stock > 0).length;
+    const sinStock   = totalAll - conStock;
+    logAdd(`\n📊 TOTALES:`);
+    logAdd(`   Total productos  : ${totalAll}`);
+    logAdd(`   Con stock > 0    : ${conStock}`);
+    logAdd(`   Sin stock        : ${sinStock}`);
+
+    // ── Ofertas ──────────────────────────────────────────────────
+    const ofertaMap = {};
+    mapped.forEach(p => {
+      const co = p.catOferta || '(vacío)';
+      if(!ofertaMap[co]) ofertaMap[co] = {total:0, conStock:0};
+      ofertaMap[co].total++;
+      if(p.stock > 0) ofertaMap[co].conStock++;
+    });
+    logAdd('\n🏷️  OFERTAS (categoriaOferta col J):');
+    Object.keys(ofertaMap).sort().forEach(o => {
+      const v = ofertaMap[o];
+      logAdd(`   ${o.padEnd(25)} total:${String(v.total).padStart(4)}  con stock:${String(v.conStock).padStart(4)}`);
+    });
+
+    const activas = mapped.filter(p => isOfertaActiva(p));
+    const activasConStock = activas.filter(p => p.stock > 0);
+    logAdd(`\n   Ofertas activas (no SIN OFERTA/SIN STOCK): ${activas.length}`);
+    logAdd(`   Ofertas activas con stock > 0            : ${activasConStock.length}`);
+
+    // ── Guardar y filtrar ─────────────────────────────────────────
+    allProds = mapped.filter(p => p.stock > 0);
+    logAdd(`\n✅ allProds (solo stock>0): ${allProds.length} productos`);
+
+    // Actualizar tabs con categorías reales
+    actualizarTabs(Object.keys(catMap).filter(c => catMap[c].conStock > 0).sort());
+
+    if(!allProds.length) throw new Error('vacío tras filtrar stock');
+
+  } catch(e) {
+    logAdd(`\n❌ ERROR API: ${e.message}`);
+    logAdd('🔄 Usando datos locales (FALLBACK)');
+    fuenteDatos = 'FALLBACK LOCAL';
+    allProds = FALLBACK_DATA.filter(p => p.stock > 0);
+
+    const catFb = {};
+    allProds.forEach(p => { catFb[p.category]=(catFb[p.category]||0)+1; });
+    logAdd('\n📂 Categorías del fallback:');
+    Object.keys(catFb).sort().forEach(c => logAdd(`   ${c}: ${catFb[c]}`));
+    actualizarTabs(Object.keys(catFb).sort());
+  }
+
+  logAdd(`\n🏁 Fuente: ${fuenteDatos}`);
+  logAdd(`🏁 Carga completa. Productos disponibles: ${allProds.length}`);
+  logAdd('═══════════════════════════════════\n');
+
   document.getElementById('loader').style.display='none';
   render();
+}
+
+// Actualiza los tabs de categorías con las reales de la planilla
+function actualizarTabs(cats){
+  const ICONS = {
+    'ALMACEN':'🛒','BEBIDAS':'🍶','DULCES Y SNACKS':'🍫','HELADERA Y CONGELADOS':'❄️',
+    'LIMPIEZA':'🧹','HIGIENE PERSONAL':'🧴','PANADERIA':'🍞','CONDIMENTOS':'🧂',
+    'CARNES':'🥩','FIAMBRES':'🧀','VERDURAS':'🥦','FRUTAS':'🍎','LACTEOS':'🥛',
+    'MASCOTAS':'🐾','BAZAR':'🏠','GOLOSINAS':'🍬','CIGARRILLOS':'🚬',
+    'CERVEZAS':'🍺','PROMOS':'🎁','VINOS':'🍷',
+  };
+  const tabsEl = document.getElementById('mainTabs');
+  // Mantener "Todo" y "Ofertas", reemplazar el resto
+  const fixed = tabsEl.querySelectorAll('[data-tab="all"],[data-tab="ofertas"]');
+  // Limpiar todo excepto fijos
+  [...tabsEl.children].forEach(el => {
+    if(el.dataset.tab !== 'all' && el.dataset.tab !== 'ofertas') el.remove();
+  });
+  cats.forEach(cat => {
+    const icon = ICONS[cat] || '📦';
+    const btn = document.createElement('button');
+    btn.className = 'tab';
+    btn.dataset.tab = cat;
+    btn.textContent = `${icon} ${cat.charAt(0)+cat.slice(1).toLowerCase()}`;
+    btn.onclick = () => setTab(cat);
+    tabsEl.appendChild(btn);
+  });
 }
 
 // ─── FILTRADO ────────────────────────────────────────────────────────────────
