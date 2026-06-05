@@ -29,6 +29,7 @@
     color: var(--text);
     margin: 0;
     padding: 0;
+    padding-top: 100px;
     padding-bottom: 80px;
   }
   
@@ -126,6 +127,33 @@
   }
   
   /* Search overlay */
+  /* ===== BARRA CATEGORÍAS ===== */
+  #cat-bar {
+    position: fixed; left: 0; right: 0; z-index: 85;
+    background: var(--bg); border-bottom: 2px solid var(--border);
+    padding: 8px 10px; display: flex; gap: 8px; min-height: 52px;
+    overflow-x: auto; scrollbar-width: thin; scrollbar-color: #0288D1 #e8f5e9;
+    -webkit-overflow-scrolling: touch; align-items: center;
+    top: 52px;
+  }
+  #cat-bar::-webkit-scrollbar { height: 4px; }
+  #cat-bar::-webkit-scrollbar-track { background: #e8f5e9; border-radius: 10px; }
+  #cat-bar::-webkit-scrollbar-thumb { background: #0288D1; border-radius: 10px; }
+  .cat-btn {
+    background: #FF9800; border: 2px solid #F57C00; color: #fff;
+    box-shadow: 0 2px 6px rgba(245,124,0,.3);
+    font-weight: 700; padding: 7px 14px; border-radius: 22px;
+    cursor: pointer; white-space: nowrap; flex-shrink: 0;
+    font-size: 12px; transition: all .2s; min-width: max-content;
+    user-select: none;
+  }
+  .cat-btn.activo {
+    background: #E65100; border-color: #FF9800; color: #fff;
+    box-shadow: 0 4px 12px rgba(230,81,0,.45); transform: translateY(-1px);
+  }
+  .cat-btn.ofertas-btn { background: #c0392b; border-color: #e74c3c; }
+  .cat-btn.ofertas-btn.activo { background: #922b21; border-color: #c0392b; }
+
   #search-overlay {
     display: none;
     position: fixed;
@@ -348,6 +376,8 @@
   <button id="themeBtn" style="background:none;border:none;color:white;font-size:18px;">🌙</button>
 </div>
 
+<div id="cat-bar"></div>
+
 <div class="filter-fabs">
   <button class="filter-fab" id="offersBtn">🔥 Ofertas</button>
   <button class="filter-fab" id="searchBtn">🔍 Buscar</button>
@@ -548,17 +578,63 @@ async function loadProducts() {
 }
 
 // ============================================
+// BARRA DE CATEGORÍAS
+// ============================================
+function buildCatBar() {
+  const cats = [...new Set(allProducts
+    .filter(p => p.stock > 0)
+    .map(p => p.category).filter(Boolean))].sort();
+  const bar = document.getElementById('cat-bar');
+
+  // Primera categoría activa por defecto
+  const firstCat = cats[0] || '';
+  currentFilter = '__cat__' + firstCat;
+
+  let html = `<button class="cat-btn ofertas-btn" onclick="selCat(this,'__ofertas__')">🔥 Ofertas</button>`;
+  cats.forEach((cat, i) => {
+    const emoji = getCatEmoji(cat);
+    const isActive = i === 0 ? 'activo' : '';
+    html += `<button class="cat-btn ${isActive}" onclick="selCat(this,'${cat}')">${emoji} ${cat}</button>`;
+  });
+  bar.innerHTML = html;
+
+  // Posicionar debajo del header
+  const hdr = document.querySelector('.header') || document.getElementById('header');
+  if (hdr) bar.style.top = hdr.offsetHeight + 'px';
+  adjustMainPadding();
+}
+
+function adjustMainPadding() {
+  const bar = document.getElementById('cat-bar');
+  const hdr = document.querySelector('.header') || document.getElementById('header');
+  if (bar && hdr) {
+    const top = (hdr.offsetHeight + bar.offsetHeight + 4) + 'px';
+    document.getElementById('main-content').style.paddingTop = top;
+  }
+}
+
+window.selCat = function(btn, cat) {
+  document.querySelectorAll('#cat-bar .cat-btn').forEach(b => b.classList.remove('activo'));
+  btn.classList.add('activo');
+  currentFilter = cat === '' ? 'all' : cat === '__ofertas__' ? 'offers' : '__cat__' + cat;
+  applyFilters();
+};
+
+// ============================================
 // FILTRADO
 // ============================================
 function applyFilters() {
   let filtered = [...allProducts];
   
-  if (currentFilter !== 'all') {
-    if (currentFilter === 'offers') {
-      filtered = filtered.filter(p => p.offerType);
-    } else {
-      filtered = filtered.filter(p => p.offerType === currentFilter);
-    }
+  if (currentFilter === 'all') {
+    filtered = filtered.filter(p => p.stock > 0);
+  } else if (currentFilter === 'offers') {
+    filtered = filtered.filter(p => p.offerType);
+  } else if (currentFilter.startsWith('__cat__')) {
+    const cat = currentFilter.slice(7);
+    filtered = filtered.filter(p => p.category === cat);
+  } else {
+    filtered = filtered.filter(p => p.offerType === currentFilter);
   }
   
   if (currentSearch) {
@@ -615,12 +691,13 @@ function renderProducts() {
     return a.category.localeCompare(b.category);
   });
 
+  const esCat = currentFilter.startsWith('__cat__');
   let html = '';
   let lastCat = null;
   
   sorted.forEach(p => {
     const catNorm = normalize(p.category);
-    if (catNorm !== lastCat) {
+    if (!esCat && catNorm !== lastCat) {
       html += `<div style="grid-column:1/-1;background:var(--primary-dark);color:white;padding:6px 12px;border-radius:8px;margin:6px 0 2px;text-align:center;font-size:12px;font-weight:700;">${getCatEmoji(p.category)} ${p.category.toUpperCase()}</div>`;
       lastCat = catNorm;
     }
@@ -730,6 +807,7 @@ function init() {
         return;
       }
       console.log('Productos cargados:', allProducts.length, '— con oferta:', allProducts.filter(p=>p.offerType).length);
+      buildCatBar();
       applyFilters();
     });
   
