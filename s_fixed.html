@@ -393,10 +393,18 @@
   </div>
 </div>
 
-<div id="search-overlay">
+<!-- FLOTANTES estilo index.html -->
+<div class="float-btn" id="float-home" title="Inicio" onclick="goHome()">🏠</div>
+<div class="float-btn" id="float-search" title="Buscar" onclick="toggleSearch()">🔍</div>
+<div class="float-btn" id="float-offers" title="Ofertas" onclick="selOffers()" style="position:relative">
+  🔥<span id="float-offers-count"></span>
+</div>
+
+<div id="search-overlay" onclick="if(event.target===this)closeSearch()">
   <div class="search-box">
-    <input type="text" class="search-input" id="searchInput" placeholder="Buscar producto..." autofocus>
-    <button id="closeSearch" style="margin-top:10px;width:100%;padding:8px;border-radius:25px;border:none;background:var(--accent);color:white;">Cerrar</button>
+    <input type="text" class="search-input" id="searchInput" placeholder="🔍 Buscar producto..."
+           oninput="currentSearch=this.value.trim();applyFilters()">
+    <button id="closeSearch" style="margin-top:10px;width:100%;padding:8px;border-radius:25px;border:none;background:var(--accent);color:white;">✕ Cerrar</button>
   </div>
 </div>
 
@@ -581,16 +589,26 @@ async function loadProducts() {
 // BARRA DE CATEGORÍAS
 // ============================================
 function buildCatBar() {
+  // Excluir "ultimas unidades" de sus categorías originales
   const cats = [...new Set(allProducts
-    .filter(p => p.stock > 0)
+    .filter(p => p.stock > 0 && p.offerType !== 'ultimas')
     .map(p => p.category).filter(Boolean))].sort();
   const bar = document.getElementById('cat-bar');
 
-  // Primera categoría activa por defecto
+  const nOfertas = allProducts.filter(p => p.offerType).length;
+  const nUltimas = allProducts.filter(p => p.offerType === 'ultimas').length;
+
+  // Badge en botón flotante
+  const badge = document.getElementById('float-offers-count');
+  if (badge && nOfertas > 0) { badge.textContent = nOfertas; badge.style.display = 'flex'; }
+
   const firstCat = cats[0] || '';
   currentFilter = '__cat__' + firstCat;
 
   let html = `<button class="cat-btn ofertas-btn" onclick="selCat(this,'__ofertas__')">🔥 Ofertas</button>`;
+  if (nUltimas > 0) {
+    html += `<button class="cat-btn" style="background:#e67e22;border-color:#d35400;box-shadow:0 2px 6px rgba(230,126,34,.4)" onclick="selCat(this,'__ultimas__')">🏷️ Últimas unidades</button>`;
+  }
   cats.forEach((cat, i) => {
     const emoji = getCatEmoji(cat);
     const isActive = i === 0 ? 'activo' : '';
@@ -598,7 +616,6 @@ function buildCatBar() {
   });
   bar.innerHTML = html;
 
-  // Posicionar debajo del header
   const hdr = document.querySelector('.header') || document.getElementById('header');
   if (hdr) bar.style.top = hdr.offsetHeight + 'px';
   adjustMainPadding();
@@ -616,9 +633,36 @@ function adjustMainPadding() {
 window.selCat = function(btn, cat) {
   document.querySelectorAll('#cat-bar .cat-btn').forEach(b => b.classList.remove('activo'));
   btn.classList.add('activo');
-  currentFilter = cat === '' ? 'all' : cat === '__ofertas__' ? 'offers' : '__cat__' + cat;
+  currentFilter = cat === '' ? 'all'
+    : cat === '__ofertas__' ? 'offers'
+    : cat === '__ultimas__' ? '__ultimas__'
+    : '__cat__' + cat;
+  // Mostrar home si no es la primera categoría
+  const firstBtn = document.querySelector('#cat-bar .cat-btn:not(.ofertas-btn)');
+  document.getElementById('float-home').style.display =
+    (btn === firstBtn) ? 'none' : 'flex';
   applyFilters();
 };
+
+window.selOffers = function() {
+  const btn = document.querySelector('#cat-bar .ofertas-btn');
+  if (btn) selCat(btn, '__ofertas__');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+};
+
+window.goHome = function() {
+  const firstBtn = document.querySelector('#cat-bar .cat-btn:not(.ofertas-btn)');
+  if (firstBtn) firstBtn.click();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+};
+
+window.addEventListener('scroll', () => {
+  const home = document.getElementById('float-home');
+  if (!home) return;
+  const firstBtn = document.querySelector('#cat-bar .cat-btn:not(.ofertas-btn)');
+  const isFirst = firstBtn?.classList.contains('activo');
+  if (!isFirst) home.style.display = window.scrollY > 150 ? 'flex' : 'none';
+});
 
 // ============================================
 // FILTRADO
@@ -630,9 +674,12 @@ function applyFilters() {
     filtered = filtered.filter(p => p.stock > 0);
   } else if (currentFilter === 'offers') {
     filtered = filtered.filter(p => p.offerType);
+  } else if (currentFilter === '__ultimas__') {
+    filtered = filtered.filter(p => p.offerType === 'ultimas');
   } else if (currentFilter.startsWith('__cat__')) {
     const cat = currentFilter.slice(7);
-    filtered = filtered.filter(p => p.category === cat);
+    // Los productos en "últimas unidades" NO aparecen en su categoría original
+    filtered = filtered.filter(p => p.category === cat && p.offerType !== 'ultimas');
   } else {
     filtered = filtered.filter(p => p.offerType === currentFilter);
   }
