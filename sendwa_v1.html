@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SendWA Copihue v8</title>
+<title>SendWA Copihue v9</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,sans-serif;background:#f0f0ee;color:#111;min-height:100vh}
@@ -118,13 +118,30 @@ h1{font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;co
 .wa-txt{background:#0b141a;margin:0 10px 10px;border-radius:8px;padding:9px 11px;font-size:11px;color:#e9ede9;line-height:1.75;white-space:pre-wrap;word-break:break-word;max-height:120px;overflow-y:auto}
 
 .empty{padding:50px 20px;text-align:center;color:#bbb;font-size:13px;line-height:1.6}
+
+/* ── TABS SALIDAS ── */
+.tabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}
+.tab{padding:6px 14px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid #ddd;background:#fff;color:#555;transition:all .12s}
+.tab.on{background:#111;color:#fff;border-color:#111}
+
+/* ── GRILLA MOSAICO ── */
+.mosaic-opts{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.mopt{padding:5px 10px;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid #ddd;background:#fff;color:#555}
+.mopt.on{background:#111;color:#fff;border-color:#111}
+.mosaic-wrap{background:#111;border-radius:12px;padding:8px;display:inline-block}
+.mosaic-grid{display:grid;gap:4px}
+.mosaic-cell{border-radius:6px;overflow:hidden;position:relative}
+
+/* ── BLOQUE TEXTO SALIDA ── */
+.texto-bloque{background:#fff;border:0.5px solid #ddd;border-radius:12px;overflow:hidden;margin-bottom:12px}
+
 @media(max-width:480px){.salidas-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
 <div class="wrap">
 
-<h1>SendWA · Almacén Copihue <span style="background:#111;color:#fff;font-size:10px;padding:2px 7px;border-radius:10px;font-weight:700;letter-spacing:1px;vertical-align:middle">v8</span></h1>
+<h1>SendWA · Almacén Copihue <span style="background:#111;color:#fff;font-size:10px;padding:2px 7px;border-radius:10px;font-weight:700;letter-spacing:1px;vertical-align:middle">v9</span></h1>
 
 <!-- ESTADO CONEXIÓN -->
 <div class="estado" id="estado">
@@ -431,34 +448,151 @@ function buildTexto(prods, tpl) {
     return (headers[tpl] || '') + lineas + footer;
 }
 
+// ── MOSAICOS ──
+const MOSAIC_OPTS = [
+    {label:'1×1',cols:1,rows:1},{label:'2×1',cols:2,rows:1},{label:'2×2',cols:2,rows:2},
+    {label:'2×3',cols:2,rows:3},{label:'2×4',cols:2,rows:4},{label:'2×5',cols:2,rows:5},
+    {label:'2×6',cols:2,rows:6},{label:'3×1',cols:3,rows:1},{label:'3×2',cols:3,rows:2},
+    {label:'3×3',cols:3,rows:3},{label:'4×1',cols:4,rows:1},{label:'4×2',cols:4,rows:2},
+    {label:'4×3',cols:4,rows:3},{label:'4×4',cols:4,rows:4},
+];
+let mosaicTpl = 'fuego';
+let mosaicConfig = {cols:2,rows:2,label:'2×2'};
+let tabActiva = 'imagen';
+let prodsActuales = [];
+
 function generarSalidas() {
-    const prods = [...seleccionados].map(id => todosLosProductos.find(p => String(p.id) === String(id))).filter(Boolean);
-    if (prods.length === 0) return;
+    prodsActuales = [...seleccionados].map(id => todosLosProductos.find(p => String(p.id) === String(id))).filter(Boolean);
+    if (prodsActuales.length === 0) return;
+    renderZona();
+    setTimeout(() => document.getElementById('zona-salidas').scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+}
 
+function renderZona() {
     const zona = document.getElementById('zona-salidas');
+    zona.innerHTML = `
+    <div class="salidas-titulo">Elegí la salida que mejor calza</div>
 
-    // Si hay más de 1 producto, los flyers muestran el primero como "portada" y lista el resto en texto
-    const flyerProd = prods[0];
+    <div class="tabs">
+      <div class="tab ${tabActiva==='imagen'?'on':''}" onclick="setTab('imagen')">🖼 Imágenes</div>
+      <div class="tab ${tabActiva==='texto'?'on':''}" onclick="setTab('texto')">💬 Textos WA</div>
+    </div>
 
-    zona.innerHTML = `<div class="salidas-titulo">Elegí la salida que mejor calza</div>
-    <div class="salidas-grid">
-      ${PLANTILLAS.map(pl => {
-          const textoId = 'wa-' + pl.id;
-          return `<div class="salida">
-            <div class="salida-head">
-              <span class="salida-nombre">${pl.nombre}</span>
-              <div class="s-btns">
-                <button class="s-btn negro" onclick="copiar('${textoId}',this)">Copiar</button>
-                <button class="s-btn" onclick="abrirWA('${textoId}')">📲 WA</button>
-              </div>
-            </div>
-            <div class="flyer-wrap">${buildFlyer(flyerProd, pl.id)}</div>
-            <div class="wa-txt" id="${textoId}">${buildTexto(prods, pl.id)}</div>
-          </div>`;
-      }).join('')}
+    <div id="panel-imagen" style="display:${tabActiva==='imagen'?'block':'none'}">
+      ${renderPanelImagen()}
+    </div>
+    <div id="panel-texto" style="display:${tabActiva==='texto'?'block':'none'}">
+      ${renderPanelTexto()}
     </div>`;
+}
 
-    setTimeout(() => zona.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
+function setTab(t) { tabActiva = t; renderZona(); }
+
+function renderPanelImagen() {
+    const total = prodsActuales.length;
+    // filtrar configs que tengan suficientes productos
+    const opts = MOSAIC_OPTS.filter(o => o.cols * o.rows <= total || (o.cols===1&&o.rows===1));
+
+    return `
+    <div style="margin-bottom:10px">
+      <div style="font-size:11px;color:#888;margin-bottom:8px;font-weight:600;letter-spacing:1px;text-transform:uppercase">Plantilla</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">
+        ${PLANTILLAS.map(pl=>`<div class="mopt${mosaicTpl===pl.id?' on':''}" onclick="setMosaicTpl('${pl.id}')">${pl.nombre}</div>`).join('')}
+      </div>
+      <div style="font-size:11px;color:#888;margin-bottom:8px;font-weight:600;letter-spacing:1px;text-transform:uppercase">Grilla (${total} productos disponibles)</div>
+      <div class="mosaic-opts">
+        ${opts.map(o=>`<div class="mopt${mosaicConfig.label===o.label?' on':''}" onclick="setMosaicConfig(${o.cols},${o.rows},'${o.label}')">${o.label}</div>`).join('')}
+      </div>
+    </div>
+    ${buildMosaic()}
+    <div style="margin-top:10px;display:flex;gap:8px">
+      <button class="s-btn negro" style="padding:8px 16px;font-size:12px" onclick="compartirMosaic()">📲 Compartir imagen</button>
+    </div>`;
+}
+
+function setMosaicTpl(t) { mosaicTpl = t; document.getElementById('panel-imagen').innerHTML = renderPanelImagen(); }
+function setMosaicConfig(cols, rows, label) { mosaicConfig={cols,rows,label}; document.getElementById('panel-imagen').innerHTML = renderPanelImagen(); }
+
+function buildMosaic() {
+    const {cols, rows} = mosaicConfig;
+    const total = cols * rows;
+    // rotar productos si hay menos que celdas
+    const celdas = Array.from({length: total}, (_,i) => prodsActuales[i % prodsActuales.length]);
+    const cellSize = Math.min(140, Math.floor(320 / cols));
+
+    const cells = celdas.map(p => {
+        const f = buildFlyerInline(p, mosaicTpl, cellSize);
+        return `<div class="mosaic-cell" style="width:${cellSize}px;height:${cellSize}px">${f}</div>`;
+    }).join('');
+
+    return `<div class="mosaic-wrap">
+      <div class="mosaic-grid" style="grid-template-columns:repeat(${cols},${cellSize}px)">${cells}</div>
+    </div>`;
+}
+
+function buildFlyerInline(p, tpl, size) {
+    const tipo = tipoOferta(p);
+    const pf = precioFinal(p);
+    const conDesc = pf < p.price;
+    const ah = conDesc ? p.price - pf : 0;
+    const pct = ah > 0 ? Math.round(ah / p.price * 100) : 0;
+    const badge = badgeLabel(tipo, p);
+    const emoji = getEmoji(p.name);
+    const fs = size < 100 ? 0.65 : size < 120 ? 0.75 : 0.9;
+    const imgBg = p.image
+        ? `<img src="${p.image}" onerror="this.style.display='none'"
+             style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0.22;z-index:1">`
+        : '';
+    const extra = tpl==='dark' ? '<div class="facento" style="position:absolute;top:0;left:0;width:3px;height:100%;background:#aa00ff;z-index:2"></div>' : tpl==='fuego' ? '<div class="fg" style="position:absolute;inset:0;background:radial-gradient(ellipse at 65% 80%,#c03000 0%,#700000 50%,#0d0000 100%);z-index:1"></div>' : '';
+
+    const styles = {
+        fuego: `background:#0d0000`,
+        neon:  `background:#000;border:2px solid #00e676`,
+        urgente:`background:#ffd600`,
+        dark:  `background:#0a0a0a`,
+    };
+    const colors = {
+        fuego:  {badge:'#ff1744',badgeTxt:'#fff',nombre:'#fff',orig:'#ff8a65',precio:'#ffd600',ahorro:'rgba(255,214,0,.7)',marca:'rgba(255,255,255,.12)'},
+        neon:   {badge:'transparent',badgeTxt:'#00e676',nombre:'#fff',orig:'#555',precio:'#00e676',ahorro:'#555',marca:'#111'},
+        urgente:{badge:'#000',badgeTxt:'#ffd600',nombre:'#000',orig:'rgba(0,0,0,.4)',precio:'#000',ahorro:'#000',marca:'transparent'},
+        dark:   {badge:'transparent',badgeTxt:'#aa00ff',nombre:'#fff',orig:'#444',precio:'#fff',ahorro:'#444',marca:'#1a1a1a'},
+    };
+    const col = colors[tpl] || colors.fuego;
+    const bSz = Math.round(8*fs), nSz = Math.round(11*fs), pSz = Math.round(20*fs), aSz = Math.round(8*fs);
+    const pad = Math.round(10*fs);
+
+    return `<div style="width:${size}px;height:${size}px;border-radius:8px;overflow:hidden;position:relative;font-family:Helvetica Neue,Helvetica,Arial,sans-serif;${styles[tpl]||styles.fuego}">
+      ${extra}${imgBg}
+      <div style="position:absolute;top:${pad}px;left:${pad}px;background:${col.badge};color:${col.badgeTxt};font-size:${bSz}px;font-weight:800;padding:2px 6px;border-radius:12px;letter-spacing:.5px;text-transform:uppercase;z-index:3;${tpl==='neon'?'border:1px solid #00e676':tpl==='dark'?'':''}">
+        ${badge}
+      </div>
+      <div style="position:absolute;top:${pad}px;right:${pad}px;font-size:${Math.round(20*fs)}px;z-index:3">${emoji}</div>
+      ${conDesc ? `<div style="position:absolute;left:${pad}px;bottom:${Math.round(44*fs)}px;color:${col.orig};font-size:${Math.round(9*fs)}px;text-decoration:line-through;z-index:3">${fmt(p.price)}</div>` : ''}
+      <div style="position:absolute;left:${pad}px;bottom:${Math.round(22*fs)}px;color:${col.precio};font-size:${pSz}px;font-weight:900;z-index:3">${fmt(pf)}</div>
+      <div style="position:absolute;left:${pad}px;right:${pad}px;bottom:${Math.round(44*fs)+20}px;color:${col.nombre};font-size:${nSz}px;font-weight:900;line-height:1.2;z-index:3">${p.name}</div>
+      <div style="position:absolute;left:${pad}px;bottom:${Math.round(6*fs)}px;color:${col.ahorro};font-size:${aSz}px;z-index:3">${ah>0?'−'+fmt(ah)+' · '+pct+'% OFF':''}</div>
+      <div style="position:absolute;bottom:${Math.round(6*fs)}px;right:${pad}px;color:${col.marca};font-size:${Math.round(6*fs)}px;letter-spacing:2px;text-transform:uppercase;z-index:3">Copihue</div>
+    </div>`;
+}
+
+function compartirMosaic() {
+    alert('Para compartir: capturá pantalla del mosaico y envialo por WA. Próxima versión: exportar PNG directo.');
+}
+
+function renderPanelTexto() {
+    return PLANTILLAS.map(pl => {
+        const textoId = 'wa-' + pl.id;
+        return `<div class="texto-bloque">
+          <div class="salida-head">
+            <span class="salida-nombre">${pl.nombre}</span>
+            <div class="s-btns">
+              <button class="s-btn negro" onclick="copiar('${textoId}',this)">Copiar</button>
+              <button class="s-btn" onclick="abrirWA('${textoId}')">📲 WA</button>
+            </div>
+          </div>
+          <div class="wa-txt" id="${textoId}">${buildTexto(prodsActuales, pl.id)}</div>
+        </div>`;
+    }).join('');
 }
 
 function copiar(id, btn) {
