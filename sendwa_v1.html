@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SendWA Copihue v11</title>
+<title>SendWA Copihue v12</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,sans-serif;background:#f0f0ee;color:#111;min-height:100vh}
@@ -136,12 +136,31 @@ h1{font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;co
 .texto-bloque{background:#fff;border:0.5px solid #ddd;border-radius:12px;overflow:hidden;margin-bottom:12px}
 
 @media(max-width:480px){.salidas-grid{grid-template-columns:1fr}}
+
+/* ── FAB flotante ── */
+.fab-bar{
+  position:fixed;bottom:16px;left:50%;transform:translateX(-50%);
+  display:flex;gap:8px;align-items:center;
+  background:#111;border-radius:40px;padding:8px 12px;
+  box-shadow:0 4px 20px rgba(0,0,0,.35);z-index:999;
+  flex-wrap:nowrap;white-space:nowrap
+}
+.fab{display:flex;flex-direction:column;align-items:center;gap:2px;
+  padding:6px 10px;border-radius:28px;cursor:pointer;border:none;
+  font-size:18px;background:transparent;color:#fff;transition:background .12s;line-height:1}
+.fab span{font-size:9px;font-weight:600;letter-spacing:.5px;color:#888;text-transform:uppercase}
+.fab:hover{background:#222}
+.fab.fab-generar{background:#22c55e;padding:8px 16px}
+.fab.fab-generar span{color:rgba(255,255,255,.8)}
+.fab-sep{width:1px;height:32px;background:#333;flex-shrink:0}
+/* espacio abajo para que el FAB no tape contenido */
+.wrap{padding-bottom:100px}
 </style>
 </head>
 <body>
 <div class="wrap">
 
-<h1>SendWA · Almacén Copihue <span style="background:#111;color:#fff;font-size:10px;padding:2px 7px;border-radius:10px;font-weight:700;letter-spacing:1px;vertical-align:middle">v11</span></h1>
+<h1>SendWA · Almacén Copihue <span style="background:#111;color:#fff;font-size:10px;padding:2px 7px;border-radius:10px;font-weight:700;letter-spacing:1px;vertical-align:middle">v12</span></h1>
 
 <!-- ESTADO CONEXIÓN -->
 <div class="estado" id="estado">
@@ -168,8 +187,6 @@ h1{font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;co
 <!-- BARRA SELECCIÓN -->
 <div class="barra" id="barra">
   <span class="barra-txt" id="barra-txt"></span>
-  <button class="barra-btn" onclick="limpiar()">Limpiar</button>
-  <button class="barra-btn" style="background:#22c55e;color:#fff" onclick="generarSalidas()">⚡ Generar</button>
 </div>
 
 <!-- SALIDAS -->
@@ -611,6 +628,95 @@ function abrirWA(id) {
 }
 
 cargar();
+</script>
+
+<div class="fab-bar" id="fab-bar">
+  <button class="fab" onclick="irInicio()" title="Inicio">🏠<span>Inicio</span></button>
+  <div class="fab-sep"></div>
+  <button class="fab" onclick="buscar()" title="Buscar">🔍<span>Buscar</span></button>
+  <div class="fab-sep"></div>
+  <button class="fab" onclick="agregarTodo()" title="Agregar todo">✅<span>Todo</span></button>
+  <button class="fab" onclick="limpiarTodo()" title="Limpiar">🗑<span>Limpiar</span></button>
+  <div class="fab-sep"></div>
+  <button class="fab" onclick="recargar()" title="Recargar datos">🔄<span>Recargar</span></button>
+  <div class="fab-sep"></div>
+  <button class="fab fab-generar" onclick="generarSalidas()" title="Generar">⚡<span>Generar</span></button>
+</div>
+
+<div id="buscador-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;align-items:flex-start;justify-content:center;padding-top:60px">
+  <div style="background:#fff;border-radius:14px;padding:16px;width:90%;max-width:400px">
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <input id="buscar-input" type="text" placeholder="Buscar producto..." oninput="filtrarBusqueda()"
+        style="flex:1;padding:10px 14px;border:1px solid #ddd;border-radius:8px;font-size:15px;font-family:inherit">
+      <button onclick="cerrarBuscar()" style="padding:8px 14px;border-radius:8px;border:none;background:#111;color:#fff;font-size:13px;cursor:pointer">✕</button>
+    </div>
+    <div id="buscar-resultados" style="max-height:50vh;overflow-y:auto;display:flex;flex-direction:column;gap:6px"></div>
+  </div>
+</div>
+
+<script>
+function irInicio(){window.scrollTo({top:0,behavior:'smooth'});}
+
+function buscar(){
+  document.getElementById('buscador-overlay').style.display='flex';
+  setTimeout(()=>document.getElementById('buscar-input').focus(),100);
+  filtrarBusqueda();
+}
+function cerrarBuscar(){
+  document.getElementById('buscador-overlay').style.display='none';
+}
+function filtrarBusqueda(){
+  const q=document.getElementById('buscar-input').value.toLowerCase();
+  const res=document.getElementById('buscar-resultados');
+  const lista=todosLosProductos.filter(p=>p.stock>0&&p.name.toLowerCase().includes(q));
+  if(!lista.length){res.innerHTML='<div style="color:#bbb;text-align:center;padding:20px;font-size:13px">Sin resultados</div>';return;}
+  res.innerHTML=lista.slice(0,30).map(p=>{
+    const tipo=tipoOferta(p);
+    const pf=precioFinal(p);
+    const isSel=seleccionados.has(String(p.id));
+    return `<div onclick="selDesdeBuscar('${p.id}')" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;border:1.5px solid ${isSel?'#22c55e':'#eee'};background:${isSel?'#e8fdf0':'#fafafa'};cursor:pointer">
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:600">${getEmoji(p.name)} ${p.name}</div>
+        <div style="font-size:12px;color:#888">${fmt(pf)} ${tipo?'· <b>'+badgeLabel(tipo,p)+'</b>':''}</div>
+      </div>
+      <div style="font-size:18px">${isSel?'✅':'⬜'}</div>
+    </div>`;
+  }).join('');
+}
+function selDesdeBuscar(id){
+  const key=String(id);
+  const div=document.querySelector('[data-pid="'+key+'"]');
+  if(seleccionados.has(key)){
+    seleccionados.delete(key);
+    if(div) div.classList.remove('sel');
+  } else {
+    seleccionados.add(key);
+    if(div) div.classList.add('sel');
+  }
+  actualizarBarra();
+  filtrarBusqueda();
+}
+
+function agregarTodo(){
+  productosFiltrados().forEach(p=>seleccionados.add(String(p.id)));
+  renderGrilla();
+  actualizarBarra();
+}
+function limpiarTodo(){
+  seleccionados.clear();
+  renderGrilla();
+  actualizarBarra();
+  document.getElementById('zona-salidas').innerHTML='';
+}
+function recargar(){
+  seleccionados.clear();
+  todosLosProductos=[];
+  document.getElementById('zona-salidas').innerHTML='';
+  document.getElementById('grilla').innerHTML='';
+  document.getElementById('filtros').style.display='none';
+  cargar();
+  window.scrollTo({top:0,behavior:'smooth'});
+}
 </script>
 </body>
 </html>
