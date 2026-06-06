@@ -365,42 +365,41 @@ body {
 // ═══════════════════════════════════════════════════════════════
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbzWZzDvdGfW8vd2-FpQolT852cdPMeHbfKugn9DBOlju75bE1D0SUNB5EKEDOsI2vP4lA/exec';
 
-// Símbolos con peso, emoji, label y valor de premio
+// ── Símbolo · cada uno tiene id, emoji, label y peso de aparición
 const SIMBOLOS = [
-  { id:'compra',    emoji:'🛒', label:'COMPRA GRATIS',  peso:2  },
-  { id:'desc3000',  emoji:'💵', label:'$3.000 OFF',      peso:5  },
-  { id:'desc1500',  emoji:'💰', label:'$1.500 OFF',      peso:10 },
-  { id:'snack2',    emoji:'🍫', label:'SNACK $2000',     peso:15 },
-  { id:'snack1',    emoji:'🍪', label:'SNACK $1000',     peso:20 },
-  { id:'nada',      emoji:'⭐', label:'SUERTE',          peso:48 },
+  { id:'compra',   emoji:'🛒', label:'COMPRA GRATIS', peso:2  },
+  { id:'desc3000', emoji:'💵', label:'$3.000 OFF',    peso:5  },
+  { id:'desc1500', emoji:'💰', label:'$1.500 OFF',    peso:10 },
+  { id:'snack2',   emoji:'🍫', label:'SNACK $2000',   peso:15 },
+  { id:'snack1',   emoji:'🍪', label:'SNACK $1000',   peso:20 },
+  { id:'nada',     emoji:'⭐', label:'SUERTE',        peso:48 },
 ];
 
-// Tabla de premios (tres iguales)
+// ── Premio por tres iguales
 const PREMIOS = {
-  compra:   { texto: '🛒 ¡LLEVÁS TU COMPRA GRATIS!',      sub: 'Hasta $12.000 · Mostrá el código',  es_winner: true  },
-  desc3000: { texto: '💵 $3.000 DE DESCUENTO',             sub: 'En tu próxima compra',              es_winner: true  },
-  desc1500: { texto: '💰 $1.500 DE DESCUENTO',             sub: 'En tu próxima compra',              es_winner: true  },
-  snack2:   { texto: '🍫 SNACK GRATIS ~$2.000',            sub: 'Pasá a retirarlo al mostrador',     es_winner: true  },
-  snack1:   { texto: '🍪 SNACK GRATIS ~$1.000',            sub: 'Pasá a retirarlo al mostrador',     es_winner: true  },
-  nada:     { texto: '😔 SIN PREMIO ESTA VEZ',             sub: 'Gracias por comprar en Copihue',    es_winner: false },
+  compra:   { texto:'🛒 ¡LLEVÁS TU COMPRA GRATIS!', sub:'Hasta $12.000 · Mostrá el código al cajero', win:true  },
+  desc3000: { texto:'💵 $3.000 DE DESCUENTO',        sub:'En tu próxima compra',                      win:true  },
+  desc1500: { texto:'💰 $1.500 DE DESCUENTO',        sub:'En tu próxima compra',                      win:true  },
+  snack2:   { texto:'🍫 SNACK GRATIS ~$2.000',       sub:'Pasá a retirarlo al mostrador',             win:true  },
+  snack1:   { texto:'🍪 SNACK GRATIS ~$1.000',       sub:'Pasá a retirarlo al mostrador',             win:true  },
+  nada:     { texto:'😔 SIN PREMIO ESTA VEZ',        sub:'Gracias por comprar en Copihue',            win:false },
 };
+
+// ── Dimensiones del carrete (deben coincidir con el CSS)
+const ITEM_H = 76;   // height de cada .reel-symbol en px
+const REEL_H = 230;  // height del .reel en px
 
 // ═══════════════════════════════════════════════════════════════
 //  ESTADO
 // ═══════════════════════════════════════════════════════════════
-let cfg         = {};
-let codigoJuego = null;  // código TRG-XXXXX del URL
-let girando     = false;
-let yaGiro      = false;
-let resultadoFinal = null;
+let cfg = {}, codigoJuego = null, girando = false, yaGiro = false;
 
 // ═══════════════════════════════════════════════════════════════
 //  ARRANQUE
 // ═══════════════════════════════════════════════════════════════
 window.addEventListener('load', async () => {
-  // Leer código del URL ?code=TRG-XXXXX
-  const params = new URLSearchParams(location.search);
-  codigoJuego  = (params.get('code') || '').trim().toUpperCase();
+  const params    = new URLSearchParams(location.search);
+  codigoJuego     = (params.get('code') || '').trim().toUpperCase();
 
   if (!codigoJuego) {
     mostrarScreen('error', 'No se encontró el código. Pedile al cajero que genere uno nuevo.');
@@ -408,7 +407,6 @@ window.addEventListener('load', async () => {
   }
 
   try {
-    // Cargar config y validar código en paralelo
     const [resCfg, resVal] = await Promise.all([
       fetchGAS('getConfigRaspadita'),
       fetchGAS('validarCodigoTragamonedas', { codigo: codigoJuego })
@@ -416,30 +414,25 @@ window.addEventListener('load', async () => {
 
     if (resCfg.ok && resCfg.config) { cfg = resCfg.config; aplicarConfig(cfg); }
 
-    if (!resVal.ok) {
-      mostrarScreen('error', resVal.error || 'Código inválido.');
-      return;
-    }
-    if (resVal.usado) {
-      mostrarScreen('usado');
-      return;
-    }
+    if (!resVal.ok) { mostrarScreen('error', resVal.error || 'Código inválido.'); return; }
+    if (resVal.usado) { mostrarScreen('usado'); return; }
 
-    // Código válido — inicializar carretes y mostrar juego
-    inicializarReels();
+    inicializarCarretes();
     mostrarScreen('juego');
     encenderLuces();
 
   } catch(e) {
     mostrarScreen('error', 'Error de conexión. Verificá tu internet.');
-    console.error(e);
   }
 });
 
+// ═══════════════════════════════════════════════════════════════
+//  GAS
+// ═══════════════════════════════════════════════════════════════
 async function fetchGAS(action, data) {
   let url = GAS_URL + '?action=' + action;
   if (data) url += '&data=' + encodeURIComponent(JSON.stringify(data));
-  const r = await fetch(url);
+  const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(30000) });
   return r.json();
 }
 
@@ -457,9 +450,9 @@ function aplicarConfig(c) {
 //  PANTALLAS
 // ═══════════════════════════════════════════════════════════════
 function mostrarScreen(s, msg) {
-  ['screenLoading','screenError','screenUsado','screenJuego'].forEach(id => {
-    document.getElementById(id).classList.remove('active');
-  });
+  ['screenLoading','screenError','screenUsado','screenJuego'].forEach(id =>
+    document.getElementById(id).classList.remove('active')
+  );
   const mapa = { loading:'screenLoading', error:'screenError', usado:'screenUsado', juego:'screenJuego' };
   document.getElementById(mapa[s]).classList.add('active');
   if (msg) document.getElementById('errorMsg').textContent = msg;
@@ -475,119 +468,132 @@ function encenderLuces() {
 function lucesGanador() {
   ['lightsTop','lightsBottom'].forEach(id => {
     const el = document.getElementById(id);
-    el.classList.remove('on'); el.classList.add('blink');
+    el.classList.remove('on');
+    el.classList.add('blink');
   });
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  SÍMBOLOS CON PESO
+//  SÍMBOLOS PONDERADOS
 // ═══════════════════════════════════════════════════════════════
-function elegirSimboloPonderado(excluirId) {
-  const pool = excluirId ? SIMBOLOS.filter(s => s.id !== excluirId) : SIMBOLOS;
+function elegirPonderado(excluirId) {
+  const pool  = excluirId ? SIMBOLOS.filter(s => s.id !== excluirId) : SIMBOLOS;
   const total = pool.reduce((s, x) => s + x.peso, 0);
-  let rand = Math.random() * total;
+  let rand    = Math.random() * total;
   for (const s of pool) { rand -= s.peso; if (rand <= 0) return s; }
-  return pool[pool.length-1];
+  return pool[pool.length - 1];
 }
 
-function generarResultado() {
-  // Decidir si gana según tabla de premios
-  // Sorteo por pesos sobre todos los símbolos para el primer carrete
-  const s0 = elegirSimboloPonderado(null);
-  // Si el primer símbolo no es "nada", 30% de chance de que coincidan los 3
+// ── Decide el resultado FINAL con probabilidades correctas
+function decidirResultado() {
+  // Primer símbolo completamente ponderado
+  const s0 = elegirPonderado(null);
+
+  // Si s0 no es "nada", hay chance de premio (tres iguales)
+  // La chance real de tres iguales = peso(s0)/100 * FACTOR
+  // Para mantener las probabilidades correctas usamos el peso directamente
+  const totalPeso = SIMBOLOS.reduce((t, s) => t + s.peso, 0);
+  const probS0    = s0.peso / totalPeso;
+  // Para que tres iguales de s0 tenga prob = s0.peso/100 (aprox)
+  // necesitamos que s1=s0 y s2=s0 con prob sqrt(s0.peso/100)
+  const umbral = Math.sqrt(s0.peso / 100);
   let s1, s2;
-  if (s0.id !== 'nada' && Math.random() < 0.35) {
-    s1 = s0; s2 = s0;
+
+  if (s0.id !== 'nada' && Math.random() < umbral) {
+    s1 = s0; s2 = s0; // tres iguales → premio
   } else {
-    // Garantizar que no sean 3 iguales accidentalmente
-    s1 = elegirSimboloPonderado(null);
-    s2 = elegirSimboloPonderado(null);
-    // Si quedaron 3 iguales y no debería ganar, cambiar s2
-    if (s1.id === s0.id && s2.id === s0.id) {
-      s2 = elegirSimboloPonderado(s0.id);
-    }
+    // Garantizar que NO sean tres iguales
+    let intentos = 0;
+    do {
+      s1 = elegirPonderado(null);
+      s2 = elegirPonderado(null);
+      intentos++;
+    } while (s1.id === s0.id && s2.id === s0.id && intentos < 50);
+    if (s1.id === s0.id && s2.id === s0.id) s2 = elegirPonderado(s0.id);
   }
+
   return [s0, s1, s2];
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  INICIALIZAR REELS
+//  RENDER DE STRIP
 // ═══════════════════════════════════════════════════════════════
-function crearStrip(extraSymbols, targetSymbol) {
-  // Strip: símbolos random + símbolo objetivo al centro visual
-  const syms = [];
-  // 6 símbolos antes del objetivo
-  for (let i = 0; i < 6; i++) syms.push(SIMBOLOS[Math.floor(Math.random()*SIMBOLOS.length)]);
-  syms.push(targetSymbol);
-  // 2 después
-  for (let i = 0; i < 2; i++) syms.push(SIMBOLOS[Math.floor(Math.random()*SIMBOLOS.length)]);
-  return syms;
-}
-
 function renderStrip(stripEl, symbols) {
   stripEl.innerHTML = symbols.map(s => `
-    <div class="reel-symbol">
+    <div class="reel-symbol" data-id="${s.id}">
       <span>${s.emoji}</span>
       <span class="sym-label">${s.label}</span>
     </div>
   `).join('');
 }
 
-function inicializarReels() {
-  // Posición inicial: mostrar ⭐ en la línea de pago
-  [0,1,2].forEach(i => {
-    const strip = document.getElementById('strip'+i);
-    const syms  = [];
-    for (let j=0; j<9; j++) syms.push(SIMBOLOS[Math.floor(Math.random()*SIMBOLOS.length)]);
+// ═══════════════════════════════════════════════════════════════
+//  INICIALIZAR CARRETES (posición de reposo)
+// ═══════════════════════════════════════════════════════════════
+function inicializarCarretes() {
+  [0, 1, 2].forEach(i => {
+    const strip = document.getElementById('strip' + i);
+    // 5 símbolos random, el del medio (índice 2) visible en la payline
+    const syms = Array.from({length: 5}, () => elegirPonderado(null));
     renderStrip(strip, syms);
-    // Centrar en posición 3 (índice 3 * 76 = 228, centrado en reel de 230px)
-    strip.style.transform = 'translateY(-' + (3 * 76) + 'px)';
+    // Centrar índice 2 en la payline
+    const y = 2 * ITEM_H - Math.floor((REEL_H - ITEM_H) / 2);
+    strip.style.transition = 'none';
+    strip.style.transform  = `translateY(-${y}px)`;
   });
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  ANIMACIÓN DE GIRO
+//  ANIMACIÓN DE CARRETE
+//  targetSymbol: el símbolo que DEBE quedar en la payline al parar
+//  El strip se construye con símbolos random + objetivo en stopIdx
+//  La fórmula de finalY centra EXACTAMENTE stopIdx en la payline
 // ═══════════════════════════════════════════════════════════════
 function animarCarrete(reelIndex, targetSymbol, duracion, delay) {
   return new Promise(resolve => {
     const strip     = document.getElementById('strip' + reelIndex);
-    const ITEM_H    = 76;
-    const VUELTAS   = 8;   // vueltas visibles
-    const TOTAL_SYM = 30;  // símbolos en el strip extendido
+    const TOTAL     = 32;  // total de símbolos en el strip
+    const stopIdx   = TOTAL - 5; // posición del símbolo objetivo
 
-    // Construir strip largo
-    const syms = [];
-    for (let i = 0; i < TOTAL_SYM; i++) {
-      syms.push(SIMBOLOS[Math.floor(Math.random() * SIMBOLOS.length)]);
-    }
-    // Poner el símbolo objetivo en posición de parada (TOTAL_SYM - 4)
-    const stopIdx = TOTAL_SYM - 4;
-    syms[stopIdx] = targetSymbol;
+    // Construir strip con random + objetivo fijo en stopIdx
+    const syms = Array.from({length: TOTAL}, (_, i) =>
+      i === stopIdx ? targetSymbol : elegirPonderado(null)
+    );
+    // Poner símbolos distintos al objetivo justo antes y después
+    // para que visualmente se vean bien al parar
+    if (stopIdx > 0)     syms[stopIdx - 1] = elegirPonderado(targetSymbol.id);
+    if (stopIdx < TOTAL-1) syms[stopIdx + 1] = elegirPonderado(targetSymbol.id);
+
     renderStrip(strip, syms);
     strip.style.transition = 'none';
     strip.style.transform  = 'translateY(0)';
 
     setTimeout(() => {
-      const finalY = (stopIdx - 1) * ITEM_H; // -1 para centrar en payline
-      strip.style.transition = `transform ${duracion}ms cubic-bezier(0.15,0,0.1,1)`;
+      // Fórmula exacta: centro del símbolo stopIdx = centro del reel
+      // centro símbolo = stopIdx * ITEM_H + ITEM_H/2
+      // centro reel    = finalY + REEL_H/2
+      // → finalY = stopIdx * ITEM_H + ITEM_H/2 - REEL_H/2
+      const finalY = stopIdx * ITEM_H + Math.floor(ITEM_H / 2) - Math.floor(REEL_H / 2);
+
+      strip.style.transition = `transform ${duracion}ms cubic-bezier(0.18, 0, 0.08, 1)`;
       strip.style.transform  = `translateY(-${finalY}px)`;
 
       setTimeout(() => {
-        // Pequeño rebote
-        strip.style.transition = 'transform 80ms ease-out';
-        strip.style.transform  = `translateY(-${finalY - 6}px)`;
+        // Rebote suave
+        strip.style.transition = 'transform 90ms ease-out';
+        strip.style.transform  = `translateY(-${finalY - 5}px)`;
         setTimeout(() => {
-          strip.style.transition = 'transform 80ms ease-in';
+          strip.style.transition = 'transform 90ms ease-in';
           strip.style.transform  = `translateY(-${finalY}px)`;
-          setTimeout(resolve, 100);
-        }, 80);
+          setTimeout(resolve, 120);
+        }, 90);
       }, duracion);
     }, delay);
   });
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  GIRAR
+//  GIRAR — función principal
 // ═══════════════════════════════════════════════════════════════
 async function girar() {
   if (girando || yaGiro) return;
@@ -595,95 +601,91 @@ async function girar() {
   yaGiro  = true;
 
   const btn = document.getElementById('btnGirar');
-  btn.disabled = true;
+  btn.disabled    = true;
   btn.textContent = '⏳ GIRANDO...';
 
-  // Generar resultado
-  const resultado = generarResultado();
-  resultadoFinal  = resultado;
+  // 1. Decidir resultado
+  const resultado = decidirResultado();
 
-  // Resetear UI
+  // 2. Reset UI
   document.getElementById('payline').classList.remove('win');
-  document.getElementById('statusBar').className = 'status-bar';
-  document.getElementById('statusText').textContent = '¡GIRANDO!';
-  document.getElementById('statusSub').textContent  = '';
+  document.getElementById('statusBar').className     = 'status-bar';
+  document.getElementById('statusText').textContent  = '¡GIRANDO!';
+  document.getElementById('statusSub').textContent   = '';
   document.getElementById('codigoBox').style.display = 'none';
   document.getElementById('btnGroup').style.display  = 'none';
+  document.getElementById('btnWA').style.display     = 'none';
 
-  // Animar los 3 carretes con delays distintos
+  // 3. Animar los 3 carretes con delays escalonados
   await Promise.all([
-    animarCarrete(0, resultado[0], 1800, 0),
-    animarCarrete(1, resultado[1], 2200, 150),
-    animarCarrete(2, resultado[2], 2600, 300),
+    animarCarrete(0, resultado[0], 1600,   0),
+    animarCarrete(1, resultado[1], 2000, 180),
+    animarCarrete(2, resultado[2], 2400, 360),
   ]);
 
-  // Verificar resultado
-  const esGanador = resultado[0].id === resultado[1].id && resultado[1].id === resultado[2].id;
-  const premio    = PREMIOS[resultado[0].id] || PREMIOS['nada'];
+  // 4. Leer resultado visual (lo que quedó en la payline) como verificación
+  const idsVisuales = [0, 1, 2].map(i => {
+    const strip    = document.getElementById('strip' + i);
+    const matrix   = new WebKitCSSMatrix(getComputedStyle(strip).transform);
+    const offsetY  = Math.abs(matrix.m42); // posición actual del strip
+    const symIdx   = Math.round((offsetY + REEL_H/2 - ITEM_H/2) / ITEM_H);
+    const symEl    = strip.querySelectorAll('.reel-symbol')[symIdx];
+    return symEl ? symEl.getAttribute('data-id') : resultado[i].id;
+  });
 
-  // Mostrar resultado
+  // 5. Usar resultado visual (garantiza consistencia)
+  const gano  = idsVisuales[0] === idsVisuales[1] && idsVisuales[1] === idsVisuales[2];
+  const idWin = idsVisuales[0];
+  const premio = gano ? (PREMIOS[idWin] || PREMIOS['nada']) : PREMIOS['nada'];
+
+  // 6. Mostrar resultado
   const statusBar = document.getElementById('statusBar');
-  statusBar.className = 'status-bar ' + (esGanador ? 'win' : 'lose');
+  statusBar.className = 'status-bar ' + (gano ? 'win' : 'lose');
   document.getElementById('statusText').textContent = premio.texto;
   document.getElementById('statusSub').textContent  = premio.sub;
+  document.getElementById('btnGroup').style.display = '';
 
-  if (esGanador) {
+  if (gano && idWin !== 'nada') {
     document.getElementById('payline').classList.add('win');
     lucesGanador();
     lanzarConfetti();
-    await registrarGanador(resultado[0].id, premio.texto);
+    await registrarResultado(idWin, premio.texto, true);
+    setTimeout(() => {
+      document.getElementById('codigoBox').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 400);
   } else {
-    // Registrar jugada perdedora y marcar código como usado
-    registrarPerdedor();
+    await registrarResultado('nada', 'SIN PREMIO', false);
   }
 
   btn.textContent = '🎰 GIRAR';
-  document.getElementById('btnGroup').style.display = '';
   girando = false;
 }
 
 // ═══════════════════════════════════════════════════════════════
 //  REGISTRAR EN GAS
 // ═══════════════════════════════════════════════════════════════
-async function registrarGanador(simboloId, premioTexto) {
+async function registrarResultado(simboloId, premioTexto, esGanador) {
   try {
     const dispositivo = (navigator.userAgent + '|' + screen.width + 'x' + screen.height).slice(0, 80);
     const res = await fetchGAS('registrarPremioTragamonedas', {
-      codigo:     codigoJuego,
-      simbolo:    simboloId,
-      premio:     premioTexto,
-      dispositivo
+      codigo: codigoJuego, simbolo: simboloId, premio: premioTexto, dispositivo
     });
 
-    let codigoPremio = res.codigoPremio || codigoJuego;
+    if (esGanador && res.ok) {
+      const cod = res.codigoPremio || codigoJuego;
+      document.getElementById('codigoValor').textContent  = cod;
+      document.getElementById('codigoBox').style.display  = '';
 
-    // Mostrar caja de código
-    document.getElementById('codigoValor').textContent  = codigoPremio;
-    document.getElementById('codigoBox').style.display  = '';
-
-    // Botón WA
-    const tel     = (cfg.telefono || '5492944907380').replace(/\D/g,'');
-    const empresa = cfg.empresa || 'Almacén Copihue';
-    const msg     = `Hola 🌺 Jugué en la tragamonedas de ${empresa}.\n\n🎰 Premio: ${premioTexto}\n🎟️ Código: ${codigoPremio}\n\n¿Puedo reclamarlo? ¡Tengo 20 minutos! 😊`;
-    const btnWA   = document.getElementById('btnWA');
-    btnWA.href    = 'https://wa.me/' + tel + '?text=' + encodeURIComponent(msg);
-    btnWA.style.display = '';
-
+      const tel     = (cfg.telefono || '5492944907380').replace(/\D/g, '');
+      const empresa = cfg.empresa || 'Almacén Copihue';
+      const msg     = `Hola 🌺 Jugué en la tragamonedas de ${empresa}.\n\n🎰 Premio: ${premioTexto}\n🎟️ Código: ${cod}\n\n¿Puedo reclamarlo? ¡Tengo 20 minutos! 😊`;
+      const btnWA   = document.getElementById('btnWA');
+      btnWA.href    = 'https://wa.me/' + tel + '?text=' + encodeURIComponent(msg);
+      btnWA.style.display = '';
+    }
   } catch(e) {
-    console.error('Error registrando ganador:', e);
+    console.error('Error registrando resultado:', e);
   }
-}
-
-async function registrarPerdedor() {
-  try {
-    const dispositivo = (navigator.userAgent + '|' + screen.width + 'x' + screen.height).slice(0, 80);
-    await fetchGAS('registrarPremioTragamonedas', {
-      codigo:     codigoJuego,
-      simbolo:    'nada',
-      premio:     'SIN PREMIO',
-      dispositivo
-    });
-  } catch(e) { /* silencioso */ }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -695,7 +697,10 @@ function lanzarConfetti() {
     const p = document.createElement('div');
     p.className = 'confetti-piece';
     const w = 6 + Math.random() * 10;
-    p.style.cssText = `left:${Math.random()*100}vw;top:-20px;width:${w}px;height:${w}px;background:${cols[Math.floor(Math.random()*cols.length)]};border-radius:${Math.random()>.5?'50%':'2px'};animation-duration:${1.5+Math.random()*2.5}s;animation-delay:${Math.random()*.6}s;z-index:9999;`;
+    p.style.cssText = `left:${Math.random()*100}vw;top:-20px;width:${w}px;height:${w}px;` +
+      `background:${cols[Math.floor(Math.random()*cols.length)]};` +
+      `border-radius:${Math.random()>.5?'50%':'2px'};` +
+      `animation-duration:${1.5+Math.random()*2.5}s;animation-delay:${Math.random()*.6}s;z-index:9999;`;
     document.body.appendChild(p);
     p.addEventListener('animationend', () => p.remove());
   }
