@@ -217,13 +217,46 @@ function initPacPos(){
   pac.x=pac.col;pac.y=pac.row;pac.progress=1;pac.moving=false;
 }
 
-// Direction buffer - remembers joystick input for BUF_FRAMES frames
-let bufDx=0,bufDy=0,bufTTL=0;
-const BUF_FRAMES=12;
+// ---- DIRECTION SYSTEM WITH LOOKAHEAD ----
+// Stores requested direction + searches ahead for next valid intersection
+let wantDx=0,wantDy=0,wantTTL=0;
+const WANT_TTL=18;    // frames to remember input
+const LOOK_AHEAD=4;   // tiles to scan ahead for intersection
 
 function setDir(dx,dy){
   nextDx=dx;nextDy=dy;
-  bufDx=dx;bufDy=dy;bufTTL=BUF_FRAMES;
+  wantDx=dx;wantDy=dy;wantTTL=WANT_TTL;
+}
+
+// Returns how many tiles ahead (0..LOOK_AHEAD) the turn is possible, or -1
+function tilesUntilTurn(fromCol,fromRow,moveDx,moveDy,turnDx,turnDy){
+  for(let i=0;i<=LOOK_AHEAD;i++){
+    const c=fromCol+moveDx*i, r=fromRow+moveDy*i;
+    if(isWall(c,r)) return -1; // path blocked before turn
+    if(!isWall(c+turnDx,r+turnDy)) return i; // turn possible here
+  }
+  return -1;
+}
+
+// Pre-commit: if a turn is coming soon, lock it in
+// Returns true if we scheduled a pre-turn
+function tryPreTurn(){
+  if(wantTTL<=0) return false;
+  const dx=wantDx,dy=wantDy;
+  if(dx===pac.dx&&dy===pac.dy) return false; // same dir, no need
+  if(dx===-pac.dx&&dy===-pac.dy){
+    // U-turn: apply immediately
+    if(!pac.moving){pac.dx=dx;pac.dy=dy;return true;}
+    return false;
+  }
+  // Lookahead: find next intersection where we can turn
+  const dist=tilesUntilTurn(pac.col,pac.row,pac.dx,pac.dy,dx,dy);
+  if(dist<0) return false;
+  // If 0 tiles away (current tile), apply now
+  if(dist===0){wantTTL=0;nextDx=dx;nextDy=dy;return false;}
+  // If 1-LOOK_AHEAD tiles away, set a "pre-turn" flag so we auto-turn when we arrive
+  pac.preTurnDx=dx;pac.preTurnDy=dy;pac.preTurnAt=dist;
+  return true;
 }
 
 function updatePac(){
@@ -231,29 +264,34 @@ function updatePac(){
   if(pac.mouth>1)pac.mdir=-1;
   if(pac.mouth<0)pac.mdir=1;
 
-  // Buffer countdown
-  if(bufTTL>0)bufTTL--;
+  if(wantTTL>0){wantTTL--;tryPreTurn();}
 
-  // Best queued direction: live input OR buffered
-  const qdx=(bufTTL>0)?bufDx:nextDx;
-  const qdy=(bufTTL>0)?bufDy:nextDy;
+  // Best queued dir
+  const qdx=wantTTL>0?wantDx:nextDx;
+  const qdy=wantTTL>0?wantDy:nextDy;
 
   if(!pac.moving){
     let moved=false;
-    // Try queued direction
-    if(qdx!==0||qdy!==0){
+    // Pre-turn: arrived at planned intersection?
+    if(pac.preTurnAt===0&&pac.preTurnDx!==undefined){
+      const pd=pac.preTurnDx,py2=pac.preTurnDy;
+      if(!isWall(pac.col+pd,pac.row+py2)){
+        pac.dx=pd;pac.dy=py2;pac.preTurnAt=undefined;wantTTL=0;
+        startPacMove();moved=true;
+      } else {pac.preTurnAt=undefined;}
+    }
+    if(!moved&&(qdx!==0||qdy!==0)){
       if(!isWall(pac.col+qdx,pac.row+qdy)){
-        pac.dx=qdx;pac.dy=qdy;bufTTL=0;
+        pac.dx=qdx;pac.dy=qdy;wantTTL=0;pac.preTurnAt=undefined;
         startPacMove();moved=true;
       }
     }
-    // Continue current direction
     if(!moved&&(pac.dx!==0||pac.dy!==0)){
-      if(!isWall(pac.col+pac.dx,pac.row+pac.dy)){
-        startPacMove();
-      }
+      if(!isWall(pac.col+pac.dx,pac.row+pac.dy)) startPacMove();
     }
   } else {
+    // Count down pre-turn distance each tile
+    if(pac.preTurnAt>0) pac.preTurnAt--;
     pac.progress+=0.18;
     if(pac.progress>=1){
       pac.col=pac.targetCol;pac.row=pac.targetRow;
@@ -261,11 +299,11 @@ function updatePac(){
       if(pac.col>=COLS)pac.col=0;
       pac.x=pac.col;pac.y=pac.row;pac.moving=false;
       eatDot();
-      // On arrival: apply buffered/queued turn
-      const q2x=(bufTTL>0)?bufDx:nextDx;
-      const q2y=(bufTTL>0)?bufDy:nextDy;
+      // Apply queued turn on arrival
+      const q2x=wantTTL>0?wantDx:nextDx;
+      const q2y=wantTTL>0?wantDy:nextDy;
       if(q2x!==0||q2y!==0){
-        if(!isWall(pac.col+q2x,pac.row+q2y)){pac.dx=q2x;pac.dy=q2y;bufTTL=0;}
+        if(!isWall(pac.col+q2x,pac.row+q2y)){pac.dx=q2x;pac.dy=q2y;wantTTL=0;pac.preTurnAt=undefined;}
       }
     } else {
       pac.x=pac.col+(pac.targetCol-pac.col)*pac.progress;
