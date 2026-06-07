@@ -380,45 +380,121 @@ function isOfertaActiva(p){
 }
 
 // PROMO ACTIVA / COMBO ACTIVO: la lógica es INVERSA al resto
-//   Col B (price)  = precio antes (lo que vale suelto / sin oferta)
-//   Col L (normal) = precio ahora  (lo que pagás con la promo/combo)
-//   Condición: normal > 0 && normal < price  (idéntico a seba21 líneas 6985-7003)
+// ─── TABLA NxM (idéntica a OFERTAS_RELAMPAGO_SISTEMA en seba21) ──────────────
+const NXM = {
+  '1':{'nombre':'2x1','tipo':'nxm','cantidad':2,'pagas':1},
+  '2':{'nombre':'3x2','tipo':'nxm','cantidad':3,'pagas':2},
+  '3':{'nombre':'4x3','tipo':'nxm','cantidad':4,'pagas':3},
+  '4':{'nombre':'5x4','tipo':'nxm','cantidad':5,'pagas':4},
+  '5':{'nombre':'6x5','tipo':'nxm','cantidad':6,'pagas':5},
+  '6':{'nombre':'7x6','tipo':'nxm','cantidad':7,'pagas':6},
+  '10':{'nombre':'2da50','tipo':'nxm','cantidad':2,'pagas':1.5},
+  '11':{'nombre':'10off','tipo':'pct','descuento':10},
+  '12':{'nombre':'15off','tipo':'pct','descuento':15},
+  '13':{'nombre':'20off','tipo':'pct','descuento':20},
+  '14':{'nombre':'25off','tipo':'pct','descuento':25},
+  'relampago2x1':{'nombre':'2x1','tipo':'nxm','cantidad':2,'pagas':1},
+  'relampago3x2':{'nombre':'3x2','tipo':'nxm','cantidad':3,'pagas':2},
+  'relampago4x3':{'nombre':'4x3','tipo':'nxm','cantidad':4,'pagas':3},
+  'relampago5x4':{'nombre':'5x4','tipo':'nxm','cantidad':5,'pagas':4},
+  'relampago6x5':{'nombre':'6x5','tipo':'nxm','cantidad':6,'pagas':5},
+  'relampago7x6':{'nombre':'7x6','tipo':'nxm','cantidad':7,'pagas':6},
+  '2da50off':{'nombre':'2da50','tipo':'nxm','cantidad':2,'pagas':1.5},
+  '10off':{'nombre':'10off','tipo':'pct','descuento':10},
+  '15off':{'nombre':'15off','tipo':'pct','descuento':15},
+  '20off':{'nombre':'20off','tipo':'pct','descuento':20},
+  '25off':{'nombre':'25off','tipo':'pct','descuento':25},
+};
+
+// Devuelve el cfg de NXM si el campo relampago es un código NxM, null si es pct directo
+function getNxmCfg(p){
+  const key = String(p.relampago||'').trim();
+  const cfg = NXM[key];
+  if(cfg && cfg.tipo === 'nxm') return cfg;
+  // Formato "NxM" literal (ej: "2x1", "3x2")
+  const match = key.match(/^(\d+)x(\d+)$/i);
+  if(match) return {nombre:key.toUpperCase(),tipo:'nxm',cantidad:parseInt(match[1]),pagas:parseInt(match[2])};
+  return null;
+}
+
+// Devuelve el % de descuento si el relámpago es tipo pct, 0 si NxM
+function getPctRelampago(p){
+  const key = String(p.relampago||'').trim();
+  const cfg = NXM[key];
+  if(cfg && cfg.tipo === 'pct') return cfg.descuento;
+  const n = parseInt(key);
+  if(!isNaN(n) && n > 10 && !NXM[key]) return n; // número directo > 10 = %
+  return 0;
+}
+
+// ─── LÓGICA DE PRECIOS (idéntico a seba21) ───────────────────────────────────
+//
+// price  (col B) = precio de venta actual
+// normal (col K) = precio sin oferta / precio anterior (> price cuando hay oferta de descuento)
+//
+// RELÁMPAGO pct:  normal > price → normal=ANTES, price=AHORA
+// RELÁMPAGO NxM:  no hay tachado — es mecánica de cantidad, mostrar solo price
+// DESTACADA:      normal > price → normal=ANTES, price=AHORA
+// ESPECIAL:       normal > price → normal=ANTES, price=AHORA
+// PROMO/COMBO:    normal < price → price=ANTES, normal=AHORA
+
 function isPromoCombo(p){
-  const c = (p.catOferta||'').toUpperCase().trim();
-  return (c === 'PROMO ACTIVA' || c === 'COMBO ACTIVO') &&
-         p.normal > 0 && p.normal < p.price;
+  const c=(p.catOferta||'').toUpperCase().trim();
+  return (c==='PROMO ACTIVA'||c==='COMBO ACTIVO') && p.normal>0 && p.normal<p.price;
 }
 
-// Precio que se muestra TACHADO (el de antes)
-function getPrecioAntes(p){
-  if(!isOfertaActiva(p)) return 0;
-  if(isPromoCombo(p))    return p.price;   // col B = antes
-  return p.normal > 0 ? p.normal : 0;     // col L = antes para el resto
+function isRelNxM(p){
+  const c=(p.catOferta||'').toUpperCase().trim();
+  return c.startsWith('RELAMPAGO') && getNxmCfg(p)!==null;
 }
 
-// Precio que se muestra COMO VIGENTE (el de ahora)
+// Precio AHORA (lo que paga el cliente)
 function getPrecioAhora(p){
   if(!isOfertaActiva(p)) return p.price;
-  if(isPromoCombo(p))    return p.normal;  // col L = ahora
-  return p.price;                          // col B = ahora para el resto
+  if(isPromoCombo(p))    return p.normal;
+  if(isRelNxM(p))        return p.price;   // NxM: precio unitario normal, la oferta es en cantidad
+  return p.price;                           // pct: price ya ES el precio con descuento aplicado por GAS
 }
 
-// Ahorro en $$ (sin porcentajes)
+// Precio ANTES (el que se tacha — 0 si NxM)
+function getPrecioAntes(p){
+  if(!isOfertaActiva(p))  return 0;
+  if(isRelNxM(p))         return 0;        // NxM: sin tachado, mostrar solo label
+  if(isPromoCombo(p))     return p.price;
+  return p.normal > p.price ? p.normal : 0;
+}
+
+// Ahorro en $$ sin porcentajes (0 si NxM)
 function getAhorro(p){
-  const antes = getPrecioAntes(p);
-  const ahora = getPrecioAhora(p);
-  return (antes > 0 && ahora > 0 && antes > ahora) ? antes - ahora : 0;
+  const antes=getPrecioAntes(p), ahora=getPrecioAhora(p);
+  return antes>0 && ahora>0 && antes>ahora ? antes-ahora : 0;
 }
 
-// Badge SOLO si la oferta está activa (catOferta lo confirma)
+// Label NxM para mostrar en badge/imagen (ej: "2X1", "3X2", "2da50%")
+function getNxmLabel(p){
+  const cfg=getNxmCfg(p);
+  if(!cfg) return null;
+  if(cfg.nombre==='2da50') return '2da 50%';
+  return cfg.nombre.toUpperCase();
+}
+
+// Badge SOLO si la oferta está activa
 function getBadgeInfo(p){
   if(!isOfertaActiva(p)) return null;
-  const c = (p.catOferta||'').toUpperCase().trim();
-  if(c.startsWith('RELAMPAGO')) return {cls:'badge-r', lbl:'⚡ '+c.replace('RELAMPAGO','').trim(), color:'#E53935'};
-  if(c==='DESTACADA')           return {cls:'badge-d', lbl:'⭐ DEST',        color:'#7B1FA2'};
-  if(c==='ESPECIAL')            return {cls:'badge-e', lbl:'💙 ESP',         color:'#1565C0'};
-  if(c==='PROMO ACTIVA')        return {cls:'badge-p', lbl:'🎁 PROMO',       color:'#6A1B9A'};
-  if(c==='COMBO ACTIVO')        return {cls:'badge-c', lbl:'🛍️ COMBO',       color:'#00695C'};
+  const c=(p.catOferta||'').toUpperCase().trim();
+  if(c.startsWith('RELAMPAGO')){
+    const nxm=getNxmLabel(p);
+    // NxM → mostrar "⚡ 2X1" etc
+    if(nxm) return {cls:'badge-r', lbl:`⚡ ${nxm}`, color:'#E53935'};
+    // pct → mostrar "⚡ -15%"
+    const pct=getPctRelampago(p);
+    const lbl=pct>0?`⚡ -${pct}%`:`⚡ ${c.replace('RELAMPAGO','').trim()||'OFF'}`;
+    return {cls:'badge-r', lbl, color:'#E53935'};
+  }
+  if(c==='DESTACADA')    return {cls:'badge-d', lbl:'⭐ DEST',   color:'#7B1FA2'};
+  if(c==='ESPECIAL')     return {cls:'badge-e', lbl:'💙 ESP',    color:'#1565C0'};
+  if(c==='PROMO ACTIVA') return {cls:'badge-p', lbl:'🎁 PROMO',  color:'#6A1B9A'};
+  if(c==='COMBO ACTIVO') return {cls:'badge-c', lbl:'🛍️ COMBO', color:'#00695C'};
   return {cls:'badge-r', lbl:'🏷️ '+c, color:'#E65100'};
 }
 
@@ -439,7 +515,12 @@ function logPoolsConsola(prods){
       console.group(`  ${cat} (${activos.length} productos con stock)`);
       activos.forEach(p => {
         const ahora=getPrecioAhora(p), antes=getPrecioAntes(p), ahorro=getAhorro(p);
-        const extra = antes>0 ? ` — antes ${fmt$(antes)} → ahora ${fmt$(ahora)} (ahorrás ${fmt$(ahorro)})` : ` — ${fmt$(ahora)}`;
+        const nxm=getNxmLabel(p);
+        const extra = nxm
+          ? ` — ⚡ ${nxm} @ ${fmt$(ahora)} c/u`
+          : antes>0
+            ? ` — antes ${fmt$(antes)} → ahora ${fmt$(ahora)} (ahorrás ${fmt$(ahorro)})`
+            : ` — ${fmt$(ahora)}`;
         console.log(`    [${p.id}] ${p.name}${extra}`);
       });
       console.groupEnd();
@@ -729,7 +810,9 @@ function buildText(fmt){
     let t=`*ALMACÉN COPIHUE* 🏔️\n\n`;
     ps.forEach(p=>{
       const q=quantities[p.id]||1, ahora=getPrecioAhora(p);
-      t+=`• ${p.name}${q>1?' x'+q:''} → *${fmt$(ahora)}*\n`;
+      const nxm=getNxmLabel(p);
+      const sufijo = nxm ? ` ⚡ *${nxm}*` : '';
+      t+=`• ${p.name}${q>1?' x'+q:''} → *${fmt$(ahora)}*${sufijo}\n`;
     });
     t+=`\n📲 Pedidos al WhatsApp`;return t;
   }
@@ -737,14 +820,18 @@ function buildText(fmt){
     let t=`*🏔️ ALMACÉN COPIHUE*\n*Ofertas y Variedad*\n_Precios válidos hoy_\n\n`;
     ps.forEach(p=>{
       const q=quantities[p.id]||1, antes=getPrecioAntes(p), ahora=getPrecioAhora(p);
-      const ahorro=getAhorro(p), badge=getBadgeInfo(p);
+      const ahorro=getAhorro(p), badge=getBadgeInfo(p), nxm=getNxmLabel(p);
       t+=`▪️ *${p.name}*\n`;
       if(q>1)t+=`  📦 Cantidad: ${q}\n`;
-      t+=`  💵 *${fmt$(ahora)}*`;
-      if(antes>0)t+=` ~~${fmt$(antes)}~~`;
-      t+='\n';
-      if(ahorro>0)t+=`  💰 Ahorrás *${fmt$(ahorro)}*\n`;
-      if(badge)t+=`  ${badge.lbl}\n`;
+      if(nxm){
+        t+=`  ⚡ *${nxm}* — Precio unitario: *${fmt$(ahora)}*\n`;
+      } else {
+        t+=`  💵 *${fmt$(ahora)}*`;
+        if(antes>0)t+=` ~~${fmt$(antes)}~~`;
+        t+='\n';
+        if(ahorro>0)t+=`  💰 Ahorrás *${fmt$(ahorro)}*\n`;
+      }
+      if(badge && !nxm)t+=`  ${badge.lbl}\n`;
       t+='\n';
     });
     t+=`📲 Pedidos por WhatsApp · ¡Te esperamos!`;return t;
