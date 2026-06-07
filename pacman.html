@@ -220,8 +220,8 @@ function initPacPos(){
 // ---- DIRECTION SYSTEM WITH LOOKAHEAD ----
 // Stores requested direction + searches ahead for next valid intersection
 let wantDx=0,wantDy=0,wantTTL=0;
-const WANT_TTL=18;    // frames to remember input
-const LOOK_AHEAD=4;   // tiles to scan ahead for intersection
+const WANT_TTL=60;    // frames to remember input
+const LOOK_AHEAD=10;  // tiles to scan ahead for intersection
 
 function setDir(dx,dy){
   nextDx=dx;nextDy=dy;
@@ -264,7 +264,7 @@ function updatePac(){
   if(pac.mouth>1)pac.mdir=-1;
   if(pac.mouth<0)pac.mdir=1;
 
-  if(wantTTL>0){wantTTL--;tryPreTurn();}
+  if(wantTTL>0){wantTTL--;tryPreTurn();} else if(wantDx!==0||wantDy!==0){tryPreTurn();}
 
   // Best queued dir
   const qdx=wantTTL>0?wantDx:nextDx;
@@ -292,6 +292,8 @@ function updatePac(){
   } else {
     // Count down pre-turn distance each tile
     if(pac.preTurnAt>0) pac.preTurnAt--;
+    // Re-evaluate if joystick still held
+    if(wantTTL>0&&pac.preTurnAt===undefined) tryPreTurn();
     pac.progress+=0.18;
     if(pac.progress>=1){
       pac.col=pac.targetCol;pac.row=pac.targetRow;
@@ -581,8 +583,18 @@ function jApply(cx,cy){
   const cl=Math.min(d,JMAX),a=Math.atan2(oy,ox);
   joyCap.style.transform=`translate(${Math.cos(a)*cl}px,${Math.sin(a)*cl}px)`;
   if(d>JDEAD){
-    if(Math.abs(ox)>=Math.abs(oy))setDir(ox>0?1:-1,0);
-    else setDir(0,oy>0?1:-1);
+    // Bias toward current movement axis to avoid diagonal confusion
+    let dx,dy;
+    const ratio=Math.abs(ox)/Math.abs(oy+0.001);
+    if(ratio>1.3){dx=ox>0?1:-1;dy=0;}       // clearly horizontal
+    else if(ratio<0.77){dx=0;dy=oy>0?1:-1;} // clearly vertical
+    else{
+      // Diagonal: prefer perpendicular to current movement
+      if(pac&&(pac.dx!==0)){dx=0;dy=oy>0?1:-1;}
+      else{dx=ox>0?1:-1;dy=0;}
+    }
+    setDir(dx,dy);
+    wantTTL=WANT_TTL; // keep refreshing while finger held
   }
 }
 function jReset(){jActive=false;jId=-1;joyCap.style.transform='';}
