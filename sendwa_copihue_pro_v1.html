@@ -920,45 +920,141 @@ async function renderSquare(cv,ps,th){
   cv.width=1080;cv.height=1080;
   const ctx=cv.getContext('2d');
   const items=ps.slice(0,6);
-  // Fondo degradado
-  const grad=ctx.createLinearGradient(0,0,1080,1080);grad.addColorStop(0,th.bg);grad.addColorStop(1,th.bg2);
+
+  // ── Fondo degradado diagonal ──────────────────────────────────────
+  const grad=ctx.createLinearGradient(0,0,1080,1080);
+  grad.addColorStop(0,th.bg);grad.addColorStop(0.6,th.bg2);grad.addColorStop(1,th.bg);
   ctx.fillStyle=grad;ctx.fillRect(0,0,1080,1080);
-  // Header
-  ctx.fillStyle='rgba(0,0,0,0.25)';ctx.fillRect(0,0,1080,120);
-  ctx.fillStyle='#fff';ctx.font='bold 52px sans-serif';ctx.textAlign='center';ctx.textBaseline='alphabetic';
-  ctx.fillText('🏔️ ALMACÉN COPIHUE',540,78);
-  ctx.font='24px sans-serif';ctx.fillStyle='rgba(255,255,255,0.75)';ctx.fillText('Ofertas de hoy',540,112);
-  if(!items.length){ctx.fillStyle='rgba(255,255,255,0.4)';ctx.font='36px sans-serif';ctx.fillText('Seleccioná productos',540,580);return;}
+
+  // ── Textura sutil (líneas diagonales tenues) ──────────────────────
+  ctx.save();ctx.globalAlpha=0.04;ctx.strokeStyle='#fff';ctx.lineWidth=2;
+  for(let x=-1080;x<2160;x+=28){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x+1080,1080);ctx.stroke();}
+  ctx.restore();
+
+  // ── Header ────────────────────────────────────────────────────────
+  // Sombra header
+  ctx.fillStyle='rgba(0,0,0,0.22)';ctx.fillRect(0,0,1080,128);
+  // Icono montaña
+  ctx.font='56px sans-serif';ctx.textAlign='center';ctx.textBaseline='alphabetic';
+  ctx.fillText('🏔️',100,86);
+  // Título
+  ctx.fillStyle='#fff';ctx.font='bold 58px sans-serif';
+  ctx.fillText('ALMACÉN COPIHUE',556,82);
+  // Subtítulo
+  ctx.font='500 26px sans-serif';ctx.fillStyle='rgba(255,255,255,0.80)';
+  ctx.fillText('Ofertas especiales de hoy',556,116);
+  // Línea separadora
+  ctx.strokeStyle='rgba(255,255,255,0.25)';ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.moveTo(30,130);ctx.lineTo(1050,130);ctx.stroke();
+
+  if(!items.length){
+    ctx.fillStyle='rgba(255,255,255,0.4)';ctx.font='36px sans-serif';
+    ctx.fillText('Seleccioná productos primero',540,580);return;
+  }
+
+  // ── Layout grid ───────────────────────────────────────────────────
   const cols=items.length<=3?items.length:3;
   const rows=Math.ceil(items.length/cols);
-  const pad=16,hdrH=130,ftrH=60;
-  const areaW=1080-pad*2,areaH=1080-hdrH-ftrH-pad*2;
+  const pad=14, hdrH=142, ftrH=70;
+  const areaW=1080-pad*2;
+  const areaH=1080-hdrH-ftrH-pad*(rows+1);
   const cw=Math.floor((areaW-(cols-1)*pad)/cols);
-  const ch=Math.floor((areaH-(rows-1)*pad)/rows);
+  const ch=Math.floor(areaH/rows);
+
   for(let i=0;i<items.length;i++){
-    const col=i%cols,row=Math.floor(i/cols);
-    const cx=pad+col*(cw+pad),cy=hdrH+row*(ch+pad);
-    const p=items[i];const img=await loadImg(getImg(p));
-    rr(ctx,cx,cy,cw,ch,14,'rgba(255,255,255,0.92)');
-    const imgH=ch-64;
-    drawImgClipped(ctx,img||null,cx+4,cy+4,cw-8,imgH,10);
-    if(!img){ctx.fillStyle='#e8e8e8';rr(ctx,cx+4,cy+4,cw-8,imgH,10,'#e8e8e8');ctx.font=`${Math.round(imgH*0.4)}px sans-serif`;ctx.textAlign='center';ctx.fillText('📦',cx+cw/2,cy+imgH/2+20);}
-    // precio
-    const antes=getPrecioAntes(p),ahora=getPrecioAhora(p);
-    ctx.textAlign='center';ctx.textBaseline='alphabetic';
-    if(antes>0){
-      ctx.font=`${Math.round(ch*0.065)}px sans-serif`;ctx.fillStyle='#9e9e9e';
-      const as=fmt$(antes);ctx.fillText(as,cx+cw/2,cy+imgH+32);
-      ctx.strokeStyle='#9e9e9e';ctx.lineWidth=1.5;
-      const aw=ctx.measureText(as).width;ctx.beginPath();ctx.moveTo(cx+cw/2-aw/2,cy+imgH+22);ctx.lineTo(cx+cw/2+aw/2,cy+imgH+22);ctx.stroke();
+    const col=i%cols, row=Math.floor(i/cols);
+    const cx=pad+col*(cw+pad);
+    const cy=hdrH+pad+row*(ch+pad);
+    const p=items[i];
+    const img=await loadImg(getImg(p));
+    const antes=getPrecioAntes(p), ahora=getPrecioAhora(p), ahorro=getAhorro(p);
+    const badge=getBadgeInfo(p);
+
+    // Card shadow
+    ctx.save();ctx.shadowColor='rgba(0,0,0,0.22)';ctx.shadowBlur=18;ctx.shadowOffsetY=4;
+    rr(ctx,cx,cy,cw,ch,16,'#fff');
+    ctx.restore();
+
+    // Zona imagen (75% de la card)
+    const imgZoneH=Math.floor(ch*0.72);
+    drawImgClipped(ctx,img||null,cx+4,cy+4,cw-8,imgZoneH-4,12);
+    if(!img){
+      rr(ctx,cx+4,cy+4,cw-8,imgZoneH-4,12,'#F5F5F5');
+      ctx.font=`${Math.round(imgZoneH*0.38)}px sans-serif`;
+      ctx.textAlign='center';ctx.fillStyle='#ccc';
+      ctx.fillText('📦',cx+cw/2,cy+imgZoneH/2+14);
     }
-    ctx.font=`bold ${Math.round(ch*0.1)}px sans-serif`;ctx.fillStyle='#E53935';
-    ctx.fillText(fmt$(ahora),cx+cw/2,cy+ch-8);
-    // badge
-    const badge=getBadgeInfo(p);if(badge){const bfs=14;ctx.font=`bold ${bfs}px sans-serif`;const tw=ctx.measureText(badge.lbl).width+bfs*0.8;rr(ctx,cx+6,cy+6,tw,bfs*1.5,bfs*0.75,badge.color);ctx.fillStyle='#fff';ctx.textAlign='left';ctx.fillText(badge.lbl,cx+6+bfs*0.4,cy+6+bfs*1.1);}
+
+    // Gradiente sutil en la parte baja de la imagen para legibilidad
+    const imgGrad=ctx.createLinearGradient(cx,cy+imgZoneH-60,cx,cy+imgZoneH);
+    imgGrad.addColorStop(0,'rgba(255,255,255,0)');imgGrad.addColorStop(1,'rgba(255,255,255,0.95)');
+    ctx.fillStyle=imgGrad;ctx.fillRect(cx+4,cy+imgZoneH-60,cw-8,60);
+
+    // ── Zona info (25% inferior) ──
+    const infoY=cy+imgZoneH;
+    const infoH=ch-imgZoneH;
+
+    // Nombre del producto
+    const nom=p.name.length>22?p.name.slice(0,20)+'…':p.name;
+    ctx.fillStyle='#333';ctx.font=`bold ${Math.round(infoH*0.22)}px sans-serif`;
+    ctx.textAlign='center';ctx.textBaseline='alphabetic';
+    ctx.fillText(nom,cx+cw/2,infoY+Math.round(infoH*0.28));
+
+    // Precio anterior tachado
+    if(antes>0){
+      const fsTachado=Math.round(infoH*0.19);
+      ctx.font=`${fsTachado}px sans-serif`;ctx.fillStyle='#aaa';
+      const antStr=fmt$(antes);
+      ctx.fillText(antStr,cx+cw/2,infoY+Math.round(infoH*0.54));
+      // Tachado
+      const antW=ctx.measureText(antStr).width;
+      ctx.strokeStyle='#aaa';ctx.lineWidth=1.5;
+      const ty=infoY+Math.round(infoH*0.54)-fsTachado*0.3;
+      ctx.beginPath();ctx.moveTo(cx+cw/2-antW/2,ty);ctx.lineTo(cx+cw/2+antW/2,ty);ctx.stroke();
+    }
+
+    // Precio ahora — grande y rojo
+    const fsPrecio=Math.round(infoH*(antes>0?0.34:0.40));
+    ctx.font=`bold ${fsPrecio}px sans-serif`;ctx.fillStyle='#E53935';
+    ctx.textAlign='center';
+    ctx.fillText(fmt$(ahora),cx+cw/2,cy+ch-Math.round(infoH*0.08));
+
+    // ── Badge de oferta ──
+    if(badge){
+      const bfs=Math.round(cw*0.058);
+      ctx.font=`bold ${bfs}px sans-serif`;
+      const btxt=badge.lbl;
+      const bw=ctx.measureText(btxt).width+bfs*1.0;
+      const bh=bfs*1.7;
+      // Sombra del badge
+      ctx.save();ctx.shadowColor='rgba(0,0,0,0.3)';ctx.shadowBlur=6;ctx.shadowOffsetY=2;
+      rr(ctx,cx+10,cy+10,bw,bh,bh/2,badge.color);
+      ctx.restore();
+      ctx.fillStyle='#fff';ctx.font=`bold ${bfs}px sans-serif`;
+      ctx.textAlign='left';ctx.textBaseline='middle';
+      ctx.fillText(btxt,cx+10+bfs*0.5,cy+10+bh/2);
+    }
+
+    // Ahorro chip (esquina inferior derecha de la imagen)
+    if(ahorro>0){
+      const afs=Math.round(cw*0.048);
+      ctx.font=`bold ${afs}px sans-serif`;
+      const atxt=`Ahorrás ${fmt$(ahorro)}`;
+      const aw2=ctx.measureText(atxt).width+afs*0.8;
+      const ah=afs*1.6;
+      rr(ctx,cx+cw-aw2-8,cy+imgZoneH-ah-8,aw2,ah,ah/2,'#E65100');
+      ctx.fillStyle='#fff';ctx.textAlign='left';ctx.textBaseline='middle';
+      ctx.fillText(atxt,cx+cw-aw2-8+afs*0.4,cy+imgZoneH-ah-8+ah/2);
+    }
   }
-  ctx.fillStyle='rgba(0,0,0,0.3)';ctx.fillRect(0,1020,1080,60);
-  ctx.fillStyle='#fff';ctx.font='bold 22px sans-serif';ctx.textAlign='center';ctx.fillText('📲 Pedidos por WhatsApp',540,1058);
+
+  // ── Footer ────────────────────────────────────────────────────────
+  ctx.fillStyle='rgba(0,0,0,0.28)';ctx.fillRect(0,1010,1080,70);
+  // Ícono WA
+  ctx.font='32px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText('📲',420,1045);
+  ctx.fillStyle='#fff';ctx.font='bold 28px sans-serif';ctx.textBaseline='middle';
+  ctx.fillText('Pedidos por WhatsApp',560,1045);
 }
 
 async function renderBanner(cv,ps,th){
