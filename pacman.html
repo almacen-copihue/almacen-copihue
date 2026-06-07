@@ -217,47 +217,55 @@ function initPacPos(){
   pac.x=pac.col;pac.y=pac.row;pac.progress=1;pac.moving=false;
 }
 
-function updatePac(){
-  if(!pac.progress&&pac.progress!==0)pac.progress=1;
+// Direction buffer - remembers joystick input for BUF_FRAMES frames
+let bufDx=0,bufDy=0,bufTTL=0;
+const BUF_FRAMES=12;
 
+function setDir(dx,dy){
+  nextDx=dx;nextDy=dy;
+  bufDx=dx;bufDy=dy;bufTTL=BUF_FRAMES;
+}
+
+function updatePac(){
   pac.mouth+=0.15*pac.mdir;
   if(pac.mouth>1)pac.mdir=-1;
   if(pac.mouth<0)pac.mdir=1;
 
-  // If not moving, try to start
+  // Buffer countdown
+  if(bufTTL>0)bufTTL--;
+
+  // Best queued direction: live input OR buffered
+  const qdx=(bufTTL>0)?bufDx:nextDx;
+  const qdy=(bufTTL>0)?bufDy:nextDy;
+
   if(!pac.moving){
-    // Try queued direction first
     let moved=false;
-    if(nextDx!==0||nextDy!==0){
-      if(!isWall(pac.col+nextDx,pac.row+nextDy)){
-        pac.dx=nextDx;pac.dy=nextDy;
+    // Try queued direction
+    if(qdx!==0||qdy!==0){
+      if(!isWall(pac.col+qdx,pac.row+qdy)){
+        pac.dx=qdx;pac.dy=qdy;bufTTL=0;
         startPacMove();moved=true;
       }
     }
-    // Continue in current direction
+    // Continue current direction
     if(!moved&&(pac.dx!==0||pac.dy!==0)){
       if(!isWall(pac.col+pac.dx,pac.row+pac.dy)){
         startPacMove();
       }
     }
   } else {
-    // Advance animation
-    pac.progress+=0.18; // speed: fraction of tile per frame
+    pac.progress+=0.18;
     if(pac.progress>=1){
-      pac.progress=1;
-      pac.col=pac.targetCol;
-      pac.row=pac.targetRow;
-      // Tunnel wrap
+      pac.col=pac.targetCol;pac.row=pac.targetRow;
       if(pac.col<0)pac.col=COLS-1;
       if(pac.col>=COLS)pac.col=0;
-      pac.x=pac.col;pac.y=pac.row;
-      pac.moving=false;
+      pac.x=pac.col;pac.y=pac.row;pac.moving=false;
       eatDot();
-      // Immediately try queued turn
-      if(nextDx!==0||nextDy!==0){
-        if(!isWall(pac.col+nextDx,pac.row+nextDy)){
-          pac.dx=nextDx;pac.dy=nextDy;
-        }
+      // On arrival: apply buffered/queued turn
+      const q2x=(bufTTL>0)?bufDx:nextDx;
+      const q2y=(bufTTL>0)?bufDy:nextDy;
+      if(q2x!==0||q2y!==0){
+        if(!isWall(pac.col+q2x,pac.row+q2y)){pac.dx=q2x;pac.dy=q2y;bufTTL=0;}
       }
     } else {
       pac.x=pac.col+(pac.targetCol-pac.col)*pac.progress;
@@ -535,8 +543,8 @@ function jApply(cx,cy){
   const cl=Math.min(d,JMAX),a=Math.atan2(oy,ox);
   joyCap.style.transform=`translate(${Math.cos(a)*cl}px,${Math.sin(a)*cl}px)`;
   if(d>JDEAD){
-    if(Math.abs(ox)>=Math.abs(oy)){nextDx=ox>0?1:-1;nextDy=0;}
-    else{nextDx=0;nextDy=oy>0?1:-1;}
+    if(Math.abs(ox)>=Math.abs(oy))setDir(ox>0?1:-1,0);
+    else setDir(0,oy>0?1:-1);
   }
 }
 function jReset(){jActive=false;jId=-1;joyCap.style.transform='';}
@@ -563,10 +571,10 @@ window.addEventListener('mouseup',()=>{if(jActive)jReset();});
 
 // Keyboard
 document.addEventListener('keydown',e=>{
-  if(e.key==='ArrowUp'||e.key==='w'){nextDx=0;nextDy=-1;}
-  if(e.key==='ArrowDown'||e.key==='s'){nextDx=0;nextDy=1;}
-  if(e.key==='ArrowLeft'||e.key==='a'){nextDx=-1;nextDy=0;}
-  if(e.key==='ArrowRight'||e.key==='d'){nextDx=1;nextDy=0;}
+  if(e.key==='ArrowUp'||e.key==='w')setDir(0,-1);
+  if(e.key==='ArrowDown'||e.key==='s')setDir(0,1);
+  if(e.key==='ArrowLeft'||e.key==='a')setDir(-1,0);
+  if(e.key==='ArrowRight'||e.key==='d')setDir(1,0);
   if(e.key==='p'||e.key==='Escape')document.getElementById('pbtn-pause').click();
 });
 
