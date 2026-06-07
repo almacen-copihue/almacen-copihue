@@ -4,6 +4,23 @@
   COPIHUE POS — CHANGELOG
 ================================================================================
 
+  v369 — 07/06/2026
+  -----------------
+  • FIX CRÍTICO FIADO — doble registro en hoja Ventas:
+    La llamada 'vender' de un fiado no incluía idVenta, por lo que si GAS
+    tardaba y el timeout disparaba, la venta quedaba encolada en
+    ventas_pendientes y _reenviarVentasPendientes() la reenviaba generando
+    una segunda fila con ticket diferente (aunque GAS ya la había procesado).
+    Fix: _procesarVentaFiado ahora genera idVentaFiado = idFiado + '_v' y
+    lo incluye en el payload. Si el primer intento falla, encola con ese
+    mismo idVenta — GAS puede deduplicar por idVenta.
+  • FIX CRÍTICO FIADO — ticket null cuando GAS tarda:
+    Si el primer intento de 'vender' en el fiado fallaba por timeout,
+    ticketNum quedaba null y se guardaba el fiado sin número de ticket.
+    Fix: cuando _reenviarVentasPendientes() logra enviar una venta con
+    idFiado, llama a la nueva acción GAS 'actualizarTicketFiado' para
+    poner el ticket correcto en la fila de la hoja Fiados.
+
   v368 — 30/05/2026
   -----------------
   • FIX precio tachado en modal para productos por peso: precioOriginal ahora
@@ -442,7 +459,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v369</title>
+    <title>Copihue — POS v370</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -4447,6 +4464,16 @@ async function _reenviarVentasPendientes() {
             const resp = await _apiFetchUrl('vender', url);
             if (resp.success) {
                 console.log('✅ Venta pendiente enviada correctamente:', venta.ts);
+                // Si era una venta de fiado, actualizar el ticket en hoja Fiados
+                if (venta.idFiado && (resp.ticket || resp.numeroTicket)) {
+                    try {
+                        const ticketRetry = resp.ticket || resp.numeroTicket;
+                        const updatePayload = { idFiado: venta.idFiado, ticket: ticketRetry };
+                        const urlFiadoTicket = API_URL + '?action=actualizarTicketFiado&data=' + encodeURIComponent(JSON.stringify(updatePayload));
+                        _apiFetchUrl('actualizarTicketFiado', urlFiadoTicket).catch(e2 =>
+                            console.warn('⚠️ No se pudo actualizar ticket en fiado:', e2));
+                    } catch(e2) {}
+                }
                 // Marcar como rebajada en el historial local
                 const key = _getDateKeyAR();
                 const keyStore = 'ventas_dia_' + key;
@@ -10778,6 +10805,8 @@ async function _procesarVentaFiado(datosFiado, itemsSnapshot) {
 
     let stockOk = false;
     let ticketNum = null;
+    // idVenta único — permite deduplicar en GAS si el request llega dos veces
+    const idVentaFiado = datosFiado.idFiado + '_v';
     try {
         const ventaData = itemsSnapshot.map(i => ({
             id: i.esPeso ? i.idOriginal : i.id,
@@ -10788,12 +10817,32 @@ async function _procesarVentaFiado(datosFiado, itemsSnapshot) {
         }));
         const ventaPayload = { items: ventaData, metodoPago: 'FIADO', vendedor: vendedorActual,
             clienteFiado: datosFiado.cliente || '',
-            telefonoFiado: datosFiado.telefono || '' };
+            telefonoFiado: datosFiado.telefono || '',
+            idVenta: idVentaFiado };
         const url = API_URL + '?action=vender&data=' + encodeURIComponent(JSON.stringify(ventaPayload));
         const resp = await _apiFetchUrl('vender', url);
         stockOk = resp.success === true;
         ticketNum = resp.ticket || resp.numeroTicket || null;
-    } catch(e) { console.warn('⚠️ Error venta fiado:', e); }
+    } catch(e) {
+        console.warn('⚠️ Error venta fiado (se reintentará):', e);
+        // Encolar para reintento — con el mismo idVenta para evitar duplicado en GAS
+        try {
+            const ventaDataRetry = itemsSnapshot.map(i => ({
+                id: i.esPeso ? i.idOriginal : i.id,
+                name: i.name, qty: i.qty,
+                esPeso: i.esPeso || false, gramos: i.gramos || 0,
+                precioVenta: i.price, precioModificado: i.precioModificado || false,
+                precioOriginal: i.precioOriginal || 0
+            }));
+            const pendientes = JSON.parse(localStorage.getItem('ventas_pendientes') || '[]');
+            pendientes.push({
+                items: ventaDataRetry, metodoPago: 'FIADO', vendedor: vendedorActual,
+                idVenta: idVentaFiado, idFiado: datosFiado.idFiado, ts: Date.now()
+            });
+            localStorage.setItem('ventas_pendientes', JSON.stringify(pendientes));
+            setTimeout(() => _reenviarVentasPendientes(), 10000);
+        } catch(e2) { console.warn('⚠️ No se pudo encolar fiado pendiente:', e2); }
+    }
 
     datosFiado.ticket = ticketNum;
 
