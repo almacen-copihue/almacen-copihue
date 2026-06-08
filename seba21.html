@@ -4,22 +4,18 @@
   COPIHUE POS — CHANGELOG
 ================================================================================
 
-  v369 — 07/06/2026
+  v371 — 07/06/2026
   -----------------
-  • FIX CRÍTICO FIADO — doble registro en hoja Ventas:
-    La llamada 'vender' de un fiado no incluía idVenta, por lo que si GAS
-    tardaba y el timeout disparaba, la venta quedaba encolada en
-    ventas_pendientes y _reenviarVentasPendientes() la reenviaba generando
-    una segunda fila con ticket diferente (aunque GAS ya la había procesado).
-    Fix: _procesarVentaFiado ahora genera idVentaFiado = idFiado + '_v' y
-    lo incluye en el payload. Si el primer intento falla, encola con ese
-    mismo idVenta — GAS puede deduplicar por idVenta.
-  • FIX CRÍTICO FIADO — ticket null cuando GAS tarda:
-    Si el primer intento de 'vender' en el fiado fallaba por timeout,
-    ticketNum quedaba null y se guardaba el fiado sin número de ticket.
-    Fix: cuando _reenviarVentasPendientes() logra enviar una venta con
-    idFiado, llama a la nueva acción GAS 'actualizarTicketFiado' para
-    poner el ticket correcto en la fila de la hoja Fiados.
+  • TRAGAMONEDAS: Modal reestructurado con 2 tabs:
+    — Tab 1 "📋 Pendientes": lista ganadores pendientes de entrega desde
+      TRAGAMONEDAS_CODIGOS (estado GANADOR, entregado NO). Botón ✅ Entregar
+      marca el premio como entregado en la planilla via entregarPremioTragamonedas.
+    — Tab 2 "🎰 Generar código": generador de QR existente (sin cambios funcionales).
+  • TRAGAMONEDAS: abrirTragamonedas() siempre arranca en tab Pendientes.
+  • TRAGAMONEDAS: tragValidarMonto() muestra cuántos intentos corresponden
+    según el monto (1 intento cada $10.000).
+  • TRAGAMONEDAS: Code.gs requiere nuevas acciones:
+    listarPendientesTragamonedas + entregarPremioTragamonedas (ver v8.7).
 
   v368 — 30/05/2026
   -----------------
@@ -459,7 +455,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v370</title>
+    <title>Copihue — POS v371</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -1709,48 +1705,78 @@
     <div class="modal-sheet" style="padding-bottom:28px;">
         <div class="modal-handle"></div>
         <div class="modal-header">
-            <span class="modal-titulo">🎰 Tragamonedas — Generar código</span>
+            <span class="modal-titulo">🎰 Tragamonedas</span>
             <button class="modal-cerrar" onclick="cerrarTragamonedas()">✕</button>
         </div>
-        <div style="padding:16px 20px 0;">
+        <div style="padding:0 16px;">
 
-            <div style="background:#fff8e1;border:1px solid #ffe082;border-radius:10px;padding:12px 14px;margin-bottom:16px;font-size:0.82rem;color:#795548;line-height:1.5;">
-                🛒 Solo para compras <strong>mayores a $10.000</strong><br>
-                Cada compra tiene <strong>1 intento</strong>.
-            </div>
-
-            <div style="font-size:0.72rem;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Monto de la compra</div>
-            <div style="position:relative;margin-bottom:16px;">
-                <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);font-size:1.2rem;font-weight:700;color:#aaa;">$</span>
-                <input type="number" id="tragMontoInput" placeholder="0"
-                       inputmode="numeric" min="10000"
-                       style="width:100%;font-size:1.4rem;font-weight:900;border:2px solid #e0e0e0;border-radius:10px;padding:10px 14px 10px 32px;color:#222;"
-                       oninput="tragValidarMonto()">
-            </div>
-            <div id="tragMontoAviso" style="font-size:0.78rem;color:#e53935;margin-top:-10px;margin-bottom:12px;display:none;">
-                ⚠️ El monto mínimo es $10.000
-            </div>
-
-            <button id="tragBtnGenerar" onclick="tragGenerarCodigo()"
-                    style="width:100%;padding:14px;border:none;border-radius:12px;background:#c9a000;color:white;font-size:1rem;font-weight:700;cursor:pointer;margin-bottom:14px;opacity:0.5;"
-                    disabled>
-                🎰 Generar código para el cliente
-            </button>
-
-            <div id="tragResultado" style="display:none;">
-                <div style="background:#1a1a1a;border:2px solid #c9a000;border-radius:14px;padding:18px;text-align:center;margin-bottom:12px;">
-                    <div style="font-size:0.65rem;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:2px;margin-bottom:6px;">Código generado</div>
-                    <div id="tragCodigo" style="font-family:monospace;font-size:2rem;font-weight:900;color:#f5c518;letter-spacing:6px;margin-bottom:12px;"></div>
-                    <div id="tragQR" style="margin:0 auto 12px;width:180px;height:180px;"></div>
-                    <div style="font-size:0.72rem;color:rgba(255,255,255,0.4);margin-bottom:4px;">El cliente escanea con el celu</div>
-                    <div id="tragLink" style="font-size:0.68rem;color:#c9a000;word-break:break-all;"></div>
-                </div>
-                <button onclick="tragNuevoCodigo()"
-                        style="width:100%;padding:11px;border:1px solid #ddd;border-radius:10px;background:#fafafa;color:#666;font-size:0.85rem;font-weight:600;cursor:pointer;">
-                    🔄 Generar otro código
+            <!-- TABS -->
+            <div style="display:flex;gap:6px;margin-bottom:14px;margin-top:12px;">
+                <button id="tragTab1" onclick="tragCambiarTab(1)"
+                        style="flex:1;padding:9px 0;border:none;border-radius:8px;font-weight:700;font-size:0.85rem;cursor:pointer;background:#c9a000;color:white;">
+                    📋 Pendientes
+                </button>
+                <button id="tragTab2" onclick="tragCambiarTab(2)"
+                        style="flex:1;padding:9px 0;border:none;border-radius:8px;font-weight:700;font-size:0.85rem;cursor:pointer;background:#f5f0e0;color:#888;">
+                    🎰 Generar código
                 </button>
             </div>
 
+            <!-- TAB 1: PENDIENTES -->
+            <div id="tragTabContent1">
+                <div id="tragListaCargando" style="text-align:center;padding:20px;color:#aaa;font-size:0.85rem;">
+                    Cargando...
+                </div>
+                <div id="tragListaVacia" style="display:none;text-align:center;padding:20px;">
+                    <div style="font-size:2rem;">🎉</div>
+                    <div style="font-weight:700;color:#2e7d32;margin-top:6px;">Sin premios pendientes</div>
+                    <div style="font-size:0.8rem;color:#aaa;margin-top:4px;">Todos los premios fueron entregados</div>
+                </div>
+                <div id="tragListaItems" style="overflow-y:auto;max-height:55vh;display:none;"></div>
+            </div>
+
+            <!-- TAB 2: GENERAR CÓDIGO -->
+            <div id="tragTabContent2" style="display:none;padding-top:4px;">
+
+                <div style="background:#fff8e1;border:1px solid #ffe082;border-radius:10px;padding:12px 14px;margin-bottom:16px;font-size:0.82rem;color:#795548;line-height:1.5;">
+                    🛒 Solo para compras <strong>mayores a $10.000</strong><br>
+                    Cada $10.000 tiene <strong>1 intento</strong>.
+                </div>
+
+                <div style="font-size:0.72rem;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Monto de la compra</div>
+                <div style="position:relative;margin-bottom:16px;">
+                    <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);font-size:1.2rem;font-weight:700;color:#aaa;">$</span>
+                    <input type="number" id="tragMontoInput" placeholder="0"
+                           inputmode="numeric" min="10000"
+                           style="width:100%;font-size:1.4rem;font-weight:900;border:2px solid #e0e0e0;border-radius:10px;padding:10px 14px 10px 32px;color:#222;"
+                           oninput="tragValidarMonto()">
+                </div>
+                <div id="tragMontoAviso" style="font-size:0.78rem;color:#e53935;margin-top:-10px;margin-bottom:12px;display:none;">
+                    ⚠️ El monto mínimo es $10.000
+                </div>
+                <div id="tragIntentosInfo" style="font-size:0.8rem;color:#c9a000;font-weight:700;margin-bottom:12px;display:none;"></div>
+
+                <button id="tragBtnGenerar" onclick="tragGenerarCodigo()"
+                        style="width:100%;padding:14px;border:none;border-radius:12px;background:#c9a000;color:white;font-size:1rem;font-weight:700;cursor:pointer;margin-bottom:14px;opacity:0.5;"
+                        disabled>
+                    🎰 Generar código para el cliente
+                </button>
+
+                <div id="tragResultado" style="display:none;">
+                    <div style="background:#1a1a1a;border:2px solid #c9a000;border-radius:14px;padding:18px;text-align:center;margin-bottom:12px;">
+                        <div style="font-size:0.65rem;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:2px;margin-bottom:6px;">Código generado</div>
+                        <div id="tragCodigo" style="font-family:monospace;font-size:2rem;font-weight:900;color:#f5c518;letter-spacing:6px;margin-bottom:12px;"></div>
+                        <div id="tragQR" style="margin:0 auto 12px;width:180px;height:180px;"></div>
+                        <div style="font-size:0.72rem;color:rgba(255,255,255,0.4);margin-bottom:4px;">El cliente escanea con el celu</div>
+                        <div id="tragLink" style="font-size:0.68rem;color:#c9a000;word-break:break-all;"></div>
+                    </div>
+                    <button onclick="tragNuevoCodigo()"
+                            style="width:100%;padding:11px;border:1px solid #ddd;border-radius:10px;background:#fafafa;color:#666;font-size:0.85rem;font-weight:600;cursor:pointer;">
+                        🔄 Generar otro código
+                    </button>
+                </div>
+
+            </div><!-- fin tab2 -->
         </div>
     </div>
 </div>
@@ -4464,16 +4490,6 @@ async function _reenviarVentasPendientes() {
             const resp = await _apiFetchUrl('vender', url);
             if (resp.success) {
                 console.log('✅ Venta pendiente enviada correctamente:', venta.ts);
-                // Si era una venta de fiado, actualizar el ticket en hoja Fiados
-                if (venta.idFiado && (resp.ticket || resp.numeroTicket)) {
-                    try {
-                        const ticketRetry = resp.ticket || resp.numeroTicket;
-                        const updatePayload = { idFiado: venta.idFiado, ticket: ticketRetry };
-                        const urlFiadoTicket = API_URL + '?action=actualizarTicketFiado&data=' + encodeURIComponent(JSON.stringify(updatePayload));
-                        _apiFetchUrl('actualizarTicketFiado', urlFiadoTicket).catch(e2 =>
-                            console.warn('⚠️ No se pudo actualizar ticket en fiado:', e2));
-                    } catch(e2) {}
-                }
                 // Marcar como rebajada en el historial local
                 const key = _getDateKeyAR();
                 const keyStore = 'ventas_dia_' + key;
@@ -10805,8 +10821,6 @@ async function _procesarVentaFiado(datosFiado, itemsSnapshot) {
 
     let stockOk = false;
     let ticketNum = null;
-    // idVenta único — permite deduplicar en GAS si el request llega dos veces
-    const idVentaFiado = datosFiado.idFiado + '_v';
     try {
         const ventaData = itemsSnapshot.map(i => ({
             id: i.esPeso ? i.idOriginal : i.id,
@@ -10817,32 +10831,12 @@ async function _procesarVentaFiado(datosFiado, itemsSnapshot) {
         }));
         const ventaPayload = { items: ventaData, metodoPago: 'FIADO', vendedor: vendedorActual,
             clienteFiado: datosFiado.cliente || '',
-            telefonoFiado: datosFiado.telefono || '',
-            idVenta: idVentaFiado };
+            telefonoFiado: datosFiado.telefono || '' };
         const url = API_URL + '?action=vender&data=' + encodeURIComponent(JSON.stringify(ventaPayload));
         const resp = await _apiFetchUrl('vender', url);
         stockOk = resp.success === true;
         ticketNum = resp.ticket || resp.numeroTicket || null;
-    } catch(e) {
-        console.warn('⚠️ Error venta fiado (se reintentará):', e);
-        // Encolar para reintento — con el mismo idVenta para evitar duplicado en GAS
-        try {
-            const ventaDataRetry = itemsSnapshot.map(i => ({
-                id: i.esPeso ? i.idOriginal : i.id,
-                name: i.name, qty: i.qty,
-                esPeso: i.esPeso || false, gramos: i.gramos || 0,
-                precioVenta: i.price, precioModificado: i.precioModificado || false,
-                precioOriginal: i.precioOriginal || 0
-            }));
-            const pendientes = JSON.parse(localStorage.getItem('ventas_pendientes') || '[]');
-            pendientes.push({
-                items: ventaDataRetry, metodoPago: 'FIADO', vendedor: vendedorActual,
-                idVenta: idVentaFiado, idFiado: datosFiado.idFiado, ts: Date.now()
-            });
-            localStorage.setItem('ventas_pendientes', JSON.stringify(pendientes));
-            setTimeout(() => _reenviarVentasPendientes(), 10000);
-        } catch(e2) { console.warn('⚠️ No se pudo encolar fiado pendiente:', e2); }
-    }
+    } catch(e) { console.warn('⚠️ Error venta fiado:', e); }
 
     datosFiado.ticket = ticketNum;
 
@@ -11583,44 +11577,129 @@ function _raspMostrarEstado(msg, color) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  TRAGAMONEDAS — GENERAR CÓDIGO (POS)
+//  TRAGAMONEDAS — GENERAR CÓDIGO + PENDIENTES (POS)
 // ═══════════════════════════════════════════════════════════════
 const TRAG_BASE_URL = 'https://almacen-copihue.vercel.app/tragamonedas.html';
 
 function abrirTragamonedas() {
-  // Reset completo cada vez que se abre
-  document.getElementById('tragMontoInput').value          = '';
-  document.getElementById('tragMontoAviso').style.display  = 'none';
-  document.getElementById('tragResultado').style.display   = 'none';
-  document.getElementById('tragQR').innerHTML              = '';
-  document.getElementById('tragCodigo').textContent        = '';
-  document.getElementById('tragLink').textContent          = '';
-  const btn = document.getElementById('tragBtnGenerar');
-  btn.style.display   = '';
-  btn.disabled        = true;
-  btn.style.opacity   = '0.5';
-  btn.textContent     = '🎰 Generar código para el cliente';
   document.getElementById('modalTragamonedas').classList.add('open');
-  setTimeout(() => document.getElementById('tragMontoInput').focus(), 300);
+  tragCambiarTab(1); // siempre arranca en pendientes
 }
 
 function cerrarTragamonedas() {
   document.getElementById('modalTragamonedas').classList.remove('open');
 }
 
+function tragCambiarTab(tab) {
+  document.getElementById('tragTabContent1').style.display = tab === 1 ? '' : 'none';
+  document.getElementById('tragTabContent2').style.display = tab === 2 ? '' : 'none';
+  document.getElementById('tragTab1').style.background = tab === 1 ? '#c9a000' : '#f5f0e0';
+  document.getElementById('tragTab1').style.color      = tab === 1 ? 'white'   : '#888';
+  document.getElementById('tragTab2').style.background = tab === 2 ? '#c9a000' : '#f5f0e0';
+  document.getElementById('tragTab2').style.color      = tab === 2 ? 'white'   : '#888';
+  if (tab === 1) cargarPendientesTragamonedas();
+  if (tab === 2) _tragResetGenerador();
+}
+
+function _tragResetGenerador() {
+  document.getElementById('tragMontoInput').value          = '';
+  document.getElementById('tragMontoAviso').style.display  = 'none';
+  document.getElementById('tragResultado').style.display   = 'none';
+  document.getElementById('tragQR').innerHTML              = '';
+  document.getElementById('tragCodigo').textContent        = '';
+  document.getElementById('tragLink').textContent          = '';
+  document.getElementById('tragIntentosInfo').style.display = 'none';
+  const btn = document.getElementById('tragBtnGenerar');
+  btn.style.display = ''; btn.disabled = true;
+  btn.style.opacity = '0.5';
+  btn.textContent   = '🎰 Generar código para el cliente';
+  setTimeout(() => document.getElementById('tragMontoInput').focus(), 200);
+}
+
+// ── Lista de pendientes ───────────────────────────────────────
+async function cargarPendientesTragamonedas() {
+  document.getElementById('tragListaCargando').style.display = '';
+  document.getElementById('tragListaCargando').innerHTML     = 'Cargando...';
+  document.getElementById('tragListaVacia').style.display    = 'none';
+  document.getElementById('tragListaItems').style.display    = 'none';
+  try {
+    const res = await _apiFetch('listarPendientesTragamonedas');
+    document.getElementById('tragListaCargando').style.display = 'none';
+    if (!res.ok || !res.pendientes || res.pendientes.length === 0) {
+      document.getElementById('tragListaVacia').style.display = '';
+      return;
+    }
+    const lista = document.getElementById('tragListaItems');
+    lista.innerHTML = res.pendientes.map(g => `
+      <div style="border:1px solid #e8df99;border-radius:10px;padding:12px 14px;margin-bottom:8px;background:#fffdf0;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+          <div style="flex:1;min-width:0;">
+            <div style="font-weight:800;font-size:0.95rem;color:#222;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${g.premio || 'Premio'}</div>
+            <div style="font-size:0.8rem;color:#c9a000;font-weight:700;">${g.simbolo || ''}</div>
+            <div style="font-size:0.72rem;color:#aaa;margin-top:2px;">${g.fecha} ${g.hora} · <span style="font-family:monospace;font-weight:700;color:#c9a000;">${g.codigo}</span></div>
+            ${g.dispositivo ? '<div style="font-size:0.68rem;color:#bbb;margin-top:2px;">📱 ' + g.dispositivo.substring(0,40) + '</div>' : ''}
+          </div>
+          <button onclick="entregarPremioTragamonedas('${g.codigo}')"
+                  style="flex-shrink:0;padding:8px 14px;border:none;border-radius:8px;background:#2e7d32;color:white;font-weight:700;font-size:0.82rem;cursor:pointer;white-space:nowrap;">
+            ✅ Entregar
+          </button>
+        </div>
+      </div>
+    `).join('');
+    lista.style.display = '';
+  } catch(e) {
+    document.getElementById('tragListaCargando').innerHTML =
+      '<div style="color:#c0392b;font-size:0.85rem;padding:10px;">❌ ' + e.message + '</div>';
+    document.getElementById('tragListaCargando').style.display = '';
+  }
+}
+
+async function entregarPremioTragamonedas(codigo) {
+  // Deshabilitar el botón tocado
+  document.querySelectorAll('#tragListaItems button').forEach(b => {
+    if (b.getAttribute('onclick') && b.getAttribute('onclick').includes(codigo)) {
+      b.textContent = '⏳...'; b.disabled = true;
+    }
+  });
+  try {
+    const res = await _apiFetch('entregarPremioTragamonedas', null, '&codigo=' + encodeURIComponent(codigo));
+    if (res.ok) {
+      mostrarToast('✅ Premio entregado: ' + codigo, 'verde');
+      await cargarPendientesTragamonedas();
+    } else {
+      mostrarToast('❌ Error: ' + (res.error || 'intentá de nuevo'), 'rojo');
+      await cargarPendientesTragamonedas();
+    }
+  } catch(e) {
+    mostrarToast('❌ ' + e.message, 'rojo');
+    await cargarPendientesTragamonedas();
+  }
+}
+
+// ── Generador de código ───────────────────────────────────────
 function tragValidarMonto() {
   const monto = parseFloat(document.getElementById('tragMontoInput').value) || 0;
   const ok    = monto >= 10000;
   document.getElementById('tragMontoAviso').style.display = (monto > 0 && !ok) ? '' : 'none';
   document.getElementById('tragBtnGenerar').disabled      = !ok;
   document.getElementById('tragBtnGenerar').style.opacity = ok ? '1' : '0.5';
+  // Mostrar cuántos intentos corresponden
+  const info = document.getElementById('tragIntentosInfo');
+  if (ok) {
+    const intentos = Math.floor(monto / 10000);
+    info.textContent = '🎰 ' + intentos + (intentos === 1 ? ' intento' : ' intentos') + ' (1 código por cada $10.000)';
+    info.style.display = '';
+  } else {
+    info.style.display = 'none';
+  }
 }
 
 async function tragGenerarCodigo() {
   const btn = document.getElementById('tragBtnGenerar');
   btn.textContent = '⏳ Generando...'; btn.disabled = true; btn.style.opacity = '0.6';
   try {
-    const res = await _apiFetch('generarCodigoTragamonedas');
+    const monto = parseFloat(document.getElementById('tragMontoInput').value) || 0;
+    const res = await _apiFetch('generarCodigoTragamonedas', null, '&monto=' + monto);
     if (!res.ok) throw new Error(res.error || 'Error al generar código');
     const codigo  = res.codigo;
     const gameURL = TRAG_BASE_URL + '?code=' + codigo;
@@ -11641,6 +11720,7 @@ async function tragGenerarCodigo() {
 function tragNuevoCodigo() {
   document.getElementById('tragMontoInput').value         = '';
   document.getElementById('tragResultado').style.display  = 'none';
+  document.getElementById('tragIntentosInfo').style.display = 'none';
   document.getElementById('tragBtnGenerar').style.display = '';
   document.getElementById('tragBtnGenerar').disabled      = true;
   document.getElementById('tragBtnGenerar').style.opacity = '0.5';
