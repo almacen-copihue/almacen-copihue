@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-<title>SendWA — Almacén Copihue v8</title>
+<title>SendWA — Almacén Copihue v9</title>
 <style>
   :root {
     --primary: #4a7c3f;
@@ -408,7 +408,7 @@
   <div class="header-stats">
     <span>✓ <span id="selectedCount">0</span></span>
   </div>
-  <span style="background:rgba(255,255,255,.18);color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px;margin-right:4px;">v8</span>
+  <span style="background:rgba(255,255,255,.18);color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px;margin-right:4px;">v9</span>
   <button onclick="recargarPagina()" title="Recargar" style="background:none;border:none;color:white;font-size:18px;">🔄</button>
   <button id="themeBtn" style="background:none;border:none;color:white;font-size:18px;">🌙</button>
 </div>
@@ -533,6 +533,9 @@ async function fetchAPI(action) {
   return res.json();
 }
 
+// Config de recién llegados (desde planilla config_sistema)
+let configRecientes = { dias: 7, precioMin: 0, limite: 20 };
+
 async function loadOffers() {
   try {
     const data = await fetchAPI('getOfertas');
@@ -545,13 +548,26 @@ async function loadOffers() {
       (data.especialesActivas || []).forEach(p => offerPools.especial.add(Number(p.id)));
       const ults = data.ultimasSeleccionadasSiempre || data.ultimasSeleccionadas || [];
       ults.forEach(p => offerPools.ultimas.add(Number(p.id)));
+
+      // Leer config de recién llegados si viene en la respuesta
+      if (data.config) {
+        configRecientes.dias     = parseFloat(data.config.RECIEN_LLEGADOS_DIAS)    || 7;
+        configRecientes.precioMin= parseFloat(data.config.RECIEN_LLEGADOS_PRECIO_MIN) || 0;
+        configRecientes.limite   = parseFloat(data.config.RECIEN_LLEGADOS_LIMITE)  || 20;
+      }
+
+      // Recién llegados — pool de IDs si viene desde la API
+      if (data.recienLlegados && Array.isArray(data.recienLlegados)) {
+        offerPools.recientes = new Set(data.recienLlegados.map(p => Number(p.id)));
+      }
+
       console.log('Pools cargados:', {
         relampago: offerPools.relampago.size,
         destacado: offerPools.destacado.size,
         especial: offerPools.especial.size,
-        ultimas: offerPools.ultimas.size
+        ultimas: offerPools.ultimas.size,
+        recientes: (offerPools.recientes||new Set()).size
       });
-
     }
   } catch(e) { console.warn(e); }
 }
@@ -608,6 +624,22 @@ async function loadProducts() {
     }
     
     const rotacion = parseFloat(r.rotacion || r.rotation || 0);
+
+    // esReciente: primero chequear pool de API, luego fecha de ingreso, luego rotacion baja
+    let esReciente = false;
+    if (offerPools.recientes && offerPools.recientes.has(Number(id))) {
+      esReciente = true;
+    } else {
+      // Intentar con fecha de ingreso si viene en la API
+      const fechaStr = r.fechaIngreso || r.fecha_ingreso || r.created || '';
+      if (fechaStr) {
+        const fecha = new Date(fechaStr);
+        const diasAtras = (Date.now() - fecha.getTime()) / (1000*60*60*24);
+        const precioOk = price >= (configRecientes.precioMin || 0);
+        esReciente = !isNaN(diasAtras) && diasAtras <= (configRecientes.dias || 7) && precioOk;
+      }
+    }
+
     return {
       id: String(id),
       name: String(r.name || r.nombre || '').trim(),
@@ -620,7 +652,7 @@ async function loadProducts() {
       relampago: r.relampago,
       destacadaPct: parseFloat(r.destacada) || 15,
       rotacion: rotacion,
-      esReciente: rotacion <= 1,
+      esReciente,
     };
   }).filter(p => p.name && p.price > 0);
 }
@@ -645,7 +677,9 @@ function buildCatBar() {
   const firstCat = cats[0] || '';
   currentFilter = '__cat__' + firstCat;
 
-  const nRecientes = allProducts.filter(p => p.esReciente && p.stock > 0).length;
+  // Respetar límite de recién llegados configurado en planilla
+  const todosRecientes = allProducts.filter(p => p.esReciente && p.stock > 0);
+  const nRecientes = Math.min(todosRecientes.length, configRecientes.limite || 20);
 
   // Colores por tipo de oferta — consistentes con el sistema
   const C = {
@@ -764,7 +798,9 @@ function applyFilters() {
   } else if (currentFilter === '__ultimas__') {
     filtered = filtered.filter(p => p.offerType === 'ultimas' && p.stock > 0);
   } else if (currentFilter === '__recientes__') {
-    filtered = filtered.filter(p => p.esReciente && p.stock > 0);
+    filtered = filtered
+      .filter(p => p.esReciente && p.stock > 0 && p.price >= (configRecientes.precioMin||0))
+      .slice(0, configRecientes.limite || 20);
   } else if (currentFilter.startsWith('__cat__')) {
     const cat = currentFilter.slice(7);
     // Los productos en "últimas unidades" NO aparecen en su categoría original
