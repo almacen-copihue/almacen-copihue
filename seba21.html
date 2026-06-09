@@ -455,7 +455,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v374</title>
+    <title>Copihue — POS v375</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -551,6 +551,7 @@
             70% { box-shadow: 0 0 0 5px rgba(105,240,174,0); }
             100% { box-shadow: 0 0 0 0 rgba(105,240,174,0); }
         }
+        @keyframes girar { to { transform: rotate(360deg); } }
         @keyframes pulsoCobrar {
             0%   { transform: scale(1);    box-shadow: 0 4px 16px rgba(27,94,32,0.55), 0 0 0 0 rgba(76,175,80,0.8); }
             50%  { transform: scale(1.08); box-shadow: 0 6px 22px rgba(27,94,32,0.7),  0 0 0 12px rgba(76,175,80,0); }
@@ -1532,7 +1533,11 @@
     </div>
 
     <!-- Cobrar -->
-    <div id="fabCobrar">
+    <div id="fabCobrar" style="position:relative;">
+        <div id="badgePendientes" style="display:none;position:absolute;top:-4px;right:-4px;
+             background:#e53935;color:white;border-radius:50%;width:20px;height:20px;
+             font-size:0.65rem;font-weight:900;display:none;align-items:center;
+             justify-content:center;z-index:10;border:2px solid white;pointer-events:none;"></div>
         <button onclick="abrirConfirmacion()"
                 title="Cobrar"
                 style="width:64px;height:64px;border-radius:50%;border:none;cursor:pointer;
@@ -1546,6 +1551,26 @@
                   letter-spacing:-0.3px;max-width:58px;overflow:hidden;
                   text-overflow:ellipsis;white-space:nowrap;">$0</span>
         </button>
+    </div>
+</div>
+
+<!-- BANNER VENTAS PENDIENTES -->
+<div id="bannerPendientes" style="display:none;position:fixed;top:0;left:0;right:0;z-index:3500;
+     background:linear-gradient(90deg,#e65100,#f57c00);color:white;
+     padding:10px 16px;font-size:0.82rem;font-weight:700;
+     display:none;align-items:center;justify-content:space-between;gap:8px;
+     box-shadow:0 2px 8px rgba(0,0,0,0.3);">
+    <div style="display:flex;align-items:center;gap:8px;">
+        <span style="font-size:1.1rem;">⚠️</span>
+        <div>
+            <div id="bannerPendientesTxt">1 venta sin sincronizar</div>
+            <div style="font-size:0.7rem;font-weight:400;opacity:0.85;">Se enviará automáticamente. No repetir la venta.</div>
+        </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+        <div id="bannerPendientesSpinner" style="width:14px;height:14px;border:2px solid rgba(255,255,255,0.4);
+             border-top-color:white;border-radius:50%;animation:girar 0.8s linear infinite;"></div>
+        <span style="font-size:0.72rem;opacity:0.8;">Reintentando...</span>
     </div>
 </div>
 
@@ -4497,6 +4522,39 @@ function reporteOfertasPOS(origen = 'manual') {
 }
 
 // Reenvía ventas que fallaron por conexión — corre en background
+function _actualizarBadgePendientes() {
+    try {
+        const pendientes = JSON.parse(localStorage.getItem('ventas_pendientes') || '[]');
+        const n = pendientes.length;
+        // Badge en FAB
+        const badge = document.getElementById('badgePendientes');
+        if (badge) {
+            if (n > 0) {
+                badge.textContent = n;
+                badge.style.display = 'flex';
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+        // Banner
+        const banner = document.getElementById('bannerPendientes');
+        const txt    = document.getElementById('bannerPendientesTxt');
+        if (banner) {
+            if (n > 0) {
+                if (txt) txt.textContent = n === 1
+                    ? '1 venta sin sincronizar'
+                    : n + ' ventas sin sincronizar';
+                banner.style.display = 'flex';
+                // Empujar el contenido principal hacia abajo para no tapar nada
+                document.body.style.paddingTop = (banner.offsetHeight + 4) + 'px';
+            } else {
+                banner.style.display = 'none';
+                document.body.style.paddingTop = '';
+            }
+        }
+    } catch(e) {}
+}
+
 async function _reenviarVentasPendientes() {
     const pendientes = JSON.parse(localStorage.getItem('ventas_pendientes') || '[]');
     if (!pendientes.length) return;
@@ -6700,7 +6758,7 @@ inicializarVendedor();
 cargarConfig();
 _cargarHorarioSistema();
 // Reenviar ventas que fallaron por conexión en sesiones anteriores
-setTimeout(() => _reenviarVentasPendientes(), 5000);
+setTimeout(() => { _reenviarVentasPendientes(); _actualizarBadgePendientes(); }, 5000);
 // ========== SISTEMA DE CLIENTES ==========
 const CLIENTES_KEY = 'copihue_clientes';
 let _clienteActual = null; // { nombre, telefono } seleccionado para esta venta
