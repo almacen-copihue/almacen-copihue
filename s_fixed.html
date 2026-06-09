@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-<title>SendWA — Almacén Copihue v11</title>
+<title>SendWA — Almacén Copihue v12</title>
 <style>
   :root {
     --primary: #4a7c3f;
@@ -408,7 +408,7 @@
   <div class="header-stats">
     <span>✓ <span id="selectedCount">0</span></span>
   </div>
-  <span style="background:rgba(255,255,255,.18);color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px;margin-right:4px;">v11</span>
+  <span style="background:rgba(255,255,255,.18);color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px;margin-right:4px;">v12</span>
   <button onclick="recargarPagina()" title="Recargar" style="background:none;border:none;color:white;font-size:18px;">🔄</button>
   <button id="themeBtn" style="background:none;border:none;color:white;font-size:18px;">🌙</button>
 </div>
@@ -556,6 +556,8 @@ async function loadOffers() {
         console.log('Recién llegados:', offerPools.recientes.size, '— límite:', configRecientes.limite);
       }
 
+      // Guardar horarios para mostrar aviso fuera de horario
+      window._horariosOferta = data.horariosOferta || {};
       console.log('Pools cargados:', {
         relampago: offerPools.relampago.size,
         destacado: offerPools.destacado.size,
@@ -616,6 +618,18 @@ async function loadProducts() {
     } else if (offerPools.ultimas && offerPools.ultimas.has(Number(id))) {
       offerType = 'ultimas';
       discountPrice = Math.round(price * 0.9);
+    } else {
+      // Promos y Combos — se leen directo de categoriaOferta (col J), sin pool
+      const rawCat = String(r.categoriaOferta || r.categoria_oferta || '').toUpperCase().trim();
+      if (rawCat === 'PROMO ACTIVA' || rawCat.startsWith('PROMO')) {
+        offerType = 'promo';
+        const normal = parseFloat(r.normal || r['$promos/combos'] || 0);
+        if (normal > 0 && normal < price) discountPrice = normal;
+      } else if (rawCat === 'COMBO ACTIVO' || rawCat.startsWith('COMBO')) {
+        offerType = 'combo';
+        const normal = parseFloat(r.normal || r['$promos/combos'] || 0);
+        if (normal > 0 && normal < price) discountPrice = normal;
+      }
     }
     
     const rotacion = parseFloat(r.rotacion || r.rotation || 0);
@@ -823,6 +837,16 @@ function applyFilters() {
 // RENDER
 // ============================================
 // Labels fuera de funciones para que ambas puedan accederlos
+// Colores de marco por tipo de oferta
+function offerBorderStyle(type) {
+  const colors = {
+    relampago: '#F9A825', destacado: '#FF9800', especial: '#00838F',
+    promo: '#6A1B9A', combo: '#6D4C41', ultimas: '#C62828'
+  };
+  const c = colors[type] || '';
+  return c ? `border: 2.5px solid ${c}; box-shadow: 0 0 8px ${c}55;` : '';
+}
+
 const NXM_LABELS = {1:'⚡ 2x1',2:'⚡ 3x2',3:'⚡ 4x3',4:'⚡ 5x4',5:'⚡ 6x5',6:'⚡ 7x6',10:'⚡ 2da 50%'};
 const PCT_LABELS = {11:'⚡ -10% OFF',12:'⚡ -15% OFF',13:'⚡ -20% OFF',14:'⚡ -25% OFF',15:'⚡ -30% OFF'};
 const TYPE_LABELS = { relampago:'⚡ Relámpago', destacado:'🔥 Destacado', especial:'💜 Especial', ultimas:'🏷️ Últimas' };
@@ -838,7 +862,21 @@ function getOfferLabelFull(p) {
   }
   if (p.offerType === 'destacado') return `🔥 -${p.destacadaPct||15}% OFF`;
   if (p.offerType === 'especial')  return '💜 -10% OFF';
-  if (p.offerType === 'ultimas')   return '🏷️ Últimas';
+  if (p.offerType === 'ultimas')   return '🏷️ Últimas unidades';
+  if (p.offerType === 'promo') {
+    if (p.discountPrice && p.discountPrice < p.price) {
+      const pct = Math.round((1 - p.discountPrice/p.price)*100);
+      return `🏷️ PROMO -${pct}% OFF`;
+    }
+    return '🏷️ PROMO ACTIVA';
+  }
+  if (p.offerType === 'combo') {
+    if (p.discountPrice && p.discountPrice < p.price) {
+      const pct = Math.round((1 - p.discountPrice/p.price)*100);
+      return `🎯 COMBO -${pct}% OFF`;
+    }
+    return '🎯 COMBO ACTIVO';
+  }
   return TYPE_LABELS[p.offerType] || '';
 }
 
@@ -846,7 +884,22 @@ function renderProducts() {
   const grid = document.getElementById('productsGrid');
   
   if (!filteredProducts.length) {
-    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;">No hay productos</div>';
+    // Verificar si es por fuera de horario
+    const h = window._horariosOferta || {};
+    const tipoMap = { '__relampago__':'relampago','__destacado__':'destacadas',
+      '__especial__':'especiales','__ultimas__':'ultimas' };
+    const tipoKey = tipoMap[currentFilter];
+    const horario = tipoKey && h[tipoKey];
+    if (horario && !horario.activo && horario.inicio != null) {
+      const ini = String(horario.inicio).padStart(2,'0').slice(0,2) + ':00';
+      const cie = String(Math.floor(horario.cierre)).padStart(2,'0').slice(0,2) + ':00';
+      grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:40px;color:#888;">
+        ⏰ <b>Modo automático — fuera de horario</b><br>
+        <small>Esta oferta está activa de ${ini} a ${cie} hs</small>
+      </div>`;
+    } else {
+      grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:#888;">Sin productos</div>';
+    }
     return;
   }
   
@@ -875,10 +928,12 @@ function renderProducts() {
     const hasDiscount = p.offerType && p.discountPrice && p.discountPrice < p.price;
     const offerLabel = getOfferLabelFull(p);
     const imgUrl = getImgUrl(p);
-    const esVistaOferta = ['offers','__ultimas__','all'].includes(currentFilter) || !!currentSearch;
+    const esVistaOferta = ['offers','__ultimas__','__relampago__','__destacado__',
+      '__especial__','__promo__','__combo__','all'].includes(currentFilter) || !!currentSearch;
 
     html += `
-      <div class="product-card ${selected ? 'selected' : ''}" data-id="${p.id}" onclick="toggleSelect('${p.id}')">
+      <div class="product-card ${selected ? 'selected' : ''}" data-id="${p.id}" onclick="toggleSelect('${p.id}')"
+           style="${hasOffer && esVistaOferta ? offerBorderStyle(p.offerType) : ''}">
         ${(hasOffer && esVistaOferta) ? `<div class="offer-badge">${offerLabel}</div>` : ''}
         <div class="check-mark">✓</div>
         ${imgUrl ? `<img class="product-img" src="${imgUrl}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">` : ''}
