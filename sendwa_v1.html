@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SendWA Copihue v29</title>
+<title>SendWA Copihue v30</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,sans-serif;background:#f0f0ee;color:#111;min-height:100vh}
@@ -200,7 +200,7 @@ h1{font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;co
 <body>
 <div class="wrap">
 
-<h1>SendWA · Almacén Copihue <span style="background:#111;color:#fff;font-size:10px;padding:2px 7px;border-radius:10px;font-weight:700;letter-spacing:1px;vertical-align:middle">v29</span></h1>
+<h1>SendWA · Almacén Copihue <span style="background:#111;color:#fff;font-size:10px;padding:2px 7px;border-radius:10px;font-weight:700;letter-spacing:1px;vertical-align:middle">v30</span></h1>
 
 <!-- ESTADO CONEXIÓN -->
 <div class="estado" id="estado">
@@ -219,7 +219,7 @@ h1{font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;co
   <div class="chip" data-t="ultimas" onclick="filtrar(this)">Últimas</div>
   <div class="chip" data-t="cervecero" onclick="filtrar(this)">🍺 Cervecero</div>
   <div class="chip" data-t="sinoferta" onclick="filtrar(this)">Sin oferta</div>
-  <div class="chip" data-t="fuera" onclick="filtrar(this)" style="background:#444;color:#aaa;border-color:#444">⏰ Fuera horario</div>
+
 </div>
 
 <!-- GRILLA -->
@@ -239,6 +239,15 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbzWZzDvdGfW8vd2-FpQolT8
 const API_TIMEOUT_MS = 25000;
 
 let todosLosProductos = [];
+
+// Pools de ofertas activas — se llenan desde getOfertas
+const poolIds = {
+    relampago:  new Set(),
+    destacado:  new Set(),
+    especial:   new Set(),
+    ultimas:    new Set(),
+    recientes:  new Set(),
+};
 let filtroActivo = 'ofertas';
 let seleccionados = new Set();
 
@@ -289,124 +298,121 @@ function getEmoji(nombre) {
 
 function tipoOferta(p) {
     if (!p || p.stock <= 0) return null;
-    return p.tipo || null; // ya viene calculado desde cargar()
+    return p.offerType || null;
 }
 
 function precioFinal(p) {
-    return p.precioFinalVal || p.price;
+    return p.discountPrice || p.price;
 }
 
 function badgeLabel(tipo, p) {
-    if (tipo === 'promo') return '🏷 PROMO';
-    if (tipo === 'combo') return '🎁 COMBO';
+    if (tipo === 'promo')     return '🏷 PROMO';
+    if (tipo === 'combo')     return '🎁 COMBO';
     if (tipo === 'relampago') return '⚡ RELÁMPAGO';
-    if (tipo === 'destacada') return `⭐ ${p.destacada}% OFF`;
-    if (tipo === 'especial') return '💙 10% ESP.';
-    if (tipo === 'ultimas') return '⏳ ÚLTIMAS';
+    if (tipo === 'destacada' || tipo === 'destacado') return '⭐ ' + (p.destacada||15) + '% OFF';
+    if (tipo === 'especial')  return '💙 10% ESP.';
+    if (tipo === 'ultimas')   return '⏳ ÚLTIMAS';
     if (tipo === 'cervecero') return '🍺 CERVECERO';
     return 'OFERTA';
 }
 
 function badgeCls(tipo) {
-    return { promo:'badge-promo', combo:'badge-combo', relampago:'badge-relampago',
-             destacada:'badge-destacada', especial:'badge-especial',
-             ultimas:'badge-ultimas', cervecero:'badge-cervecero' }[tipo] || '';
+    return {
+        promo:'badge-promo', combo:'badge-combo', relampago:'badge-relampago',
+        destacada:'badge-destacada', destacado:'badge-destacada',
+        especial:'badge-especial', ultimas:'badge-ultimas', cervecero:'badge-cervecero'
+    }[tipo] || '';
 }
 
 async function cargar() {
-    setEstado('cargando', 'Cargando productos y pools desde la planilla...');
+    setEstado('cargando', 'Cargando productos y pools...');
     try {
-        // Llamadas paralelas: productos + pools de ofertas
-        const [dataProds, dataOfertas] = await Promise.all([
-            _apiFetch('getProductos'),
-            _apiFetch('getOfertas'),
-        ]);
+        // 1. Cargar pools primero (getOfertas)
+        const dataOfertas = await _apiFetch('getOfertas');
+        if (dataOfertas && dataOfertas.success) {
+            poolIds.relampago.clear();
+            poolIds.destacado.clear();
+            poolIds.especial.clear();
+            poolIds.ultimas.clear();
+            (dataOfertas.relampagoActivo   || []).forEach(p => poolIds.relampago.add(Number(p.id)));
+            (dataOfertas.destacadasActivas || []).forEach(p => poolIds.destacado.add(Number(p.id)));
+            (dataOfertas.especialesActivas || []).forEach(p => poolIds.especial.add(Number(p.id)));
+            const ults = dataOfertas.ultimasSeleccionadasSiempre || dataOfertas.ultimasSeleccionadas || [];
+            ults.forEach(p => poolIds.ultimas.add(Number(p.id)));
+            if (dataOfertas.poolRecienLlegados && Array.isArray(dataOfertas.poolRecienLlegados)) {
+                poolIds.recientes = new Set(dataOfertas.poolRecienLlegados.map(p => Number(p.id)));
+            }
+            window._horariosOferta = dataOfertas.horariosOferta || {};
+        }
 
-        // ── PRODUCTOS BASE ──
-        const arr = Array.isArray(dataProds) ? dataProds : (dataProds.productos || dataProds.items || []);
+        // 2. Cargar productos
+        const dataProds = await _apiFetch('getProductos');
+        const rows = Array.isArray(dataProds) ? dataProds : (dataProds.productos || dataProds.items || []);
 
-        // ── POOLS DE OFERTAS (desde getOfertas) ──
-        const poolRelampago  = new Set((dataOfertas.relampagoActivo   || []).map(p => String(p.id)));
-        const poolDestacadas = new Set((dataOfertas.destacadasActivas || []).map(p => String(p.id)));
-        const poolEspeciales = new Set((dataOfertas.especialesActivas || []).map(p => String(p.id)));
-        const poolUltimas    = new Set((dataOfertas.ultimasSeleccionadasSiempre || dataOfertas.ultimasSeleccionadas || []).map(p => String(p.id)));
+        // 3. Cruzar producto + pool
+        todosLosProductos = rows
+            .filter(r => r && r.name && parseFloat(r.price||0) > 0)
+            .map(r => {
+                const id    = String(r.id || '');
+                const price = parseFloat(r.price || 0);
+                const stock = parseFloat(r.stock ?? 1);
+                let offerType    = null;
+                let discountPrice = null;
 
-        // Modos de cada tipo (auto/on/off)
-        const modos = dataOfertas.modos || dataOfertas.toggleModos || {};
-
-        // ── CRUZAR: producto + pool activo ──
-        todosLosProductos = arr
-            .filter(p => p.name && p.price > 0)
-            .map(p => {
-                const id  = String(p.id);
-                const cat = String(p.categoriaOferta || p.catOferta || '').trim().toUpperCase();
-                const stock = parseInt(p.stock) || 0;
-
-                // Precio: PROMO/COMBO usan columna normal (precio promo) 
-                const precioNormal = parseInt(p.price)  || 0;  // col B — precio venta
-                const precioPromo  = parseInt(p.normal) || 0;  // col L — precio promo/combo (viene como 'normal' en la API)
-
-                // Determinar tipo de oferta según pool activo
-                let tipo = null;
-                if (cat === 'PROMO ACTIVA' && precioPromo > 0 && precioPromo < precioNormal) tipo = 'promo';
-                else if (cat === 'COMBO ACTIVO') tipo = 'combo';
-                else if (poolRelampago.has(id))  tipo = 'relampago';
-                else if (poolDestacadas.has(id)) tipo = 'destacada';
-                else if (poolEspeciales.has(id)) tipo = 'especial';
-                else if (poolUltimas.has(id))    tipo = 'ultimas';
-
-                // Precio final según tipo
-                let precioFinalVal = precioNormal;
-                if (tipo === 'promo' || tipo === 'combo') precioFinalVal = precioPromo;
-                else if (tipo === 'destacada' && p.destacada > 0) precioFinalVal = Math.round(precioNormal * (1 - parseInt(p.destacada)/100));
-                else if (tipo === 'especial') precioFinalVal = Math.round(precioNormal * 0.9);
-
-                // Modo auto fuera de horario: el pool está vacío pero el tipo existe en config
-                // GAS ya filtra por horario — si no está en pool, está fuera de horario
-                const fueraDeHorario = !tipo && (
-                    cat === 'PROMO ACTIVA' || cat === 'COMBO ACTIVO' ||
-                    (p.relampago && parseInt(p.relampago) > 0) ||
-                    (p.destacada && parseInt(p.destacada) > 0) ||
-                    (p.especial  && parseInt(p.especial)  > 0)
-                );
+                if (poolIds.relampago.has(Number(id))) {
+                    offerType = 'relampago';
+                    const val = parseInt(r.relampago) || 0;
+                    const pctMap = {11:10,12:15,13:20,14:25,15:30};
+                    const nxmMap = {1:0.5,2:0.667,3:0.75,4:0.8,5:0.833,6:0.857,10:0.75};
+                    if (pctMap[val] !== undefined) discountPrice = Math.round(price*(1-pctMap[val]/100));
+                    else if (nxmMap[val] !== undefined) discountPrice = Math.round(price*nxmMap[val]);
+                    else discountPrice = price;
+                } else if (poolIds.destacado.has(Number(id))) {
+                    offerType = 'destacada';
+                    const pct = parseFloat(r.destacada) || 15;
+                    discountPrice = Math.round(price*(1-pct/100));
+                } else if (poolIds.especial.has(Number(id))) {
+                    offerType = 'especial';
+                    discountPrice = Math.round(price*0.9);
+                } else if (poolIds.ultimas.has(Number(id))) {
+                    offerType = 'ultimas';
+                    discountPrice = price;
+                } else {
+                    // PROMO y COMBO — directo de categoriaOferta, sin pool
+                    const rawCat = String(r.categoriaOferta || r.catOferta || '').toUpperCase().trim();
+                    if (rawCat === 'PROMO ACTIVA' || rawCat.startsWith('PROMO')) {
+                        offerType = 'promo';
+                        const normal = parseFloat(r.normal || r['$promos/combos'] || 0);
+                        if (normal > 0 && normal < price) discountPrice = normal;
+                    } else if (rawCat === 'COMBO ACTIVO' || rawCat.startsWith('COMBO')) {
+                        offerType = 'combo';
+                        const normal = parseFloat(r.normal || r['$promos/combos'] || 0);
+                        if (normal > 0 && normal < price) discountPrice = normal;
+                    }
+                }
 
                 return {
                     id,
-                    name:     String(p.name).trim(),
-                    price:    precioNormal,
-                    normal:   precioPromo,
-                    precioFinalVal,
+                    name:         String(r.name || '').trim(),
+                    price,
                     stock,
-                    tipo,
-                    fueraDeHorario: stock > 0 && fueraDeHorario,
-                    relampago:  p.relampago ? (isNaN(parseInt(p.relampago)) ? String(p.relampago).trim() : parseInt(p.relampago)) : 0,
-                    destacada:  parseInt(p.destacada) || 0,
-                    especial:   parseInt(p.especial)  || 0,
-                    catOferta:  cat,
-                    image: 'imagenes-productos/' + simplificarNombre(String(p.name).trim()) + '.jpg',
+                    offerType,
+                    discountPrice,
+                    tipo:         offerType, // alias para compatibilidad
+                    precioFinalVal: discountPrice || price,
+                    relampago:    r.relampago,
+                    destacada:    parseFloat(r.destacada) || 0,
+                    especial:     parseInt(r.especial) || 0,
+                    catOferta:    String(r.categoriaOferta || r.catOferta || '').trim().toUpperCase(),
+                    normal:       parseFloat(r.normal || 0),
+                    image:        'imagenes-productos/' + simplificarNombre(String(r.name||'').trim()) + '.jpg',
                 };
             });
 
-        // Resumen
-        const conOferta    = todosLosProductos.filter(p => p.tipo && p.stock > 0).length;
-        const fueraHorario = todosLosProductos.filter(p => p.fueraDeHorario).length;
-        const sinStock     = todosLosProductos.filter(p => p.stock <= 0).length;
-
-        // Avisos de modo auto
-        const avisosModoAuto = [];
-        ['relampago','destacadas','especiales','ultimas'].forEach(t => {
-            const m = modos[t];
-            if (m === 'auto' || m === 'A') {
-                const pools = {relampago:poolRelampago,destacadas:poolDestacadas,especiales:poolEspeciales,ultimas:poolUltimas};
-                const pool = pools[t];
-                if (pool && pool.size === 0) avisosModoAuto.push(t);
-            }
-        });
-        const avisoTxt = avisosModoAuto.length
-            ? ' · ⏰ Modo auto fuera de horario: ' + avisosModoAuto.join(', ')
-            : '';
-
-        setEstado('ok', conOferta + ' ofertas activas · ' + fueraHorario + ' fuera de horario · ' + sinStock + ' sin stock' + avisoTxt);
+        const conOferta = todosLosProductos.filter(p => p.offerType && p.stock > 0).length;
+        const sinStock  = todosLosProductos.filter(p => p.stock <= 0).length;
+        const sinOferta = todosLosProductos.filter(p => !p.offerType && p.stock > 0).length;
+        setEstado('ok', conOferta + ' con oferta · ' + sinOferta + ' sin oferta · ' + sinStock + ' sin stock');
         document.getElementById('filtros').style.display = 'flex';
         renderGrilla();
 
@@ -426,11 +432,13 @@ function setEstado(tipo, txt) {
 function productosFiltrados() {
     return todosLosProductos.filter(p => {
         if (p.stock <= 0) return false;
-        if (filtroActivo === 'fuera')    return !!p.fueraDeHorario;
-        if (filtroActivo === 'sinoferta') return !p.tipo && !p.fueraDeHorario;
-        if (filtroActivo === 'ofertas')  return !!p.tipo;
-        if (!p.tipo) return false;
-        return p.tipo === filtroActivo;
+        const t = p.offerType;
+        if (filtroActivo === 'sinoferta') return !t;
+        if (filtroActivo === 'ofertas')   return !!t;
+        if (!t) return false;
+        // 'destacada' en chip = 'destacado' en pool
+        if (filtroActivo === 'destacada') return t === 'destacada' || t === 'destacado';
+        return t === filtroActivo;
     });
 }
 
@@ -448,8 +456,8 @@ function renderGrilla() {
         const ah = conDesc ? p.price - pf : 0;
         const key = String(p.id);
         const isSel = seleccionados.has(key);
-        const tipoAttr = tipo || (p.fueraDeHorario ? 'fuera' : 'sinoferta');
-        const fueraTag = p.fueraDeHorario ? '<div style="font-size:9px;color:#f59e0b;font-weight:600;margin-top:3px">⏰ Fuera de horario</div>' : '';
+        const tipoAttr = tipo || 'sinoferta';
+        const fueraTag = '';
         const bloqueado = p.fueraDeHorario || p.stock <= 0;
         return `<div class="prod${isSel ? ' sel' : ''}${bloqueado?' prod-bloqueado':''}" data-pid="${key}" data-tipo="${tipoAttr}" onclick="${bloqueado?'':'toggleSel(\''+key+'\')}">
           <div class="prod-stripe"></div>
