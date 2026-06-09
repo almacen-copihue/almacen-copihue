@@ -624,6 +624,7 @@ async function girar() {
 
   // Mostrar resultado
   const bar = document.getElementById('resultBar');
+  const esGanadorEsteGiro = esPremioReal;
   if (esPremioReal) {
     bar.className = 'result-bar win';
     const p = TEXTO_PREMIO[idWin] || { texto: '🎉 ¡Ganaste!', sub: 'Mostrá el código al cajero' };
@@ -653,6 +654,16 @@ async function girar() {
   }
 
   renderFichas();
+  // Si el jugador ya había ganado antes, mantener visible el codigoBox y btnWA
+  const codigoBox = document.getElementById('codigoBox');
+  if (codigoBox && codigoBox.style.display === 'none' && !esGanadorEsteGiro) {
+    // El giro actual no ganó — restaurar codigoBox si hay premio previo
+    const codigoActual = document.getElementById('codigoValor').textContent;
+    if (codigoActual && codigoActual !== 'TRG-XXXXX') {
+      codigoBox.style.display = '';
+      document.getElementById('btnWA').style.display = '';
+    }
+  }
   girando = false;
 }
 
@@ -668,15 +679,26 @@ async function registrarResultado(simboloId, premioTexto, esGanador) {
     });
 
     if (esGanador && res.ok) {
-      const cod = res.codigoPremio || codigoJuego;
-      document.getElementById('codigoValor').textContent = cod;
-      document.getElementById('codigoBox').style.display = '';
+      const cod     = res.codigoPremio || codigoJuego;
       const tel     = (cfg.telefono || '5492944907380').replace(/\D/g, '');
       const empresa = cfg.empresa || 'Almacén Copihue';
-      const msg     = `Hola 🌺 Jugué en la tragamonedas de ${empresa}.\n\n🎰 Premio: ${premioTexto}\n🎟️ Código: ${cod}\n\n¿Puedo pasar a retirarlo? 😊`;
-      const btnWA   = document.getElementById('btnWA');
-      btnWA.href    = 'https://wa.me/' + tel + '?text=' + encodeURIComponent(msg);
+      document.getElementById('codigoValor').textContent = cod;
+      document.getElementById('codigoBox').style.display = '';
+      const msg = `Hola 🌺 Jugué en la tragamonedas de ${empresa}.\n\n🎰 Premio: ${premioTexto}\n🎟️ Código: ${cod}\n\n¿Puedo pasar a retirarlo? 😊`;
+      const btnWA = document.getElementById('btnWA');
+      btnWA.href  = 'https://wa.me/' + tel + '?text=' + encodeURIComponent(msg);
       btnWA.style.display = '';
+      // Si quedan giros avisar que puede seguir girando
+      if (girosUsados < girosTotal) {
+        document.getElementById('btnGirar').textContent = `🎰 Giro ${girosUsados + 1} (¡ya ganaste un premio!)`;
+      }
+    } else if (!esGanador) {
+      // Perdió este giro — si había ganado antes, restaurar codigoBox
+      const codigoActual = document.getElementById('codigoValor').textContent.trim();
+      if (codigoActual && codigoActual.startsWith('TRG-')) {
+        document.getElementById('codigoBox').style.display = '';
+        document.getElementById('btnWA').style.display = '';
+      }
     }
   } catch(e) { console.error(e); }
 }
