@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SendWA Copihue v28</title>
+<title>SendWA Copihue v29</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,sans-serif;background:#f0f0ee;color:#111;min-height:100vh}
@@ -39,6 +39,9 @@ h1{font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;co
 .grilla{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:20px}
 .prod{background:#fff;border:2.5px solid #e5e5e5;border-radius:12px;padding:0;cursor:pointer;transition:all .15s;position:relative;overflow:hidden}
 .prod:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.1)}
+.prod-bloqueado{opacity:.5;cursor:default}
+.prod-bloqueado:hover{transform:none;box-shadow:none}
+.prod[data-tipo="fuera"]{border-color:#555}
 @media(hover:none){.prod:hover{transform:none;box-shadow:none}}
 .prod.sel{box-shadow:0 0 0 3px currentColor}
 .prod.sel::after{content:'✓';position:absolute;top:8px;right:8px;font-size:16px;font-weight:900;color:#22c55e;background:#fff;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;z-index:10;box-shadow:0 1px 4px rgba(0,0,0,.2)}
@@ -197,7 +200,7 @@ h1{font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;co
 <body>
 <div class="wrap">
 
-<h1>SendWA · Almacén Copihue <span style="background:#111;color:#fff;font-size:10px;padding:2px 7px;border-radius:10px;font-weight:700;letter-spacing:1px;vertical-align:middle">v28</span></h1>
+<h1>SendWA · Almacén Copihue <span style="background:#111;color:#fff;font-size:10px;padding:2px 7px;border-radius:10px;font-weight:700;letter-spacing:1px;vertical-align:middle">v29</span></h1>
 
 <!-- ESTADO CONEXIÓN -->
 <div class="estado" id="estado">
@@ -216,6 +219,7 @@ h1{font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;co
   <div class="chip" data-t="ultimas" onclick="filtrar(this)">Últimas</div>
   <div class="chip" data-t="cervecero" onclick="filtrar(this)">🍺 Cervecero</div>
   <div class="chip" data-t="sinoferta" onclick="filtrar(this)">Sin oferta</div>
+  <div class="chip" data-t="fuera" onclick="filtrar(this)" style="background:#444;color:#aaa;border-color:#444">⏰ Fuera horario</div>
 </div>
 
 <!-- GRILLA -->
@@ -285,22 +289,11 @@ function getEmoji(nombre) {
 
 function tipoOferta(p) {
     if (!p || p.stock <= 0) return null;
-    const cat = String(p.catOferta || '').toUpperCase();
-    if (cat === 'PROMO ACTIVA') return 'promo';
-    if (cat === 'COMBO ACTIVO') return 'combo';
-    if (p.relampago) return 'relampago';
-    if (p.destacada > 0) return 'destacada';
-    if (p.especial > 0) return 'especial';
-    return null;
+    return p.tipo || null; // ya viene calculado desde cargar()
 }
 
 function precioFinal(p) {
-    const tipo = tipoOferta(p);
-    if (!tipo) return p.price;
-    if (tipo === 'promo' || tipo === 'combo') return p.normal > 0 && p.normal < p.price ? p.normal : p.price;
-    if (tipo === 'destacada') return Math.round(p.price * (1 - p.destacada / 100));
-    if (tipo === 'especial') return Math.round(p.price * 0.9);
-    return p.price;
+    return p.precioFinalVal || p.price;
 }
 
 function badgeLabel(tipo, p) {
@@ -321,41 +314,108 @@ function badgeCls(tipo) {
 }
 
 async function cargar() {
-    setEstado('cargando', 'Cargando productos desde la planilla...');
+    setEstado('cargando', 'Cargando productos y pools desde la planilla...');
     try {
-        const data = await _apiFetch('getProductos');
-        const arr = Array.isArray(data) ? data : (data.productos || data.items || []);
+        // Llamadas paralelas: productos + pools de ofertas
+        const [dataProds, dataOfertas] = await Promise.all([
+            _apiFetch('getProductos'),
+            _apiFetch('getOfertas'),
+        ]);
+
+        // ── PRODUCTOS BASE ──
+        const arr = Array.isArray(dataProds) ? dataProds : (dataProds.productos || dataProds.items || []);
+
+        // ── POOLS DE OFERTAS (desde getOfertas) ──
+        const poolRelampago  = new Set((dataOfertas.relampagoActivo   || []).map(p => String(p.id)));
+        const poolDestacadas = new Set((dataOfertas.destacadasActivas || []).map(p => String(p.id)));
+        const poolEspeciales = new Set((dataOfertas.especialesActivas || []).map(p => String(p.id)));
+        const poolUltimas    = new Set((dataOfertas.ultimasSeleccionadasSiempre || dataOfertas.ultimasSeleccionadas || []).map(p => String(p.id)));
+
+        // Modos de cada tipo (auto/on/off)
+        const modos = dataOfertas.modos || dataOfertas.toggleModos || {};
+
+        // ── CRUZAR: producto + pool activo ──
         todosLosProductos = arr
-            .filter(p => p.name && p.price > 0 && p.stock > 0)
-            .map(p => ({
-                id: p.id,
-                name: String(p.name).trim(),
-                price: parseInt(p.price) || 0,
-                stock: parseInt(p.stock) || 0,
-                relampago: p.relampago ? (isNaN(parseInt(p.relampago)) ? String(p.relampago).trim() : parseInt(p.relampago)) : 0,
-                destacada: parseInt(p.destacada) || 0,
-                especial: parseInt(p.especial) || 0,
-                normal: parseInt(p.normal) || 0,
-                catOferta: String(p.categoriaOferta || p.catOferta || '').trim().toUpperCase(),
-                image: `imagenes-productos/${simplificarNombre(String(p.name||'').trim())}.jpg`,
-            }));
-        // Solo los que tienen oferta
-        const conOferta = todosLosProductos.filter(p => tipoOferta(p));
-        setEstado('ok', `${conOferta.length} productos con oferta activa · ${todosLosProductos.length} en total`);
+            .filter(p => p.name && p.price > 0)
+            .map(p => {
+                const id  = String(p.id);
+                const cat = String(p.categoriaOferta || p.catOferta || '').trim().toUpperCase();
+                const stock = parseInt(p.stock) || 0;
+
+                // Precio: PROMO/COMBO usan columna normal (precio promo) 
+                const precioNormal = parseInt(p.price)  || 0;  // col B — precio venta
+                const precioPromo  = parseInt(p.normal) || 0;  // col L — precio promo/combo (viene como 'normal' en la API)
+
+                // Determinar tipo de oferta según pool activo
+                let tipo = null;
+                if (cat === 'PROMO ACTIVA' && precioPromo > 0 && precioPromo < precioNormal) tipo = 'promo';
+                else if (cat === 'COMBO ACTIVO') tipo = 'combo';
+                else if (poolRelampago.has(id))  tipo = 'relampago';
+                else if (poolDestacadas.has(id)) tipo = 'destacada';
+                else if (poolEspeciales.has(id)) tipo = 'especial';
+                else if (poolUltimas.has(id))    tipo = 'ultimas';
+
+                // Precio final según tipo
+                let precioFinalVal = precioNormal;
+                if (tipo === 'promo' || tipo === 'combo') precioFinalVal = precioPromo;
+                else if (tipo === 'destacada' && p.destacada > 0) precioFinalVal = Math.round(precioNormal * (1 - parseInt(p.destacada)/100));
+                else if (tipo === 'especial') precioFinalVal = Math.round(precioNormal * 0.9);
+
+                // Modo auto fuera de horario: el pool está vacío pero el tipo existe en config
+                // GAS ya filtra por horario — si no está en pool, está fuera de horario
+                const fueraDeHorario = !tipo && (
+                    cat === 'PROMO ACTIVA' || cat === 'COMBO ACTIVO' ||
+                    (p.relampago && parseInt(p.relampago) > 0) ||
+                    (p.destacada && parseInt(p.destacada) > 0) ||
+                    (p.especial  && parseInt(p.especial)  > 0)
+                );
+
+                return {
+                    id,
+                    name:     String(p.name).trim(),
+                    price:    precioNormal,
+                    normal:   precioPromo,
+                    precioFinalVal,
+                    stock,
+                    tipo,
+                    fueraDeHorario: stock > 0 && fueraDeHorario,
+                    relampago:  p.relampago ? (isNaN(parseInt(p.relampago)) ? String(p.relampago).trim() : parseInt(p.relampago)) : 0,
+                    destacada:  parseInt(p.destacada) || 0,
+                    especial:   parseInt(p.especial)  || 0,
+                    catOferta:  cat,
+                    image: 'imagenes-productos/' + simplificarNombre(String(p.name).trim()) + '.jpg',
+                };
+            });
+
+        // Resumen
+        const conOferta    = todosLosProductos.filter(p => p.tipo && p.stock > 0).length;
+        const fueraHorario = todosLosProductos.filter(p => p.fueraDeHorario).length;
+        const sinStock     = todosLosProductos.filter(p => p.stock <= 0).length;
+
+        // Avisos de modo auto
+        const avisosModoAuto = [];
+        ['relampago','destacadas','especiales','ultimas'].forEach(t => {
+            const m = modos[t];
+            if (m === 'auto' || m === 'A') {
+                const pools = {relampago:poolRelampago,destacadas:poolDestacadas,especiales:poolEspeciales,ultimas:poolUltimas};
+                const pool = pools[t];
+                if (pool && pool.size === 0) avisosModoAuto.push(t);
+            }
+        });
+        const avisoTxt = avisosModoAuto.length
+            ? ' · ⏰ Modo auto fuera de horario: ' + avisosModoAuto.join(', ')
+            : '';
+
+        setEstado('ok', conOferta + ' ofertas activas · ' + fueraHorario + ' fuera de horario · ' + sinStock + ' sin stock' + avisoTxt);
         document.getElementById('filtros').style.display = 'flex';
         renderGrilla();
+
     } catch(e) {
         console.error('API falló:', e);
-        todosLosProductos = [
-            { id: '1', name: 'Coca Cola 2L',      price: 1800, stock: 10, relampago: 1, catOferta: 'PROMO ACTIVA', normal: 1500, destacada: 0, especial: 0, image: 'imagenes-productos/coca-cola-2l.jpg' },
-            { id: '2', name: 'Cerveza Andes 1L',  price: 1200, stock: 5,  relampago: 0, catOferta: 'COMBO ACTIVO', normal: 1000, destacada: 0, especial: 0, image: 'imagenes-productos/cerveza-andes-1l.jpg' },
-            { id: '3', name: 'Yerba Playadito 1kg',price: 2500, stock: 8,  relampago: 0, catOferta: 'PROMO ACTIVA', normal: 2200, destacada: 0, especial: 0, image: 'imagenes-productos/yerba-playadito-1kg.jpg' }
-        ];
-        setEstado('ok', '⚠️ Sin conexión — ' + todosLosProductos.length + ' productos de prueba');
-        document.getElementById('filtros').style.display = 'flex';
-        renderGrilla();
+        setEstado('error', 'Error conectando: ' + e.message);
     }
 }
+
 
 function setEstado(tipo, txt) {
     const dot = document.getElementById('dot');
@@ -366,11 +426,11 @@ function setEstado(tipo, txt) {
 function productosFiltrados() {
     return todosLosProductos.filter(p => {
         if (p.stock <= 0) return false;
-        const tipo = tipoOferta(p);
-        if (filtroActivo === 'sinoferta') return !tipo;
-        if (filtroActivo === 'ofertas') return !!tipo;
-        if (!tipo) return false;
-        return tipo === filtroActivo;
+        if (filtroActivo === 'fuera')    return !!p.fueraDeHorario;
+        if (filtroActivo === 'sinoferta') return !p.tipo && !p.fueraDeHorario;
+        if (filtroActivo === 'ofertas')  return !!p.tipo;
+        if (!p.tipo) return false;
+        return p.tipo === filtroActivo;
     });
 }
 
@@ -388,8 +448,10 @@ function renderGrilla() {
         const ah = conDesc ? p.price - pf : 0;
         const key = String(p.id);
         const isSel = seleccionados.has(key);
-        const tipoAttr = tipo || 'sinoferta';
-        return `<div class="prod${isSel ? ' sel' : ''}" data-pid="${key}" data-tipo="${tipoAttr}" onclick="toggleSel('${key}')">
+        const tipoAttr = tipo || (p.fueraDeHorario ? 'fuera' : 'sinoferta');
+        const fueraTag = p.fueraDeHorario ? '<div style="font-size:9px;color:#f59e0b;font-weight:600;margin-top:3px">⏰ Fuera de horario</div>' : '';
+        const bloqueado = p.fueraDeHorario || p.stock <= 0;
+        return `<div class="prod${isSel ? ' sel' : ''}${bloqueado?' prod-bloqueado':''}" data-pid="${key}" data-tipo="${tipoAttr}" onclick="${bloqueado?'':'toggleSel(\''+key+'\')}">
           <div class="prod-stripe"></div>
           ${p.image
             ? `<div style="width:100%;height:140px;overflow:hidden;background:#f0f0ee">
@@ -404,6 +466,7 @@ function renderGrilla() {
             <div class="prod-precio">${fmt(pf)}</div>
             ${tipo ? `<span class="prod-badge ${badgeCls(tipo)}" style="margin-top:5px;display:inline-block">${badgeLabel(tipo, p)}</span>` : ''}
             ${ah > 0 ? `<div style="font-size:10px;color:#22c55e;margin-top:3px;font-weight:600">Ahorrás ${fmt(ah)}</div>` : ''}
+            ${fueraTag}
           </div>
         </div>`;
     }).join('');
