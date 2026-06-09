@@ -332,6 +332,7 @@ const TEXTO_PREMIO = {
 //  ESTADO
 // ═══════════════════════════════════════════════════════════════
 let cfg = {}, codigoJuego = null, girosTotal = 1, girosUsados = 0, girando = false;
+let premiosGanadosSession = []; // nombres de premios ganados en esta sesión
 let simbolosDisponibles = []; // se construye combinando premios especiales + productos del GAS
 
 // ═══════════════════════════════════════════════════════════════
@@ -356,6 +357,7 @@ window.addEventListener('load', async () => {
     // Giros disponibles (viene del GAS)
     girosTotal  = resVal.giros || 1;
     girosUsados = resVal.girosUsados || 0;
+  premiosGanadosSession = [];
 
     // Construir pool de símbolos: premios especiales + snacks del inventario
     construirSimbolos(resPremios.ok ? resPremios.premios : []);
@@ -627,7 +629,17 @@ async function girar() {
   const esGanadorEsteGiro = esPremioReal;
   if (esPremioReal) {
     bar.className = 'result-bar win';
-    const p = TEXTO_PREMIO[idWin] || { texto: '🎉 ¡Ganaste!', sub: 'Mostrá el código al cajero' };
+    // Buscar nombre real del premio — primero en TEXTO_PREMIO, luego en simbolosDisponibles
+    let textoPremio, subPremio;
+    if (TEXTO_PREMIO[idWin]) {
+      textoPremio = TEXTO_PREMIO[idWin].texto;
+      subPremio   = TEXTO_PREMIO[idWin].sub;
+    } else {
+      const simGanador = simbolosDisponibles.find(s => s.id === idWin);
+      textoPremio = simGanador ? simGanador.nombre : '🎉 ¡Ganaste!';
+      subPremio   = 'Mostrá el código al cajero';
+    }
+    const p = { texto: textoPremio, sub: subPremio };
     document.getElementById('resultText').textContent = p.texto;
     document.getElementById('resultSub').textContent  = p.sub;
     document.getElementById('payline').classList.add('win');
@@ -682,13 +694,22 @@ async function registrarResultado(simboloId, premioTexto, esGanador) {
       const cod     = res.codigoPremio || codigoJuego;
       const tel     = (cfg.telefono || '5492944907380').replace(/\D/g, '');
       const empresa = cfg.empresa || 'Almacén Copihue';
+      // Acumular premio de esta sesión
+      premiosGanadosSession.push(premioTexto);
+      // WA con todos los premios ganados
+      let detalle;
+      if (premiosGanadosSession.length === 1) {
+        detalle = '🎰 Premio: ' + premioTexto;
+      } else {
+        detalle = '🎰 ¡Gané ' + premiosGanadosSession.length + ' premios!\n' +
+          premiosGanadosSession.map((p,i) => '  · ' + p).join('\n');
+      }
+      const msg = `Hola 🌺 Jugué en la tragamonedas de ${empresa}.\n\n${detalle}\n🎟️ Código: ${cod}\n\n¿Puedo pasar a retirarlo? 😊`;
       document.getElementById('codigoValor').textContent = cod;
       document.getElementById('codigoBox').style.display = '';
-      const msg = `Hola 🌺 Jugué en la tragamonedas de ${empresa}.\n\n🎰 Premio: ${premioTexto}\n🎟️ Código: ${cod}\n\n¿Puedo pasar a retirarlo? 😊`;
       const btnWA = document.getElementById('btnWA');
       btnWA.href  = 'https://wa.me/' + tel + '?text=' + encodeURIComponent(msg);
       btnWA.style.display = '';
-      // Si quedan giros avisar que puede seguir girando
       if (girosUsados < girosTotal) {
         document.getElementById('btnGirar').textContent = `🎰 Giro ${girosUsados + 1} (¡ya ganaste un premio!)`;
       }
