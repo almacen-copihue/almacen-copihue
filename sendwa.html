@@ -544,7 +544,7 @@
     <option value="grupo">👥 WA Grupo</option>
     <option value="rapido">⚡ Lista rápida</option>
   </select>
-  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.33</div>
+  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.34</div>
   <button id="btn-dark" title="Modo oscuro">🌙</button>
 </div>
 
@@ -1607,7 +1607,7 @@ async function drawSingleExpandidoFmt(p, W=1080, H=1080) {
 
   // Foto ocupa TODO el canvas (cover)
   try {
-    const img = await loadImg(getImgUrl(p));
+    const img = preloadedImg || await loadImg(getImgUrl(p));
     const scale = Math.max(W/img.width, H/img.height);
     const dw=img.width*scale, dh=img.height*scale;
     ctx.drawImage(img, (W-dw)/2, (H-dh)/2, dw, dh);
@@ -1751,7 +1751,7 @@ function countLines(ctx, text, maxW) {
   return lines;
 }
 
-async function drawProductCard(ctx, p, x, y, W, H) {
+async function drawProductCard(ctx, p, x, y, W, H, preloadedImg) {
   const _esSinOferta = p._sinOferta === true;
   const oferta = calcularOferta(p);
   const badgeColor = BADGE_COLORS[p.catOferta] || null;
@@ -1853,23 +1853,41 @@ async function drawProductCard(ctx, p, x, y, W, H) {
   }
 }
 
-// ── MODO COLLAGE — hasta 3x4=12 productos, canvas 1080x1080 ────────
+// ── MODO COLLAGE — hasta 3x4=12 productos, canvas 1080xAUTO ────────
 async function drawCollage(prods) {
   const n = Math.min(prods.length, 12);
-
-  // Layout: hasta 12 productos en 3 cols × hasta 4 filas
-  // Para menos de 4 usamos 2 cols para que las tarjetas sean más grandes
   const cols = n <= 2 ? 1 : n <= 4 ? 2 : 3;
   const rows = Math.ceil(n / cols);
 
-  // Canvas siempre 1080x1080
-  const CW = 1080, CH = 1080;
-  const HDRH = 72, FTRH = 44;
-  const PAD  = 8;
-  const gridW = CW - PAD * (cols + 1);
-  const gridH = CH - HDRH - FTRH - PAD * (rows + 1);
-  const CARD_W = Math.floor(gridW / cols);
-  const CARD_H = Math.floor(gridH / rows);
+  const CW   = 1080;
+  const HDRH = 72, FTRH = 44, PAD = 8;
+  const CARD_W = Math.floor((CW - PAD * (cols + 1)) / cols);
+
+  // Pre-cargar imágenes para medir ratio real
+  const imgCache = {};
+  await Promise.all(prods.slice(0,n).map(async p => {
+    try { imgCache[p.id || p.nombre] = await loadImg(getImgUrl(p)); } catch {}
+  }));
+
+  // Ratio máximo del lote (la foto más vertical manda), cap en 4:3
+  let maxRatio = 1.0;
+  prods.slice(0,n).forEach(p => {
+    const img = imgCache[p.id || p.nombre];
+    if (img && img.width > 0) {
+      const r = img.height / img.width;
+      if (r > maxRatio) maxRatio = r;
+    }
+  });
+  maxRatio = Math.min(maxRatio, 1.35);
+
+  const tieneOfertas = prods.slice(0,n).some(p => p.catOferta);
+  const TEXT_H  = tieneOfertas ? 100 : 78;
+  const BADGE_H = tieneOfertas ? 26 : 0;
+  const IMG_H   = Math.round(CARD_W * maxRatio);
+  const CARD_H  = IMG_H + TEXT_H + BADGE_H;
+
+  // Canvas altura dinámica según contenido
+  const CH = HDRH + rows * CARD_H + (rows + 1) * PAD + FTRH;
 
   const cvs = document.getElementById('collage-canvas');
   cvs.width = CW; cvs.height = CH;
@@ -1905,7 +1923,7 @@ async function drawCollage(prods) {
     const row = Math.floor(i / cols);
     const x = PAD + col * (CARD_W + PAD);
     const y = HDRH + PAD + row * (CARD_H + PAD);
-    await drawProductCard(ctx, prods[i], x, y, CARD_W, CARD_H);
+    await drawProductCard(ctx, prods[i], x, y, CARD_W, CARD_H, imgCache[prods[i].id || prods[i].nombre]);
   }
 
   // Footer
