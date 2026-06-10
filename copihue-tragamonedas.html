@@ -107,17 +107,47 @@ body {
 .payline {
   position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%);
   height: 80px;
-  border-top: 2px solid rgba(212,160,23,0.5);
-  border-bottom: 2px solid rgba(212,160,23,0.5);
-  background: rgba(212,160,23,0.04);
+  border-top: 2px solid rgba(212,160,23,0.7);
+  border-bottom: 2px solid rgba(212,160,23,0.7);
+  background: rgba(212,160,23,0.06);
   pointer-events: none; z-index: 5;
+  /* Flechas laterales indicando la línea central */
+}
+/* Flecha izquierda */
+.payline::before {
+  content: '▶';
+  position: absolute; left: 4px; top: 50%; transform: translateY(-50%);
+  color: rgba(212,160,23,0.8); font-size: 0.9rem; line-height: 1;
+  text-shadow: 0 0 6px rgba(212,160,23,0.6);
+  pointer-events: none;
+}
+/* Flecha derecha */
+.payline::after {
+  content: '◀';
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  color: rgba(212,160,23,0.8); font-size: 0.9rem; line-height: 1;
+  text-shadow: 0 0 6px rgba(212,160,23,0.6);
+  pointer-events: none;
 }
 .payline.win {
   border-color: var(--dorado-cl);
-  background: rgba(245,197,24,0.1);
-  animation: glow-line 0.8s ease-in-out infinite;
+  border-width: 3px;
+  background: rgba(245,197,24,0.12);
+  box-shadow: 0 0 18px rgba(245,197,24,0.4), inset 0 0 18px rgba(245,197,24,0.08);
+  animation: glow-line 0.7s ease-in-out infinite;
 }
-@keyframes glow-line { 0%,100%{box-shadow:0 0 8px rgba(245,197,24,.3)}50%{box-shadow:0 0 24px rgba(245,197,24,.7)} }
+.payline.win::before, .payline.win::after {
+  color: var(--dorado-cl);
+  font-size: 1.1rem;
+  text-shadow: 0 0 10px rgba(245,197,24,0.9);
+  animation: flechas-pulso 0.7s ease-in-out infinite;
+}
+@keyframes glow-line { 0%,100%{box-shadow:0 0 12px rgba(245,197,24,.3),inset 0 0 12px rgba(245,197,24,.06)}50%{box-shadow:0 0 28px rgba(245,197,24,.7),inset 0 0 20px rgba(245,197,24,.12)} }
+@keyframes flechas-pulso { 0%,100%{opacity:0.7} 50%{opacity:1} }
+
+/* Oscurecer filas superior e inferior sin taparlo del todo */
+.reel::before { top: 0;    background: linear-gradient(to bottom, rgba(13,13,13,0.85) 0%, rgba(13,13,13,0.45) 60%, transparent 100%); }
+.reel::after  { bottom: 0; background: linear-gradient(to top,    rgba(13,13,13,0.85) 0%, rgba(13,13,13,0.45) 60%, transparent 100%); }
 
 .reels { display: flex; gap: 4px; }
 .reel {
@@ -127,8 +157,7 @@ body {
 .reel::before, .reel::after {
   content: ''; position: absolute; left: 0; right: 0; height: 60px; z-index: 2; pointer-events: none;
 }
-.reel::before { top: 0;    background: linear-gradient(to bottom, #0d0d0d, transparent); }
-.reel::after  { bottom: 0; background: linear-gradient(to top,    #0d0d0d, transparent); }
+/* reel overlays moved to payline section above */
 
 .reel-strip { display: flex; flex-direction: column; will-change: transform; }
 
@@ -342,35 +371,58 @@ window.addEventListener('load', async () => {
   const params  = new URLSearchParams(location.search);
   codigoJuego   = (params.get('code') || '').trim().toUpperCase();
   if (!codigoJuego) { mostrarScreen('error', 'No se encontró el código.'); return; }
+  await _cargarJuego(3); // hasta 3 intentos automáticos
+});
 
+// Carga el juego con reintentos — cubre el caso de GAS frío (puede tardar 20-30s)
+async function _cargarJuego(intentosRestantes) {
+  const loadMsg = document.getElementById('scrLoadingMsg');
+  const intento = 4 - intentosRestantes;
+  if (loadMsg) {
+    loadMsg.textContent = intento === 1
+      ? 'Conectando con el servidor...'
+      : 'Reintentando... (' + intento + '/3)';
+  }
   try {
     const [resCfg, resVal, resPremios] = await Promise.all([
       fetchGAS('getConfigRaspadita'),
       fetchGAS('validarCodigoTragamonedas', { codigo: codigoJuego }),
-      fetchGAS('premiosRaspadita')  // reutilizamos los snacks del inventario
+      fetchGAS('premiosRaspadita')
     ]);
 
     if (resCfg.ok && resCfg.config) { cfg = resCfg.config; aplicarConfig(cfg); }
-    if (!resVal.ok)  { mostrarScreen('error', resVal.error || 'Código inválido.'); return; }
+
+    // Si GAS respondió pero dice error de código — puede ser instancia fría que devolvió basura
+    if (!resVal.ok) {
+      if (intentosRestantes > 1) {
+        if (loadMsg) loadMsg.textContent = 'Servidor iniciando, reintentando...';
+        await new Promise(r => setTimeout(r, 4000));
+        return _cargarJuego(intentosRestantes - 1);
+      }
+      mostrarScreen('error', resVal.error || 'Código no encontrado. Pedile al cajero que verifique.');
+      return;
+    }
     if (resVal.usado || resVal.girosRestantes === 0) { mostrarScreen('usado'); return; }
 
-    // Giros disponibles (viene del GAS)
     girosTotal  = resVal.giros || 1;
     girosUsados = resVal.girosUsados || 0;
-  premiosGanadosSession = [];
+    premiosGanadosSession = [];
 
-    // Construir pool de símbolos: premios especiales + snacks del inventario
     construirSimbolos(resPremios.ok ? resPremios.premios : []);
-
     inicializarCarretes();
     mostrarScreen('juego');
     renderFichas();
 
   } catch(e) {
-    mostrarScreen('error', 'Error de conexión. Verificá tu internet.');
+    if (intentosRestantes > 1) {
+      if (loadMsg) loadMsg.textContent = 'Sin respuesta, reintentando en 5s...';
+      await new Promise(r => setTimeout(r, 5000));
+      return _cargarJuego(intentosRestantes - 1);
+    }
+    mostrarScreen('error', 'No se pudo conectar. Verificá tu internet e intentá de nuevo.');
     console.error(e);
   }
-});
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  FETCH GAS — con redirect:follow igual que el POS
