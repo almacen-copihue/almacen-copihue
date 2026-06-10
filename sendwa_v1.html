@@ -265,13 +265,81 @@ const poolIds = {
 let filtroActivo = 'ofertas';
 let seleccionados = new Set();
 
+// ── LOG HELPERS ──────────────────────────────────────────────
+function _ts() {
+    const d = new Date();
+    return '[' + d.getHours().toString().padStart(2,'0') + ':' +
+                 d.getMinutes().toString().padStart(2,'0') + ':' +
+                 d.getSeconds().toString().padStart(2,'0') + '.' +
+                 d.getMilliseconds().toString().padStart(3,'0') + ']';
+}
+function logInfo(msg)  { console.log( '%c' + _ts() + ' ℹ️  ' + msg, 'color:#3b82f6;font-weight:600'); }
+function logOk(msg)    { console.log( '%c' + _ts() + ' ✅ ' + msg, 'color:#22c55e;font-weight:600'); }
+function logWarn(msg)  { console.warn('%c' + _ts() + ' ⚠️  ' + msg, 'color:#f59e0b;font-weight:600'); }
+function logError(msg) { console.error('%c' + _ts() + ' ❌ ' + msg, 'color:#ef4444;font-weight:700'); }
+function logStep(msg)  { console.groupCollapsed('%c' + _ts() + ' 🔄 ' + msg, 'color:#a855f7;font-weight:700'); }
+function logEnd()      { console.groupEnd(); }
+
+// ── ESTADO VISUAL CON DETALLE ─────────────────────────────────
+let _estadoTimer = null;
+function setEstadoCargando(paso, detalle) {
+    const dot = document.getElementById('dot');
+    dot.className = 'dot cargando';
+    document.getElementById('estado-txt').textContent = paso + (detalle ? '  —  ' + detalle : '');
+}
+
+// Contador regresivo si tarda más de X segundos
+function _iniciarWatchdog(label, msMax) {
+    if (_estadoTimer) clearInterval(_estadoTimer);
+    const t0 = Date.now();
+    _estadoTimer = setInterval(() => {
+        const elapsed = Math.round((Date.now() - t0) / 1000);
+        const left    = Math.max(0, Math.round((msMax - (Date.now() - t0)) / 1000));
+        setEstadoCargando(label, elapsed + 's transcurridos… timeout en ' + left + 's');
+    }, 1000);
+}
+function _clearWatchdog() {
+    if (_estadoTimer) { clearInterval(_estadoTimer); _estadoTimer = null; }
+}
+
+// ── API FETCH CON LOGS ────────────────────────────────────────
 async function _apiFetch(action, data = null) {
     const url = data
         ? API_URL + '?action=' + action + '&data=' + encodeURIComponent(JSON.stringify(data)) + '&t=' + Date.now()
         : API_URL + '?action=' + action + '&t=' + Date.now();
-    const resp = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(API_TIMEOUT_MS) });
+
+    logInfo('→ fetch(' + action + ')  URL: ' + url.substring(0, 90) + '…');
+    const t0 = Date.now();
+
+    let resp;
+    try {
+        resp = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(API_TIMEOUT_MS) });
+    } catch(err) {
+        const ms = Date.now() - t0;
+        if (err.name === 'TimeoutError' || err.name === 'AbortError') {
+            logError('TIMEOUT en ' + action + ' (' + ms + 'ms — límite ' + API_TIMEOUT_MS + 'ms)');
+            throw new Error('Timeout después de ' + Math.round(ms/1000) + 's en ' + action);
+        }
+        logError('Red/fetch fallido en ' + action + ': ' + err.message);
+        throw err;
+    }
+
+    logInfo('← HTTP ' + resp.status + ' en ' + action + ' (' + (Date.now()-t0) + 'ms)  Content-Type: ' + (resp.headers.get('content-type')||'?'));
+
     const text = await resp.text();
-    return JSON.parse(text);
+    logInfo('   Respuesta raw (' + text.length + ' bytes): ' + text.substring(0, 120) + (text.length > 120 ? '…' : ''));
+
+    let parsed;
+    try {
+        parsed = JSON.parse(text);
+    } catch(e) {
+        logError('JSON inválido en ' + action + ': ' + e.message);
+        logError('Texto completo recibido: ' + text.substring(0, 500));
+        throw new Error('Respuesta no es JSON en ' + action + ': ' + e.message);
+    }
+
+    logOk('   Parsed OK — keys: ' + Object.keys(parsed).join(', '));
+    return parsed;
 }
 
 function fmt(n) { const num = typeof n === 'string' ? parseFloat(n) : n; return '$' + (isNaN(num) ? 0 : Math.round(num)).toLocaleString('es-AR'); }
@@ -339,10 +407,22 @@ function badgeCls(tipo) {
 }
 
 async function cargar() {
-    setEstado('cargando', 'Cargando productos y pools...');
+    console.group('%c🚀 SendWA — inicio de carga', 'color:#a855f7;font-size:13px;font-weight:700');
+    logInfo('API_URL: ' + API_URL);
+    logInfo('Timeout configurado: ' + API_TIMEOUT_MS + 'ms');
+
+    // ── PASO 1: pools ────────────────────────────────────────
+    setEstadoCargando('1/2 · Cargando pools de ofertas…');
+    _iniciarWatchdog('1/2 · Cargando pools de ofertas…', API_TIMEOUT_MS);
+    logStep('PASO 1 — getOfertas');
+    const t1 = Date.now();
+    let dataOfertas;
     try {
-        // 1. Cargar pools primero (getOfertas)
-        const dataOfertas = await _apiFetch('getOfertas');
+        dataOfertas = await _apiFetch('getOfertas');
+        _clearWatchdog();
+        logEnd();
+        logOk('PASO 1 completado en ' + (Date.now()-t1) + 'ms  success=' + dataOfertas?.success);
+
         if (dataOfertas && dataOfertas.success) {
             poolIds.relampago.clear();
             poolIds.destacado.clear();
@@ -357,11 +437,36 @@ async function cargar() {
                 poolIds.recientes = new Set(dataOfertas.poolRecienLlegados.map(p => Number(p.id)));
             }
             window._horariosOferta = dataOfertas.horariosOferta || {};
+            logInfo('Pools — relampago:' + poolIds.relampago.size +
+                    ' destacado:' + poolIds.destacado.size +
+                    ' especial:' + poolIds.especial.size +
+                    ' ultimas:' + poolIds.ultimas.size);
+        } else {
+            logWarn('getOfertas devolvió success=false — pools quedarán vacíos');
+            logWarn('Respuesta completa: ' + JSON.stringify(dataOfertas).substring(0,300));
         }
+    } catch(e) {
+        _clearWatchdog();
+        logEnd();
+        logError('PASO 1 FALLÓ: ' + e.message);
+        setEstado('error', '⚠️ Paso 1 fallido: ' + e.message);
+        console.groupEnd();
+        return;
+    }
 
-        // 2. Cargar productos
-        const dataProds = await _apiFetch('getProductos');
+    // ── PASO 2: productos ─────────────────────────────────────
+    setEstadoCargando('2/2 · Cargando catálogo de productos…');
+    _iniciarWatchdog('2/2 · Cargando catálogo de productos…', API_TIMEOUT_MS);
+    logStep('PASO 2 — getProductos');
+    const t2 = Date.now();
+    let dataProds;
+    try {
+        dataProds = await _apiFetch('getProductos');
+        _clearWatchdog();
+        logEnd();
+        logOk('PASO 2 completado en ' + (Date.now()-t2) + 'ms');
         const rows = Array.isArray(dataProds) ? dataProds : (dataProds.productos || dataProds.items || []);
+        logInfo('Filas recibidas: ' + rows.length + '  (Array directo: ' + Array.isArray(dataProds) + ')');
 
         // 3. Cruzar producto + pool
         todosLosProductos = rows
@@ -426,14 +531,21 @@ async function cargar() {
         const conOferta = todosLosProductos.filter(p => p.offerType && p.stock > 0).length;
         const sinStock  = todosLosProductos.filter(p => p.stock <= 0).length;
         const sinOferta = todosLosProductos.filter(p => !p.offerType && p.stock > 0).length;
+        logOk('✅ Carga completa — conOferta:' + conOferta + ' sinOferta:' + sinOferta + ' sinStock:' + sinStock);
         setEstado('ok', conOferta + ' con oferta · ' + sinOferta + ' sin oferta · ' + sinStock + ' sin stock');
         document.getElementById('filtros').style.display = 'flex';
         renderGrilla();
 
     } catch(e) {
-        console.error('API falló:', e);
-        setEstado('error', 'Error conectando: ' + e.message);
+        _clearWatchdog();
+        logEnd();
+        logError('PASO 2 FALLÓ: ' + e.message);
+        setEstado('error', '⚠️ Paso 2 fallido: ' + e.message);
+        console.groupEnd();
+        return;
     }
+
+    console.groupEnd(); // fin grupo carga
 }
 
 
