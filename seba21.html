@@ -36,6 +36,15 @@
 
 ================================================================================
 
+  v386 — 11/06/2026
+  -----------------
+  • MULTICOMPRA: _poolMulticompra (Map id→{tipo,cantidad,precio}) cargado desde
+    data.multicompraActiva en cargarPoolsOfertas(), igual que el resto de pools.
+  • calcularOfertaPOS: nuevo caso 4b MULTICOMPRA — calcula precio dinámico según
+    cantidad en carrito (2X/3X/NX/LLEVÁ-PAGÁ: ciclos×AU + resto×pnormal;
+    2DA_UNIDAD: pares×(pnormal+AU) + resto×pnormal). Sin toggle — siempre activo
+    si el producto está en el pool. tieneOferta=true solo cuando qty >= AT.
+
   v385 — 10/06/2026
   -----------------
   • FIX CRÍTICO REGRESIÓN — _procesarVentaFiado perdió el idVentaFiado en
@@ -565,7 +574,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v385</title>
+    <title>Copihue — POS v386</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -7096,6 +7105,7 @@ const _poolIdsDestacadas = new Set();
 const _poolIdsEspeciales = new Set();
 const _poolIdsUltimas    = new Map(); // id → diasParaVencer
 const _poolCervecero     = new Map(); // id → { descuento, precioPromo }
+const _poolMulticompra   = new Map(); // id → { tipo, cantidad, precio }
 let _limiteRelampago     = 3; // configurable desde GAS → limites.relampago
 let _limiteDestacadas    = 9; // configurable desde GAS → limites.destacadas
 let _limiteEspeciales    = 2; // configurable desde GAS → limites.especiales
@@ -7129,6 +7139,15 @@ async function cargarPoolsOfertas() {
         // Destacadas: code.gs ya aplicó la rotación y el límite — usar directo
         (data.destacadasActivas || []).filter(p => p.categoria !== 'CERVEZAS').forEach(p => _poolIdsDestacadas.add(Number(p.id)));
         _destacadasFiltradas = new Set([..._poolIdsDestacadas]); // sincronizado con backend
+        _poolMulticompra.clear();
+        (data.multicompraActiva || []).forEach(p => {
+            const local = productos.find(lp => lp.id === Number(p.id));
+            if (local) _poolMulticompra.set(local.id, {
+                tipo:     p.MULTICOMPRA_TIPO     || '',
+                cantidad: p.MULTICOMPRA_CANTIDAD || 0,
+                precio:   p.MULTICOMPRA_PRECIO   || 0
+            });
+        });
         (data.especialesActivas || []).filter(p => p.categoria !== 'CERVEZAS').forEach(p => _poolIdsEspeciales.add(Number(p.id)));
         // Solo se usan las seleccionadas manualmente — nunca fallback automático
         // Seba21 usa siempre las seleccionadas (sin restricción de horario) — el horario lo respeta index
@@ -7346,6 +7365,34 @@ function calcularOfertaPOS(producto, qty) {
         r.etiqueta       = `⭐ -10% OFF`;
         r.tieneOferta = true; r.tipoOferta = 'especiales';
     }
+    // 4b. MULTICOMPRA — pool desde getOfertas, cálculo dinámico por cantidad
+    else if (_poolMulticompra.has(producto.id)) {
+        const mc      = _poolMulticompra.get(producto.id);
+        const AT      = mc.cantidad;
+        const AU      = mc.precio;
+        const tipo    = mc.tipo;
+        const pnormal = producto.price;
+        let total     = qty * pnormal; // fallback: precio normal
+
+        if (qty >= AT && AT > 0 && AU > 0) {
+            if (tipo === '2X' || tipo === '3X' || tipo === 'NX' || tipo === 'LLEVÁ-PAGÁ') {
+                const ciclos = Math.floor(qty / AT);
+                const resto  = qty % AT;
+                total = ciclos * AU + resto * pnormal;
+            } else if (tipo === '2DA_UNIDAD') {
+                const pares = Math.floor(qty / 2);
+                const resto  = qty % 2;
+                total = pares * (pnormal + AU) + resto * pnormal;
+            }
+            r.tieneOferta = true;
+        }
+
+        r.precioTotal    = Math.round(total);
+        r.precioUnitario = qty > 0 ? Math.round(total / qty) : pnormal;
+        r.etiqueta       = `📦 ${AT}x $${AU.toLocaleString('es-AR')}`;
+        r.tipoOferta     = 'multicompra';
+    }
+
     // 4. PROMO ACTIVA — col J = "promo activa", col L = precio promo (sin toggle)
     else if (
         String(producto.catOferta || '').toUpperCase() === 'PROMO ACTIVA' &&
