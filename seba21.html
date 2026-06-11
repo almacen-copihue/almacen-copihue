@@ -4,6 +4,116 @@
   COPIHUE POS — CHANGELOG
 ================================================================================
 
+⚠️⚠️⚠️  REGLA CRÍTICA PARA CUALQUIER IA QUE MODIFIQUE ESTE ARCHIVO  ⚠️⚠️⚠️
+================================================================================
+
+  FLUJO DE VENTA FIADO — NUNCA TOCAR SIN VERIFICAR ESTO:
+
+  La función _procesarVentaFiado() (buscar por ese nombre) DEBE contener
+  obligatoriamente ANTES del await _apiFetchUrl('vender', url):
+
+    const idVentaFiado = datosFiado.idFiado + '_v';
+
+  Y el ventaPayload DEBE incluir:
+
+    idVenta: idVentaFiado
+
+  SIN ESTE CAMPO el sistema registra ventas duplicadas en la hoja Ventas
+  y los fiados quedan sin número de ticket. Este bug fue crítico en producción
+  (detectado 07/06/2026, reaparecido 10/06/2026 por reescritura accidental).
+
+  ANTES DE ENTREGAR CUALQUIER VERSIÓN DE ESTE ARCHIVO:
+  1. Buscar "_procesarVentaFiado" y verificar que idVentaFiado esté presente
+  2. Verificar que ventaPayload tenga idVenta: idVentaFiado
+  3. Verificar que el catch encole en ventas_pendientes con idVenta + idFiado
+  4. Verificar que _reenviarVentasPendientes llame actualizarTicketFiado
+     cuando res.ok === true y venta.idFiado existe
+
+  FLUJO DE VENTA NORMAL — también crítico:
+  confirmarVenta() genera idVenta = 'v_' + Date.now() + '_' + random
+  y lo envía en el payload. GAS usa LockService + PropertiesService para
+  deduplicar. NO eliminar el idVenta ni el LockService en Code.gs.
+
+================================================================================
+
+  v385 — 10/06/2026
+  -----------------
+  • FIX CRÍTICO REGRESIÓN — _procesarVentaFiado perdió el idVentaFiado en
+    versiones intermedias (v371→v384). Restaurado idVentaFiado = idFiado+'_v'
+    en el payload de vender. Sin este campo GAS no puede deduplicar → doble
+    registro en hoja Ventas y fiados sin ticket cuando GAS tarda (timeout).
+  • _procesarVentaFiado ahora encola correctamente en ventas_pendientes con
+    idVenta + idFiado cuando falla, y llama _actualizarBadgePendientes().
+
+  v384 — 10/06/2026
+  -----------------
+  • FIX fecha en tarjetas de pendientes Tragamonedas y Raspadita: maneja
+    los 3 formatos que puede devolver GAS (YYYY-MM-DD, Date string completo,
+    otros) y muestra DD/MM/YYYY HH:MM en formato argentino.
+
+  v383 — 10/06/2026
+  -----------------
+  • FIX tarjetas pendientes Tragamonedas: símbolo técnico (ej: "desc3000")
+    oculto — solo se muestra si es emoji o texto legible. Fecha formateada.
+
+  v382 — 10/06/2026
+  -----------------
+  • FIX tragamonedas generador: tragValidarMonto() nunca toca el texto del
+    botón — solo disabled/opacity. Texto manejado únicamente por _tragResetGenerador.
+    Guard en tragGenerarCodigo: if(btn.disabled) return para evitar doble disparo.
+
+  v381 — 10/06/2026
+  -----------------
+  • Tabs Tragamonedas rediseñados como pestañas de carpeta: activo=blanco con
+    borde dorado arriba, inactivo=gris hundido. Reset con cssText para evitar
+    estados residuales de bordes. Contenido con borde que conecta con pestaña activa.
+  • Modal Tragamonedas expandido a 92vh con scroll en contenido de tabs.
+
+  v380 — 10/06/2026
+  -----------------
+  • Tab activo Tragamonedas: borde dorado (#c9a000) arriba para identificar pestaña.
+
+  v379 — 10/06/2026
+  -----------------
+  • Tabs Tragamonedas: primer diseño de carpeta (blanco/gris).
+  • Guard en tragGenerarCodigo para evitar disparo fantasma.
+
+  v378 — 10/06/2026
+  -----------------
+  • FIX texto botón generador Tragamonedas en JS: _tragResetGenerador y
+    tragNuevoCodigo usaban texto viejo "Generar código para el cliente".
+
+  v377 — 10/06/2026
+  -----------------
+  • Tab "Generar código" → "Nuevo código". Botón → "Generar y mostrar QR".
+
+  v376 — 10/06/2026
+  -----------------
+  • FIX ghost "Generando..." en tab Tragamonedas: _tragTabActual trackea tab
+    activo, reset solo cuando cambiás de tab. _tragResetGenerador fuerza
+    disabled 2 veces (inmediato + 80ms). abrirTragamonedas resetea _tragTabActual.
+
+  v375 — 07/06/2026
+  -----------------
+  • Badge rojo encima del FAB Cobrar + banner naranja fijo cuando hay ventas
+    pendientes de sincronizar. _actualizarBadgePendientes() llamada al encolar,
+    al reenviar y al iniciar la app. Mensaje "No repetir la venta" para el vendedor.
+
+  v374 — 07/06/2026
+  -----------------
+  • Tragamonedas: botón "🎰 Jugar acá" abre iframe del juego dentro del modal.
+    Botón "✕ Cerrar" vuelve al estado anterior. El vendedor puede jugar
+    en nombre del cliente si no tiene celular.
+
+  v373 — 07/06/2026
+  -----------------
+  • URL Tragamonedas actualizada: tragamonedas.html → copihue-tragamonedas.html
+
+  v372 — 07/06/2026
+  -----------------
+  • Raspadita pendientes: badge VENCIDO en rojo en buscar código.
+    entregarPremioRaspadita maneja respuesta vencido: badge rojo, sin botón entregar.
+
   v371 — 07/06/2026
   -----------------
   • TRAGAMONEDAS: Modal reestructurado con 2 tabs:
@@ -455,7 +565,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v383</title>
+    <title>Copihue — POS v385</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -10898,6 +11008,9 @@ async function _procesarVentaFiado(datosFiado, itemsSnapshot) {
 
     let stockOk = false;
     let ticketNum = null;
+    // idVenta único para deduplicación en GAS — evita doble registro si hay reintento
+    const idVentaFiado = datosFiado.idFiado + '_v';
+
     try {
         const ventaData = itemsSnapshot.map(i => ({
             id: i.esPeso ? i.idOriginal : i.id,
@@ -10906,18 +11019,41 @@ async function _procesarVentaFiado(datosFiado, itemsSnapshot) {
             precioVenta: i.price, precioModificado: i.precioModificado || false,
             precioOriginal: i.precioOriginal || 0, precioCosto: i.precioCosto || 0
         }));
-        const ventaPayload = { items: ventaData, metodoPago: 'FIADO', vendedor: vendedorActual,
+        const ventaPayload = {
+            items: ventaData, metodoPago: 'FIADO', vendedor: vendedorActual,
             clienteFiado: datosFiado.cliente || '',
-            telefonoFiado: datosFiado.telefono || '' };
+            telefonoFiado: datosFiado.telefono || '',
+            idVenta: idVentaFiado  // ← deduplicación GAS
+        };
         const url = API_URL + '?action=vender&data=' + encodeURIComponent(JSON.stringify(ventaPayload));
         const resp = await _apiFetchUrl('vender', url);
         stockOk = resp.success === true;
         ticketNum = resp.ticket || resp.numeroTicket || null;
-    } catch(e) { console.warn('⚠️ Error venta fiado:', e); }
+    } catch(e) {
+        console.warn('⚠️ Error venta fiado (se reintentará):', e);
+        // Encolar reintento con mismo idVenta para no duplicar
+        try {
+            const ventaDataRetry = itemsSnapshot.map(i => ({
+                id: i.esPeso ? i.idOriginal : i.id,
+                name: i.name, qty: i.qty,
+                esPeso: i.esPeso || false, gramos: i.gramos || 0,
+                precioVenta: i.price, precioModificado: i.precioModificado || false,
+                precioOriginal: i.precioOriginal || 0
+            }));
+            const pendientes = JSON.parse(localStorage.getItem('ventas_pendientes') || '[]');
+            pendientes.push({
+                items: ventaDataRetry, metodoPago: 'FIADO', vendedor: vendedorActual,
+                idVenta: idVentaFiado, idFiado: datosFiado.idFiado, ts: Date.now()
+            });
+            localStorage.setItem('ventas_pendientes', JSON.stringify(pendientes));
+            _actualizarBadgePendientes();
+            setTimeout(() => _reenviarVentasPendientes(), 10000);
+        } catch(e2) { console.warn('⚠️ No se pudo encolar fiado:', e2); }
+    }
 
     datosFiado.ticket = ticketNum;
 
-    // 2. Guardar en hoja FIADOS
+    // 2. Guardar en hoja FIADOS (con o sin ticket — si no hay ticket se actualiza después)
     try {
         const url2 = API_URL + '?action=guardarFiado&data=' + encodeURIComponent(JSON.stringify(datosFiado));
         await _apiFetchUrl('guardarFiado', url2);
@@ -11557,7 +11693,7 @@ async function cargarPendientesRaspadita() {
           <div style="flex:1;min-width:0;">
             <div style="font-weight:800;font-size:0.95rem;color:#222;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${g.premio}</div>
             <div style="font-size:0.8rem;color:#2e7d32;font-weight:700;">$${Number(g.precio).toLocaleString('es-AR')}</div>
-            <div style="font-size:0.72rem;color:#aaa;margin-top:2px;">${(() => { try { const d=new Date(g.fecha+'T'+(g.hora||'00:00:00')); return isNaN(d) ? g.fecha : d.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric'})+' '+(g.hora||'').substring(0,5); } catch(e){ return g.fecha; } })()} · <span style="font-family:monospace;font-weight:700;color:#c0392b;">${g.codigo}</span></div>
+            <div style="font-size:0.72rem;color:#aaa;margin-top:2px;">${(() => { try { const fs=String(g.fecha||'').trim(); const hs=String(g.hora||'').trim().substring(0,5); if(/^\d{4}-\d{2}-\d{2}$/.test(fs)){const p=fs.split('-');return p[2]+'/'+p[1]+'/'+p[0]+(hs?' '+hs:'');} const d=new Date(fs); if(!isNaN(d.getTime())){return String(d.getDate()).padStart(2,'0')+'/'+(d.getMonth()+1).toString().padStart(2,'0')+'/'+d.getFullYear()+(hs?' '+hs:'');} return fs.substring(0,10)+(hs?' '+hs:''); }catch(e){return String(g.fecha||'').substring(0,10);} })()} · <span style="font-family:monospace;font-weight:700;color:#c0392b;">${g.codigo}</span></div>
           </div>
           <button onclick="entregarPremioRaspadita('${g.codigo}')"
                   style="flex-shrink:0;padding:8px 14px;border:none;border-radius:8px;background:#2e7d32;color:white;font-weight:700;font-size:0.82rem;cursor:pointer;white-space:nowrap;">
@@ -11754,18 +11890,28 @@ async function cargarPendientesTragamonedas() {
     }
     const lista = document.getElementById('tragListaItems');
     lista.innerHTML = res.pendientes.map(g => {
-      // Formatear fecha legible
+      // Formatear fecha legible — GAS puede devolver varios formatos
       let fechaLinda = '';
       try {
-        const d = new Date(g.fecha + 'T' + (g.hora || '00:00:00'));
-        if (!isNaN(d)) {
-          fechaLinda = d.toLocaleDateString('es-AR', {day:'2-digit',month:'2-digit',year:'numeric'})
-                     + ' ' + (g.hora || '').substring(0,5);
+        const fs = String(g.fecha || '').trim();
+        const hs = String(g.hora  || '').trim().substring(0,5);
+        // Si ya viene YYYY-MM-DD usarlo directo
+        if (/^\d{4}-\d{2}-\d{2}$/.test(fs)) {
+          const p = fs.split('-');
+          fechaLinda = p[2] + '/' + p[1] + '/' + p[0] + (hs ? ' ' + hs : '');
         } else {
-          // Fallback si la fecha ya es string simple
-          fechaLinda = (g.fecha || '').substring(0,10) + ' ' + (g.hora || '').substring(0,5);
+          // Puede venir como Date string de GAS — parsear y formatear
+          const d = new Date(fs);
+          if (!isNaN(d.getTime())) {
+            const dd = String(d.getDate()).padStart(2,'0');
+            const mm = String(d.getMonth()+1).padStart(2,'0');
+            const yy = d.getFullYear();
+            fechaLinda = dd + '/' + mm + '/' + yy + (hs ? ' ' + hs : '');
+          } else {
+            fechaLinda = fs.substring(0,10) + (hs ? ' ' + hs : '');
+          }
         }
-      } catch(e) { fechaLinda = g.fecha + ' ' + g.hora; }
+      } catch(e) { fechaLinda = String(g.fecha||'').substring(0,10) + ' ' + String(g.hora||'').substring(0,5); }
       // Símbolo: ocultar si es el id técnico (contiene guion bajo o empieza con letra minúscula sin emoji)
       const simboloLindo = g.simbolo && !g.simbolo.includes('_') && !/^[a-z]/.test(g.simbolo) ? g.simbolo : '';
       return `
