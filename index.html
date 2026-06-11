@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Almacén Copihue v142</title>
+    <title>Almacén Copihue v143</title>
     
     <!-- META TAGS PARA PWA -->
     <meta name="theme-color" content="#2e7d32" id="meta-theme-color">
@@ -2399,7 +2399,7 @@
 
 <script>
 // ========== VERSIÓN Y CONFIGURACIÓN ==========
-const APP_VERSION = 'copihue-index-v115';
+const APP_VERSION = 'copihue-index-v116';
 // Tag versión automático con fecha
 // versionTag se actualiza desde config_sistema (campo 'version')
 
@@ -2528,6 +2528,7 @@ let poolRelampago = [];
 let _relampagoActivoBackend = []; // Los 3 del día según code.gs
 let _poolRecienLlegados = []; // Recién llegados desde Historial
 let _poolUltimasSeleccion = []; // Últimas Unidades — selección manual desde seba21
+let _poolMulticompra = [];      // Multicompra — array desde getOfertas
 let _limiteRecienLlegados = 12; // configurable desde config_sistema → RECIEN_LLEGADOS_LIMITE
 let _destacadasBackend = []; // IDs de destacadas rotadas del día según code.gs
 let _limiteDestacadas = 9; // configurable desde config_sistema → "máximo destacadas"
@@ -4025,6 +4026,7 @@ async function loadProductsFromAPI() {
                 if (dOfertas.poolRecienLlegados) _poolRecienLlegados = dOfertas.poolRecienLlegados;
                 if (dOfertas.limiteRecienLlegados) _limiteRecienLlegados = dOfertas.limiteRecienLlegados;
                 if (dOfertas.ultimasSeleccionadas) _poolUltimasSeleccion = dOfertas.ultimasSeleccionadas;
+                if (dOfertas.multicompraActiva) _poolMulticompra = dOfertas.multicompraActiva;
                 if (dOfertas.horariosOferta) {
                     _horariosOferta = dOfertas.horariosOferta;
                     const h = _horariosOferta;
@@ -4654,6 +4656,21 @@ function addToCart(productId, tipoForzado) {
             console.log('✅ Producto tiene oferta RELÁMPAGO:', configRelampago.nombre);
         }
     }
+    // 4. Verificar MULTICOMPRA
+    else {
+        const mc = _poolMulticompra.find(m => Number(m.id) === productId);
+        if (mc && mc.MULTICOMPRA_CANTIDAD > 0 && mc.MULTICOMPRA_PRECIO > 0) {
+            ofertaConfig = {
+                nombre:    `📦 ${mc.MULTICOMPRA_TIPO}`,
+                tipo:      'multicompra',
+                mcTipo:    mc.MULTICOMPRA_TIPO,
+                mcCantidad: mc.MULTICOMPRA_CANTIDAD,
+                mcPrecio:   mc.MULTICOMPRA_PRECIO,
+                eslogan:   `📦 ${mc.MULTICOMPRA_CANTIDAD}x $${mc.MULTICOMPRA_PRECIO.toLocaleString('es-AR')}`
+            };
+            console.log('✅ Producto tiene oferta MULTICOMPRA:', mc.MULTICOMPRA_TIPO);
+        }
+    }
     
     console.log('🔍 Ofertas detectadas:', {
         esOfertaEspecial,
@@ -4880,6 +4897,39 @@ function renderCartItems() {
             ahorroItem = precioNormalTotal - precioTotalItem;
             badge = `-${item.oferta.descuento}%`;
             formula = `<div style="color:#b71c1c;font-size:0.7rem;">👉 -${item.oferta.descuento}% c/u</div>`;
+        }
+        // ===== MULTICOMPRA =====
+        else if (item.oferta && item.oferta.tipo === 'multicompra') {
+            esProductoNormal = false;
+            const AT = item.oferta.mcCantidad;
+            const AU = item.oferta.mcPrecio;
+            const tipo = item.oferta.mcTipo;
+            const pnormal = product.price;
+            let total = item.quantity * pnormal;
+
+            if (item.quantity >= AT && AT > 0 && AU > 0) {
+                if (tipo === '2X' || tipo === '3X' || tipo === 'NX' || tipo === 'LLEVÁ-PAGÁ') {
+                    const ciclos = Math.floor(item.quantity / AT);
+                    const resto  = item.quantity % AT;
+                    total = ciclos * AU + resto * pnormal;
+                } else if (tipo === '2DA_UNIDAD') {
+                    const pares = Math.floor(item.quantity / 2);
+                    const resto  = item.quantity % 2;
+                    total = pares * (pnormal + AU) + resto * pnormal;
+                }
+                ahorroItem = precioNormalTotal - Math.round(total);
+                badgeColor = '#6a1b9a';
+                badge = `📦${AT}x`;
+                formula = `<div style="color:#6a1b9a;font-size:0.7rem;">👉 ${AT}x $${AU.toLocaleString('es-AR')}</div>`;
+                if (item.quantity % AT !== 0) {
+                    formula += `<div style="color:#666;font-size:0.65rem;">+${item.quantity % AT} sin promo</div>`;
+                }
+            } else {
+                badgeColor = '#9c4dcc';
+                badge = `📦`;
+                formula = `<div style="color:#9c4dcc;font-size:0.7rem;">👉 Agregá ${AT - item.quantity} más para activar</div>`;
+            }
+            precioTotalItem = Math.round(total);
         }
         // ===== COMBOS (PROMOS) =====
         else if (item.esPromo) {
