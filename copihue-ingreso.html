@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>v3 · Copihue · Ingreso</title>
+  <title>v4 · Copihue · Ingreso</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -251,7 +251,7 @@
 <div class="card">
   <h3>
     <span>📦 Ingreso Mercadería</span>
-    <span class="version">v3</span>
+    <span class="version">v4</span>
   </h3>
 
   <!-- PRODUCTO -->
@@ -323,6 +323,10 @@
 
 <script>
 // ── Changelog ──────────────────────────────────────────────────────────────────
+// v4 — Fix: categorías nunca quedaban vacías. Se agrega fallback hardcodeado con
+//       las categorías reales de Copihue para cuando el GAS no las devuelve.
+//       Fix: dropdown de categoría se renderiza al abrir (focus/chevron), no solo
+//       al escribir. Así el listado completo aparece de entrada.
 // v3 — Categorías dinámicas desde GAS (no más hardcode); widget con búsqueda.
 //       Al seleccionar producto existente se precargan TODOS los datos del último
 //       ingreso (costo, venta, proveedor, categoría) con banner visual verde.
@@ -340,6 +344,29 @@ let _catFiltradas = [];   // subset según búsqueda
 let _esNuevo      = false;
 let _infoTimer    = null;
 let _catAbierta   = false;
+
+// Fallback: categorías reales de Copihue (se usa solo si el GAS no las devuelve)
+const CATS_FALLBACK = [
+  { value:'ALMACEN',          emoji:'📦', label:'Almacén' },
+  { value:'ALFAJORES',        emoji:'🍫', label:'Alfajores' },
+  { value:'GALLETITAS',       emoji:'🍪', label:'Galletitas' },
+  { value:'GOLOSINAS',        emoji:'🍬', label:'Golosinas' },
+  { value:'SNACKS',           emoji:'🍿', label:'Snacks' },
+  { value:'GASEOSAS',         emoji:'🥤', label:'Gaseosas' },
+  { value:'BEBIDAS',          emoji:'🧃', label:'Bebidas' },
+  { value:'CERVEZAS',         emoji:'🍺', label:'Cervezas' },
+  { value:'VINOS',            emoji:'🍷', label:'Vinos' },
+  { value:'LACTEOS',          emoji:'🥛', label:'Lácteos' },
+  { value:'HELADERA',         emoji:'🧊', label:'Heladera' },
+  { value:'FIAMBRES',         emoji:'🥩', label:'Fiambres' },
+  { value:'FRUTAS Y VERDURAS',emoji:'🥦', label:'Frutas y Verduras' },
+  { value:'PANADERIA',        emoji:'🍞', label:'Panadería' },
+  { value:'PANIFICADOS',      emoji:'🥐', label:'Panificados' },
+  { value:'CONDIMENTOS',      emoji:'🧂', label:'Condimentos' },
+  { value:'LIMPIEZA',         emoji:'🧹', label:'Limpieza' },
+  { value:'HIGIENE PERSONAL', emoji:'🧴', label:'Higiene Personal' },
+  { value:'OTROS',            emoji:'🔹', label:'Otros' },
+];
 
 // ── INIT ───────────────────────────────────────────────────────────────────────
 async function init() {
@@ -374,18 +401,27 @@ async function init() {
         };
       });
     } else {
-      // Fallback: extraer categorías únicas del listado de productos
+      // Intentar extraer de los productos mismos
       const catSet = new Set();
       rawProductos.forEach(p => { if (p && p.categoria) catSet.add(p.categoria.trim().toUpperCase()); });
-      _categorias = [...catSet].filter(Boolean).sort().map(c => ({ value: c, label: c, emoji: '' }));
+      if (catSet.size > 0) {
+        _categorias = [...catSet].filter(Boolean).sort().map(c => {
+          // Intentar enriquecer con emoji del fallback
+          const fb = CATS_FALLBACK.find(f => f.value === c);
+          return fb || { value: c, label: c, emoji: '' };
+        });
+      } else {
+        // Sin datos del GAS: usar fallback hardcodeado
+        _categorias = CATS_FALLBACK;
+      }
     }
 
     buildCategoriaWidget();
 
   } catch(e) {
     console.warn('Error cargando datos:', e);
-    // Mostrar widget igualmente (vacío) para no bloquear al usuario
-    _categorias = [];
+    // Usar fallback para no bloquear al usuario
+    _categorias = CATS_FALLBACK;
     buildCategoriaWidget();
   }
 }
@@ -426,6 +462,13 @@ function filtrarCategorias() {
 }
 
 function abrirCatList() {
+  // Re-renderizar con el texto actual del input (puede estar vacío = mostrar todo)
+  const q = document.getElementById('categoriaInput').value;
+  const qUp = q.trim().toUpperCase();
+  _catFiltradas = qUp
+    ? _categorias.filter(c => c.label.toUpperCase().includes(qUp) || c.value.includes(qUp))
+    : [..._categorias];
+  renderCatList(_catFiltradas, q);
   document.getElementById('catList').classList.add('open');
   _catAbierta = true;
 }
