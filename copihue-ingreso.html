@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>v4 · Copihue · Ingreso</title>
+  <title>v5 · Copihue · Ingreso</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -251,7 +251,7 @@
 <div class="card">
   <h3>
     <span>📦 Ingreso Mercadería</span>
-    <span class="version">v4</span>
+    <span class="version">v5</span>
   </h3>
 
   <!-- PRODUCTO -->
@@ -323,6 +323,11 @@
 
 <script>
 // ── Changelog ──────────────────────────────────────────────────────────────────
+// v5 — Fix crítico: GAS devuelve campo 'category' (inglés) no 'categoria'.
+//       El fallback de extracción desde productos nunca encontraba nada porque
+//       buscaba p.categoria. Ahora lee p.category || p.categoria.
+//       Además: _categorias se inicializa con CATS_FALLBACK de entrada (no vacío)
+//       así el widget nunca aparece vacío mientras init() carga.
 // v4 — Fix: categorías nunca quedaban vacías. Se agrega fallback hardcodeado con
 //       las categorías reales de Copihue para cuando el GAS no las devuelve.
 //       Fix: dropdown de categoría se renderiza al abrir (focus/chevron), no solo
@@ -336,16 +341,7 @@
 
 const API_URL = 'https://script.google.com/macros/s/AKfycbzWZzDvdGfW8vd2-FpQolT852cdPMeHbfKugn9DBOlju75bE1D0SUNB5EKEDOsI2vP4lA/exec';
 
-let _productos    = [];   // array de strings (nombres)
-let _productosMap = {};   // nombre → objeto completo {categoria, precioCosto, precioVenta, proveedor, ...}
-let _proveedores  = [];
-let _categorias   = [];   // [{value, emoji, label}] desde GAS
-let _catFiltradas = [];   // subset según búsqueda
-let _esNuevo      = false;
-let _infoTimer    = null;
-let _catAbierta   = false;
-
-// Fallback: categorías reales de Copihue (se usa solo si el GAS no las devuelve)
+// Fallback: categorías reales de Copihue (se usa si el GAS no las devuelve)
 const CATS_FALLBACK = [
   { value:'ALMACEN',          emoji:'📦', label:'Almacén' },
   { value:'ALFAJORES',        emoji:'🍫', label:'Alfajores' },
@@ -367,6 +363,15 @@ const CATS_FALLBACK = [
   { value:'HIGIENE PERSONAL', emoji:'🧴', label:'Higiene Personal' },
   { value:'OTROS',            emoji:'🔹', label:'Otros' },
 ];
+
+let _productos    = [];   // array de strings (nombres)
+let _productosMap = {};   // nombre → objeto completo {category, precioCosto, precioVenta, proveedor, ...}
+let _proveedores  = [];
+let _categorias   = CATS_FALLBACK.slice(); // empieza con fallback; init() lo reemplaza con datos reales
+let _catFiltradas = [];   // subset según búsqueda
+let _esNuevo      = false;
+let _infoTimer    = null;
+let _catAbierta   = false;
 
 // ── INIT ───────────────────────────────────────────────────────────────────────
 async function init() {
@@ -402,8 +407,12 @@ async function init() {
       });
     } else {
       // Intentar extraer de los productos mismos
+      // NOTA: el GAS devuelve el campo como 'category' (inglés)
       const catSet = new Set();
-      rawProductos.forEach(p => { if (p && p.categoria) catSet.add(p.categoria.trim().toUpperCase()); });
+      rawProductos.forEach(p => {
+        const cat = p && (p.category || p.categoria);
+        if (cat) catSet.add(cat.trim().toUpperCase());
+      });
       if (catSet.size > 0) {
         _categorias = [...catSet].filter(Boolean).sort().map(c => {
           // Intentar enriquecer con emoji del fallback
@@ -411,7 +420,7 @@ async function init() {
           return fb || { value: c, label: c, emoji: '' };
         });
       } else {
-        // Sin datos del GAS: usar fallback hardcodeado
+        // Sin datos del GAS: mantener fallback ya cargado
         _categorias = CATS_FALLBACK;
       }
     }
@@ -426,6 +435,9 @@ async function init() {
   }
 }
 init();
+// Construir el widget de categoría de inmediato con el fallback —
+// init() lo enriquecerá con datos reales del GAS cuando termine
+buildCategoriaWidget();
 
 // ── WIDGET CATEGORÍA ────────────────────────────────────────────────────────────
 function buildCategoriaWidget() {
