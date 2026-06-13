@@ -4,29 +4,24 @@
   COPIHUE POS — CHANGELOG
 ================================================================================
 
-  v371 — 31/05/2026
+  v369 — 07/06/2026
   -----------------
-  • MEJORA display modal peso: muestra precio/kg bajo los gramos calculados.
-    Si tiene promo activa: badge violeta con etiqueta + precio tachado + precio promo.
-    Si es precio normal: solo precio/kg en gris. Se actualiza en tiempo real
-    mientras se tipea el monto.
+  • FIX CRÍTICO FIADO — doble registro en hoja Ventas:
+    La llamada 'vender' de un fiado no incluía idVenta, por lo que si GAS
+    tardaba y el timeout disparaba, la venta quedaba encolada en
+    ventas_pendientes y _reenviarVentasPendientes() la reenviaba generando
+    una segunda fila con ticket diferente (aunque GAS ya la había procesado).
+    Fix: _procesarVentaFiado ahora genera idVentaFiado = idFiado + '_v' y
+    lo incluye en el payload. Si el primer intento falla, encola con ese
+    mismo idVenta — GAS puede deduplicar por idVenta.
+  • FIX CRÍTICO FIADO — ticket null cuando GAS tarda:
+    Si el primer intento de 'vender' en el fiado fallaba por timeout,
+    ticketNum quedaba null y se guardaba el fiado sin número de ticket.
+    Fix: cuando _reenviarVentasPendientes() logra enviar una venta con
+    idFiado, llama a la nueva acción GAS 'actualizarTicketFiado' para
+    poner el ticket correcto en la fila de la hoja Fiados.
 
-
-  -----------------
-  • FIX gramos en display y carrito: actualizarDisplayPeso() y confirmarPeso()
-    usaban pesoProductoActual.price ($17.200) para calcular gramos → con $16.100
-    ingresado mostraba 936gr en vez de 1000gr. Ahora usan precio promo (normal)
-    cuando hay oferta activa. La boleta refleja los gramos reales correctos.
-
-
-  -----------------
-  • FIX precioOriginal en peso: los gramos se calculaban con price ($17.200)
-    pero el cliente paga a normal ($16.100) → gramos inflados → precioOriginal
-    igual a price → ahorro = $0. Ahora gramosReales = totalPesos / normal × 1000
-    y precioOriginal = gramosReales × price / 1000. Ejemplo 1292gr:
-    tachado $22.662, pagado $20.801, ahorro $1.861.
-
-
+  v368 — 30/05/2026
   -----------------
   • FIX precio tachado en modal para productos por peso: precioOriginal ahora
     es proporcional a los gramos reales (price/kg ÷ 1000 × gramos) en vez
@@ -1409,6 +1404,8 @@
         <div class="header-right" style="width:100%;justify-content:space-between;gap:4px;">
             <a href="copihue-horario.html?v=2" class="btn-resumen" title="Horario" style="background:rgba(0,188,212,0.3);border-color:rgba(0,188,212,0.6);flex:1;text-align:center;text-decoration:none;display:flex;align-items:center;justify-content:center;">🕐</a>
             <button class="btn-resumen" onclick="location.href='copihue-herramientas.html'" title="Herramientas" style="background:rgba(255,193,7,0.3);border-color:rgba(255,193,7,0.6);flex:1;text-align:center;">🧰</button>
+            <button class="btn-resumen" onclick="abrirRaspadita()" title="Raspadita - Entregar premio" style="background:rgba(192,57,43,0.25);border-color:rgba(192,57,43,0.6);flex:1;text-align:center;">🃏</button>
+            <button class="btn-resumen" onclick="abrirTragamonedas()" title="Tragamonedas - Generar código" style="background:rgba(245,197,24,0.2);border-color:rgba(245,197,24,0.6);flex:1;text-align:center;">🎰</button>
             <button class="btn-resumen" id="btnActualizar" onclick="forzarActualizacion()" title="Actualizar" style="background:rgba(105,240,174,0.2);border-color:rgba(105,240,174,0.5);flex:1;text-align:center;">🔄</button>
             <button class="btn-resumen" id="btnNotifPos" onclick="abrirNotifPos()" title="Notificaciones"
                     style="background:rgba(255,193,7,0.15);border-color:rgba(255,193,7,0.5);flex:1;text-align:center;position:relative;display:flex;align-items:center;justify-content:center;">
@@ -1707,6 +1704,138 @@
     </div>
 </div>
 
+<!-- MODAL TRAGAMONEDAS — GENERAR CÓDIGO -->
+<div class="modal-bg" id="modalTragamonedas" onclick="if(event.target===this)cerrarTragamonedas()" style="z-index:5100;">
+    <div class="modal-sheet" style="padding-bottom:28px;">
+        <div class="modal-handle"></div>
+        <div class="modal-header">
+            <span class="modal-titulo">🎰 Tragamonedas — Generar código</span>
+            <button class="modal-cerrar" onclick="cerrarTragamonedas()">✕</button>
+        </div>
+        <div style="padding:16px 20px 0;">
+
+            <div style="background:#fff8e1;border:1px solid #ffe082;border-radius:10px;padding:12px 14px;margin-bottom:16px;font-size:0.82rem;color:#795548;line-height:1.5;">
+                🛒 Solo para compras <strong>mayores a $10.000</strong><br>
+                Cada compra tiene <strong>1 intento</strong>.
+            </div>
+
+            <div style="font-size:0.72rem;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Monto de la compra</div>
+            <div style="position:relative;margin-bottom:16px;">
+                <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);font-size:1.2rem;font-weight:700;color:#aaa;">$</span>
+                <input type="number" id="tragMontoInput" placeholder="0"
+                       inputmode="numeric" min="10000"
+                       style="width:100%;font-size:1.4rem;font-weight:900;border:2px solid #e0e0e0;border-radius:10px;padding:10px 14px 10px 32px;color:#222;"
+                       oninput="tragValidarMonto()">
+            </div>
+            <div id="tragMontoAviso" style="font-size:0.78rem;color:#e53935;margin-top:-10px;margin-bottom:12px;display:none;">
+                ⚠️ El monto mínimo es $10.000
+            </div>
+
+            <button id="tragBtnGenerar" onclick="tragGenerarCodigo()"
+                    style="width:100%;padding:14px;border:none;border-radius:12px;background:#c9a000;color:white;font-size:1rem;font-weight:700;cursor:pointer;margin-bottom:14px;opacity:0.5;"
+                    disabled>
+                🎰 Generar código para el cliente
+            </button>
+
+            <div id="tragResultado" style="display:none;">
+                <div style="background:#1a1a1a;border:2px solid #c9a000;border-radius:14px;padding:18px;text-align:center;margin-bottom:12px;">
+                    <div style="font-size:0.65rem;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:2px;margin-bottom:6px;">Código generado</div>
+                    <div id="tragCodigo" style="font-family:monospace;font-size:2rem;font-weight:900;color:#f5c518;letter-spacing:6px;margin-bottom:12px;"></div>
+                    <div id="tragQR" style="margin:0 auto 12px;width:180px;height:180px;"></div>
+                    <div style="font-size:0.72rem;color:rgba(255,255,255,0.4);margin-bottom:4px;">El cliente escanea con el celu</div>
+                    <div id="tragLink" style="font-size:0.68rem;color:#c9a000;word-break:break-all;"></div>
+                </div>
+                <button onclick="tragNuevoCodigo()"
+                        style="width:100%;padding:11px;border:1px solid #ddd;border-radius:10px;background:#fafafa;color:#666;font-size:0.85rem;font-weight:600;cursor:pointer;">
+                    🔄 Generar otro código
+                </button>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<!-- MODAL RASPADITA — ENTREGAR PREMIO -->
+<div class="modal-bg" id="modalRaspadita" onclick="if(event.target===this)cerrarRaspadita()" style="z-index:5000;">
+    <div class="modal-sheet" style="padding-bottom:24px;">
+        <div class="modal-handle"></div>
+        <div class="modal-header">
+            <span class="modal-titulo">🎰 Raspadita — Premios</span>
+            <button class="modal-cerrar" onclick="cerrarRaspadita()">✕</button>
+        </div>
+        <div style="padding:0 16px;">
+
+            <!-- TABS -->
+            <div style="display:flex;gap:6px;margin-bottom:14px;margin-top:12px;">
+                <button id="raspTab1" onclick="raspCambiarTab(1)"
+                        style="flex:1;padding:9px 0;border:none;border-radius:8px;font-weight:700;font-size:0.85rem;cursor:pointer;background:#c0392b;color:white;">
+                    📋 Pendientes
+                </button>
+                <button id="raspTab2" onclick="raspCambiarTab(2)"
+                        style="flex:1;padding:9px 0;border:none;border-radius:8px;font-weight:700;font-size:0.85rem;cursor:pointer;background:#f0ece0;color:#888;">
+                    🔍 Buscar código
+                </button>
+            </div>
+
+            <!-- TAB 1: PENDIENTES -->
+            <div id="raspTabContent1">
+                <div id="raspListaCargando" style="text-align:center;padding:20px;color:#aaa;font-size:0.85rem;">
+                    Cargando...
+                </div>
+                <div id="raspListaVacia" style="display:none;text-align:center;padding:20px;">
+                    <div style="font-size:2rem;">🎉</div>
+                    <div style="font-weight:700;color:#2e7d32;margin-top:6px;">Sin premios pendientes</div>
+                    <div style="font-size:0.8rem;color:#aaa;margin-top:4px;">Todos los premios fueron entregados</div>
+                </div>
+                <div id="raspListaItems" style="overflow-y:auto;max-height:55vh;display:none;"></div>
+            </div>
+
+            <!-- TAB 2: BUSCAR CÓDIGO -->
+            <div id="raspTabContent2" style="display:none;">
+                <div style="font-size:0.72rem;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Código del cliente</div>
+                <div style="display:flex;gap:8px;margin-bottom:12px;">
+                    <input type="text" id="raspCodigoInput"
+                           placeholder="COP-XXXXX"
+                           maxlength="9"
+                           autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false"
+                           style="flex:1;font-size:1.4rem;font-weight:900;letter-spacing:4px;text-transform:uppercase;border:2px solid #d0c8b0;border-radius:10px;padding:10px 14px;font-family:monospace;color:#c0392b;"
+                           oninput="this.value=this.value.toUpperCase()"
+                           onkeydown="if(event.key==='Enter')buscarCodigoRaspadita()">
+                    <button onclick="buscarCodigoRaspadita()"
+                            style="padding:10px 18px;border:none;border-radius:10px;background:#c0392b;color:white;font-weight:700;font-size:1rem;cursor:pointer;">🔍</button>
+                </div>
+                <div id="raspEstado" style="display:none;"></div>
+                <div id="raspPanel" style="display:none;">
+                    <div style="background:#fdf6e3;border:2px solid #d4a017;border-radius:12px;padding:14px 16px;margin-bottom:12px;">
+                        <div style="font-size:0.65rem;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">Premio</div>
+                        <div id="raspPremioNombre" style="font-size:1.05rem;font-weight:800;color:#222;margin-bottom:2px;"></div>
+                        <div id="raspPremioValor"  style="font-size:0.88rem;color:#2e7d32;font-weight:700;margin-bottom:8px;"></div>
+                        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
+                            <div>
+                                <div style="font-size:0.62rem;color:#aaa;text-transform:uppercase;letter-spacing:1px;">Código</div>
+                                <div id="raspCodigo" style="font-family:monospace;font-size:0.95rem;font-weight:900;color:#c0392b;letter-spacing:3px;"></div>
+                            </div>
+                            <div>
+                                <div style="font-size:0.62rem;color:#aaa;text-transform:uppercase;letter-spacing:1px;">Fecha</div>
+                                <div id="raspFecha" style="font-size:0.82rem;font-weight:600;color:#555;"></div>
+                            </div>
+                            <span id="raspEstadoBadge" style="padding:4px 10px;border-radius:20px;font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;"></span>
+                        </div>
+                    </div>
+                    <button id="raspBtnEntregar" onclick="entregarPremioRaspadita(null)"
+                            style="width:100%;padding:13px;border:none;border-radius:12px;background:#2e7d32;color:white;font-size:1rem;font-weight:700;cursor:pointer;margin-bottom:8px;">
+                        ✅ Marcar como ENTREGADO
+                    </button>
+                    <div id="raspMsgEntregado" style="display:none;text-align:center;padding:12px;background:#e8f5e9;border-radius:10px;font-weight:700;color:#2e7d32;">
+                        ✅ Premio entregado correctamente
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
 <!-- MODAL INGRESO MERCADERÍA -->
 <div class="modal-bg" id="modalIngreso" onclick="cerrarModalIngreso(event)">
     <div class="modal-sheet" style="padding-bottom:20px;">
@@ -1952,9 +2081,8 @@
         <div class="peso-producto-nombre" id="pesoNombre"></div>
         <div class="peso-display">
             <div class="peso-gramos" id="pesoGramos">$0</div>
-            <div class="peso-unit">pesos ingresados</div>
+            <div class="peso-unit">pesos</div>
             <div class="peso-precio-calculado" id="pesoPrecio">0 gr</div>
-            <div id="pesoPrecioKg" style="font-size:0.85rem;color:var(--subtexto);margin-top:4px;min-height:1.2em;"></div>
         </div>
         <div class="peso-teclado">
             <button class="peso-tecla" onclick="pesoTecla('1')">1</button>
@@ -4336,6 +4464,16 @@ async function _reenviarVentasPendientes() {
             const resp = await _apiFetchUrl('vender', url);
             if (resp.success) {
                 console.log('✅ Venta pendiente enviada correctamente:', venta.ts);
+                // Si era una venta de fiado, actualizar el ticket en hoja Fiados
+                if (venta.idFiado && (resp.ticket || resp.numeroTicket)) {
+                    try {
+                        const ticketRetry = resp.ticket || resp.numeroTicket;
+                        const updatePayload = { idFiado: venta.idFiado, ticket: ticketRetry };
+                        const urlFiadoTicket = API_URL + '?action=actualizarTicketFiado&data=' + encodeURIComponent(JSON.stringify(updatePayload));
+                        _apiFetchUrl('actualizarTicketFiado', urlFiadoTicket).catch(e2 =>
+                            console.warn('⚠️ No se pudo actualizar ticket en fiado:', e2));
+                    } catch(e2) {}
+                }
                 // Marcar como rebajada en el historial local
                 const key = _getDateKeyAR();
                 const keyStore = 'ventas_dia_' + key;
@@ -4755,11 +4893,7 @@ function pesoBorrar() {
 
 function actualizarDisplayPeso() {
     const totalPesos = parseInt(pesoValor) || 0;
-    const ofertaDisplay = pesoProductoActual ? calcularOfertaPOS(pesoProductoActual, 1) : null;
-    const tieneOferta = ofertaDisplay?.tieneOferta;
-    const precioPorKg = pesoProductoActual
-        ? (tieneOferta ? (pesoProductoActual.normal || pesoProductoActual.price) : pesoProductoActual.price)
-        : 0;
+    const precioPorKg = pesoProductoActual ? pesoProductoActual.price : 0;
     const gramos = precioPorKg > 0 ? Math.round((totalPesos / precioPorKg) * 1000) : 0;
 
     document.getElementById('pesoGramos').textContent = totalPesos > 0
@@ -4769,54 +4903,36 @@ function actualizarDisplayPeso() {
         ? gramos + ' gr'
         : '0 gr';
     document.getElementById('pesoOkBtn').disabled = totalPesos <= 0;
-
-    // Info precio/kg + badge promo
-    const infoEl = document.getElementById('pesoPrecioKg');
-    if (infoEl && pesoProductoActual) {
-        if (tieneOferta) {
-            infoEl.innerHTML = `
-                <span style="background:#6a1b9a;color:#fff;font-size:0.7rem;font-weight:800;
-                    padding:2px 8px;border-radius:10px;margin-right:6px;">
-                    ${ofertaDisplay.etiqueta}
-                </span>
-                <span style="text-decoration:line-through;color:#bbb;margin-right:4px;">
-                    $${pesoProductoActual.price.toLocaleString('es-AR')}/kg
-                </span>
-                <span style="color:#6a1b9a;font-weight:800;">
-                    $${precioPorKg.toLocaleString('es-AR')}/kg
-                </span>`;
-        } else {
-            infoEl.innerHTML = `<span style="color:var(--subtexto);">$${precioPorKg.toLocaleString('es-AR')}/kg</span>`;
-        }
-    }
 }
 
 function confirmarPeso() {
     const totalPesos = parseInt(pesoValor, 10) || 0;
     if (totalPesos <= 0 || !pesoProductoActual) return;
 
-    const precioPorKg = pesoProductoActual.price;
+    // Calcular oferta ANTES de usar el precio por kg
     const oferta = calcularOfertaPOS(pesoProductoActual, 1);
     const tieneOferta = oferta.tieneOferta;
-    // Precio real que cobra el cliente (promo si tiene, normal si no)
-    const precioPorKgPromo = tieneOferta ? (pesoProductoActual.normal || precioPorKg) : precioPorKg;
-    // Gramos reales basados en el precio que pagó el cliente
-    const gramosReales = precioPorKgPromo > 0 ? Math.round((totalPesos / precioPorKgPromo) * 1000) : 0;
+
+    // Si hay promo/combo activo, usar precio promo como precio por kg
+    const precioPorKg = tieneOferta ? oferta.precioUnitario : pesoProductoActual.price;
+    const gramos = precioPorKg > 0 ? Math.round((totalPesos / precioPorKg) * 1000) : 0;
     const costoPorKg = pesoProductoActual.precioCosto || 0;
-    const costoCalculado = costoPorKg > 0 ? Math.round((costoPorKg / 1000) * gramosReales) : 0;
-    // precioOriginal proporcional: gramosReales × precio sin descuento / 1000
+    const costoCalculado = costoPorKg > 0 ? Math.round((costoPorKg / 1000) * gramos) : 0;
+    // precioOriginal proporcional a los gramos reales (precio sin descuento × gramos / 1000)
     const precioOrigProporcional = tieneOferta
-        ? Math.round((precioPorKg / 1000) * gramosReales)
+        ? Math.round((pesoProductoActual.price / 1000) * gramos)
         : 0;
 
+    // Si ya hay un item de peso del mismo producto, acumular
     const existente = ventaActual.find(i => i.esPeso && i.idOriginal === pesoProductoActual.id);
     if (existente) {
-        const gramosNuevos = existente.gramos + gramosReales;
+        const gramosNuevos = existente.gramos + gramos;
         const precioNuevo  = existente.price + totalPesos;
         existente.gramos      = gramosNuevos;
         existente.price       = precioNuevo;
         existente.name        = `${pesoProductoActual.name} (${gramosNuevos}gr)`;
         existente.precioCosto = (existente.precioCosto || 0) + costoCalculado;
+        // Preservar badge si ya lo tenía; actualizar precioOriginal acumulando proporcional
         if (tieneOferta) {
             existente.ofertaEtiqueta   = oferta.etiqueta || existente.ofertaEtiqueta;
             existente.ofertaTipo       = oferta.tipoOferta || existente.ofertaTipo;
@@ -4827,10 +4943,10 @@ function confirmarPeso() {
         ventaActual.push({
             id: `peso_${Date.now()}`,
             idOriginal: pesoProductoActual.id,
-            name: `${pesoProductoActual.name} (${gramosReales}gr)`,
+            name: `${pesoProductoActual.name} (${gramos}gr)`,
             price: totalPesos,
             qty: 1,
-            gramos: gramosReales,
+            gramos: gramos,
             stockDisponible: pesoProductoActual.stock || 999,
             esPeso: true,
             precioCosto: costoCalculado,
@@ -10689,6 +10805,7 @@ async function _procesarVentaFiado(datosFiado, itemsSnapshot) {
 
     let stockOk = false;
     let ticketNum = null;
+    const idVentaFiado = datosFiado.idFiado + '_v';
     try {
         const ventaData = itemsSnapshot.map(i => ({
             id: i.esPeso ? i.idOriginal : i.id,
@@ -10699,14 +10816,23 @@ async function _procesarVentaFiado(datosFiado, itemsSnapshot) {
         }));
         const ventaPayload = { items: ventaData, metodoPago: 'FIADO', vendedor: vendedorActual,
             clienteFiado: datosFiado.cliente || '',
-            telefonoFiado: datosFiado.telefono || '' };
+            telefonoFiado: datosFiado.telefono || '',
+            idVenta: idVentaFiado };
         const url = API_URL + '?action=vender&data=' + encodeURIComponent(JSON.stringify(ventaPayload));
         const resp = await _apiFetchUrl('vender', url);
         stockOk = resp.success === true;
         ticketNum = resp.ticket || resp.numeroTicket || null;
-    } catch(e) { console.warn('⚠️ Error venta fiado:', e); }
+    } catch(e) {
+        // Para fiados NO encolar retry automático — el retry doble causa doble registro en Ventas.
+        // El fiado igual se guarda en FIADOS (paso 2) para no perder la deuda.
+        console.warn('⚠️ Error venta fiado (no se reencola para evitar duplicado):', e);
+        mostrarToast('⚠️ Venta registrada sin descuento de stock — revisá inventario', 'naranja');
+    }
 
+    // Asignar ticket ANTES de guardar en FIADOS para que quede registrado
     datosFiado.ticket = ticketNum;
+    if (ticketNum) console.log('🧾 Fiado ticket asignado:', ticketNum);
+    else console.warn('⚠️ Fiado sin ticket (venta falló o no devolvió ticket)');
 
     // 2. Guardar en hoja FIADOS
     try {
@@ -11296,6 +11422,219 @@ async function cargarHistorialSalidas() {
         el.innerHTML = '<div style="text-align:center;color:#c62828;padding:20px;font-size:0.85rem;">❌ Error al cargar datos</div>';
     }
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  RASPADITA — ENTREGAR PREMIO
+// ═══════════════════════════════════════════════════════════════
+let _raspCodigoActual = null;
+
+function abrirRaspadita() {
+  _raspCodigoActual = null;
+  document.getElementById('raspCodigoInput').value = '';
+  document.getElementById('raspEstado').style.display     = 'none';
+  document.getElementById('raspPanel').style.display      = 'none';
+  document.getElementById('raspMsgEntregado').style.display = 'none';
+  const btn = document.getElementById('raspBtnEntregar');
+  btn.style.display = ''; btn.disabled = false;
+  btn.textContent = '✅ Marcar como ENTREGADO';
+  document.getElementById('modalRaspadita').classList.add('open');
+  raspCambiarTab(1);
+}
+
+function cerrarRaspadita() {
+  document.getElementById('modalRaspadita').classList.remove('open');
+}
+
+function raspCambiarTab(tab) {
+  document.getElementById('raspTabContent1').style.display = tab===1 ? '' : 'none';
+  document.getElementById('raspTabContent2').style.display = tab===2 ? '' : 'none';
+  document.getElementById('raspTab1').style.background = tab===1 ? '#c0392b' : '#f0ece0';
+  document.getElementById('raspTab1').style.color      = tab===1 ? 'white'   : '#888';
+  document.getElementById('raspTab2').style.background = tab===2 ? '#c0392b' : '#f0ece0';
+  document.getElementById('raspTab2').style.color      = tab===2 ? 'white'   : '#888';
+  if (tab===1) cargarPendientesRaspadita();
+  if (tab===2) setTimeout(()=>document.getElementById('raspCodigoInput').focus(), 200);
+}
+
+async function cargarPendientesRaspadita() {
+  document.getElementById('raspListaCargando').style.display = '';
+  document.getElementById('raspListaVacia').style.display    = 'none';
+  document.getElementById('raspListaItems').style.display    = 'none';
+  try {
+    const res = await _apiFetch('listarPendientesRaspadita');
+    document.getElementById('raspListaCargando').style.display = 'none';
+    if (!res.ok || !res.pendientes || res.pendientes.length === 0) {
+      document.getElementById('raspListaVacia').style.display = '';
+      return;
+    }
+    const lista = document.getElementById('raspListaItems');
+    lista.innerHTML = res.pendientes.map(g => `
+      <div style="border:1px solid #e8e0cc;border-radius:10px;padding:12px 14px;margin-bottom:8px;background:#fffdf5;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+          <div style="flex:1;min-width:0;">
+            <div style="font-weight:800;font-size:0.95rem;color:#222;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${g.premio}</div>
+            <div style="font-size:0.8rem;color:#2e7d32;font-weight:700;">$${Number(g.precio).toLocaleString('es-AR')}</div>
+            <div style="font-size:0.72rem;color:#aaa;margin-top:2px;">${g.fecha} ${g.hora} · <span style="font-family:monospace;font-weight:700;color:#c0392b;">${g.codigo}</span></div>
+          </div>
+          <button onclick="entregarPremioRaspadita('${g.codigo}')"
+                  style="flex-shrink:0;padding:8px 14px;border:none;border-radius:8px;background:#2e7d32;color:white;font-weight:700;font-size:0.82rem;cursor:pointer;white-space:nowrap;">
+            ✅ Entregar
+          </button>
+        </div>
+      </div>
+    `).join('');
+    lista.style.display = '';
+  } catch(e) {
+    document.getElementById('raspListaCargando').innerHTML = '<div style="color:#c0392b;font-size:0.85rem;padding:10px;">❌ ' + e.message + '</div>';
+  }
+}
+
+async function buscarCodigoRaspadita() {
+  const codigo = document.getElementById('raspCodigoInput').value.trim().toUpperCase();
+  if (!codigo || codigo.length < 5) {
+    _raspMostrarEstado('⚠️ Ingresá el código completo (ej: COP-WEDM5)', '#f57f17'); return;
+  }
+  _raspMostrarEstado('🔍 Buscando...', '#888');
+  document.getElementById('raspPanel').style.display = 'none';
+  try {
+    const res = await _apiFetch('buscarCodigoRaspadita', null, '&codigo=' + encodeURIComponent(codigo));
+    if (!res.ok || !res.ganador) {
+      _raspMostrarEstado('❌ Código no encontrado. Verificá que esté bien escrito.', '#c0392b'); return;
+    }
+    const g = res.ganador;
+    _raspCodigoActual = g.codigo;
+    document.getElementById('raspPremioNombre').textContent = g.premio;
+    document.getElementById('raspPremioValor').textContent  = '$' + Number(g.precio).toLocaleString('es-AR');
+    document.getElementById('raspCodigo').textContent       = g.codigo;
+    document.getElementById('raspFecha').textContent        = g.fecha + (g.hora ? ' ' + g.hora : '');
+    const badge = document.getElementById('raspEstadoBadge');
+    if (g.estado === 'ENTREGADO') {
+      badge.textContent = '✅ Entregado'; badge.style.background='#e8f5e9'; badge.style.color='#2e7d32';
+      document.getElementById('raspBtnEntregar').style.display = 'none';
+    } else {
+      badge.textContent = '⏳ Pendiente'; badge.style.background='#fff8e1'; badge.style.color='#f57f17';
+      document.getElementById('raspBtnEntregar').style.display = '';
+    }
+    document.getElementById('raspEstado').style.display    = 'none';
+    document.getElementById('raspPanel').style.display     = '';
+    document.getElementById('raspMsgEntregado').style.display = 'none';
+  } catch(e) {
+    _raspMostrarEstado('❌ ' + e.message, '#c0392b');
+  }
+}
+
+async function entregarPremioRaspadita(codigoOverride) {
+  const codigo = codigoOverride || _raspCodigoActual ||
+                 document.getElementById('raspCodigoInput').value.trim().toUpperCase();
+  if (!codigo) return;
+  if (codigoOverride) {
+    document.querySelectorAll('#raspListaItems button').forEach(b => {
+      if (b.getAttribute('onclick') && b.getAttribute('onclick').includes(codigoOverride)) {
+        b.textContent='⏳...'; b.disabled=true;
+      }
+    });
+  } else {
+    const btn = document.getElementById('raspBtnEntregar');
+    btn.textContent='⏳ Guardando...'; btn.disabled=true;
+  }
+  try {
+    const res = await _apiFetch('entregarPremioRaspadita', null, '&codigo=' + encodeURIComponent(codigo));
+    if (res.ok) {
+      if (codigoOverride) {
+        await cargarPendientesRaspadita();
+      } else {
+        document.getElementById('raspBtnEntregar').style.display = 'none';
+        document.getElementById('raspMsgEntregado').style.display = '';
+        const badge = document.getElementById('raspEstadoBadge');
+        badge.textContent='✅ Entregado'; badge.style.background='#e8f5e9'; badge.style.color='#2e7d32';
+      }
+    } else {
+      _raspMostrarEstado('❌ Error: ' + (res.error||'intentá de nuevo'), '#c0392b');
+      if (!codigoOverride) {
+        const btn = document.getElementById('raspBtnEntregar');
+        btn.textContent='✅ Marcar como ENTREGADO'; btn.disabled=false;
+      }
+    }
+  } catch(e) {
+    _raspMostrarEstado('❌ ' + e.message, '#c0392b');
+    if (!codigoOverride) {
+      const btn = document.getElementById('raspBtnEntregar');
+      btn.textContent='✅ Marcar como ENTREGADO'; btn.disabled=false;
+    }
+  }
+}
+
+function _raspMostrarEstado(msg, color) {
+  const el = document.getElementById('raspEstado');
+  el.style.display='';
+  el.innerHTML='<div style="padding:10px 14px;border-radius:8px;background:#f5f5f5;color:'+color+';font-weight:600;font-size:0.9rem;margin-bottom:12px;">'+msg+'</div>';
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  TRAGAMONEDAS — GENERAR CÓDIGO (POS)
+// ═══════════════════════════════════════════════════════════════
+const TRAG_BASE_URL = 'https://almacen-copihue.vercel.app/tragamonedas.html';
+
+function abrirTragamonedas() {
+  // Reset completo cada vez que se abre
+  document.getElementById('tragMontoInput').value          = '';
+  document.getElementById('tragMontoAviso').style.display  = 'none';
+  document.getElementById('tragResultado').style.display   = 'none';
+  document.getElementById('tragQR').innerHTML              = '';
+  document.getElementById('tragCodigo').textContent        = '';
+  document.getElementById('tragLink').textContent          = '';
+  const btn = document.getElementById('tragBtnGenerar');
+  btn.style.display   = '';
+  btn.disabled        = true;
+  btn.style.opacity   = '0.5';
+  btn.textContent     = '🎰 Generar código para el cliente';
+  document.getElementById('modalTragamonedas').classList.add('open');
+  setTimeout(() => document.getElementById('tragMontoInput').focus(), 300);
+}
+
+function cerrarTragamonedas() {
+  document.getElementById('modalTragamonedas').classList.remove('open');
+}
+
+function tragValidarMonto() {
+  const monto = parseFloat(document.getElementById('tragMontoInput').value) || 0;
+  const ok    = monto >= 10000;
+  document.getElementById('tragMontoAviso').style.display = (monto > 0 && !ok) ? '' : 'none';
+  document.getElementById('tragBtnGenerar').disabled      = !ok;
+  document.getElementById('tragBtnGenerar').style.opacity = ok ? '1' : '0.5';
+}
+
+async function tragGenerarCodigo() {
+  const btn = document.getElementById('tragBtnGenerar');
+  btn.textContent = '⏳ Generando...'; btn.disabled = true; btn.style.opacity = '0.6';
+  try {
+    const res = await _apiFetch('generarCodigoTragamonedas');
+    if (!res.ok) throw new Error(res.error || 'Error al generar código');
+    const codigo  = res.codigo;
+    const gameURL = TRAG_BASE_URL + '?code=' + codigo;
+    document.getElementById('tragCodigo').textContent = codigo;
+    document.getElementById('tragLink').textContent   = gameURL;
+    const qrURL = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(gameURL);
+    document.getElementById('tragQR').innerHTML = '<img src="' + qrURL + '" width="180" height="180" style="border-radius:8px;">';
+    document.getElementById('tragResultado').style.display = '';
+    btn.style.display = 'none';
+  } catch(e) {
+    btn.textContent   = '🎰 Generar código para el cliente';
+    btn.disabled      = false;
+    btn.style.opacity = '1';
+    alert('Error: ' + e.message);
+  }
+}
+
+function tragNuevoCodigo() {
+  document.getElementById('tragMontoInput').value         = '';
+  document.getElementById('tragResultado').style.display  = 'none';
+  document.getElementById('tragBtnGenerar').style.display = '';
+  document.getElementById('tragBtnGenerar').disabled      = true;
+  document.getElementById('tragBtnGenerar').style.opacity = '0.5';
+  document.getElementById('tragMontoInput').focus();
+}
+
 </script>
 
 </body>
