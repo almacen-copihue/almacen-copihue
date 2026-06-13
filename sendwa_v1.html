@@ -6,7 +6,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SendWA Copihue v37</title>
+<title>SendWA Copihue v39</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,sans-serif;background:#f0f0ee;color:#111;min-height:100vh}
@@ -171,6 +171,8 @@ h1{font-size:11px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;
 .mopt{padding:5px 10px;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid #ddd;background:#fff;color:#555}
 .mopt.on{background:#111;color:#fff;border-color:#111}
 .mosaic-wrap{background:#111;border-radius:12px;padding:8px;display:inline-block}
+.mosaic-scroll{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding-bottom:4px}
+.mosaic-scroll::-webkit-scrollbar{display:none}
 .mosaic-grid{display:grid;gap:4px}
 .mosaic-cell{border-radius:6px;overflow:hidden;position:relative}
 
@@ -213,7 +215,7 @@ h1{font-size:11px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;
       <div style="font-size:10px;color:#aaa;letter-spacing:1px;text-transform:uppercase">Ofertas del día</div>
     </div>
   </div>
-  <span style="background:#111;color:#fff;font-size:10px;padding:3px 8px;border-radius:10px;font-weight:700;letter-spacing:1px">v37</span>
+  <span style="background:#111;color:#fff;font-size:10px;padding:3px 8px;border-radius:10px;font-weight:700;letter-spacing:1px">v39</span>
 </div>
 
 <!-- ESTADO CONEXIÓN -->
@@ -269,8 +271,10 @@ async function _apiFetch(action, data = null) {
     const url = data
         ? API_URL + '?action=' + action + '&data=' + encodeURIComponent(JSON.stringify(data)) + '&t=' + Date.now()
         : API_URL + '?action=' + action + '&t=' + Date.now();
+    console.log('[sendwa] fetch:', action, url.slice(0,80)+'...');
     const resp = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(API_TIMEOUT_MS) });
     const text = await resp.text();
+    console.log('[sendwa] resp:', action, text.slice(0,120));
     return JSON.parse(text);
 }
 
@@ -341,50 +345,49 @@ function badgeCls(tipo) {
 async function cargar() {
     setEstado('cargando', 'Cargando productos y pools...');
     try {
-        // 1. Cargar pools primero (getOfertas)
-        const dataOfertas = await _apiFetch('getOfertas');
+        console.log('[sendwa] iniciando carga...');
+        const [dataOfertas, dataProds] = await Promise.all([
+            _apiFetch('getOfertas'),
+            _apiFetch('getProductos'),
+        ]);
+        console.log('[sendwa] getOfertas:', JSON.stringify(dataOfertas).slice(0,100));
+        console.log('[sendwa] getProductos count:', Array.isArray(dataProds) ? dataProds.length : JSON.stringify(dataProds).slice(0,80));
+
+        // Llenar pools
         if (dataOfertas && dataOfertas.success) {
-            poolIds.relampago.clear();
-            poolIds.destacado.clear();
-            poolIds.especial.clear();
-            poolIds.ultimas.clear();
+            poolIds.relampago.clear(); poolIds.destacado.clear();
+            poolIds.especial.clear();  poolIds.ultimas.clear();
             (dataOfertas.relampagoActivo   || []).forEach(p => poolIds.relampago.add(Number(p.id)));
             (dataOfertas.destacadasActivas || []).forEach(p => poolIds.destacado.add(Number(p.id)));
             (dataOfertas.especialesActivas || []).forEach(p => poolIds.especial.add(Number(p.id)));
             const ults = dataOfertas.ultimasSeleccionadasSiempre || dataOfertas.ultimasSeleccionadas || [];
             ults.forEach(p => poolIds.ultimas.add(Number(p.id)));
-            if (dataOfertas.poolRecienLlegados && Array.isArray(dataOfertas.poolRecienLlegados)) {
-                poolIds.recientes = new Set(dataOfertas.poolRecienLlegados.map(p => Number(p.id)));
-            }
-            window._horariosOferta = dataOfertas.horariosOferta || {};
+        } else {
+            console.warn('[sendwa] getOfertas sin success:', dataOfertas);
         }
 
-        // 2. Cargar productos
-        const dataProds = await _apiFetch('getProductos');
         const rows = Array.isArray(dataProds) ? dataProds : (dataProds.productos || dataProds.items || []);
+        console.log('[sendwa] productos a procesar:', rows.length);
 
-        // 3. Cruzar producto + pool
         todosLosProductos = rows
             .filter(r => r && r.name && parseFloat(r.price||0) > 0)
             .map(r => {
                 const id    = String(r.id || '');
                 const price = parseFloat(r.price || 0);
                 const stock = parseFloat(r.stock ?? 1);
-                let offerType    = null;
-                let discountPrice = null;
+                let offerType = null, discountPrice = null;
 
                 if (poolIds.relampago.has(Number(id))) {
                     offerType = 'relampago';
                     const val = parseInt(r.relampago) || 0;
                     const pctMap = {11:10,12:15,13:20,14:25,15:30};
                     const nxmMap = {1:0.5,2:0.667,3:0.75,4:0.8,5:0.833,6:0.857,10:0.75};
-                    if (pctMap[val] !== undefined) discountPrice = Math.round(price*(1-pctMap[val]/100));
-                    else if (nxmMap[val] !== undefined) discountPrice = Math.round(price*nxmMap[val]);
+                    if (pctMap[val]) discountPrice = Math.round(price*(1-pctMap[val]/100));
+                    else if (nxmMap[val]) discountPrice = Math.round(price*nxmMap[val]);
                     else discountPrice = price;
                 } else if (poolIds.destacado.has(Number(id))) {
                     offerType = 'destacada';
-                    const pct = parseFloat(r.destacada) || 15;
-                    discountPrice = Math.round(price*(1-pct/100));
+                    discountPrice = Math.round(price*(1-(parseFloat(r.destacada)||15)/100));
                 } else if (poolIds.especial.has(Number(id))) {
                     offerType = 'especial';
                     discountPrice = Math.round(price*0.9);
@@ -392,47 +395,44 @@ async function cargar() {
                     offerType = 'ultimas';
                     discountPrice = price;
                 } else {
-                    // PROMO y COMBO — directo de categoriaOferta, sin pool
-                    const rawCat = String(r.categoriaOferta || r.catOferta || '').toUpperCase().trim();
-                    if (rawCat === 'PROMO ACTIVA' || rawCat.startsWith('PROMO')) {
+                    const cat = String(r.categoriaOferta || r.catOferta || '').toUpperCase().trim();
+                    if (cat === 'PROMO ACTIVA' || cat.startsWith('PROMO')) {
                         offerType = 'promo';
-                        const normal = parseFloat(r.normal || r['$promos/combos'] || 0);
-                        if (normal > 0 && normal < price) discountPrice = normal;
-                    } else if (rawCat === 'COMBO ACTIVO' || rawCat.startsWith('COMBO')) {
+                        const n = parseFloat(r.normal || 0);
+                        if (n > 0 && n < price) discountPrice = n;
+                    } else if (cat === 'COMBO ACTIVO' || cat.startsWith('COMBO')) {
                         offerType = 'combo';
-                        const normal = parseFloat(r.normal || r['$promos/combos'] || 0);
-                        if (normal > 0 && normal < price) discountPrice = normal;
+                        const n = parseFloat(r.normal || 0);
+                        if (n > 0 && n < price) discountPrice = n;
                     }
                 }
 
                 return {
-                    id,
-                    name:         String(r.name || '').trim(),
-                    price,
-                    stock,
-                    offerType,
+                    id, name: String(r.name||'').trim(),
+                    price, stock, offerType,
                     discountPrice,
-                    tipo:         offerType, // alias para compatibilidad
+                    tipo: offerType,
                     precioFinalVal: discountPrice || price,
-                    relampago:    r.relampago,
-                    destacada:    parseFloat(r.destacada) || 0,
-                    especial:     parseInt(r.especial) || 0,
-                    catOferta:    String(r.categoriaOferta || r.catOferta || '').trim().toUpperCase(),
-                    normal:       parseFloat(r.normal || 0),
-                    image:        'imagenes-productos/' + simplificarNombre(String(r.name||'').trim()) + '.jpg',
+                    relampago: r.relampago,
+                    destacada: parseFloat(r.destacada)||0,
+                    especial:  parseInt(r.especial)||0,
+                    catOferta: String(r.categoriaOferta||r.catOferta||'').trim().toUpperCase(),
+                    normal:    parseFloat(r.normal||0),
+                    image: 'imagenes-productos/' + simplificarNombre(String(r.name||'').trim()) + '.jpg',
                 };
             });
 
         const conOferta = todosLosProductos.filter(p => p.offerType && p.stock > 0).length;
         const sinStock  = todosLosProductos.filter(p => p.stock <= 0).length;
         const sinOferta = todosLosProductos.filter(p => !p.offerType && p.stock > 0).length;
+        console.log('[sendwa] con oferta:', conOferta, '| sin oferta:', sinOferta, '| sin stock:', sinStock);
         setEstado('ok', conOferta + ' con oferta · ' + sinOferta + ' sin oferta · ' + sinStock + ' sin stock');
         document.getElementById('filtros').style.display = 'flex';
         renderGrilla();
 
     } catch(e) {
-        console.error('API falló:', e);
-        setEstado('error', 'Error conectando: ' + e.message);
+        console.error('[sendwa] ERROR en cargar():', e);
+        setEstado('error', 'Error: ' + e.message + ' — Revisá la consola');
     }
 }
 
@@ -494,3 +494,256 @@ function renderGrilla() {
                 ahoHTML + bdgHTML + urgHTML + stockHTML +
             '</div></div>';
 
+    }).join('');
+}
+
+function filtrar(el) {
+    document.querySelectorAll('.chip').forEach(c => c.classList.remove('on'));
+    el.classList.add('on');
+    filtroActivo = el.dataset.t;
+    renderGrilla();
+}
+
+function toggleSel(id) {
+    const key = String(id);
+    const div = document.querySelector('[data-pid="' + key + '"]');
+    if (seleccionados.has(key)) {
+        seleccionados.delete(key);
+        if (div) div.classList.remove('sel');
+    } else {
+        seleccionados.add(key);
+        if (div) div.classList.add('sel');
+    }
+    actualizarBarra();
+}
+
+function limpiar() { seleccionados.clear(); renderGrilla(); actualizarBarra(); }
+
+function actualizarBarra() {
+    const barra = document.getElementById('barra');
+    const n = seleccionados.size;
+    if (n === 0) { barra.style.display = 'none'; return; }
+    barra.style.display = 'flex';
+    document.getElementById('barra-txt').textContent = n + ' producto' + (n > 1 ? 's' : '') + ' seleccionado' + (n > 1 ? 's' : '');
+}
+
+// ── MOSAICO ──
+const MOSAIC_OPTS = [
+    {label:'1×1',cols:1,rows:1},{label:'2×1',cols:2,rows:1},{label:'2×2',cols:2,rows:2},
+    {label:'2×3',cols:2,rows:3},{label:'2×4',cols:2,rows:4},{label:'2×5',cols:2,rows:5},
+    {label:'2×6',cols:2,rows:6},{label:'3×1',cols:3,rows:1},{label:'3×2',cols:3,rows:2},
+    {label:'3×3',cols:3,rows:3},{label:'4×1',cols:4,rows:1},{label:'4×2',cols:4,rows:2},
+    {label:'4×3',cols:4,rows:3},{label:'4×4',cols:4,rows:4},
+];
+const PLANTILLAS = [
+    { id: 'fuego',   nombre: '🔥 Fuego' },
+    { id: 'neon',    nombre: '💚 Neon' },
+    { id: 'urgente', nombre: '⚡ Urgente' },
+    { id: 'dark',    nombre: '💜 Dark' },
+    { id: 'minimal', nombre: '🏪 Minimal' },
+    { id: 'fresh',   nombre: '🌿 Fresh' },
+    { id: 'alerta',  nombre: '🔴 Alerta' },
+    { id: 'noche',   nombre: '🌙 Noche' },
+    { id: 'story',   nombre: '📱 Story 9:16' },
+    { id: 'banner',  nombre: '📺 Banner 16:9' },
+];
+const FORMATOS = {
+    fuego:{w:1,h:1},neon:{w:1,h:1},urgente:{w:1,h:1},dark:{w:1,h:1},
+    minimal:{w:1,h:1},fresh:{w:1,h:1},alerta:{w:1,h:1},noche:{w:1,h:1},
+    story:{w:9,h:16},banner:{w:16,h:9},
+};
+
+let mosaicTpl='fuego', mosaicConfig={cols:3,rows:4,label:'3×4'}, tabActiva='imagen', prodsActuales=[];
+
+function tipoDominante(prods) {
+    const tipos = prods.map(p => tipoOferta(p)).filter(Boolean);
+    if (!tipos.length) return null;
+    if (tipos.every(t => t === tipos[0])) return tipos[0];
+    return 'mixto';
+}
+function tituloOfertas(prods) {
+    const td = tipoDominante(prods);
+    return {promo:'🏷 PROMOS DEL DÍA',combo:'🎁 COMBOS ACTIVOS',relampago:'⚡ OFERTAS RELÁMPAGO',
+            destacada:'⭐ PRODUCTOS DESTACADOS',especial:'💙 ESPECIALES — 10% OFF',
+            ultimas:'⏳ ÚLTIMAS UNIDADES',mixto:'🔥 OFERTAS COPIHUE'}[td] || '🔥 OFERTAS COPIHUE';
+}
+
+function generarSalidas() {
+    prodsActuales = [...seleccionados].map(id => todosLosProductos.find(p => String(p.id) === String(id))).filter(Boolean);
+    if (!prodsActuales.length) return;
+    renderZona();
+    setTimeout(() => document.getElementById('zona-salidas').scrollIntoView({behavior:'smooth',block:'start'}), 80);
+}
+
+function renderZona() {
+    const zona = document.getElementById('zona-salidas');
+    zona.innerHTML =
+        '<div class="salidas-titulo">Elegí la salida que mejor calza</div>' +
+        '<div class="tabs">' +
+            '<div class="tab ' + (tabActiva==='imagen'?'on':'') + '" onclick="setTab(\'imagen\')">🖼 Imágenes</div>' +
+            '<div class="tab ' + (tabActiva==='texto'?'on':'') + '" onclick="setTab(\'texto\')">💬 Textos WA</div>' +
+        '</div>' +
+        '<div id="panel-imagen" style="display:' + (tabActiva==='imagen'?'block':'none') + '">' + renderPanelImagen() + '</div>' +
+        '<div id="panel-texto"  style="display:' + (tabActiva==='texto'?'block':'none') + '">' + renderPanelTexto() + '</div>';
+}
+
+function setTab(t) { tabActiva=t; renderZona(); }
+function setMosaicTpl(t) { mosaicTpl=t; document.getElementById('panel-imagen').innerHTML=renderPanelImagen(); }
+function setMosaicConfig(cols,rows,label) { mosaicConfig={cols,rows,label}; document.getElementById('panel-imagen').innerHTML=renderPanelImagen(); }
+
+function renderPanelImagen() {
+    const total = prodsActuales.length;
+    const opts  = MOSAIC_OPTS.filter(o => o.cols*o.rows <= total);
+    const celdas = mosaicConfig.cols * mosaicConfig.rows;
+    const sobran = Math.max(0, total - celdas);
+    const llena  = celdas === total;
+    const aviso  = llena
+        ? '<div style="font-size:11px;color:#22c55e;margin-bottom:8px">✅ Grilla completa — ' + total + ' productos</div>'
+        : sobran > 0 ? '<div style="font-size:11px;color:#f59e0b;margin-bottom:8px">⚠️ ' + sobran + ' producto' + (sobran>1?'s':'') + ' no entran</div>' : '';
+
+    const tplBtns = PLANTILLAS.map(function(pl){
+        return '<div class="mopt' + (mosaicTpl===pl.id?' on':'') + '" onclick="setMosaicTpl(\'' + pl.id + '\')">' + pl.nombre + '</div>';
+    }).join('');
+
+    const gridBtns = opts.map(function(o){
+        const c2=o.cols*o.rows, sob=total-c2, ok=c2===total;
+        const hint=ok?' ✓':(sob>0?' (-'+sob+')':'');
+        const sty=ok&&mosaicConfig.label!==o.label?'border-color:#22c55e;color:#22c55e':'';
+        return '<div class="mopt' + (mosaicConfig.label===o.label?' on':'') + '" style="' + sty + '" onclick="setMosaicConfig(' + o.cols + ',' + o.rows + ',\'' + o.label + '\')">' + o.label + hint + '</div>';
+    }).join('');
+
+    return '<div style="margin-bottom:10px">' +
+        '<div style="font-size:11px;color:#888;margin-bottom:8px;font-weight:600;letter-spacing:1px;text-transform:uppercase">Plantilla</div>' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">' + tplBtns + '</div>' +
+        '<div style="font-size:11px;color:#888;margin-bottom:8px;font-weight:600;letter-spacing:1px;text-transform:uppercase">Grilla — ' + total + ' productos</div>' +
+        '<div class="mosaic-opts">' + gridBtns + '</div>' + aviso + '</div>' +
+        buildMosaico(tituloOfertas(prodsActuales)) +
+        '<div style="margin-top:12px"><button class="s-btn negro" style="padding:10px 20px;font-size:13px;font-weight:700;border-radius:10px" onclick="compartirMosaic()">📲 Descargar / Compartir</button></div>';
+}
+
+function buildMosaico(titulo) {
+    const cols=mosaicConfig.cols, rows=mosaicConfig.rows;
+    const total=cols*rows;
+    const celdas=prodsActuales.slice(0,total);
+    const cellSize=total>12?160:Math.min(160,Math.floor(Math.min(window.innerWidth-40,500)/cols));
+    const gridW=cols*cellSize+(cols-1)*4;
+    const needsScroll=gridW>window.innerWidth-32||total>12;
+
+    const header='<div style="background:#1a4a1a;border-radius:12px 12px 0 0;padding:10px 14px 8px;text-align:center">' +
+        '<div style="color:#aed581;font-size:10px;font-weight:600;letter-spacing:.5px;margin-bottom:2px">🛒 ALMACÉN COPIHUE</div>' +
+        '<div style="color:#fff;font-size:13px;font-weight:900;letter-spacing:1px;text-transform:uppercase">' + titulo + '</div>' +
+        '</div>';
+
+    const cells=celdas.map(function(p){
+        return '<div style="border-radius:6px;overflow:hidden;flex-shrink:0">' + buildFlyerInline(p,mosaicTpl,cellSize,prodsActuales) + '</div>';
+    }).join('');
+
+    const gridStyle=needsScroll
+        ? 'display:flex;flex-direction:row;gap:4px;width:'+gridW+'px'
+        : 'display:grid;gap:4px;grid-template-columns:repeat('+cols+','+cellSize+'px)';
+
+    const wrap=needsScroll
+        ? '<div style="width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none"><div style="'+gridStyle+';padding:4px">' + cells + '</div></div>'
+        : '<div style="'+gridStyle+';padding:4px">' + cells + '</div>';
+
+    const footer='<div style="background:#1a4a1a;border-radius:0 0 12px 12px;padding:6px 14px;text-align:center">' +
+        '<span style="color:#aed581;font-size:10px;font-weight:600">📲 Hacemos pedidos  •  💬 Consultas por WhatsApp</span>' +
+        '</div>';
+
+    return '<div id="mosaic-export" style="background:#2d5a27;border-radius:12px;overflow:hidden;width:100%;display:block">' +
+        header + wrap + footer + '</div>';
+}
+
+function imgError(img) { img.parentElement.style.display='none'; }
+
+function renderPanelTexto() {
+    return PLANTILLAS.map(function(pl){
+        const textoId='wa-'+pl.id;
+        return '<div class="texto-bloque">' +
+            '<div class="salida-head"><span class="salida-nombre">'+pl.nombre+'</span>' +
+            '<div class="s-btns">' +
+            '<button class="s-btn negro" onclick="copiar(\''+textoId+'\',this)">Copiar</button>' +
+            '<button class="s-btn" onclick="abrirWA(\''+textoId+'\')">📲 WA</button>' +
+            '</div></div>' +
+            '<div class="wa-txt" id="'+textoId+'">'+buildTexto(prodsActuales,pl.id)+'</div>' +
+            '</div>';
+    }).join('');
+}
+
+async function compartirMosaic() {
+    const el=document.getElementById('mosaic-export');
+    if(!el){alert('No hay mosaico generado.');return;}
+    const btn=document.querySelector('[onclick="compartirMosaic()"]');
+    const orig=btn?btn.innerHTML:'';
+    if(btn)btn.innerHTML='⏳ Generando...';
+    try {
+        const canvas=await html2canvas(el,{backgroundColor:null,scale:2,useCORS:true,allowTaint:true,logging:false});
+        canvas.toBlob(async function(blob){
+            const file=new File([blob],'oferta-copihue.png',{type:'image/png'});
+            if(navigator.canShare&&navigator.canShare({files:[file]})){
+                try{await navigator.share({files:[file],title:'Oferta Almacén Copihue'});if(btn)btn.innerHTML=orig;return;}
+                catch(e){if(e.name!=='AbortError')console.warn(e);}
+            }
+            const url=URL.createObjectURL(blob);
+            const a=document.createElement('a');a.href=url;a.download='oferta-copihue.png';a.click();
+            setTimeout(()=>URL.revokeObjectURL(url),3000);
+            if(btn)btn.innerHTML=orig;
+        },'image/png');
+    }catch(e){alert('Error: '+e.message);if(btn)btn.innerHTML=orig;}
+}
+
+function copiar(id,btn){
+    const txt=document.getElementById(id).textContent;
+    navigator.clipboard.writeText(txt).then(function(){
+        btn.textContent='✅';setTimeout(function(){btn.textContent='Copiar';},2000);
+    });
+}
+function abrirWA(id){
+    window.open('https://wa.me/?text='+encodeURIComponent(document.getElementById(id).textContent),'_blank');
+}
+
+function irInicio(){window.scrollTo({top:0,behavior:'smooth'});}
+function imgError(img){img.parentElement.style.display='none';}
+
+window.addEventListener('popstate',function(e){
+    const o=document.getElementById('buscador-overlay');
+    if(o&&o.style.display!=='none')cerrarBuscar();
+});
+function buscarConHistorial(){history.pushState({buscador:true},'');buscar();}
+
+function buscar(){
+    document.getElementById('buscador-overlay').style.display='flex';
+    setTimeout(()=>document.getElementById('buscar-input').focus(),100);
+    filtrarBusqueda();
+}
+function cerrarBuscar(){document.getElementById('buscador-overlay').style.display='none';}
+function filtrarBusqueda(){
+    const q=document.getElementById('buscar-input').value.toLowerCase();
+    const res=document.getElementById('buscar-resultados');
+    const lista=todosLosProductos.filter(p=>p.stock>0&&(!q||p.name.toLowerCase().includes(q)));
+    if(!lista.length){res.innerHTML='<div style="color:#bbb;text-align:center;padding:20px">Sin resultados</div>';return;}
+    res.innerHTML=lista.slice(0,50).map(function(p){
+        const tipo=tipoOferta(p),pf=precioFinal(p),isSel=seleccionados.has(String(p.id));
+        const bdg=tipo?'<span style="background:#222;color:#aaa;font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;text-transform:uppercase;margin-left:4px">'+badgeLabel(tipo,p)+'</span>':'';
+        return '<div onclick="selDesdeBuscar(\''+p.id+'\')" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;border:1.5px solid '+(isSel?'#22c55e':'#eee')+';background:'+(isSel?'#e8fdf0':'#fafafa')+';cursor:pointer;margin-bottom:6px">' +
+            '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+getEmoji(p.name)+' '+p.name+'</div>' +
+            '<div style="font-size:12px;color:#888;margin-top:2px">'+fmt(pf)+bdg+'</div></div>' +
+            '<div style="font-size:22px;flex-shrink:0">'+(isSel?'✅':'⬜')+'</div></div>';
+    }).join('');
+}
+function selDesdeBuscar(id){
+    const key=String(id);
+    const div=document.querySelector('[data-pid="'+key+'"]');
+    if(seleccionados.has(key)){seleccionados.delete(key);if(div)div.classList.remove('sel');}
+    else{seleccionados.add(key);if(div)div.classList.add('sel');}
+    actualizarBarra();filtrarBusqueda();
+}
+
+function agregarTodo(){productosFiltrados().forEach(p=>seleccionados.add(String(p.id)));renderGrilla();actualizarBarra();}
+function limpiarTodo(){seleccionados.clear();renderGrilla();actualizarBarra();document.getElementById('zona-salidas').innerHTML='';}
+function recargar(){seleccionados.clear();todosLosProductos=[];document.getElementById('zona-salidas').innerHTML='';document.getElementById('grilla').innerHTML='';document.getElementById('filtros').style.display='none';cargar();window.scrollTo({top:0,behavior:'smooth'});}
+
+cargar();
+</script>
+</body>
+</html>
