@@ -4,156 +4,29 @@
   COPIHUE POS — CHANGELOG
 ================================================================================
 
-⚠️⚠️⚠️  REGLA CRÍTICA PARA CUALQUIER IA QUE MODIFIQUE ESTE ARCHIVO  ⚠️⚠️⚠️
-================================================================================
-
-  FLUJO DE VENTA FIADO — NUNCA TOCAR SIN VERIFICAR ESTO:
-
-  La función _procesarVentaFiado() (buscar por ese nombre) DEBE contener
-  obligatoriamente ANTES del await _apiFetchUrl('vender', url):
-
-    const idVentaFiado = datosFiado.idFiado + '_v';
-
-  Y el ventaPayload DEBE incluir:
-
-    idVenta: idVentaFiado
-
-  SIN ESTE CAMPO el sistema registra ventas duplicadas en la hoja Ventas
-  y los fiados quedan sin número de ticket. Este bug fue crítico en producción
-  (detectado 07/06/2026, reaparecido 10/06/2026 por reescritura accidental).
-
-  ANTES DE ENTREGAR CUALQUIER VERSIÓN DE ESTE ARCHIVO:
-  1. Buscar "_procesarVentaFiado" y verificar que idVentaFiado esté presente
-  2. Verificar que ventaPayload tenga idVenta: idVentaFiado
-  3. Verificar que el catch encole en ventas_pendientes con idVenta + idFiado
-  4. Verificar que _reenviarVentasPendientes llame actualizarTicketFiado
-     cuando res.ok === true y venta.idFiado existe
-
-  FLUJO DE VENTA NORMAL — también crítico:
-  confirmarVenta() genera idVenta = 'v_' + Date.now() + '_' + random
-  y lo envía en el payload. GAS usa LockService + PropertiesService para
-  deduplicar. NO eliminar el idVenta ni el LockService en Code.gs.
-
-================================================================================
-
-  v387 — 15/06/2026
+  v371 — 31/05/2026
   -----------------
-  • FIX CRÍTICO — _reenviarVentasPendientes: cuando la venta pendiente tiene
-    idFiado, al recibir resp.ticket del reintento exitoso ahora llama
-    actualizarTicketFiado(venta.idFiado, ticket) para registrar el número en
-    la hoja Fiados. Antes el ticket llegaba a Ventas pero nunca a Fiados.
-  • FIX — _reenviarVentasPendientes: el reintento automático (setTimeout 60s)
-    ahora solo se programa si la hora argentina es < 22. Después de las 22 no
-    sigue intentando en bucle — evitaba que el POS quedara "pegado" toda la noche.
-  • NUEVO — Botón "✕ Cancelar todo" en el banner de ventas pendientes: aparece
-    solo cuando hay pendientes, pide confirmación y limpia localStorage. Útil
-    cuando las ventas ya se cargaron manualmente y el loop de reintento molesta.
-  • FIX CRÍTICO — procesarVencidosDeAyer: ahora solo corre si la hora argentina
-    es >= 6 (evita que timezone UTC dispare la función a medianoche argentina
-    como si fuera "hoy" en vez de "ayer") y agrega log de seguridad antes de
-    poner stock en 0 para auditoría en consola.
+  • MEJORA display modal peso: muestra precio/kg bajo los gramos calculados.
+    Si tiene promo activa: badge violeta con etiqueta + precio tachado + precio promo.
+    Si es precio normal: solo precio/kg en gris. Se actualiza en tiempo real
+    mientras se tipea el monto.
 
-  v386 — 11/06/2026
+
   -----------------
-  • MULTICOMPRA: _poolMulticompra (Map id→{tipo,cantidad,precio}) cargado desde
-    data.multicompraActiva en cargarPoolsOfertas(), igual que el resto de pools.
-  • calcularOfertaPOS: nuevo caso 4b MULTICOMPRA — calcula precio dinámico según
-    cantidad en carrito (2X/3X/NX/LLEVÁ-PAGÁ: ciclos×AU + resto×pnormal;
-    2DA_UNIDAD: pares×(pnormal+AU) + resto×pnormal). Sin toggle — siempre activo
-    si el producto está en el pool. tieneOferta=true solo cuando qty >= AT.
+  • FIX gramos en display y carrito: actualizarDisplayPeso() y confirmarPeso()
+    usaban pesoProductoActual.price ($17.200) para calcular gramos → con $16.100
+    ingresado mostraba 936gr en vez de 1000gr. Ahora usan precio promo (normal)
+    cuando hay oferta activa. La boleta refleja los gramos reales correctos.
 
-  v385 — 10/06/2026
+
   -----------------
-  • FIX CRÍTICO REGRESIÓN — _procesarVentaFiado perdió el idVentaFiado en
-    versiones intermedias (v371→v384). Restaurado idVentaFiado = idFiado+'_v'
-    en el payload de vender. Sin este campo GAS no puede deduplicar → doble
-    registro en hoja Ventas y fiados sin ticket cuando GAS tarda (timeout).
-  • _procesarVentaFiado ahora encola correctamente en ventas_pendientes con
-    idVenta + idFiado cuando falla, y llama _actualizarBadgePendientes().
+  • FIX precioOriginal en peso: los gramos se calculaban con price ($17.200)
+    pero el cliente paga a normal ($16.100) → gramos inflados → precioOriginal
+    igual a price → ahorro = $0. Ahora gramosReales = totalPesos / normal × 1000
+    y precioOriginal = gramosReales × price / 1000. Ejemplo 1292gr:
+    tachado $22.662, pagado $20.801, ahorro $1.861.
 
-  v384 — 10/06/2026
-  -----------------
-  • FIX fecha en tarjetas de pendientes Tragamonedas y Raspadita: maneja
-    los 3 formatos que puede devolver GAS (YYYY-MM-DD, Date string completo,
-    otros) y muestra DD/MM/YYYY HH:MM en formato argentino.
 
-  v383 — 10/06/2026
-  -----------------
-  • FIX tarjetas pendientes Tragamonedas: símbolo técnico (ej: "desc3000")
-    oculto — solo se muestra si es emoji o texto legible. Fecha formateada.
-
-  v382 — 10/06/2026
-  -----------------
-  • FIX tragamonedas generador: tragValidarMonto() nunca toca el texto del
-    botón — solo disabled/opacity. Texto manejado únicamente por _tragResetGenerador.
-    Guard en tragGenerarCodigo: if(btn.disabled) return para evitar doble disparo.
-
-  v381 — 10/06/2026
-  -----------------
-  • Tabs Tragamonedas rediseñados como pestañas de carpeta: activo=blanco con
-    borde dorado arriba, inactivo=gris hundido. Reset con cssText para evitar
-    estados residuales de bordes. Contenido con borde que conecta con pestaña activa.
-  • Modal Tragamonedas expandido a 92vh con scroll en contenido de tabs.
-
-  v380 — 10/06/2026
-  -----------------
-  • Tab activo Tragamonedas: borde dorado (#c9a000) arriba para identificar pestaña.
-
-  v379 — 10/06/2026
-  -----------------
-  • Tabs Tragamonedas: primer diseño de carpeta (blanco/gris).
-  • Guard en tragGenerarCodigo para evitar disparo fantasma.
-
-  v378 — 10/06/2026
-  -----------------
-  • FIX texto botón generador Tragamonedas en JS: _tragResetGenerador y
-    tragNuevoCodigo usaban texto viejo "Generar código para el cliente".
-
-  v377 — 10/06/2026
-  -----------------
-  • Tab "Generar código" → "Nuevo código". Botón → "Generar y mostrar QR".
-
-  v376 — 10/06/2026
-  -----------------
-  • FIX ghost "Generando..." en tab Tragamonedas: _tragTabActual trackea tab
-    activo, reset solo cuando cambiás de tab. _tragResetGenerador fuerza
-    disabled 2 veces (inmediato + 80ms). abrirTragamonedas resetea _tragTabActual.
-
-  v375 — 07/06/2026
-  -----------------
-  • Badge rojo encima del FAB Cobrar + banner naranja fijo cuando hay ventas
-    pendientes de sincronizar. _actualizarBadgePendientes() llamada al encolar,
-    al reenviar y al iniciar la app. Mensaje "No repetir la venta" para el vendedor.
-
-  v374 — 07/06/2026
-  -----------------
-  • Tragamonedas: botón "🎰 Jugar acá" abre iframe del juego dentro del modal.
-    Botón "✕ Cerrar" vuelve al estado anterior. El vendedor puede jugar
-    en nombre del cliente si no tiene celular.
-
-  v373 — 07/06/2026
-  -----------------
-  • URL Tragamonedas actualizada: tragamonedas.html → copihue-tragamonedas.html
-
-  v372 — 07/06/2026
-  -----------------
-  • Raspadita pendientes: badge VENCIDO en rojo en buscar código.
-    entregarPremioRaspadita maneja respuesta vencido: badge rojo, sin botón entregar.
-
-  v371 — 07/06/2026
-  -----------------
-  • TRAGAMONEDAS: Modal reestructurado con 2 tabs:
-    — Tab 1 "📋 Pendientes": lista ganadores pendientes de entrega desde
-      TRAGAMONEDAS_CODIGOS (estado GANADOR, entregado NO). Botón ✅ Entregar
-      marca el premio como entregado en la planilla via entregarPremioTragamonedas.
-    — Tab 2 "🎰 Generar código": generador de QR existente (sin cambios funcionales).
-  • TRAGAMONEDAS: abrirTragamonedas() siempre arranca en tab Pendientes.
-  • TRAGAMONEDAS: tragValidarMonto() muestra cuántos intentos corresponden
-    según el monto (1 intento cada $10.000).
-  • TRAGAMONEDAS: Code.gs requiere nuevas acciones:
-    listarPendientesTragamonedas + entregarPremioTragamonedas (ver v8.7).
-
-  v368 — 30/05/2026
   -----------------
   • FIX precio tachado en modal para productos por peso: precioOriginal ahora
     es proporcional a los gramos reales (price/kg ÷ 1000 × gramos) en vez
@@ -591,7 +464,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v387</title>
+    <title>Copihue — POS v374</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -687,7 +560,6 @@
             70% { box-shadow: 0 0 0 5px rgba(105,240,174,0); }
             100% { box-shadow: 0 0 0 0 rgba(105,240,174,0); }
         }
-        @keyframes girar { to { transform: rotate(360deg); } }
         @keyframes pulsoCobrar {
             0%   { transform: scale(1);    box-shadow: 0 4px 16px rgba(27,94,32,0.55), 0 0 0 0 rgba(76,175,80,0.8); }
             50%  { transform: scale(1.08); box-shadow: 0 6px 22px rgba(27,94,32,0.7),  0 0 0 12px rgba(76,175,80,0); }
@@ -1537,8 +1409,6 @@
         <div class="header-right" style="width:100%;justify-content:space-between;gap:4px;">
             <a href="copihue-horario.html?v=2" class="btn-resumen" title="Horario" style="background:rgba(0,188,212,0.3);border-color:rgba(0,188,212,0.6);flex:1;text-align:center;text-decoration:none;display:flex;align-items:center;justify-content:center;">🕐</a>
             <button class="btn-resumen" onclick="location.href='copihue-herramientas.html'" title="Herramientas" style="background:rgba(255,193,7,0.3);border-color:rgba(255,193,7,0.6);flex:1;text-align:center;">🧰</button>
-            <button class="btn-resumen" onclick="abrirRaspadita()" title="Raspadita - Entregar premio" style="background:rgba(192,57,43,0.25);border-color:rgba(192,57,43,0.6);flex:1;text-align:center;">🃏</button>
-            <button class="btn-resumen" onclick="abrirTragamonedas()" title="Tragamonedas - Generar código" style="background:rgba(245,197,24,0.2);border-color:rgba(245,197,24,0.6);flex:1;text-align:center;">🎰</button>
             <button class="btn-resumen" id="btnActualizar" onclick="forzarActualizacion()" title="Actualizar" style="background:rgba(105,240,174,0.2);border-color:rgba(105,240,174,0.5);flex:1;text-align:center;">🔄</button>
             <button class="btn-resumen" id="btnNotifPos" onclick="abrirNotifPos()" title="Notificaciones"
                     style="background:rgba(255,193,7,0.15);border-color:rgba(255,193,7,0.5);flex:1;text-align:center;position:relative;display:flex;align-items:center;justify-content:center;">
@@ -1669,11 +1539,7 @@
     </div>
 
     <!-- Cobrar -->
-    <div id="fabCobrar" style="position:relative;">
-        <div id="badgePendientes" style="display:none;position:absolute;top:-4px;right:-4px;
-             background:#e53935;color:white;border-radius:50%;width:20px;height:20px;
-             font-size:0.65rem;font-weight:900;display:none;align-items:center;
-             justify-content:center;z-index:10;border:2px solid white;pointer-events:none;"></div>
+    <div id="fabCobrar">
         <button onclick="abrirConfirmacion()"
                 title="Cobrar"
                 style="width:64px;height:64px;border-radius:50%;border:none;cursor:pointer;
@@ -1687,32 +1553,6 @@
                   letter-spacing:-0.3px;max-width:58px;overflow:hidden;
                   text-overflow:ellipsis;white-space:nowrap;">$0</span>
         </button>
-    </div>
-</div>
-
-<!-- BANNER VENTAS PENDIENTES -->
-<div id="bannerPendientes" style="display:none;position:fixed;top:0;left:0;right:0;z-index:3500;
-     background:linear-gradient(90deg,#e65100,#f57c00);color:white;
-     padding:10px 16px;font-size:0.82rem;font-weight:700;
-     display:none;align-items:center;justify-content:space-between;gap:8px;
-     box-shadow:0 2px 8px rgba(0,0,0,0.3);">
-    <div style="display:flex;align-items:center;gap:8px;">
-        <span style="font-size:1.1rem;">⚠️</span>
-        <div>
-            <div id="bannerPendientesTxt">1 venta sin sincronizar</div>
-            <div style="font-size:0.7rem;font-weight:400;opacity:0.85;">Se enviará automáticamente. No repetir la venta.</div>
-        </div>
-    </div>
-    <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
-        <div id="bannerPendientesSpinner" style="width:14px;height:14px;border:2px solid rgba(255,255,255,0.4);
-             border-top-color:white;border-radius:50%;animation:girar 0.8s linear infinite;"></div>
-        <span style="font-size:0.72rem;opacity:0.8;">Reintentando...</span>
-        <button onclick="_cancelarVentasPendientes()"
-                title="Cancelar y limpiar ventas pendientes"
-                style="margin-left:6px;padding:5px 10px;border:2px solid rgba(255,255,255,0.7);
-                       border-radius:20px;background:rgba(0,0,0,0.25);color:white;
-                       font-size:0.72rem;font-weight:800;cursor:pointer;
-                       touch-action:manipulation;white-space:nowrap;">✕ Cancelar todo</button>
     </div>
 </div>
 
@@ -1863,187 +1703,6 @@
                 </div>
 
             </div>
-        </div>
-    </div>
-</div>
-
-<!-- MODAL TRAGAMONEDAS — GENERAR CÓDIGO -->
-<div class="modal-bg" id="modalTragamonedas" onclick="if(event.target===this)cerrarTragamonedas()" style="z-index:5100;">
-    <div class="modal-sheet" style="padding-bottom:28px;max-height:92vh;display:flex;flex-direction:column;">
-        <div class="modal-handle"></div>
-        <div class="modal-header">
-            <span class="modal-titulo">🎰 Tragamonedas</span>
-            <button class="modal-cerrar" onclick="cerrarTragamonedas()">✕</button>
-        </div>
-        <div style="padding:0 16px;">
-
-            <!-- TABS -->
-            <div style="display:flex;gap:4px;margin-bottom:0;margin-top:12px;border-bottom:1px solid #ddd;">
-                <button id="tragTab1" onclick="tragCambiarTab(1)"
-                        style="flex:1;padding:9px 0;border:1px solid #ddd;border-bottom:2px solid white;border-top:2px solid #c9a000;border-radius:8px 8px 0 0;font-weight:700;font-size:0.85rem;cursor:pointer;background:white;color:#333;box-shadow:0 -2px 6px rgba(0,0,0,0.06);">
-                    📋 Pendientes
-                </button>
-                <button id="tragTab2" onclick="tragCambiarTab(2)"
-                        style="flex:1;padding:9px 0;border:1px solid transparent;border-bottom:2px solid transparent;border-radius:8px 8px 0 0;font-weight:500;font-size:0.85rem;cursor:pointer;background:#e8e0d0;color:#999;">
-                    🎰 Nuevo código
-                </button>
-            </div>
-
-            <!-- TAB 1: PENDIENTES -->
-            <div id="tragTabContent1" style="border:1px solid #ddd;border-top:none;border-radius:0 0 10px 10px;padding:14px;margin-bottom:8px;overflow-y:auto;max-height:calc(92vh - 180px);">
-                <div id="tragListaCargando" style="text-align:center;padding:20px;color:#aaa;font-size:0.85rem;">
-                    Cargando...
-                </div>
-                <div id="tragListaVacia" style="display:none;text-align:center;padding:20px;">
-                    <div style="font-size:2rem;">🎉</div>
-                    <div style="font-weight:700;color:#2e7d32;margin-top:6px;">Sin premios pendientes</div>
-                    <div style="font-size:0.8rem;color:#aaa;margin-top:4px;">Todos los premios fueron entregados</div>
-                </div>
-                <div id="tragListaItems" style="overflow-y:auto;max-height:55vh;display:none;"></div>
-            </div>
-
-            <!-- TAB 2: GENERAR CÓDIGO -->
-            <div id="tragTabContent2" style="display:none;border:1px solid #ddd;border-top:none;border-radius:0 0 10px 10px;padding:14px;margin-bottom:8px;overflow-y:auto;max-height:calc(92vh - 180px);">
-
-                <div style="background:#fff8e1;border:1px solid #ffe082;border-radius:10px;padding:12px 14px;margin-bottom:16px;font-size:0.82rem;color:#795548;line-height:1.5;">
-                    🛒 Solo para compras <strong>mayores a $10.000</strong><br>
-                    Cada $10.000 tiene <strong>1 intento</strong>.
-                </div>
-
-                <div style="font-size:0.72rem;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Monto de la compra</div>
-                <div style="position:relative;margin-bottom:16px;">
-                    <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);font-size:1.2rem;font-weight:700;color:#aaa;">$</span>
-                    <input type="number" id="tragMontoInput" placeholder="0"
-                           inputmode="numeric" min="10000"
-                           style="width:100%;font-size:1.4rem;font-weight:900;border:2px solid #e0e0e0;border-radius:10px;padding:10px 14px 10px 32px;color:#222;"
-                           oninput="tragValidarMonto()">
-                </div>
-                <div id="tragMontoAviso" style="font-size:0.78rem;color:#e53935;margin-top:-10px;margin-bottom:12px;display:none;">
-                    ⚠️ El monto mínimo es $10.000
-                </div>
-                <div id="tragIntentosInfo" style="font-size:0.8rem;color:#c9a000;font-weight:700;margin-bottom:12px;display:none;"></div>
-
-                <button id="tragBtnGenerar" onclick="tragGenerarCodigo()"
-                        style="width:100%;padding:14px;border:none;border-radius:12px;background:#c9a000;color:white;font-size:1rem;font-weight:700;cursor:pointer;margin-bottom:14px;opacity:0.5;"
-                        disabled>
-                    🎰 Generar y mostrar QR
-                </button>
-
-                <div id="tragResultado" style="display:none;">
-                    <div style="background:#1a1a1a;border:2px solid #c9a000;border-radius:14px;padding:18px;text-align:center;margin-bottom:12px;">
-                        <div style="font-size:0.65rem;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:2px;margin-bottom:6px;">Código generado</div>
-                        <div id="tragCodigo" style="font-family:monospace;font-size:2rem;font-weight:900;color:#f5c518;letter-spacing:6px;margin-bottom:12px;"></div>
-                        <div id="tragQR" style="margin:0 auto 12px;width:180px;height:180px;"></div>
-                        <div style="font-size:0.72rem;color:rgba(255,255,255,0.4);margin-bottom:4px;">El cliente escanea con el celu</div>
-                        <div id="tragLink" style="font-size:0.68rem;color:#c9a000;word-break:break-all;"></div>
-                    </div>
-                    <div style="display:flex;gap:8px;margin-bottom:10px;">
-                        <button onclick="tragNuevoCodigo()"
-                                style="flex:1;padding:11px;border:1px solid #ddd;border-radius:10px;background:#fafafa;color:#666;font-size:0.85rem;font-weight:600;cursor:pointer;">
-                            🔄 Otro código
-                        </button>
-                        <button id="tragBtnJugarAca" onclick="tragJugarAca()"
-                                style="flex:1;padding:11px;border:none;border-radius:10px;background:#c9a000;color:white;font-size:0.85rem;font-weight:700;cursor:pointer;">
-                            🎰 Jugar acá
-                        </button>
-                    </div>
-                </div>
-
-                <!-- IFRAME para jugar desde el POS (sin celular) -->
-                <div id="tragJuegoLocal" style="display:none;margin-top:4px;">
-                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                        <div style="font-size:0.8rem;font-weight:700;color:#c9a000;">🎰 Juego en pantalla</div>
-                        <button onclick="tragCerrarJuego()"
-                                style="border:none;background:#f5f5f5;border-radius:6px;padding:4px 10px;font-size:0.8rem;cursor:pointer;color:#666;">
-                            ✕ Cerrar
-                        </button>
-                    </div>
-                    <iframe id="tragIframe" src="" style="width:100%;height:520px;border:none;border-radius:12px;background:#1a1a1a;"
-                            allow="autoplay"></iframe>
-                </div>
-
-            </div><!-- fin tab2 -->
-        </div>
-    </div>
-</div>
-
-<!-- MODAL RASPADITA — ENTREGAR PREMIO -->
-<div class="modal-bg" id="modalRaspadita" onclick="if(event.target===this)cerrarRaspadita()" style="z-index:5000;">
-    <div class="modal-sheet" style="padding-bottom:24px;">
-        <div class="modal-handle"></div>
-        <div class="modal-header">
-            <span class="modal-titulo">🎰 Raspadita — Premios</span>
-            <button class="modal-cerrar" onclick="cerrarRaspadita()">✕</button>
-        </div>
-        <div style="padding:0 16px;">
-
-            <!-- TABS -->
-            <div style="display:flex;gap:6px;margin-bottom:14px;margin-top:12px;">
-                <button id="raspTab1" onclick="raspCambiarTab(1)"
-                        style="flex:1;padding:9px 0;border:none;border-radius:8px;font-weight:700;font-size:0.85rem;cursor:pointer;background:#c0392b;color:white;">
-                    📋 Pendientes
-                </button>
-                <button id="raspTab2" onclick="raspCambiarTab(2)"
-                        style="flex:1;padding:9px 0;border:none;border-radius:8px;font-weight:700;font-size:0.85rem;cursor:pointer;background:#f0ece0;color:#888;">
-                    🔍 Buscar código
-                </button>
-            </div>
-
-            <!-- TAB 1: PENDIENTES -->
-            <div id="raspTabContent1">
-                <div id="raspListaCargando" style="text-align:center;padding:20px;color:#aaa;font-size:0.85rem;">
-                    Cargando...
-                </div>
-                <div id="raspListaVacia" style="display:none;text-align:center;padding:20px;">
-                    <div style="font-size:2rem;">🎉</div>
-                    <div style="font-weight:700;color:#2e7d32;margin-top:6px;">Sin premios pendientes</div>
-                    <div style="font-size:0.8rem;color:#aaa;margin-top:4px;">Todos los premios fueron entregados</div>
-                </div>
-                <div id="raspListaItems" style="overflow-y:auto;max-height:55vh;display:none;"></div>
-            </div>
-
-            <!-- TAB 2: BUSCAR CÓDIGO -->
-            <div id="raspTabContent2" style="display:none;">
-                <div style="font-size:0.72rem;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Código del cliente</div>
-                <div style="display:flex;gap:8px;margin-bottom:12px;">
-                    <input type="text" id="raspCodigoInput"
-                           placeholder="COP-XXXXX"
-                           maxlength="9"
-                           autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false"
-                           style="flex:1;font-size:1.4rem;font-weight:900;letter-spacing:4px;text-transform:uppercase;border:2px solid #d0c8b0;border-radius:10px;padding:10px 14px;font-family:monospace;color:#c0392b;"
-                           oninput="this.value=this.value.toUpperCase()"
-                           onkeydown="if(event.key==='Enter')buscarCodigoRaspadita()">
-                    <button onclick="buscarCodigoRaspadita()"
-                            style="padding:10px 18px;border:none;border-radius:10px;background:#c0392b;color:white;font-weight:700;font-size:1rem;cursor:pointer;">🔍</button>
-                </div>
-                <div id="raspEstado" style="display:none;"></div>
-                <div id="raspPanel" style="display:none;">
-                    <div style="background:#fdf6e3;border:2px solid #d4a017;border-radius:12px;padding:14px 16px;margin-bottom:12px;">
-                        <div style="font-size:0.65rem;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">Premio</div>
-                        <div id="raspPremioNombre" style="font-size:1.05rem;font-weight:800;color:#222;margin-bottom:2px;"></div>
-                        <div id="raspPremioValor"  style="font-size:0.88rem;color:#2e7d32;font-weight:700;margin-bottom:8px;"></div>
-                        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
-                            <div>
-                                <div style="font-size:0.62rem;color:#aaa;text-transform:uppercase;letter-spacing:1px;">Código</div>
-                                <div id="raspCodigo" style="font-family:monospace;font-size:0.95rem;font-weight:900;color:#c0392b;letter-spacing:3px;"></div>
-                            </div>
-                            <div>
-                                <div style="font-size:0.62rem;color:#aaa;text-transform:uppercase;letter-spacing:1px;">Fecha</div>
-                                <div id="raspFecha" style="font-size:0.82rem;font-weight:600;color:#555;"></div>
-                            </div>
-                            <span id="raspEstadoBadge" style="padding:4px 10px;border-radius:20px;font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;"></span>
-                        </div>
-                    </div>
-                    <button id="raspBtnEntregar" onclick="entregarPremioRaspadita(null)"
-                            style="width:100%;padding:13px;border:none;border-radius:12px;background:#2e7d32;color:white;font-size:1rem;font-weight:700;cursor:pointer;margin-bottom:8px;">
-                        ✅ Marcar como ENTREGADO
-                    </button>
-                    <div id="raspMsgEntregado" style="display:none;text-align:center;padding:12px;background:#e8f5e9;border-radius:10px;font-weight:700;color:#2e7d32;">
-                        ✅ Premio entregado correctamente
-                    </div>
-                </div>
-            </div>
-
         </div>
     </div>
 </div>
@@ -2293,8 +1952,9 @@
         <div class="peso-producto-nombre" id="pesoNombre"></div>
         <div class="peso-display">
             <div class="peso-gramos" id="pesoGramos">$0</div>
-            <div class="peso-unit">pesos</div>
+            <div class="peso-unit">pesos ingresados</div>
             <div class="peso-precio-calculado" id="pesoPrecio">0 gr</div>
+            <div id="pesoPrecioKg" style="font-size:0.85rem;color:var(--subtexto);margin-top:4px;min-height:1.2em;"></div>
         </div>
         <div class="peso-teclado">
             <button class="peso-tecla" onclick="pesoTecla('1')">1</button>
@@ -3747,7 +3407,7 @@ function _renderVentaCompleta(ligero) {
     const esDesktopPanel = window.innerWidth >= 768;
 
     contenedor.innerHTML = ventaActual.map(item => {
-        const imgSrc = `imagenes-productos/${simplificarNombre(item.name)}.jpg`;
+        const imgSrc = item.image || `imagenes-productos/${simplificarNombre(item.name)}.jpg`;
 
         // ── Calcular precios y ahorro ──────────────────────────────
         const tieneOferta  = item.precioModificado && item.precioOriginal > 0 && item.precioOriginal > item.price
@@ -3963,7 +3623,7 @@ function _buildDetalleModalHTML() {
                      data-idx="${idx}"
                      onclick="_modalQty(${idx},1)"
                      style="display:flex;align-items:center;gap:8px;padding:9px 12px;cursor:pointer;user-select:none;">
-            ${esDesktop ? `<img src="imagenes-productos/${simplificarNombre(item.name)}.jpg"
+            ${esDesktop ? `<img src="${item.image || `imagenes-productos/${simplificarNombre(item.name)}.jpg`}"
                  onerror="this.style.display='none'"
                  style="width:34px;height:34px;border-radius:6px;object-fit:cover;background:#e8f5e9;flex-shrink:0;">` : ''}
             <div style="flex:1;min-width:0;">
@@ -4664,53 +4324,6 @@ function reporteOfertasPOS(origen = 'manual') {
 }
 
 // Reenvía ventas que fallaron por conexión — corre en background
-function _actualizarBadgePendientes() {
-    try {
-        const pendientes = JSON.parse(localStorage.getItem('ventas_pendientes') || '[]');
-        const n = pendientes.length;
-        // Badge en FAB
-        const badge = document.getElementById('badgePendientes');
-        if (badge) {
-            if (n > 0) {
-                badge.textContent = n;
-                badge.style.display = 'flex';
-            } else {
-                badge.style.display = 'none';
-            }
-        }
-        // Banner
-        const banner = document.getElementById('bannerPendientes');
-        const txt    = document.getElementById('bannerPendientesTxt');
-        if (banner) {
-            if (n > 0) {
-                if (txt) txt.textContent = n === 1
-                    ? '1 venta sin sincronizar'
-                    : n + ' ventas sin sincronizar';
-                banner.style.display = 'flex';
-                // Empujar el contenido principal hacia abajo para no tapar nada
-                document.body.style.paddingTop = (banner.offsetHeight + 4) + 'px';
-            } else {
-                banner.style.display = 'none';
-                document.body.style.paddingTop = '';
-            }
-        }
-    } catch(e) {}
-}
-
-function _cancelarVentasPendientes() {
-    const pendientes = JSON.parse(localStorage.getItem('ventas_pendientes') || '[]');
-    if (!pendientes.length) { mostrarToast('No hay ventas pendientes', ''); return; }
-    const n = pendientes.length;
-    const msg = n === 1
-        ? 'Cancelar 1 venta pendiente de sincronizar?\n\nUsa esto solo si ya la cargaste manualmente en la planilla o no queres que se registre.'
-        : `Cancelar ${n} ventas pendientes de sincronizar?\n\nUsa esto solo si ya las cargaste manualmente.`;
-    if (!confirm(msg)) return;
-    localStorage.removeItem('ventas_pendientes');
-    _actualizarBadgePendientes();
-    mostrarToast(`Canceladas ${n} venta${n>1?'s':''} pendiente${n>1?'s':''}`, 'naranja');
-    console.log(`ventas_pendientes limpiado manualmente (${n} entradas)`);
-}
-
 async function _reenviarVentasPendientes() {
     const pendientes = JSON.parse(localStorage.getItem('ventas_pendientes') || '[]');
     if (!pendientes.length) return;
@@ -4733,16 +4346,6 @@ async function _reenviarVentasPendientes() {
                     if (idx >= 0) { ventasDia[idx].stockRebajado = true; localStorage.setItem(keyStore, JSON.stringify(ventasDia)); }
                 } catch(e2) {}
                 mostrarToast('✅ Stock sincronizado con la planilla', 'verde');
-                // Si era venta FIADO y GAS devolvió ticket, actualizar hoja Fiados
-                if (venta.idFiado && (resp.ticket || resp.numeroTicket)) {
-                    const ticketRecuperado = resp.ticket || resp.numeroTicket;
-                    try {
-                        const urlTicket = API_URL + '?action=actualizarTicketFiado&data=' +
-                            encodeURIComponent(JSON.stringify({ idFiado: venta.idFiado, ticket: ticketRecuperado }));
-                        await _apiFetchUrl('actualizarTicketFiado', urlTicket);
-                        console.log('✅ Ticket fiado actualizado:', venta.idFiado, '→ #' + ticketRecuperado);
-                    } catch(eTkt) { console.warn('⚠️ No se pudo actualizar ticket fiado:', eTkt); }
-                }
             } else {
                 restantes.push(venta);
             }
@@ -4752,14 +4355,8 @@ async function _reenviarVentasPendientes() {
     }
     localStorage.setItem('ventas_pendientes', JSON.stringify(restantes));
     if (restantes.length > 0) {
-        // Solo reintentar automáticamente si es antes de las 22hs (hora Argentina)
-        const horaAR = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' })).getHours();
-        if (horaAR < 22) {
-            console.warn(`⚠️ Quedan ${restantes.length} venta(s) pendientes — reintentando en 60s`);
-            setTimeout(() => _reenviarVentasPendientes(), 60000);
-        } else {
-            console.warn(`⚠️ Quedan ${restantes.length} venta(s) pendientes — no se reintenta (hora: ${horaAR}hs). Se retomarán al abrir el POS mañana.`);
-        }
+        console.warn(`⚠️ Quedan ${restantes.length} venta(s) pendientes — reintentando en 60s`);
+        setTimeout(() => _reenviarVentasPendientes(), 60000);
     }
 }
 
@@ -5158,7 +4755,11 @@ function pesoBorrar() {
 
 function actualizarDisplayPeso() {
     const totalPesos = parseInt(pesoValor) || 0;
-    const precioPorKg = pesoProductoActual ? pesoProductoActual.price : 0;
+    const ofertaDisplay = pesoProductoActual ? calcularOfertaPOS(pesoProductoActual, 1) : null;
+    const tieneOferta = ofertaDisplay?.tieneOferta;
+    const precioPorKg = pesoProductoActual
+        ? (tieneOferta ? (pesoProductoActual.normal || pesoProductoActual.price) : pesoProductoActual.price)
+        : 0;
     const gramos = precioPorKg > 0 ? Math.round((totalPesos / precioPorKg) * 1000) : 0;
 
     document.getElementById('pesoGramos').textContent = totalPesos > 0
@@ -5168,38 +4769,61 @@ function actualizarDisplayPeso() {
         ? gramos + ' gr'
         : '0 gr';
     document.getElementById('pesoOkBtn').disabled = totalPesos <= 0;
+
+    // Info precio/kg + badge promo
+    const infoEl = document.getElementById('pesoPrecioKg');
+    if (infoEl && pesoProductoActual) {
+        if (tieneOferta) {
+            infoEl.innerHTML = `
+                <span style="background:#6a1b9a;color:#fff;font-size:0.7rem;font-weight:800;
+                    padding:2px 8px;border-radius:10px;margin-right:6px;">
+                    ${ofertaDisplay.etiqueta}
+                </span>
+                <span style="text-decoration:line-through;color:#bbb;margin-right:4px;">
+                    $${pesoProductoActual.price.toLocaleString('es-AR')}/kg
+                </span>
+                <span style="color:#6a1b9a;font-weight:800;">
+                    $${precioPorKg.toLocaleString('es-AR')}/kg
+                </span>`;
+        } else {
+            infoEl.innerHTML = `<span style="color:var(--subtexto);">$${precioPorKg.toLocaleString('es-AR')}/kg</span>`;
+        }
+    }
 }
 
 function confirmarPeso() {
     const totalPesos = parseInt(pesoValor, 10) || 0;
     if (totalPesos <= 0 || !pesoProductoActual) return;
 
-    // Calcular oferta ANTES de usar el precio por kg
+    const precioPorKg = pesoProductoActual.price;
     const oferta = calcularOfertaPOS(pesoProductoActual, 1);
     const tieneOferta = oferta.tieneOferta;
-
-    // Si hay promo/combo activo, usar precio promo como precio por kg
-    const precioPorKg = tieneOferta ? oferta.precioUnitario : pesoProductoActual.price;
-    const gramos = precioPorKg > 0 ? Math.round((totalPesos / precioPorKg) * 1000) : 0;
+    // Precio real que cobra el cliente (promo si tiene, normal si no)
+    const precioPorKgPromo = tieneOferta ? (pesoProductoActual.normal || precioPorKg) : precioPorKg;
+    // Gramos reales basados en el precio que pagó el cliente
+    const gramosReales = precioPorKgPromo > 0 ? Math.round((totalPesos / precioPorKgPromo) * 1000) : 0;
     const costoPorKg = pesoProductoActual.precioCosto || 0;
-    const costoCalculado = costoPorKg > 0 ? Math.round((costoPorKg / 1000) * gramos) : 0;
-    // precioOriginal proporcional a los gramos reales (precio sin descuento × gramos / 1000)
+    const costoCalculado = costoPorKg > 0 ? Math.round((costoPorKg / 1000) * gramosReales) : 0;
+    // precioOriginal proporcional: gramosReales × precio sin descuento / 1000
     const precioOrigProporcional = tieneOferta
-        ? Math.round((pesoProductoActual.price / 1000) * gramos)
+        ? Math.round((precioPorKg / 1000) * gramosReales)
         : 0;
+    // Porcentaje real calculado desde los montos exactos (no desde precio/kg)
+    const etiquetaReal = tieneOferta && precioOrigProporcional > totalPesos
+        ? (oferta.tipoOferta === 'combo' ? '🎯 COMBO' : '🏷️ PROMO') +
+          ` -${parseFloat(((precioOrigProporcional - totalPesos) / precioOrigProporcional * 100).toFixed(1))}% OFF`
+        : oferta.etiqueta;
 
-    // Si ya hay un item de peso del mismo producto, acumular
     const existente = ventaActual.find(i => i.esPeso && i.idOriginal === pesoProductoActual.id);
     if (existente) {
-        const gramosNuevos = existente.gramos + gramos;
+        const gramosNuevos = existente.gramos + gramosReales;
         const precioNuevo  = existente.price + totalPesos;
         existente.gramos      = gramosNuevos;
         existente.price       = precioNuevo;
         existente.name        = `${pesoProductoActual.name} (${gramosNuevos}gr)`;
         existente.precioCosto = (existente.precioCosto || 0) + costoCalculado;
-        // Preservar badge si ya lo tenía; actualizar precioOriginal acumulando proporcional
         if (tieneOferta) {
-            existente.ofertaEtiqueta   = oferta.etiqueta || existente.ofertaEtiqueta;
+            existente.ofertaEtiqueta   = etiquetaReal || existente.ofertaEtiqueta;
             existente.ofertaTipo       = oferta.tipoOferta || existente.ofertaTipo;
             existente.precioOriginal   = (existente.precioOriginal || 0) + precioOrigProporcional;
             existente.precioModificado = true;
@@ -5208,15 +4832,16 @@ function confirmarPeso() {
         ventaActual.push({
             id: `peso_${Date.now()}`,
             idOriginal: pesoProductoActual.id,
-            name: `${pesoProductoActual.name} (${gramos}gr)`,
+            name: `${pesoProductoActual.name} (${gramosReales}gr)`,
+            image: pesoProductoActual.image, // ← imagen del producto base, sin el peso
             price: totalPesos,
             qty: 1,
-            gramos: gramos,
+            gramos: gramosReales,
             stockDisponible: pesoProductoActual.stock || 999,
             esPeso: true,
             precioCosto: costoCalculado,
             ofertaTipo:      tieneOferta ? oferta.tipoOferta : null,
-            ofertaEtiqueta:  tieneOferta ? oferta.etiqueta  : null,
+            ofertaEtiqueta:  tieneOferta ? etiquetaReal     : null,
             precioOriginal:  precioOrigProporcional,
             precioModificado: tieneOferta
         });
@@ -6269,14 +5894,6 @@ async function procesarVencidosDeAyer() {
     const hoyKey  = fechaArgentina(0);
     const ayerKey = fechaArgentina(-1);
 
-    // Protección timezone: solo correr entre las 6 y las 22hs Argentina
-    // Evita que UTC medianoche (21hs AR) dispare la función con fechas incorrectas
-    const horaAR = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' })).getHours();
-    if (horaAR < 6 || horaAR >= 22) {
-        console.log(`ℹ️ procesarVencidosDeAyer omitido — hora AR: ${horaAR}hs (solo corre entre 6 y 22)`);
-        return;
-    }
-
     if (localStorage.getItem(claveVencidosAutoZero(hoyKey))) return;
 
     const raw = localStorage.getItem(claveVencidosConfirmados(ayerKey));
@@ -6294,8 +5911,6 @@ async function procesarVencidosDeAyer() {
     localStorage.setItem(claveVencidosAutoZero(hoyKey), '1');
 
     if (pendientes.length === 0) return;
-
-    console.log('🗑 Auto-zero vencidos de ayer:', pendientes.map(i => i.name).join(', '), '| fecha ayer:', ayerKey, '| hora AR:', horaAR + 'hs');
 
     const nombresOk = [];
     for (const item of pendientes) {
@@ -6940,7 +6555,7 @@ inicializarVendedor();
 cargarConfig();
 _cargarHorarioSistema();
 // Reenviar ventas que fallaron por conexión en sesiones anteriores
-setTimeout(() => { _reenviarVentasPendientes(); _actualizarBadgePendientes(); }, 5000);
+setTimeout(() => _reenviarVentasPendientes(), 5000);
 // ========== SISTEMA DE CLIENTES ==========
 const CLIENTES_KEY = 'copihue_clientes';
 let _clienteActual = null; // { nombre, telefono } seleccionado para esta venta
@@ -7168,7 +6783,6 @@ const _poolIdsDestacadas = new Set();
 const _poolIdsEspeciales = new Set();
 const _poolIdsUltimas    = new Map(); // id → diasParaVencer
 const _poolCervecero     = new Map(); // id → { descuento, precioPromo }
-const _poolMulticompra   = new Map(); // id → { tipo, cantidad, precio }
 let _limiteRelampago     = 3; // configurable desde GAS → limites.relampago
 let _limiteDestacadas    = 9; // configurable desde GAS → limites.destacadas
 let _limiteEspeciales    = 2; // configurable desde GAS → limites.especiales
@@ -7202,15 +6816,6 @@ async function cargarPoolsOfertas() {
         // Destacadas: code.gs ya aplicó la rotación y el límite — usar directo
         (data.destacadasActivas || []).filter(p => p.categoria !== 'CERVEZAS').forEach(p => _poolIdsDestacadas.add(Number(p.id)));
         _destacadasFiltradas = new Set([..._poolIdsDestacadas]); // sincronizado con backend
-        _poolMulticompra.clear();
-        (data.multicompraActiva || []).forEach(p => {
-            const local = productos.find(lp => lp.id === Number(p.id));
-            if (local) _poolMulticompra.set(local.id, {
-                tipo:     p.MULTICOMPRA_TIPO     || '',
-                cantidad: p.MULTICOMPRA_CANTIDAD || 0,
-                precio:   p.MULTICOMPRA_PRECIO   || 0
-            });
-        });
         (data.especialesActivas || []).filter(p => p.categoria !== 'CERVEZAS').forEach(p => _poolIdsEspeciales.add(Number(p.id)));
         // Solo se usan las seleccionadas manualmente — nunca fallback automático
         // Seba21 usa siempre las seleccionadas (sin restricción de horario) — el horario lo respeta index
@@ -7428,44 +7033,16 @@ function calcularOfertaPOS(producto, qty) {
         r.etiqueta       = `⭐ -10% OFF`;
         r.tieneOferta = true; r.tipoOferta = 'especiales';
     }
-    // 4b. MULTICOMPRA — pool desde getOfertas, cálculo dinámico por cantidad
-    else if (_poolMulticompra.has(producto.id)) {
-        const mc      = _poolMulticompra.get(producto.id);
-        const AT      = mc.cantidad;
-        const AU      = mc.precio;
-        const tipo    = mc.tipo;
-        const pnormal = producto.price;
-        let total     = qty * pnormal; // fallback: precio normal
-
-        if (qty >= AT && AT > 0 && AU > 0) {
-            if (tipo === '2X' || tipo === '3X' || tipo === 'NX' || tipo === 'LLEVÁ-PAGÁ') {
-                const ciclos = Math.floor(qty / AT);
-                const resto  = qty % AT;
-                total = ciclos * AU + resto * pnormal;
-            } else if (tipo === '2DA_UNIDAD') {
-                const pares = Math.floor(qty / 2);
-                const resto  = qty % 2;
-                total = pares * (pnormal + AU) + resto * pnormal;
-            }
-            r.tieneOferta = true;
-        }
-
-        r.precioTotal    = Math.round(total);
-        r.precioUnitario = qty > 0 ? Math.round(total / qty) : pnormal;
-        r.etiqueta       = `📦 ${AT}x $${AU.toLocaleString('es-AR')}`;
-        r.tipoOferta     = 'multicompra';
-    }
-
     // 4. PROMO ACTIVA — col J = "promo activa", col L = precio promo (sin toggle)
     else if (
         String(producto.catOferta || '').toUpperCase() === 'PROMO ACTIVA' &&
         (producto.normal || 0) > 0 &&
         (producto.normal || 0) < (producto.price || 0)
     ) {
-        const pct = Math.round((1 - producto.normal / producto.price) * 100);
+        const pct = parseFloat(((1 - producto.normal / producto.price) * 100).toFixed(1));
         r.precioUnitario = producto.normal;
         r.precioTotal    = producto.normal * qty;
-        r.etiqueta       = `🏷️ PROMO -${pct}% OFF`;
+        r.etiqueta       = pct > 0 ? `🏷️ PROMO -${pct}% OFF` : `🏷️ PROMO ACTIVA`;
         r.tieneOferta = true; r.tipoOferta = 'promo';
     }
     // 5. COMBO ACTIVO — col J = "combo activo", col L = precio combo (sin toggle)
@@ -7474,10 +7051,10 @@ function calcularOfertaPOS(producto, qty) {
         (producto.normal || 0) > 0 &&
         (producto.normal || 0) < (producto.price || 0)
     ) {
-        const pct = Math.round((1 - producto.normal / producto.price) * 100);
+        const pct = parseFloat(((1 - producto.normal / producto.price) * 100).toFixed(1));
         r.precioUnitario = producto.normal;
         r.precioTotal    = producto.normal * qty;
-        r.etiqueta       = `🎯 COMBO -${pct}% OFF`;
+        r.etiqueta       = pct > 0 ? `🎯 COMBO -${pct}% OFF` : `🎯 COMBO ACTIVO`;
         r.tieneOferta = true; r.tipoOferta = 'combo';
     }
 
@@ -9591,7 +9168,7 @@ window.t9Limpiar = function(){};
 
 // Restaurar badge de notificaciones del día al arrancar
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('%c🏪 COPIHUE POS — Sistema listo v358', 'color:#4caf50;font-weight:bold;font-size:1.2em;');
+    console.log('%c🏪 COPIHUE POS — Sistema listo v374', 'color:#4caf50;font-weight:bold;font-size:1.2em;');
     setTimeout(_precargarClientes, 3000); // precarga clientes en background
     setTimeout(() => {
         const arr = _cargarNotifPos ? _cargarNotifPos() : [];
@@ -11118,9 +10695,6 @@ async function _procesarVentaFiado(datosFiado, itemsSnapshot) {
 
     let stockOk = false;
     let ticketNum = null;
-    // idVenta único para deduplicación en GAS — evita doble registro si hay reintento
-    const idVentaFiado = datosFiado.idFiado + '_v';
-
     try {
         const ventaData = itemsSnapshot.map(i => ({
             id: i.esPeso ? i.idOriginal : i.id,
@@ -11129,41 +10703,18 @@ async function _procesarVentaFiado(datosFiado, itemsSnapshot) {
             precioVenta: i.price, precioModificado: i.precioModificado || false,
             precioOriginal: i.precioOriginal || 0, precioCosto: i.precioCosto || 0
         }));
-        const ventaPayload = {
-            items: ventaData, metodoPago: 'FIADO', vendedor: vendedorActual,
+        const ventaPayload = { items: ventaData, metodoPago: 'FIADO', vendedor: vendedorActual,
             clienteFiado: datosFiado.cliente || '',
-            telefonoFiado: datosFiado.telefono || '',
-            idVenta: idVentaFiado  // ← deduplicación GAS
-        };
+            telefonoFiado: datosFiado.telefono || '' };
         const url = API_URL + '?action=vender&data=' + encodeURIComponent(JSON.stringify(ventaPayload));
         const resp = await _apiFetchUrl('vender', url);
         stockOk = resp.success === true;
         ticketNum = resp.ticket || resp.numeroTicket || null;
-    } catch(e) {
-        console.warn('⚠️ Error venta fiado (se reintentará):', e);
-        // Encolar reintento con mismo idVenta para no duplicar
-        try {
-            const ventaDataRetry = itemsSnapshot.map(i => ({
-                id: i.esPeso ? i.idOriginal : i.id,
-                name: i.name, qty: i.qty,
-                esPeso: i.esPeso || false, gramos: i.gramos || 0,
-                precioVenta: i.price, precioModificado: i.precioModificado || false,
-                precioOriginal: i.precioOriginal || 0
-            }));
-            const pendientes = JSON.parse(localStorage.getItem('ventas_pendientes') || '[]');
-            pendientes.push({
-                items: ventaDataRetry, metodoPago: 'FIADO', vendedor: vendedorActual,
-                idVenta: idVentaFiado, idFiado: datosFiado.idFiado, ts: Date.now()
-            });
-            localStorage.setItem('ventas_pendientes', JSON.stringify(pendientes));
-            _actualizarBadgePendientes();
-            setTimeout(() => _reenviarVentasPendientes(), 10000);
-        } catch(e2) { console.warn('⚠️ No se pudo encolar fiado:', e2); }
-    }
+    } catch(e) { console.warn('⚠️ Error venta fiado:', e); }
 
     datosFiado.ticket = ticketNum;
 
-    // 2. Guardar en hoja FIADOS (con o sin ticket — si no hay ticket se actualiza después)
+    // 2. Guardar en hoja FIADOS
     try {
         const url2 = API_URL + '?action=guardarFiado&data=' + encodeURIComponent(JSON.stringify(datosFiado));
         await _apiFetchUrl('guardarFiado', url2);
@@ -11751,399 +11302,6 @@ async function cargarHistorialSalidas() {
         el.innerHTML = '<div style="text-align:center;color:#c62828;padding:20px;font-size:0.85rem;">❌ Error al cargar datos</div>';
     }
 }
-
-// ═══════════════════════════════════════════════════════════════
-//  RASPADITA — ENTREGAR PREMIO
-// ═══════════════════════════════════════════════════════════════
-let _raspCodigoActual = null;
-
-function abrirRaspadita() {
-  _raspCodigoActual = null;
-  document.getElementById('raspCodigoInput').value = '';
-  document.getElementById('raspEstado').style.display     = 'none';
-  document.getElementById('raspPanel').style.display      = 'none';
-  document.getElementById('raspMsgEntregado').style.display = 'none';
-  const btn = document.getElementById('raspBtnEntregar');
-  btn.style.display = ''; btn.disabled = false;
-  btn.textContent = '✅ Marcar como ENTREGADO';
-  document.getElementById('modalRaspadita').classList.add('open');
-  raspCambiarTab(1);
-}
-
-function cerrarRaspadita() {
-  document.getElementById('modalRaspadita').classList.remove('open');
-}
-
-function raspCambiarTab(tab) {
-  document.getElementById('raspTabContent1').style.display = tab===1 ? '' : 'none';
-  document.getElementById('raspTabContent2').style.display = tab===2 ? '' : 'none';
-  document.getElementById('raspTab1').style.background = tab===1 ? '#c0392b' : '#f0ece0';
-  document.getElementById('raspTab1').style.color      = tab===1 ? 'white'   : '#888';
-  document.getElementById('raspTab2').style.background = tab===2 ? '#c0392b' : '#f0ece0';
-  document.getElementById('raspTab2').style.color      = tab===2 ? 'white'   : '#888';
-  if (tab===1) cargarPendientesRaspadita();
-  if (tab===2) setTimeout(()=>document.getElementById('raspCodigoInput').focus(), 200);
-}
-
-async function cargarPendientesRaspadita() {
-  document.getElementById('raspListaCargando').style.display = '';
-  document.getElementById('raspListaVacia').style.display    = 'none';
-  document.getElementById('raspListaItems').style.display    = 'none';
-  try {
-    const res = await _apiFetch('listarPendientesRaspadita');
-    document.getElementById('raspListaCargando').style.display = 'none';
-    if (!res.ok || !res.pendientes || res.pendientes.length === 0) {
-      document.getElementById('raspListaVacia').style.display = '';
-      return;
-    }
-    const lista = document.getElementById('raspListaItems');
-    lista.innerHTML = res.pendientes.map(g => `
-      <div style="border:1px solid #e8e0cc;border-radius:10px;padding:12px 14px;margin-bottom:8px;background:#fffdf5;">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-          <div style="flex:1;min-width:0;">
-            <div style="font-weight:800;font-size:0.95rem;color:#222;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${g.premio}</div>
-            <div style="font-size:0.8rem;color:#2e7d32;font-weight:700;">$${Number(g.precio).toLocaleString('es-AR')}</div>
-            <div style="font-size:0.72rem;color:#aaa;margin-top:2px;">${(() => { try { const fs=String(g.fecha||'').trim(); const hs=String(g.hora||'').trim().substring(0,5); if(/^\d{4}-\d{2}-\d{2}$/.test(fs)){const p=fs.split('-');return p[2]+'/'+p[1]+'/'+p[0]+(hs?' '+hs:'');} const d=new Date(fs); if(!isNaN(d.getTime())){return String(d.getDate()).padStart(2,'0')+'/'+(d.getMonth()+1).toString().padStart(2,'0')+'/'+d.getFullYear()+(hs?' '+hs:'');} return fs.substring(0,10)+(hs?' '+hs:''); }catch(e){return String(g.fecha||'').substring(0,10);} })()} · <span style="font-family:monospace;font-weight:700;color:#c0392b;">${g.codigo}</span></div>
-          </div>
-          <button onclick="entregarPremioRaspadita('${g.codigo}')"
-                  style="flex-shrink:0;padding:8px 14px;border:none;border-radius:8px;background:#2e7d32;color:white;font-weight:700;font-size:0.82rem;cursor:pointer;white-space:nowrap;">
-            ✅ Entregar
-          </button>
-        </div>
-      </div>
-    `).join('');
-    lista.style.display = '';
-  } catch(e) {
-    document.getElementById('raspListaCargando').innerHTML = '<div style="color:#c0392b;font-size:0.85rem;padding:10px;">❌ ' + e.message + '</div>';
-  }
-}
-
-async function buscarCodigoRaspadita() {
-  const codigo = document.getElementById('raspCodigoInput').value.trim().toUpperCase();
-  if (!codigo || codigo.length < 5) {
-    _raspMostrarEstado('⚠️ Ingresá el código completo (ej: COP-WEDM5)', '#f57f17'); return;
-  }
-  _raspMostrarEstado('🔍 Buscando...', '#888');
-  document.getElementById('raspPanel').style.display = 'none';
-  try {
-    const res = await _apiFetch('buscarCodigoRaspadita', null, '&codigo=' + encodeURIComponent(codigo));
-    if (!res.ok || !res.ganador) {
-      _raspMostrarEstado('❌ Código no encontrado. Verificá que esté bien escrito.', '#c0392b'); return;
-    }
-    const g = res.ganador;
-    _raspCodigoActual = g.codigo;
-    document.getElementById('raspPremioNombre').textContent = g.premio;
-    document.getElementById('raspPremioValor').textContent  = '$' + Number(g.precio).toLocaleString('es-AR');
-    document.getElementById('raspCodigo').textContent       = g.codigo;
-    document.getElementById('raspFecha').textContent        = g.fecha + (g.hora ? ' ' + g.hora : '');
-    const badge = document.getElementById('raspEstadoBadge');
-    if (g.estado === 'ENTREGADO') {
-      badge.textContent = '✅ Entregado'; badge.style.background='#e8f5e9'; badge.style.color='#2e7d32';
-      document.getElementById('raspBtnEntregar').style.display = 'none';
-    } else if (g.estado === 'VENCIDO') {
-      badge.textContent = '⌛ Vencido'; badge.style.background='#fce4ec'; badge.style.color='#b71c1c';
-      document.getElementById('raspBtnEntregar').style.display = 'none';
-    } else {
-      badge.textContent = '⏳ Pendiente'; badge.style.background='#fff8e1'; badge.style.color='#f57f17';
-      document.getElementById('raspBtnEntregar').style.display = '';
-    }
-    // Mostrar hora de vencimiento si existe
-    if (g.vence) {
-      const vStr = g.vence.split(' ')[1]?.substring(0,5) || '';
-      if (vStr) document.getElementById('raspFecha').textContent += ' · Vence ' + vStr;
-    }
-    document.getElementById('raspEstado').style.display    = 'none';
-    document.getElementById('raspPanel').style.display     = '';
-    document.getElementById('raspMsgEntregado').style.display = 'none';
-  } catch(e) {
-    _raspMostrarEstado('❌ ' + e.message, '#c0392b');
-  }
-}
-
-async function entregarPremioRaspadita(codigoOverride) {
-  const codigo = codigoOverride || _raspCodigoActual ||
-                 document.getElementById('raspCodigoInput').value.trim().toUpperCase();
-  if (!codigo) return;
-  if (codigoOverride) {
-    document.querySelectorAll('#raspListaItems button').forEach(b => {
-      if (b.getAttribute('onclick') && b.getAttribute('onclick').includes(codigoOverride)) {
-        b.textContent='⏳...'; b.disabled=true;
-      }
-    });
-  } else {
-    const btn = document.getElementById('raspBtnEntregar');
-    btn.textContent='⏳ Guardando...'; btn.disabled=true;
-  }
-  try {
-    const res = await _apiFetch('entregarPremioRaspadita', null, '&codigo=' + encodeURIComponent(codigo));
-    if (res.ok) {
-      if (codigoOverride) {
-        mostrarToast('✅ Premio entregado: ' + codigo, 'verde');
-        await cargarPendientesRaspadita();
-      } else {
-        document.getElementById('raspBtnEntregar').style.display = 'none';
-        document.getElementById('raspMsgEntregado').style.display = '';
-        const badge = document.getElementById('raspEstadoBadge');
-        badge.textContent='✅ Entregado'; badge.style.background='#e8f5e9'; badge.style.color='#2e7d32';
-      }
-    } else if (res.vencido) {
-      const badge = document.getElementById('raspEstadoBadge');
-      if (badge) { badge.textContent='⌛ Vencido'; badge.style.background='#fce4ec'; badge.style.color='#b71c1c'; }
-      document.getElementById('raspBtnEntregar').style.display = 'none';
-      _raspMostrarEstado('⌛ Premio vencido — el local cerró sin que el cliente lo retirara.', '#b71c1c');
-      if (codigoOverride) await cargarPendientesRaspadita();
-    } else {
-      _raspMostrarEstado('❌ Error: ' + (res.error||'intentá de nuevo'), '#c0392b');
-      if (!codigoOverride) {
-        const btn = document.getElementById('raspBtnEntregar');
-        btn.textContent='✅ Marcar como ENTREGADO'; btn.disabled=false;
-      }
-    }
-  } catch(e) {
-    _raspMostrarEstado('❌ ' + e.message, '#c0392b');
-    if (!codigoOverride) {
-      const btn = document.getElementById('raspBtnEntregar');
-      btn.textContent='✅ Marcar como ENTREGADO'; btn.disabled=false;
-    }
-  }
-}
-
-function _raspMostrarEstado(msg, color) {
-  const el = document.getElementById('raspEstado');
-  el.style.display='';
-  el.innerHTML='<div style="padding:10px 14px;border-radius:8px;background:#f5f5f5;color:'+color+';font-weight:600;font-size:0.9rem;margin-bottom:12px;">'+msg+'</div>';
-}
-
-// ═══════════════════════════════════════════════════════════════
-//  TRAGAMONEDAS — GENERAR CÓDIGO + PENDIENTES (POS)
-// ═══════════════════════════════════════════════════════════════
-const TRAG_BASE_URL = 'https://almacen-copihue.vercel.app/copihue-tragamonedas.html';
-
-function abrirTragamonedas() {
-  _tragTabActual = 0; // forzar reset al abrir aunque vuelva al mismo tab
-  document.getElementById('modalTragamonedas').classList.add('open');
-  tragCambiarTab(1); // siempre arranca en pendientes
-}
-
-function cerrarTragamonedas() {
-  document.getElementById('modalTragamonedas').classList.remove('open');
-}
-
-let _tragTabActual = 0;
-function tragCambiarTab(tab) {
-  document.getElementById('tragTabContent1').style.display = tab === 1 ? '' : 'none';
-  document.getElementById('tragTabContent2').style.display = tab === 2 ? '' : 'none';
-  // Tab activo = pestaña de carpeta
-  const t1 = document.getElementById('tragTab1');
-  const t2 = document.getElementById('tragTab2');
-  // Reset ambos
-  [t1, t2].forEach(t => {
-    t.style.background   = '#e8e0d0';
-    t.style.color        = '#999';
-    t.style.fontWeight   = '500';
-    t.style.border       = '1px solid transparent';
-    t.style.borderBottom = '2px solid transparent';
-    t.style.borderTop    = '2px solid transparent';
-    t.style.boxShadow    = 'none';
-  });
-  // Activo
-  const tA = tab === 1 ? t1 : t2;
-  tA.style.background   = 'white';
-  tA.style.color        = '#333';
-  tA.style.fontWeight   = '700';
-  tA.style.border       = '1px solid #ddd';
-  tA.style.borderBottom = '2px solid white';
-  tA.style.borderTop    = '2px solid #c9a000';
-  tA.style.boxShadow    = '0 -2px 6px rgba(0,0,0,0.06)';
-  if (tab === 1) cargarPendientesTragamonedas();
-  if (tab === 2 && _tragTabActual !== 2) _tragResetGenerador();
-  _tragTabActual = tab;
-}
-
-function _tragResetGenerador() {
-  const inp = document.getElementById('tragMontoInput');
-  if (inp) inp.value = '';
-  document.getElementById('tragMontoAviso').style.display   = 'none';
-  document.getElementById('tragResultado').style.display    = 'none';
-  document.getElementById('tragJuegoLocal').style.display   = 'none';
-  document.getElementById('tragIframe').src                 = '';
-  document.getElementById('tragQR').innerHTML               = '';
-  document.getElementById('tragCodigo').textContent         = '';
-  document.getElementById('tragLink').textContent           = '';
-  document.getElementById('tragIntentosInfo').style.display = 'none';
-  const btn = document.getElementById('tragBtnGenerar');
-  btn.style.display = '';
-  btn.disabled      = true;
-  btn.style.opacity = '0.5';
-  btn.textContent   = '🎰 Generar y mostrar QR';
-  // Forzar reset tras render
-  setTimeout(() => {
-    btn.disabled      = true;
-    btn.style.opacity = '0.5';
-    btn.textContent   = '🎰 Generar y mostrar QR';
-    if (inp) inp.focus();
-  }, 80);
-}
-
-// ── Lista de pendientes ───────────────────────────────────────
-async function cargarPendientesTragamonedas() {
-  document.getElementById('tragListaCargando').style.display = '';
-  document.getElementById('tragListaCargando').innerHTML     = 'Cargando...';
-  document.getElementById('tragListaVacia').style.display    = 'none';
-  document.getElementById('tragListaItems').style.display    = 'none';
-  try {
-    const res = await _apiFetch('listarPendientesTragamonedas');
-    document.getElementById('tragListaCargando').style.display = 'none';
-    if (!res.ok || !res.pendientes || res.pendientes.length === 0) {
-      document.getElementById('tragListaVacia').style.display = '';
-      return;
-    }
-    const lista = document.getElementById('tragListaItems');
-    lista.innerHTML = res.pendientes.map(g => {
-      // Formatear fecha legible — GAS puede devolver varios formatos
-      let fechaLinda = '';
-      try {
-        const fs = String(g.fecha || '').trim();
-        const hs = String(g.hora  || '').trim().substring(0,5);
-        // Si ya viene YYYY-MM-DD usarlo directo
-        if (/^\d{4}-\d{2}-\d{2}$/.test(fs)) {
-          const p = fs.split('-');
-          fechaLinda = p[2] + '/' + p[1] + '/' + p[0] + (hs ? ' ' + hs : '');
-        } else {
-          // Puede venir como Date string de GAS — parsear y formatear
-          const d = new Date(fs);
-          if (!isNaN(d.getTime())) {
-            const dd = String(d.getDate()).padStart(2,'0');
-            const mm = String(d.getMonth()+1).padStart(2,'0');
-            const yy = d.getFullYear();
-            fechaLinda = dd + '/' + mm + '/' + yy + (hs ? ' ' + hs : '');
-          } else {
-            fechaLinda = fs.substring(0,10) + (hs ? ' ' + hs : '');
-          }
-        }
-      } catch(e) { fechaLinda = String(g.fecha||'').substring(0,10) + ' ' + String(g.hora||'').substring(0,5); }
-      // Símbolo: ocultar si es el id técnico (contiene guion bajo o empieza con letra minúscula sin emoji)
-      const simboloLindo = g.simbolo && !g.simbolo.includes('_') && !/^[a-z]/.test(g.simbolo) ? g.simbolo : '';
-      return `
-      <div style="border:1px solid #e8df99;border-radius:10px;padding:12px 14px;margin-bottom:8px;background:#fffdf0;">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-          <div style="flex:1;min-width:0;">
-            <div style="font-weight:800;font-size:0.95rem;color:#222;">${g.premio || 'Premio'}</div>
-            ${simboloLindo ? '<div style="font-size:0.8rem;color:#c9a000;font-weight:700;">' + simboloLindo + '</div>' : ''}
-            <div style="font-size:0.72rem;color:#aaa;margin-top:3px;">${fechaLinda} · <span style="font-family:monospace;font-weight:700;color:#c9a000;">${g.codigo}</span></div>
-          </div>
-          <button onclick="entregarPremioTragamonedas('${g.codigo}')"
-                  style="flex-shrink:0;padding:8px 14px;border:none;border-radius:8px;background:#2e7d32;color:white;font-weight:700;font-size:0.82rem;cursor:pointer;white-space:nowrap;">
-            ✅ Entregar
-          </button>
-        </div>
-      </div>`;
-    }).join('');
-    lista.style.display = '';
-  } catch(e) {
-    document.getElementById('tragListaCargando').innerHTML =
-      '<div style="color:#c0392b;font-size:0.85rem;padding:10px;">❌ ' + e.message + '</div>';
-    document.getElementById('tragListaCargando').style.display = '';
-  }
-}
-
-async function entregarPremioTragamonedas(codigo) {
-  // Deshabilitar el botón tocado
-  document.querySelectorAll('#tragListaItems button').forEach(b => {
-    if (b.getAttribute('onclick') && b.getAttribute('onclick').includes(codigo)) {
-      b.textContent = '⏳...'; b.disabled = true;
-    }
-  });
-  try {
-    const res = await _apiFetch('entregarPremioTragamonedas', null, '&codigo=' + encodeURIComponent(codigo));
-    if (res.ok) {
-      mostrarToast('✅ Premio entregado: ' + codigo, 'verde');
-      await cargarPendientesTragamonedas();
-    } else {
-      mostrarToast('❌ Error: ' + (res.error || 'intentá de nuevo'), 'rojo');
-      await cargarPendientesTragamonedas();
-    }
-  } catch(e) {
-    mostrarToast('❌ ' + e.message, 'rojo');
-    await cargarPendientesTragamonedas();
-  }
-}
-
-// ── Generador de código ───────────────────────────────────────
-function tragValidarMonto() {
-  const monto = parseFloat(document.getElementById('tragMontoInput').value) || 0;
-  const ok    = monto >= 10000;
-  document.getElementById('tragMontoAviso').style.display = (monto > 0 && !ok) ? '' : 'none';
-  const btn = document.getElementById('tragBtnGenerar');
-  btn.disabled      = !ok;
-  btn.style.opacity = ok ? '1' : '0.5';
-  // Nunca tocar el texto del botón acá — solo _tragResetGenerador lo resetea
-  const info = document.getElementById('tragIntentosInfo');
-  if (ok) {
-    const intentos = Math.floor(monto / 10000);
-    info.textContent = '🎰 ' + intentos + (intentos === 1 ? ' intento' : ' intentos') + ' (1 código por cada $10.000)';
-    info.style.display = '';
-  } else {
-    info.style.display = 'none';
-  }
-}
-
-async function tragGenerarCodigo() {
-  const btn = document.getElementById('tragBtnGenerar');
-  if (btn.disabled) return; // evitar doble disparo
-  btn.textContent = '⏳ Generando...'; btn.disabled = true; btn.style.opacity = '0.6';
-  try {
-    const monto = parseFloat(document.getElementById('tragMontoInput').value) || 0;
-    const res = await _apiFetch('generarCodigoTragamonedas', null, '&monto=' + monto);
-    if (!res.ok) throw new Error(res.error || 'Error al generar código');
-    const codigo  = res.codigo;
-    const gameURL = TRAG_BASE_URL + '?code=' + codigo;
-    document.getElementById('tragCodigo').textContent = codigo;
-    document.getElementById('tragLink').textContent   = gameURL;
-    const qrURL = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(gameURL);
-    document.getElementById('tragQR').innerHTML = '<img src="' + qrURL + '" width="180" height="180" style="border-radius:8px;">';
-    document.getElementById('tragResultado').style.display = '';
-    btn.style.display = 'none';
-  } catch(e) {
-    btn.textContent   = '🎰 Generar y mostrar QR';
-    btn.disabled      = false;
-    btn.style.opacity = '1';
-    alert('Error: ' + e.message);
-  }
-}
-
-function tragNuevoCodigo() {
-  document.getElementById('tragMontoInput').value           = '';
-  document.getElementById('tragResultado').style.display    = 'none';
-  document.getElementById('tragIntentosInfo').style.display = 'none';
-  document.getElementById('tragJuegoLocal').style.display   = 'none';
-  document.getElementById('tragIframe').src                 = '';
-  document.getElementById('tragBtnGenerar').style.display   = '';
-  document.getElementById('tragBtnGenerar').disabled        = true;
-  document.getElementById('tragBtnGenerar').style.opacity   = '0.5';
-  document.getElementById('tragMontoInput').focus();
-}
-
-function tragJugarAca() {
-  // Carga el juego en el iframe usando el código ya generado
-  const codigo = document.getElementById('tragCodigo').textContent.trim();
-  if (!codigo) return;
-  const url = TRAG_BASE_URL + '?code=' + codigo;
-  document.getElementById('tragIframe').src           = url;
-  document.getElementById('tragJuegoLocal').style.display = '';
-  document.getElementById('tragResultado').style.display  = 'none';
-  // Scroll al iframe
-  setTimeout(() => {
-    document.getElementById('tragJuegoLocal').scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, 200);
-}
-
-function tragCerrarJuego() {
-  document.getElementById('tragIframe').src                = '';
-  document.getElementById('tragJuegoLocal').style.display  = 'none';
-  document.getElementById('tragResultado').style.display   = '';
-}
-
 </script>
 
 </body>
