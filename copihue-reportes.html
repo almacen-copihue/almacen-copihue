@@ -1956,6 +1956,28 @@ function _csiPer(cat) {
   return 'mensual';
 }
 
+// ── Horizonte de cobertura por proveedor (días) ──────────────────────────────
+// Cuántos días de stock comprar en cada visita al proveedor.
+// LA MAGDALENA cada 15 días; resto cada 7.
+var _CSI_HORIZONTE_PROV = {
+  'LA MAGDALENA': 15,
+  'DEFAULT': 7       // todos los demás
+};
+
+// Colchón de seguridad sobre la venta proyectada (30%)
+var _CSI_COLCHON = 1.3;
+
+function _csiHorizonte(nombre) {
+  // Busca el proveedor del producto en proveedorInfo (viene de GAS)
+  var prov = (raw.proveedorInfo && raw.proveedorInfo[nombre.toUpperCase()]) || '';
+  // Buscar coincidencia parcial en la tabla (LA MAGDALENA puede venir como "LA MAGDALENA S.A." etc)
+  var dias = _CSI_HORIZONTE_PROV['DEFAULT'];
+  Object.keys(_CSI_HORIZONTE_PROV).forEach(function(k) {
+    if (k !== 'DEFAULT' && prov.indexOf(k) !== -1) dias = _CSI_HORIZONTE_PROV[k];
+  });
+  return dias;
+}
+
 // Motor principal: recorre items en un solo paso y aplica todas las reglas
 function calcularMotorCSI() {
   if (!raw) return {filas:[], nMuertos:0, nVencOmit:0};
@@ -2058,11 +2080,12 @@ function calcularMotorCSI() {
       else return; // stock>0 o condición no cumplida → no reportar
       periodo = 'especial';
     }
-    // Regla 5: Categorías sensibles — reposición semanal
+    // Regla 5: Categorías sensibles — reposición según horizonte del proveedor
     else if (periodoBase === 'semanal') {
-      ventaProyectada = Math.max(v.v7, promDia * 7);
+      var hSem = _csiHorizonte(nombre);
+      ventaProyectada = Math.max(v.v7 / 7, promDia) * hSem * _CSI_COLCHON;
       compraSugerida  = Math.ceil(ventaProyectada - stock);
-      motivo = 'reposicion semanal';
+      motivo = 'reposicion ' + hSem + 'd (proveedor)';
     }
     // Regla 4 (lento reactivado) + Regla 6 (mensual) — resto del almacén
     else {
@@ -2072,9 +2095,12 @@ function calcularMotorCSI() {
         compraSugerida=1; ventaProyectada=1;
         motivo='lento reactivado'; periodo='reactivacion';
       } else if (v.v30 > 1) {
-        ventaProyectada = Math.max(v.v30, promDia * 30);
+        var hMen = _csiHorizonte(nombre);
+        // Usar promDia * horizonte * colchón — más preciso que v30 raw
+        // promDia viene de v90/90 (trimestre) → más estable que v30 solo
+        ventaProyectada = Math.max(promDia, v.v30 / 30) * hMen * _CSI_COLCHON;
         compraSugerida  = Math.ceil(ventaProyectada - stock);
-        motivo = 'reposicion mensual';
+        motivo = 'reposicion ' + hMen + 'd (proveedor)';
       } else {
         return; // v30=1 pero stock>0 → no es urgente
       }
