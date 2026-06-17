@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>SendWA — Almacén Copihue ver.36</title>
+<title>SendWA — Almacén Copihue ver.37</title>
 <style>
   /* ===== VARIABLES ===== */
   :root {
@@ -113,29 +113,39 @@
   }
   #warn-msg.show { display: block; }
 
-  /* ===== FABs FILTRO FLOTANTES ===== */
-  #filter-fabs {
-    position: fixed; top: calc(var(--header-h) + 6px); left: 8px; z-index: 200;
-    display: flex; gap: 5px; align-items: center;
+  /* ===== BARRA DE FILTROS FIJA ===== */
+  #filter-bar {
+    position: fixed; top: var(--header-h); left: 0; right: 0; z-index: 95;
+    background: #1a4a12;
+    display: flex; gap: 6px; padding: 7px 10px; align-items: center;
+    overflow-x: auto; scrollbar-width: none; min-height: 46px;
+    border-bottom: 3px solid rgba(0,0,0,.3);
+    box-shadow: 0 3px 10px rgba(0,0,0,.2);
   }
-  .filter-fab {
-    height: 30px; padding: 0 12px; border-radius: 15px;
-    background: var(--primary-dark); color: #fff; border: none;
-    font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap;
-    box-shadow: 0 2px 8px rgba(0,0,0,.25); transition: background .15s;
+  #filter-bar::-webkit-scrollbar { display: none; }
+  .fbar-btn {
+    height: 32px; padding: 0 14px; border-radius: 16px; flex-shrink: 0;
+    font-size: 12px; font-weight: 700; cursor: pointer; border: none;
+    white-space: nowrap; color: #fff; background: rgba(255,255,255,.2);
+    transition: all .15s;
   }
-  .filter-fab-icon { width: 30px; padding: 0; border-radius: 50%; font-size: 15px; }
-  .filter-fab.fab-active { background: #c0392b; }
-  .filter-fab.fab-active-cat { background: #2980b9; }
+  .fbar-btn:active { transform: scale(.95); }
+  .fbar-btn.active { background: rgba(255,255,255,.45); box-shadow: 0 0 0 2px #fff; }
+  .fbar-btn.fb-ofertas { background: #c0392b; }
+  .fbar-btn.fb-ofertas.active { background: #7b241c; box-shadow: 0 0 0 2px #fff; }
+  .fbar-btn.fb-cats { background: #2980b9; }
+  .fbar-btn.fb-cats.active { background: #1a5276; box-shadow: 0 0 0 2px #fff; }
+  .fbar-btn.fb-buscar { background: rgba(255,255,255,.15); }
 
-  /* Panels flotantes */
+  /* Panels — ancho completo debajo de la barra */
   .filter-panel {
     display: none; position: fixed; z-index: 400;
-    background: var(--card-bg); border: 1.5px solid var(--border);
-    border-radius: 14px; padding: 10px;
-    box-shadow: 0 8px 28px rgba(0,0,0,.22);
-    flex-direction: column; gap: 7px;
-    max-width: 300px; max-height: 72vh; overflow-y: auto;
+    left: 0; right: 0;
+    background: var(--card-bg); border-bottom: 2px solid var(--border);
+    padding: 10px 14px;
+    box-shadow: 0 6px 20px rgba(0,0,0,.18);
+    flex-direction: column; gap: 8px;
+    max-height: 60vh; overflow-y: auto;
   }
   .filter-panel.open { display: flex; }
   .filter-panel-title { font-size: 10px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
@@ -544,7 +554,7 @@
     <option value="grupo">👥 WA Grupo</option>
     <option value="rapido">⚡ Lista rápida</option>
   </select>
-  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.36</div>
+  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.37</div>
   <button id="btn-dark" title="Modo oscuro">🌙</button>
 </div>
 
@@ -602,7 +612,6 @@
 
 <!-- SEL-FAB: selección — izquierda fijo -->
 <div id="sel-fab">
-  <button class="sel-btn" id="btn-sel-todo" title="Seleccionar / deseleccionar todo visible">☑️ Todo</button>
   <button class="sel-btn" id="btn-sel-add"  title="Agregar visibles a selección">＋</button>
   <button class="sel-btn" id="btn-sel-remove" title="Quitar visibles de selección">－</button>
 </div>
@@ -615,7 +624,6 @@
     <button class="tool-btn t-blue"   id="btn-copy">📋 Copiar texto</button>
     <button class="tool-btn t-orange" id="btn-dl">⬇️ Descargar</button>
     <button class="tool-btn t-dark"   id="btn-ia-suggest">✨ IA Sugerencia</button>
-    <button class="tool-btn t-red"    id="btn-clear-sel">🗑️ Limpiar sel.</button>
   </div>
   <button id="tools-toggle" title="Herramientas">⚙️</button>
 </div>
@@ -986,6 +994,7 @@ function parseProducts(data) {
       const foto        = String(r.image || r.imagen || r.foto || '').trim();
       const id          = Number(r.id) || (nombre + '_' + i);
       const vendidos    = parseFloat(r.rotacion || r.vendidos || 0);
+      const costo       = parseFloat(r.costo || r.cost || 0);
       // campos numéricos directos igual que seba21
       const relampago   = (r.relampago !== undefined && r.relampago !== null && r.relampago !== '')
                           ? (isNaN(parseInt(r.relampago)) ? String(r.relampago).trim() : parseInt(r.relampago)) : 0;
@@ -996,7 +1005,7 @@ function parseProducts(data) {
 
       // catOferta se resuelve en resolveOfertas() contra los pools activos
       return { id, nombre, precioVenta, categoria, stock, foto, vendidos,
-               relampago, destacada, especial, normal, catOferta: '', _raw: r };
+               relampago, destacada, especial, normal, costo, catOferta: '', _raw: r };
     })
     .filter(p => p.nombre && p.precioVenta > 0);
 }
@@ -2123,15 +2132,7 @@ on('btn-collage-close', () => {
 // ============================================================
 // IA SUGGEST
 // ============================================================
-on('btn-clear-sel', () => {
-  if (!selectedIds.size) { toast('No hay productos seleccionados'); return; }
-  selectedIds.clear(); selectionOrder = [];
-  renderGrid();
-  toast('🗑️ Selección limpiada');
-});
-
 // ─── SEL-FAB ────────────────────────────────────────────────
-document.getElementById('btn-sel-todo').onclick = selectAll;
 document.getElementById('btn-sel-add').onclick = () => {
   const allVisible = filteredProducts.filter(p => p && !p._sep).map(p => String(p.id));
   let added = 0;
@@ -2151,31 +2152,71 @@ document.getElementById('tools-toggle').onclick = () => {
   document.getElementById('tools-panel').classList.toggle('open');
   document.getElementById('tools-toggle').classList.toggle('open');
 };
-on('btn-clear-sel', () => {
-  selectedIds.clear(); selectionOrder = [];
-  renderGrid();
-  toast('🗑️ Selección limpiada');
-});
-
 on('btn-ia-suggest', async () => {
-  if (!selectedIds.size) {
-    // Auto-seleccionar mejores según prioridad
-    const best = allProducts
-      .filter(p => p.catOferta && p.stock > 0)
-      .sort((a,b) => (PRIORITY_ORDER[a.catOferta]||6) - (PRIORITY_ORDER[b.catOferta]||6))
-      .slice(0, currentMode === 'estado' ? 12 : 20);
-    selectedIds.clear(); selectionOrder = [];
-    best.forEach(p => { selectedIds.add(p.id); selectionOrder.push(p.id); });
-    toast(`✨ IA seleccionó ${best.length} productos sugeridos`);
+  const modo = await new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:flex-end;justify-content:center';
+    const sheet = document.createElement('div');
+    sheet.style.cssText = 'background:white;border-radius:20px 20px 0 0;width:100%;max-width:500px;padding:20px 16px 30px';
+    sheet.innerHTML = `
+      <div style="font-size:15px;font-weight:800;color:#1a2e17;margin-bottom:14px;text-align:center">✨ IA Sugerencia — Criterio</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button data-m="rotacion" style="padding:12px;border-radius:12px;border:none;background:#2980b9;color:#fff;font-size:13px;font-weight:700;cursor:pointer">📈 Más vendidos (rotación)</button>
+        <button data-m="margen"   style="padding:12px;border-radius:12px;border:none;background:#8e44ad;color:#fff;font-size:13px;font-weight:700;cursor:pointer">💰 Mayor margen de ganancia</button>
+        <button data-m="stock"    style="padding:12px;border-radius:12px;border:none;background:#e67e22;color:#fff;font-size:13px;font-weight:700;cursor:pointer">📦 Mayor stock disponible</button>
+        <button data-m="oferta"   style="padding:12px;border-radius:12px;border:none;background:#c0392b;color:#fff;font-size:13px;font-weight:700;cursor:pointer">🔥 Mejores ofertas activas</button>
+        <button data-m="ordenar"  style="padding:12px;border-radius:12px;border:none;background:#4a7c3f;color:#fff;font-size:13px;font-weight:700;cursor:pointer">🔀 Optimizar orden de selección actual</button>
+        <button data-m="cancel"   style="padding:12px;border-radius:12px;border:1.5px solid #d4e4cf;background:#f5f7f4;color:#5a7055;font-size:13px;cursor:pointer">✕ Cancelar</button>
+      </div>`;
+    overlay.appendChild(sheet);
+    sheet.addEventListener('click', e => {
+      const btn = e.target.closest('button[data-m]');
+      if (!btn) return;
+      document.body.removeChild(overlay);
+      resolve(btn.dataset.m);
+    });
+    overlay.addEventListener('click', e => { if (e.target === overlay) { document.body.removeChild(overlay); resolve('cancel'); } });
+    document.body.appendChild(overlay);
+  });
+
+  if (modo === 'cancel') return;
+
+  if (modo === 'ordenar') {
+    if (!selectedIds.size) { toast('⚠️ Seleccioná productos primero'); return; }
+    const prods = getSelectedProducts();
+    const reordered = interleavedSort(sortProducts(prods, 'estado'));
+    selectionOrder = reordered.map(p => p.id);
+    toast('✨ Secuencia optimizada');
     renderGrid();
     return;
   }
 
-  // Re-ordenar seleccionados por prioridad + variedad
-  const prods = getSelectedProducts();
-  const reordered = interleavedSort(sortProducts(prods, 'estado'));
-  selectionOrder = reordered.map(p => p.id);
-  toast('✨ Secuencia optimizada por IA');
+  let candidatos = allProducts.filter(p => p.stock > 0);
+
+  if (modo === 'rotacion') {
+    candidatos.sort((a,b) => (b.vendidos||0) - (a.vendidos||0));
+  } else if (modo === 'margen') {
+    candidatos = candidatos.filter(p => p.costo > 0 && p.precioVenta > 0);
+    candidatos.sort((a,b) => {
+      const ma = (a.precioVenta - a.costo) / a.precioVenta;
+      const mb = (b.precioVenta - b.costo) / b.precioVenta;
+      return mb - ma;
+    });
+  } else if (modo === 'stock') {
+    candidatos.sort((a,b) => (b.stock||0) - (a.stock||0));
+  } else if (modo === 'oferta') {
+    candidatos = candidatos.filter(p => p.catOferta);
+    candidatos.sort((a,b) => (PRIORITY_ORDER[a.catOferta]||6) - (PRIORITY_ORDER[b.catOferta]||6));
+  }
+
+  if (!candidatos.length) { toast('⚠️ Sin productos para ese criterio'); return; }
+
+  const limite = currentMode === 'estado' ? 12 : 20;
+  selectedIds.clear(); selectionOrder = [];
+  candidatos.slice(0, limite).forEach(p => {
+    selectedIds.add(p.id); selectionOrder.push(p.id);
+  });
+  toast(`✨ IA seleccionó ${selectedIds.size} productos`);
   renderGrid();
 });
 
