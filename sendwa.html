@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>SendWA — Almacén Copihue ver.38</title>
+<title>SendWA — Almacén Copihue ver.39</title>
 <style>
   /* ===== VARIABLES ===== */
   :root {
@@ -554,7 +554,7 @@
     <option value="grupo">👥 WA Grupo</option>
     <option value="rapido">⚡ Lista rápida</option>
   </select>
-  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.38</div>
+  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.39</div>
   <button id="btn-dark" title="Modo oscuro">🌙</button>
 </div>
 
@@ -1515,7 +1515,30 @@ on('btn-dl', async () => {
 // ============================================================
 let _collageMode = 'collage';
 let _singleIdx   = 0;
-let _collageProds = [];
+let _collageProds   = [];
+let _collagePage    = 0;
+let _collagePerPage = 6;
+const _gridCols = { 4:2, 6:3, 9:3, 12:4 };
+const _gridRows = { 4:2, 6:2, 9:3, 12:3 };
+
+function collageTotalPages() {
+  return Math.max(1, Math.ceil(_collageProds.length / _collagePerPage));
+}
+async function renderCollagePage() {
+  const total = collageTotalPages();
+  _collagePage = Math.min(_collagePage, total - 1);
+  const start = _collagePage * _collagePerPage;
+  const page  = _collageProds.slice(start, start + _collagePerPage);
+  const nav = document.getElementById('collage-page-nav');
+  if (nav) {
+    nav.style.display = total > 1 ? 'flex' : 'none';
+    const lbl = document.getElementById('collage-page-lbl');
+    if (lbl) lbl.textContent = `Pág ${_collagePage+1} / ${total}`;
+  }
+  await drawCollage(page);
+}
+window.collagePrevPage = function() { if (_collagePage > 0) { _collagePage--; renderCollagePage(); } };
+window.collageNextPage = function() { if (_collagePage < collageTotalPages()-1) { _collagePage++; renderCollagePage(); } };
 
 on('btn-collage', () => {
   const base = getSelectedProducts();
@@ -1528,6 +1551,21 @@ on('btn-collage', () => {
   _collagePage  = 0;
   _singleIdx    = 0;
   openCollageModal('collage');
+});
+
+// Selector grilla
+document.getElementById('collage-collage-controls')?.addEventListener('click', e => {
+  const btn = e.target.closest('.grid-btn');
+  if (!btn) return;
+  _collagePerPage = parseInt(btn.dataset.g);
+  document.querySelectorAll('.grid-btn').forEach(b => {
+    const on = b === btn;
+    b.style.background  = on ? 'var(--primary)' : 'var(--bg)';
+    b.style.borderColor = on ? 'var(--primary)' : 'var(--border)';
+    b.style.color       = on ? '#fff' : 'var(--text-muted)';
+  });
+  _collagePage = 0;
+  renderCollagePage();
 });
 
 // Tabs de modo
@@ -1583,6 +1621,8 @@ window.selectSingleProd = (i) => {
 let _singleLayout = 'clasico'; // clasico | h2 | v2 | expandido
 
 async function renderCollageMode() {
+  const ctrls = document.getElementById('collage-collage-controls');
+  if (ctrls) ctrls.style.display = _collageMode === 'collage' ? '' : 'none';
   if (_collageMode === 'collage')  await renderCollagePage();
   if (_collageMode === 'single')   await drawSingleLayout(_collageProds[_singleIdx], _singleLayout);
   if (_collageMode === 'historia') await drawHistoria(_collageProds);
@@ -1881,9 +1921,10 @@ async function drawProductCard(ctx, p, x, y, W, H, preloadedImg) {
 
 // ── MODO COLLAGE — hasta 3x4=12 productos, canvas 1080xAUTO ────────
 async function drawCollage(prods) {
-  const n = Math.min(prods.length, 12);
-  const cols = n <= 2 ? 1 : n <= 4 ? 2 : 3;
-  const rows = Math.ceil(n / cols);
+  const perPage = _collagePerPage || 6;
+  const n    = Math.min(prods.length, perPage);
+  const cols = _gridCols[perPage] || 3;
+  const rows = _gridRows[perPage] || 2;
 
   const CW   = 1080;
   const HDRH = 72, FTRH = 44, PAD = 8;
