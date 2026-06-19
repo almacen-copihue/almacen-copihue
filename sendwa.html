@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>SendWA — Almacén Copihue ver.40</title>
+<title>SendWA — Almacén Copihue ver.41</title>
 <style>
   /* ===== VARIABLES ===== */
   :root {
@@ -554,7 +554,7 @@
     <option value="grupo">👥 WA Grupo</option>
     <option value="rapido">⚡ Lista rápida</option>
   </select>
-  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.40</div>
+  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.41</div>
   <button id="btn-dark" title="Modo oscuro">🌙</button>
 </div>
 
@@ -712,7 +712,8 @@ const WA_LIMIT_ESTADO = 30;
 const IMG_SIZE_MB = 0.15;
 
 // Priority map
-const PRIORITY_ORDER = { relampago: 1, ultimas: 2, destacado: 3, especial: 4, promo: 5, combo: 6, '': 7 };
+// Orden flyer: Promos → Combos → Especial → Destacada → Relámpago → Últimas
+const PRIORITY_ORDER = { promo: 1, combo: 2, especial: 3, destacado: 4, relampago: 5, ultimas: 6, '': 7 };
 const BADGE_COLORS = {
   relampago: '#e74c3c', ultimas: '#e67e22', destacado: '#f39c12',
   especial: '#8e44ad', promo: '#7b1fa2', combo: '#ff5722'
@@ -1077,20 +1078,29 @@ function applyUIColors(data) {
 // ============================================================
 function sortProducts(products, mode) {
   const sorted = [...products];
+
+  // Vista categoría (incluye 'todos'/'') — productos con stock primero, sin stock al final
+  const esVistaCategoria = !['oferta','activo','relampago','destacado','especial',
+    'promo','combo','ultimas','sinoferta'].includes(currentFilter);
+
+  if (esVistaCategoria) {
+    sorted.sort((a, b) => {
+      const stockA = a.stock > 0 ? 0 : 1;
+      const stockB = b.stock > 0 ? 0 : 1;
+      if (stockA !== stockB) return stockA - stockB;
+      return (b.vendidos || 0) - (a.vendidos || 0);
+    });
+    return sorted;
+  }
+
+  // Vista Ofertas (Pool/Activos) — orden flyer fijo por prioridad, SIN interleave
   sorted.sort((a, b) => {
     const pa = PRIORITY_ORDER[a.catOferta] ?? 7;
     const pb = PRIORITY_ORDER[b.catOferta] ?? 7;
     if (pa !== pb) return pa - pb;
     return (b.vendidos || 0) - (a.vendidos || 0);
   });
-
-  // interleavedSort solo en modo "todos" — si hay filtro activo los productos
-  // ya son del mismo tipo, mezclar solo introduce productos de otros grupos
-  const filtroEsGeneral = (currentFilter === 'todos' || currentFilter === 'oferta' || currentFilter === 'activo');
-  if (mode === 'estado' && filtroEsGeneral) {
-    return interleavedSort(sorted);
-  }
-  return sorted;
+  return sorted; // sin interleavedSort — mantiene el orden de prioridad agrupado
 }
 
 function interleavedSort(sorted) {
@@ -1163,14 +1173,18 @@ function getCatEmoji(cat) {
 }
 
 function insertSeparators(products) {
-  // Separadores solo cuando los productos están ordenados por categoría
-  // (filtro "todos" con interleave mezcla — no poner separadores ahí)
-  // Lógica: separador cuando cambia la categoría Y la racha anterior
-  // tenía al menos 2 del mismo grupo (evita separadores por producto mezclado)
+  // Vista Ofertas estilo FLYER — sin separadores de categoría, un único header
+  const esVistaOfertaFlyer = ['oferta','activo','relampago','destacado','especial',
+    'promo','combo','ultimas'].includes(currentFilter);
+  if (esVistaOfertaFlyer) {
+    if (!products.length) return products;
+    return [{ _sep: true, label: '🛒 ALMACÉN COPIHUE — OFERTAS 🔥', cat: '__flyer__', _flyer: true }, ...products];
+  }
 
+  // Separadores normales por categoría (vista categorías/todos)
   const result = [];
   let lastCat = null;
-  let rachaCat = 0; // cuántos seguidos de la misma categoría
+  let rachaCat = 0;
 
   for (const p of products) {
     const cat = norm(p.categoria);
@@ -1220,6 +1234,9 @@ function renderGrid() {
 
   grid.innerHTML = withSeps.map((p, i) => {
     if (p._sep) {
+      if (p._flyer) {
+        return `<div class="separator-card" style="background:linear-gradient(135deg,#8b1a1a,#c0392b);font-size:15px;letter-spacing:.5px;">${p.label}</div>`;
+      }
       return `<div class="separator-card" onclick="selectCategoryFromSeparator('${p.cat}')" style="cursor:pointer" title="Tocar para seleccionar todos">${p.label} <span style="font-size:10px;opacity:.7">· tocar para seleccionar todos</span></div>`;
     }
     const sel = selectedIds.has(String(p.id));
