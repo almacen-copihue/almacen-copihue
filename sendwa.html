@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>SendWA — Almacén Copihue ver.42</title>
+<title>SendWA — Almacén Copihue ver.43</title>
 <style>
   /* ===== VARIABLES ===== */
   :root {
@@ -554,7 +554,7 @@
     <option value="grupo">👥 WA Grupo</option>
     <option value="rapido">⚡ Lista rápida</option>
   </select>
-  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.42</div>
+  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.43</div>
   <button id="btn-dark" title="Modo oscuro">🌙</button>
 </div>
 
@@ -1080,17 +1080,31 @@ function applyUIColors(data) {
 function sortProducts(products, mode) {
   const sorted = [...products];
 
-  // Vista categoría (incluye 'todos'/'') — productos con stock primero, sin stock al final
   const esVistaCategoria = !['oferta','activo','relampago','destacado','especial',
     'promo','combo','ultimas','sinoferta'].includes(currentFilter);
 
   if (esVistaCategoria) {
-    sorted.sort((a, b) => {
-      const stockA = a.stock > 0 ? 0 : 1;
-      const stockB = b.stock > 0 ? 0 : 1;
-      if (stockA !== stockB) return stockA - stockB;
-      return (b.vendidos || 0) - (a.vendidos || 0);
-    });
+    const esCategoriaUnica = currentFilter !== 'todos' && currentFilter !== '';
+    if (esCategoriaUnica) {
+      // Filtro de una sola categoría — ordenar solo por stock, sin romper nada más
+      sorted.sort((a, b) => {
+        const stockA = a.stock > 0 ? 0 : 1;
+        const stockB = b.stock > 0 ? 0 : 1;
+        if (stockA !== stockB) return stockA - stockB;
+        return (b.vendidos || 0) - (a.vendidos || 0);
+      });
+    } else {
+      // Vista "Todos" — agrupar por categoría PRIMERO, y dentro de cada
+      // categoría ordenar por stock. Así insertSeparators no corta en pedazos.
+      sorted.sort((a, b) => {
+        const catA = norm(a.categoria), catB = norm(b.categoria);
+        if (catA !== catB) return catA.localeCompare(catB);
+        const stockA = a.stock > 0 ? 0 : 1;
+        const stockB = b.stock > 0 ? 0 : 1;
+        if (stockA !== stockB) return stockA - stockB;
+        return (b.vendidos || 0) - (a.vendidos || 0);
+      });
+    }
     return sorted;
   }
 
@@ -2241,10 +2255,13 @@ on('btn-collage-close', () => {
 // ============================================================
 // ─── SEL-FAB ────────────────────────────────────────────────
 document.getElementById('btn-sel-add').onclick = () => {
-  const allVisible = filteredProducts.filter(p => p && !p._sep).map(p => String(p.id));
+  const allVisible = filteredProducts.filter(p => p && !p._sep && p.stock > 0).map(p => String(p.id));
   let added = 0;
   allVisible.forEach(id => { if (!selectedIds.has(id)) { selectedIds.add(id); selectionOrder.push(id); added++; } });
-  toast(added ? `➕ ${added} agregados` : 'Ya están todos seleccionados');
+  const sinStock = filteredProducts.filter(p => p && !p._sep && !(p.stock > 0)).length;
+  toast(added
+    ? `➕ ${added} agregados${sinStock ? ` (${sinStock} sin stock excluidos)` : ''}`
+    : 'Ya están todos seleccionados');
   renderGrid();
 };
 document.getElementById('btn-sel-remove').onclick = () => {
