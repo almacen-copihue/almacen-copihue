@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>SendWA — Almacén Copihue ver.43</title>
+<title>SendWA — Almacén Copihue ver.44</title>
 <style>
   /* ===== VARIABLES ===== */
   :root {
@@ -136,6 +136,8 @@
   .fbar-btn.fb-cats { background: #2980b9; }
   .fbar-btn.fb-cats.active { background: #1a5276; box-shadow: 0 0 0 2px #fff; }
   .fbar-btn.fb-buscar { background: rgba(255,255,255,.15); }
+  .fbar-btn.active { box-shadow: 0 0 0 2px #fff inset; font-weight: 800; }
+  .precio-chip.active { background: var(--primary); border-color: var(--primary); color: #fff; }
 
   /* Panels — ancho completo debajo de la barra */
   .filter-panel {
@@ -554,7 +556,7 @@
     <option value="grupo">👥 WA Grupo</option>
     <option value="rapido">⚡ Lista rápida</option>
   </select>
-  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.43</div>
+  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.44</div>
   <button id="btn-dark" title="Modo oscuro">🌙</button>
 </div>
 
@@ -564,6 +566,7 @@
   <button class="fbar-btn fb-ofertas" id="fb-ofertas" onclick="toggleFBar('ofertas')">🔥 Ofertas ▾</button>
   <button class="fbar-btn fb-cats"    id="fb-cats"    onclick="toggleFBar('cats')">📦 Categorías ▾</button>
   <button class="fbar-btn fb-buscar"                  onclick="toggleSearch()">🔍 Buscar</button>
+  <button class="fbar-btn" id="fb-precio" onclick="toggleFBar('precio')" style="background:#16a085">💲 Precio ▾</button>
 </div>
 
 <!-- Panel flotante Ofertas -->
@@ -586,6 +589,25 @@
 <div class="filter-panel" id="panel-cats">
   <div class="filter-panel-title">Categoría de producto</div>
   <div class="filter-chips-wrap" id="cat-chips-container"></div>
+</div>
+
+<!-- Panel flotante Precio mínimo -->
+<div class="filter-panel" id="panel-precio">
+  <div class="filter-panel-title">Ocultar productos por debajo de:</div>
+  <div class="filter-chips-wrap">
+    <button class="filter-chip precio-chip" data-precio="0">Sin límite</button>
+    <button class="filter-chip precio-chip" data-precio="499">$499</button>
+    <button class="filter-chip precio-chip" data-precio="999">$999</button>
+    <button class="filter-chip precio-chip" data-precio="1499">$1.499</button>
+    <button class="filter-chip precio-chip" data-precio="1999">$1.999</button>
+  </div>
+  <div style="display:flex;gap:6px;align-items:center;margin-top:4px;">
+    <span style="font-size:11px;font-weight:700;color:var(--text-muted);">Otro:</span>
+    <input type="number" id="precio-min-input" placeholder="$ mínimo" min="0" step="1"
+           style="flex:1;height:32px;padding:0 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card-bg);color:var(--text);font-size:13px;">
+    <button onclick="setPrecioMinimo(parseInt(document.getElementById('precio-min-input').value)||0)"
+            style="height:32px;padding:0 14px;border-radius:8px;border:none;background:var(--primary);color:#fff;font-size:12px;font-weight:700;cursor:pointer;">OK</button>
+  </div>
 </div>
 
 <!-- Overlay de búsqueda -->
@@ -807,6 +829,7 @@ let filteredProducts = [];
 let selectedIds = new Set();
 let currentFilter = 'todos';
 let currentSearch = '';
+let precioMinimo = parseInt(localStorage.getItem('sendwa_precio_min') || '0') || 0;
 let currentMode = 'estado';
 let uiColors = {};
 let selectionOrder = []; // para mantener orden de selección
@@ -1175,6 +1198,15 @@ function applyFilter() {
     const q = norm(currentSearch);
     f = f.filter(p => norm(p.nombre).includes(q) || norm(p.categoria).includes(q));
   }
+
+  if (precioMinimo > 0) {
+    f = f.filter(p => {
+      const ofertaInfo = p.catOferta ? calcularOferta(p) : null;
+      const precioFinal = (ofertaInfo && ofertaInfo.precio) ? ofertaInfo.precio : p.precioVenta;
+      return precioFinal >= precioMinimo;
+    });
+  }
+
   filteredProducts = sortProducts(f, currentMode);
   renderGrid();
 }
@@ -2348,6 +2380,11 @@ on('btn-ia-suggest', async () => {
 // FILTROS UI — search manejado inline en el HTML
 
 document.addEventListener('click', e => {
+  const precioChip = e.target.closest('.precio-chip');
+  if (precioChip) {
+    setPrecioMinimo(parseInt(precioChip.dataset.precio) || 0);
+    return;
+  }
   const chip = e.target.closest('.filter-chip');
   if (!chip || !chip.dataset.filter) return;
   currentFilter = chip.dataset.filter;
@@ -2371,9 +2408,24 @@ window.setFilter = function(filter) {
   applyFilter();
 };
 
+window.setPrecioMinimo = function(valor) {
+  precioMinimo = Math.max(0, valor || 0);
+  localStorage.setItem('sendwa_precio_min', String(precioMinimo));
+  // Marcar chip activo si coincide con un valor predefinido
+  document.querySelectorAll('.precio-chip').forEach(c =>
+    c.classList.toggle('active', parseInt(c.dataset.precio) === precioMinimo));
+  // Actualizar estado visual del botón en la barra
+  const fb = document.getElementById('fb-precio');
+  if (fb) fb.classList.toggle('active', precioMinimo > 0);
+  if (fb) fb.textContent = precioMinimo > 0 ? `💲 +$${precioMinimo.toLocaleString('es-AR')}` : '💲 Precio ▾';
+  applyFilter(); // redibuja al instante
+};
+
 window.toggleFBar = function(tipo) {
-  const panelId = tipo === 'ofertas' ? 'panel-ofertas' : 'panel-cats';
-  const btnId   = tipo === 'ofertas' ? 'fb-ofertas' : 'fb-cats';
+  const panelMap = { ofertas:'panel-ofertas', cats:'panel-cats', precio:'panel-precio' };
+  const btnMap   = { ofertas:'fb-ofertas', cats:'fb-cats', precio:'fb-precio' };
+  const panelId  = panelMap[tipo];
+  const btnId    = btnMap[tipo];
   const panel = document.getElementById(panelId);
   const wasOpen = panel.classList.contains('open');
   document.querySelectorAll('.filter-panel').forEach(p => p.classList.remove('open'));
@@ -2530,6 +2582,11 @@ async function init() {
   applyFilter();
   recalcLayout();
   window.addEventListener('resize', recalcLayout);
+  // Restaurar UI de precio mínimo guardado en localStorage
+  if (precioMinimo > 0) {
+    const fb = document.getElementById('fb-precio');
+    if (fb) { fb.textContent = `💲 +$${precioMinimo.toLocaleString('es-AR')}`; fb.classList.add('active'); }
+  }
 }
 
 // Ajuste dinámico de layout cuando el panel cambia altura
