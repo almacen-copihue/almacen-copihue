@@ -4,9 +4,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Almacén Copihue v154</title>
+    <title>Almacén Copihue v155</title>
     <!--
     CHANGELOG
+    v155 · 2026-06-19
+      - FIX columnas dinámicas reales: columnas_catalogo y columnas_recien_llegados
+        de la planilla ahora se leen y aplican a TODOS los grids correspondientes:
+        .products-grid (catálogo), #recien-grid (recién llegados),
+        .ofertas-products-grid (relámpago/destacadas/especiales/cervecero/etc).
+        Antes v153 hardcodeaba 1 columna fija en mobile ignorando la planilla.
+        Funciones nuevas: _aplicarColumnasRecienLlegados(), _aplicarColumnasOfertas().
+        Fallback default cambiado de 1 a 2 columnas en mobile si la planilla no carga.
     v154 · 2026-06-19
       - MERGE: head (CSS + meta tags) tomado de v153 (versión confirmada funcional,
         sin la regresión de llave huérfana). Body/JS conservado de la versión
@@ -679,7 +687,7 @@
         }
         @media (max-width: 767px) {
             .ofertas-products-grid {
-                grid-template-columns: 1fr;
+                grid-template-columns: repeat(2, 1fr); /* fallback si planilla no carga; JS lo sobreescribe */
                 gap: 0.75rem;
                 padding: 0.75rem;
             }
@@ -2460,7 +2468,7 @@
 
 <script>
 // ========== VERSIÓN Y CONFIGURACIÓN ==========
-const APP_VERSION = 'copihue-index-v123';
+const APP_VERSION = 'copihue-index-v124';
 // Tag versión automático con fecha
 // versionTag se actualiza desde config_sistema (campo 'version')
 
@@ -2988,6 +2996,24 @@ async function cargarConfigSistema() {
             _aplicarColumnasCatalogo(3); // default si no está en planilla
         }
 
+        // ── COLUMNAS DE RECIÉN LLEGADOS ── configurable desde planilla → columnas_recien_llegados
+        const rowColsRecien = cfg['columnas_recien_llegados'] || cfg['COLUMNAS_RECIEN_LLEGADOS'];
+        if (rowColsRecien) {
+            const valColsR = Array.isArray(rowColsRecien) ? (rowColsRecien.find(v => v && !isNaN(parseInt(v))) || rowColsRecien[0]) : rowColsRecien;
+            if (valColsR && !isNaN(parseInt(valColsR))) _aplicarColumnasRecienLlegados(parseInt(valColsR));
+        } else {
+            _aplicarColumnasRecienLlegados(3); // default si no está en planilla
+        }
+
+        // ── COLUMNAS DE TODAS LAS OFERTAS (relámpago, destacadas, especiales, cervecero, etc) ──
+        // Reutiliza columnas_catalogo como fuente — mismo criterio que el catálogo principal
+        if (rowCols) {
+            const valColsOf = Array.isArray(rowCols) ? (rowCols.find(v => v && !isNaN(parseInt(v))) || rowCols[0]) : rowCols;
+            if (valColsOf && !isNaN(parseInt(valColsOf))) _aplicarColumnasOfertas(parseInt(valColsOf));
+        } else {
+            _aplicarColumnasOfertas(3);
+        }
+
         // WA_HORARIO global — sincronizar con teléfono de planilla
         if (_emp.telefono) window.WA_HORARIO = _emp.telefono.replace(/\D/g, '');
 
@@ -3012,6 +3038,48 @@ function _aplicarColumnasCatalogo(n) {
     else {
         const s = document.createElement('style');
         s.id = '_styleColumnasCatalogo';
+        s.textContent = css;
+        document.head.appendChild(s);
+    }
+}
+
+let _columnasRecienLlegados = 3; // default — se sobreescribe desde config_sistema → columnas_recien_llegados
+
+function _aplicarColumnasRecienLlegados(n) {
+    const cols = Math.min(Math.max(parseInt(n) || 3, 1), 5);
+    _columnasRecienLlegados = cols;
+    const style = document.getElementById('_styleColumnasRecien');
+    const css = `
+        #recien-grid { grid-template-columns: repeat(${cols}, 1fr) !important; }
+        @media (max-width: 767px) { #recien-grid { grid-template-columns: repeat(${Math.min(cols, 2)}, 1fr) !important; } }
+        @media (max-width: 400px)  { #recien-grid { grid-template-columns: repeat(${Math.min(cols, 2)}, 1fr) !important; } }
+    `;
+    if (style) { style.textContent = css; }
+    else {
+        const s = document.createElement('style');
+        s.id = '_styleColumnasRecien';
+        s.textContent = css;
+        document.head.appendChild(s);
+    }
+}
+
+let _columnasOfertas = 3; // default — se sobreescribe desde config_sistema → columnas_catalogo (compartido)
+
+function _aplicarColumnasOfertas(n) {
+    const cols = Math.min(Math.max(parseInt(n) || 3, 1), 5);
+    _columnasOfertas = cols;
+    const style = document.getElementById('_styleColumnasOfertas');
+    // Aplica a TODOS los grids de ofertas: relámpago, destacadas, especiales,
+    // cervecero, últimas, promos, combos — todos comparten .ofertas-products-grid
+    const css = `
+        .ofertas-products-grid { grid-template-columns: repeat(${cols}, 1fr) !important; }
+        @media (max-width: 767px) { .ofertas-products-grid { grid-template-columns: repeat(${Math.min(cols, 2)}, 1fr) !important; } }
+        @media (max-width: 400px)  { .ofertas-products-grid { grid-template-columns: repeat(${Math.min(cols, 2)}, 1fr) !important; } }
+    `;
+    if (style) { style.textContent = css; }
+    else {
+        const s = document.createElement('style');
+        s.id = '_styleColumnasOfertas';
         s.textContent = css;
         document.head.appendChild(s);
     }
