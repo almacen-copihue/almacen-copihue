@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>SendWA — Almacén Copihue ver.47</title>
+<title>SendWA — Almacén Copihue ver.49</title>
 <style>
   /* ===== VARIABLES ===== */
   :root {
@@ -560,7 +560,7 @@
           style="width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.2);
                  border:none;color:#fff;font-size:12px;font-weight:800;cursor:pointer;
                  flex-shrink:0;display:flex;align-items:center;justify-content:center;">?</button>
-  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.47</div>
+  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.49</div>
   <button id="btn-dark" title="Modo oscuro">🌙</button>
 </div>
 
@@ -1677,11 +1677,26 @@ function openCollageModal(mode) {
   const picker = document.getElementById('single-picker');
   const layoutBar = document.getElementById('single-layout-bar');
   const btnTodas = document.getElementById('btn-dl-todas');
+  const promoPanel = document.getElementById('promo-manual-panel');
+  const canvasWrap = document.getElementById('collage-canvas-wrap');
+
+  if (mode === 'promo') {
+    picker.style.display = 'none';
+    layoutBar.classList.remove('show');
+    btnTodas.classList.remove('show');
+    promoPanel.style.display = 'flex';
+    canvasWrap.style.display = 'none';
+    buildPromoPicker();
+    buildPromoPreciosList();
+    return;
+  }
+  promoPanel.style.display = 'none';
+  canvasWrap.style.display = '';
+
   if (mode === 'single') {
     picker.style.display = 'block';
     layoutBar.classList.add('show');
     buildSinglePicker(_collageProds);
-    // Mostrar btn descargar todas si hay más de 1
     if (_collageProds.length > 1) {
       btnTodas.classList.add('show');
       btnTodas.textContent = `⬇️ Descargar TODAS (${_collageProds.length} fotos)`;
@@ -1716,7 +1731,11 @@ let _singleLayout = 'clasico'; // clasico | h2 | v2 | expandido
 
 async function renderCollageMode() {
   const ctrls = document.getElementById('collage-collage-controls');
-  if (ctrls) ctrls.style.display = _collageMode === 'collage' ? '' : 'none';
+  if (ctrls) ctrls.style.display = (_collageMode === 'collage' || _collageMode === 'historia') ? '' : 'none';
+  // El selector de grilla solo aplica a collage — ocultar en historia
+  const gridRow = ctrls?.querySelector('div');
+  if (gridRow) gridRow.style.display = _collageMode === 'collage' ? 'flex' : 'none';
+  if (_collageMode === 'historia') _historiaPage = 0;
   if (_collageMode === 'collage')  await renderCollagePage();
   if (_collageMode === 'single')   await drawSingleLayout(_collageProds[_singleIdx], _singleLayout);
   if (_collageMode === 'historia') await drawHistoria(_collageProds);
@@ -2189,53 +2208,81 @@ async function drawSingleFmt(p, W=1080, H=1080) {
 }
 
 // ── MODO HISTORIA 1080x1920 ──────────────────────────────────────
-async function drawHistoria(prods) {
-  const n=Math.min(prods.length, 6), cols=n<=4?2:3, rows=Math.ceil(n/cols);
-  const W=1080, H=1920;
-  const CARD=Math.floor((W-60-(cols-1)*12)/cols);
-  const startY=260;
+// Historia con grilla fija 2x4=8 (óptimo para formato vertical 9:16) + paginación
+const HISTORIA_PER_PAGE = 8;
+let _historiaPage = 0;
+
+function historiaTotalPages() {
+  return Math.max(1, Math.ceil(_collageProds.length / HISTORIA_PER_PAGE));
+}
+
+async function drawHistoria(prodsAll) {
+  const total = historiaTotalPages();
+  _historiaPage = Math.min(_historiaPage, total - 1);
+  const start = _historiaPage * HISTORIA_PER_PAGE;
+  const prods = prodsAll.slice(start, start + HISTORIA_PER_PAGE);
+
+  const n = prods.length, cols = 2, rows = Math.ceil(n / cols);
+  const W = 1080, H = 1920;
+  const CARD = Math.floor((W - 60 - (cols - 1) * 12) / cols);
+  const startY = 260;
+  const FTRH = 150;
+  const gridH = H - startY - FTRH - 20;
+  const cardH = Math.min(CARD, Math.floor((gridH - (rows - 1) * 12) / rows));
+
   const cvs = document.getElementById('historia-canvas');
-  cvs.width=W; cvs.height=H; cvs.style.display='block';
-  const ctx=cvs.getContext('2d');
+  cvs.width = W; cvs.height = H; cvs.style.display = 'block';
+  const ctx = cvs.getContext('2d');
 
-  // BG
-  const grd=ctx.createLinearGradient(0,0,W,H);
-  grd.addColorStop(0,'#0f2b0b'); grd.addColorStop(1,'#1a3a16');
-  ctx.fillStyle=grd; ctx.fillRect(0,0,W,H);
+  // BG verde Almacén Copihue — fijo, no depende del tipo de oferta
+  const grd = ctx.createLinearGradient(0, 0, W, H);
+  grd.addColorStop(0, '#1a3a16'); grd.addColorStop(1, '#2d5a22');
+  ctx.fillStyle = grd; ctx.fillRect(0, 0, W, H);
 
-  // Header dinámico
-  const _tiposH = [...new Set(prods.map(p=>p.catOferta).filter(Boolean))];
-  const _titleH = { relampago:'⚡ OFERTAS RELÁMPAGO', ultimas:'🏷️ ÚLTIMAS UNIDADES',
-    destacado:'🔥 DESTACADOS', especial:'💜 ESPECIALES', promo:'🏷️ PROMOS', combo:'🎯 COMBOS' };
-  const _hTitulo = _tiposH.length===1 && _titleH[_tiposH[0]] ? _titleH[_tiposH[0]] : '🔥 OFERTAS DEL DÍA';
-  const _hColorMap = { relampago:'#F9A825', destacado:'#FF9800', especial:'#00BCD4',
-    multicompra:'#9C27B0', ultimas:'#E53935', promo:'#43A047', combo:'#6D4C41', jueves:'#1A237E' };
-  ctx.fillStyle = _hColorMap[_tiposH[0]] || '#0f2b0b';
-  ctx.fillRect(0,0,W,220);
-  ctx.fillStyle='#fff'; ctx.font='bold 64px Segoe UI'; ctx.textAlign='center';
+  // Header fijo — igual que el collage
+  ctx.fillStyle = '#2d5a22'; ctx.fillRect(0, 0, W, 220);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 60px Segoe UI'; ctx.textAlign = 'center';
   ctx.fillText('🛒 ALMACÉN COPIHUE', W/2, 100);
-  ctx.font='bold 44px Segoe UI'; ctx.fillStyle='rgba(255,255,255,.95)';
-  ctx.fillText(_hTitulo, W/2, 170);
+  ctx.font = 'bold 32px Segoe UI'; ctx.fillStyle = 'rgba(255,255,255,.92)';
+  ctx.fillText('Productos de calidad con la confianza de siempre', W/2, 160);
+  if (total > 1) {
+    ctx.font = 'bold 26px Segoe UI'; ctx.fillStyle = 'rgba(255,255,255,.8)';
+    ctx.fillText(`Página ${_historiaPage+1} de ${total}`, W/2, 200);
+  }
 
-  for (let i=0;i<n;i++) {
-    const col=i%cols, row=Math.floor(i/cols);
-    const x=30+col*(CARD+12), y=startY+row*(CARD+12);
-    await drawProductCard(ctx, prods[i], x, y, CARD, CARD);
+  for (let i = 0; i < n; i++) {
+    const col = i % cols, row = Math.floor(i / cols);
+    const x = 30 + col * (CARD + 12), y = startY + row * (cardH + 12);
+    await drawProductCard(ctx, prods[i], x, y, CARD, cardH);
   }
 
   // Footer WA
-  ctx.fillStyle='#25D366'; ctx.fillRect(0,H-150,W,150);
-  ctx.fillStyle='#fff'; ctx.font='bold 52px Segoe UI'; ctx.textAlign='center';
-  ctx.fillText('📲 Pedidos por WhatsApp', W/2, H-80);
-  ctx.font='36px Segoe UI';
-  ctx.fillText('Almacén Copihue', W/2, H-30);
+  ctx.fillStyle = '#25D366'; ctx.fillRect(0, H - FTRH, W, FTRH);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 48px Segoe UI'; ctx.textAlign = 'center';
+  ctx.fillText('📲 Pedidos por WhatsApp', W/2, H - 80);
+  ctx.font = '34px Segoe UI';
+  ctx.fillText('Almacén Copihue', W/2, H - 30);
 
-  // Mostrar en canvas principal también (preview)
-  const cvs2=document.getElementById('collage-canvas');
-  const scale=Math.min(700/W, 700/H);
-  cvs2.width=Math.round(W*scale); cvs2.height=Math.round(H*scale);
-  const ctx2=cvs2.getContext('2d');
-  ctx2.drawImage(cvs, 0,0, cvs2.width, cvs2.height);
+  // Preview en canvas principal
+  const cvs2 = document.getElementById('collage-canvas');
+  const scale = Math.min(700/W, 700/H);
+  cvs2.width = Math.round(W*scale); cvs2.height = Math.round(H*scale);
+  const ctx2 = cvs2.getContext('2d');
+  ctx2.drawImage(cvs, 0, 0, cvs2.width, cvs2.height);
+
+  // Nav de páginas — reutiliza el mismo bloque visual del collage
+  const nav = document.getElementById('collage-page-nav');
+  if (nav) {
+    nav.style.display = total > 1 ? 'flex' : 'none';
+    const lbl = document.getElementById('collage-page-lbl');
+    const desde = start + 1, hasta = Math.min(start + HISTORIA_PER_PAGE, _collageProds.length);
+    if (lbl) lbl.textContent = `Pág ${_historiaPage+1}/${total}  (${desde}–${hasta})`;
+    const btns = nav.querySelectorAll('button');
+    if (btns[0]) { btns[0].style.opacity = _historiaPage > 0 ? '1' : '.3'; btns[0].onclick = () => { if(_historiaPage>0){_historiaPage--;drawHistoria(_collageProds);} }; }
+    if (btns[1]) { btns[1].style.opacity = _historiaPage < total-1 ? '1' : '.3'; btns[1].onclick = () => { if(_historiaPage<total-1){_historiaPage++;drawHistoria(_collageProds);} }; }
+  }
+  const info = document.getElementById('collage-sel-info');
+  if (info) info.textContent = `📷 ${_collageProds.length} fotos · ${total} pág${total>1?'s':''}`;
 }
 
 // Descargar TODAS: itera cada producto con el layout actual
@@ -2278,6 +2325,138 @@ on('btn-collage-close', () => {
 // ============================================================
 // IA SUGGEST
 // ============================================================
+// ─── PROMO MANUAL ───────────────────────────────────────────
+let _promoProds = [];
+const PROMO_MAX = 12;
+
+function buildPromoPicker() {
+  const list = document.getElementById('promo-picker-list');
+  if (!list) return;
+  list.innerHTML = allProducts.filter(p => p.stock > 0).map(p => {
+    const sel = _promoProds.some(x => x.id === p.id);
+    return `<div onclick="togglePromoProd('${p.id}')"
+      style="flex-shrink:0;width:70px;cursor:pointer;text-align:center;
+             border:2px solid ${sel ? 'var(--primary)' : 'var(--border)'};
+             border-radius:10px;padding:4px;background:${sel ? 'var(--selected-bg)' : 'var(--card-bg)'};">
+      <img src="${getImgUrl(p)}" style="width:100%;height:50px;object-fit:contain;" onerror="this.style.opacity=0.2">
+      <div style="font-size:9px;line-height:1.2;margin-top:2px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${p.nombre}</div>
+    </div>`;
+  }).join('');
+}
+
+window.togglePromoProd = function(id) {
+  const idx = _promoProds.findIndex(x => x.id === id);
+  if (idx > -1) {
+    _promoProds.splice(idx, 1);
+  } else {
+    if (_promoProds.length >= PROMO_MAX) { toast(`⚠️ Máximo ${PROMO_MAX} productos`); return; }
+    const p = allProducts.find(x => x.id === id);
+    if (!p) return;
+    _promoProds.push({ id: p.id, nombre: p.nombre, foto: getImgUrl(p), precioAntes: p.precioVenta, precioHoy: p.precioVenta });
+  }
+  buildPromoPicker();
+  buildPromoPreciosList();
+};
+
+function buildPromoPreciosList() {
+  const wrap = document.getElementById('promo-precios-list');
+  if (!wrap) return;
+  wrap.innerHTML = _promoProds.map((pp, i) => `
+    <div style="display:flex;align-items:center;gap:6px;background:var(--card-bg);border:1px solid var(--border);border-radius:8px;padding:6px 8px;">
+      <span style="font-size:11px;flex:1;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${pp.nombre}</span>
+      <span style="font-size:10px;color:var(--text-muted);">Antes $</span>
+      <input type="number" value="${pp.precioAntes}" style="width:70px;height:26px;border-radius:6px;border:1px solid var(--border);font-size:11px;padding:0 4px;"
+             oninput="_promoProds[${i}].precioAntes=parseFloat(this.value)||0">
+      <span style="font-size:10px;color:var(--text-muted);">Hoy $</span>
+      <input type="number" value="${pp.precioHoy}" style="width:70px;height:26px;border-radius:6px;border:1px solid var(--primary);font-size:11px;padding:0 4px;font-weight:700;"
+             oninput="_promoProds[${i}].precioHoy=parseFloat(this.value)||0">
+      <button onclick="togglePromoProd('${pp.id}')" style="width:22px;height:22px;border-radius:50%;border:none;background:var(--accent);color:#fff;font-size:12px;cursor:pointer;">✕</button>
+    </div>
+  `).join('');
+}
+
+async function drawPromoManual() {
+  if (!_promoProds.length) { toast('⚠️ Elegí al menos un producto'); return; }
+  const titulo = document.getElementById('promo-titulo-input')?.value.trim() || 'PROMOCIÓN ESPECIAL';
+
+  const n = _promoProds.length;
+  const cols = n <= 2 ? n : n <= 4 ? 2 : n <= 9 ? 3 : 4;
+  const rows = Math.ceil(n / cols);
+  const CW = 1080, HDRH = 100, FTRH = 44, PAD = 8;
+  const CARD_W = Math.floor((CW - PAD*(cols+1)) / cols);
+
+  const imgCache = {};
+  await Promise.all(_promoProds.map(async pp => {
+    try { imgCache[pp.id] = await loadImg(pp.foto); } catch {}
+  }));
+  let maxRatio = 1.0;
+  _promoProds.forEach(pp => {
+    const img = imgCache[pp.id];
+    if (img && img.width > 0) maxRatio = Math.max(maxRatio, Math.min(img.height/img.width, 1.0));
+  });
+
+  const TEXT_H = 100, BADGE_H = 0;
+  const IMG_H = Math.round(CARD_W * maxRatio);
+  const CARD_H = IMG_H + TEXT_H + BADGE_H;
+  const CH = HDRH + rows*CARD_H + (rows+1)*PAD + FTRH;
+
+  const cvs = document.getElementById('collage-canvas');
+  cvs.width = CW; cvs.height = CH;
+  const ctx = cvs.getContext('2d');
+
+  ctx.fillStyle = '#2d5a22'; ctx.fillRect(0,0,CW,HDRH);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 24px Segoe UI'; ctx.textAlign = 'center';
+  ctx.fillText('🛒 ALMACÉN COPIHUE', CW/2, 32);
+  ctx.font = 'bold 20px Segoe UI'; ctx.fillStyle = '#ffd54f';
+  ctx.fillText(titulo, CW/2, 64);
+  ctx.font = '13px Segoe UI'; ctx.fillStyle = 'rgba(255,255,255,.85)';
+  ctx.fillText('Productos de calidad con la confianza de siempre', CW/2, 88);
+
+  ctx.fillStyle = '#f5f7f4'; ctx.fillRect(0, HDRH, CW, CH-HDRH-FTRH);
+
+  for (let i = 0; i < n; i++) {
+    const col = i % cols, row = Math.floor(i / cols);
+    const x = PAD + col*(CARD_W+PAD), y = HDRH + PAD + row*(CARD_H+PAD);
+    const pp = _promoProds[i];
+    const img = imgCache[pp.id];
+
+    ctx.save();
+    roundRect(ctx, x, y, CARD_W, CARD_H, 12); ctx.clip();
+    ctx.fillStyle = '#fff'; ctx.fillRect(x, y, CARD_W, CARD_H);
+    if (img) {
+      const padPct = 0.10;
+      const availW = CARD_W*(1-padPct), availH = IMG_H*(1-padPct);
+      const ratio = Math.min(availW/img.width, availH/img.height);
+      const dw = img.width*ratio, dh = img.height*ratio;
+      ctx.drawImage(img, x+(CARD_W-dw)/2, y+(IMG_H-dh)/2, dw, dh);
+    }
+    ctx.restore();
+    ctx.strokeStyle = '#43A047'; ctx.lineWidth = 2.5;
+    roundRect(ctx, x, y, CARD_W, CARD_H, 12); ctx.stroke();
+
+    ctx.fillStyle = '#1a2e17'; ctx.font = 'bold 13px Segoe UI'; ctx.textAlign = 'center';
+    wrapText(ctx, pp.nombre, x+CARD_W/2, y+IMG_H+20, CARD_W-12, 16);
+
+    const yPrecio = y + IMG_H + TEXT_H - 14;
+    if (pp.precioAntes > pp.precioHoy) {
+      ctx.font = '13px Segoe UI'; ctx.fillStyle = '#999';
+      const antesTxt = `$${pp.precioAntes.toLocaleString('es-AR')}`;
+      ctx.fillText(antesTxt, x+CARD_W/2, yPrecio-18);
+      const tw = ctx.measureText(antesTxt).width;
+      ctx.strokeStyle = '#999'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(x+CARD_W/2-tw/2, yPrecio-22); ctx.lineTo(x+CARD_W/2+tw/2, yPrecio-22); ctx.stroke();
+    }
+    ctx.font = 'bold 20px Segoe UI'; ctx.fillStyle = '#43A047';
+    ctx.fillText(`$${pp.precioHoy.toLocaleString('es-AR')}`, x+CARD_W/2, yPrecio+4);
+  }
+
+  ctx.fillStyle = '#25D366'; ctx.fillRect(0, CH-FTRH, CW, FTRH);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 16px Segoe UI'; ctx.textAlign = 'center';
+  ctx.fillText('📲 Hacemos pedidos · Consultas por WhatsApp', CW/2, CH-FTRH/2+5);
+
+  toast('✅ Flyer generado');
+}
+
 // ─── SEL-FAB ────────────────────────────────────────────────
 document.getElementById('btn-sel-add').onclick = () => {
   const allVisible = filteredProducts.filter(p => p && !p._sep && p.stock > 0).map(p => String(p.id));
