@@ -36,6 +36,27 @@
 
 ================================================================================
 
+  v388 — 19/06/2026
+  -----------------
+  • NUEVO — MULTICOMPRA GRUPAL: columna GRUPO_MULTICOMPRA en inventario. Cuando
+    varias variantes de un producto (ej. 6 sabores de Manaos 3L) comparten el
+    mismo valor de grupo, sus unidades en el carrito se combinan para alcanzar
+    el pack (ej. 3 unidades entre sabores distintos = mismo descuento que 3
+    unidades del mismo sabor). Vacío = comportamiento individual sin cambios.
+  • _poolMulticompra ahora guarda también { grupo } además de tipo/cantidad/precio.
+  • calcularOfertaPOS (4b): si hay grupo, suma qty de todas las líneas hermanas
+    del carrito antes de aplicar la regla de pack, y reparte el descuento
+    proporcionalmente según el qty de cada línea (evita duplicar el beneficio).
+  • Nueva función _recalcularGrupoMulticompra(id): actualiza price/precioTotalCalc
+    de las líneas hermanas tras agregar, quitar o cambiar cantidad. Enganchada en
+    los puntos reales de mutación del carrito: agregar producto, modal de cantidad,
+    +/- panel lateral (con y sin animación), +/- y eliminar en modal de confirmar
+    venta, y gesto de swipe para quitar del carrito.
+  • GAS: calcularOfertas() ahora lee también GRUPO_MULTICOMPRA por nombre de
+    columna y la expone en multicompraActiva.
+
+================================================================================
+
   v387 — 15/06/2026
   -----------------
   • FIX CRÍTICO — _reenviarVentasPendientes: cuando la venta pendiente tiene
@@ -1842,26 +1863,6 @@
                     <button onclick="ajustarPrecio(100)" style="width:44px;height:44px;border-radius:50%;border:2px solid #c8e6c9;background:#f1f8f1;font-size:1.3rem;font-weight:900;cursor:pointer;color:#2e7d32;touch-action:manipulation;">+</button>
                 </div>
 
-                <!-- OFERTAS -->
-                <div style="margin-bottom:16px;">
-                    <div style="font-size:0.7rem;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;text-align:center;">⚡ Ofertas</div>
-                    <!-- RELÁMPAGO -->
-                    <div style="margin-bottom:10px;">
-                        <div style="font-size:0.72rem;font-weight:700;color:#f57f17;margin-bottom:6px;">⚡ RELÁMPAGO <span id="ajusteRelActual" style="font-weight:400;color:#999;"></span></div>
-                        <div style="display:flex;flex-wrap:wrap;gap:5px;" id="ajusteRelGrid"></div>
-                    </div>
-                    <!-- DESTACADA -->
-                    <div style="margin-bottom:10px;">
-                        <div style="font-size:0.72rem;font-weight:700;color:#e65100;margin-bottom:6px;">🔥 DESTACADA % <span id="ajusteDestActual" style="font-weight:400;color:#999;"></span></div>
-                        <div style="display:flex;flex-wrap:wrap;gap:5px;" id="ajusteDestGrid"></div>
-                    </div>
-                    <!-- ESPECIAL -->
-                    <div>
-                        <div style="font-size:0.72rem;font-weight:700;color:#00838f;margin-bottom:6px;">🌙 ESPECIAL <span id="ajusteEspActual" style="font-weight:400;color:#999;"></span></div>
-                        <div style="display:flex;gap:8px;" id="ajusteEspGrid"></div>
-                    </div>
-                </div>
-
                 <!-- Guardar -->
                 <button onclick="guardarAjuste()" id="ajusteBtn"
                         style="width:100%;padding:14px;border:none;border-radius:12px;background:#1976d2;color:white;font-size:1rem;font-weight:700;cursor:pointer;margin-bottom:10px;">
@@ -3489,6 +3490,7 @@ function agregarProducto(id) {
         if (tieneDesc) mostrarToast(`${oferta.etiqueta || '🏷️ PROMO'} — ${producto.name.substring(0,25)}`, 'naranja');
     }
 
+    _recalcularGrupoMulticompra(id); // actualiza líneas hermanas si el producto pertenece a un grupo
     renderVenta(true); // ligero: solo panel y totales
     _guardarCarritoDiferido(); // async — no bloquea el hilo en Android
     _refreshResultadosBadges(id); // quirúrgico: solo el card tocado
@@ -3581,6 +3583,7 @@ function confirmarSelectorQty() {
     ocultarResultados();
     document.getElementById('buscador').value = '';
     document.getElementById('buscador').focus();
+    _recalcularGrupoMulticompra(p.id); // actualiza líneas hermanas si pertenece a un grupo
     renderVenta();
     guardarCarritoPendiente();
     const label = oferta.tieneOferta ? `${oferta.etiqueta} — ` : '';
@@ -3623,6 +3626,7 @@ function cambiarCantidad(id, delta) {
             filaPanel.style.opacity = '0';
             setTimeout(() => {
                 ventaActual.splice(idx, 1);
+                _recalcularGrupoMulticompra(Number(id)); // hermanas recalculan su qtyGrupo sin esta línea
                 if (ventaActual.length === 0) {
                     renderVenta();
                 } else {
@@ -3649,6 +3653,7 @@ function cambiarCantidad(id, delta) {
             }, 150);
         } else {
             ventaActual.splice(idx, 1);
+            _recalcularGrupoMulticompra(Number(id)); // hermanas recalculan su qtyGrupo sin esta línea
             if (ventaActual.length === 0) { renderVenta(); } else { _patchPanelLateral(); }
             _guardarCarritoDiferido();
             // Badge quirúrgico también en el path sin animación
@@ -3686,6 +3691,7 @@ function cambiarCantidad(id, delta) {
             item.ofertaTipo      = oferta.tipoOferta || null;
         }
         item.qty = nuevaCant;
+        _recalcularGrupoMulticompra(Number(id)); // actualiza líneas hermanas si pertenece a un grupo
         renderVenta(true); // ligero: solo actualiza panel y totales
     }
     _guardarCarritoDiferido(); // async — no bloquea el hilo en Android
@@ -4026,6 +4032,20 @@ function _modalQty(idx, delta) {
     // Sin renderVenta — el modal gestiona su propio display, no tocar elementos detrás
     _guardarCarritoDiferido();
     _patchFilaModal(idx); // quirúrgico: solo actualiza qty+subtotal de esta fila
+
+    // MULTICOMPRA GRUPAL: si este producto comparte grupo con otras líneas
+    // (ej. distintos sabores del mismo pack), recalcular y parchear también las hermanas.
+    if (p) {
+        _recalcularGrupoMulticompra(item.id);
+        const mc = _poolMulticompra.get(item.id);
+        if (mc && mc.grupo) {
+            ventaActual.forEach((otroItem, otroIdx) => {
+                if (otroIdx === idx) return;
+                const otroMc = _poolMulticompra.get(otroItem.id);
+                if (otroMc && otroMc.grupo === mc.grupo) _patchFilaModal(otroIdx);
+            });
+        }
+    }
 }
 
 function _modalDel(idx) {
@@ -4036,6 +4056,7 @@ function _modalDel(idx) {
     const filaElim = el ? el.querySelector(`.confirm-fila-editable[data-idx="${idx}"]`) : null;
 
     const _doDelete = () => {
+        const idEliminado = ventaActual[idx].id; // capturar antes del splice
         ventaActual.splice(idx, 1);
         _guardarCarritoDiferido();
         if (ventaActual.length === 0) {
@@ -4062,6 +4083,18 @@ function _modalDel(idx) {
             if (btnPlus)  btnPlus.setAttribute('onclick',  `_modalQty(${nuevoIdx},1)`);
         }
     });
+
+    // MULTICOMPRA GRUPAL: tras eliminar esta línea, las hermanas del mismo grupo
+    // deben recalcular su qtyGrupo sin ella. Recalcular y parchear con los
+    // índices ya reindexados (post-eliminación).
+    _recalcularGrupoMulticompra(idEliminado);
+    const mcElim = _poolMulticompra.get(idEliminado);
+    if (mcElim && mcElim.grupo) {
+        ventaActual.forEach((otroItem, otroIdx) => {
+            const otroMc = _poolMulticompra.get(otroItem.id);
+            if (otroMc && otroMc.grupo === mcElim.grupo) _patchFilaModal(otroIdx);
+        });
+    }
 
     // 3. Actualizar total en la fila de total
         const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
@@ -5842,8 +5875,6 @@ function seleccionarAjuste(id) {
     if (!p) return;
     ajusteProducto = p;
     ajusteValor = p.stock;
-    _ajRel = null; _ajDest = null; _ajEsp = null;
-    _renderAjusteOfertas(p);
     document.getElementById('ajusteQ').value = p.name;
     document.getElementById('ajusteResultados').style.display = 'none';
     document.getElementById('ajusteNombre').textContent = p.name;
@@ -5893,45 +5924,6 @@ function ajustarPrecio(delta) {
     input.value = Math.max(0, actual + delta);
 }
 
-// ========== AJUSTE RÁPIDO — OFERTAS ==========
-let _ajRel = null, _ajDest = null, _ajEsp = null;
-
-function _renderAjusteOfertas(p) {
-    const relOpts = [
-        {v:0,l:'❌ OFF'},{v:1,l:'1+1'},{v:2,l:'2+1'},{v:3,l:'3+1'},
-        {v:4,l:'4+1'},{v:5,l:'5+1'},{v:6,l:'6+1'},
-        {v:10,l:'2ₐ50%'},{v:11,l:'-10%'},{v:12,l:'-15%'},{v:13,l:'-20%'},{v:14,l:'-25%'}
-    ];
-    const relAct = _ajRel !== null ? _ajRel : (p.relampago || 0);
-    document.getElementById('ajusteRelActual').textContent = (p.relampago||0) > 0 ? '(actual: '+p.relampago+')' : '';
-    document.getElementById('ajusteRelGrid').innerHTML = relOpts.map(o => {
-        const sel = relAct === o.v;
-        return `<button onclick="_ajSetRel(${o.v})" style="padding:5px 9px;border-radius:7px;border:2px solid ${sel?'#f57f17':'#e0e0e0'};background:${sel?'#fff9c4':'#fafafa'};color:${sel?'#e65100':'#999'};font-size:0.76rem;font-weight:${sel?'800':'600'};cursor:pointer;touch-action:manipulation;">${o.l}</button>`;
-    }).join('');
-
-    const destOpts = [0,15,20,25,30,40,50];
-    const destAct = _ajDest !== null ? _ajDest : (p.destacada || 0);
-    document.getElementById('ajusteDestActual').textContent = (p.destacada||0) > 0 ? '(actual: '+p.destacada+'%)' : '';
-    document.getElementById('ajusteDestGrid').innerHTML = destOpts.map(v => {
-        const sel = destAct === v;
-        return `<button onclick="_ajSetDest(${v})" style="padding:5px 9px;border-radius:7px;border:2px solid ${sel?'#e65100':'#e0e0e0'};background:${sel?'#ffe0b2':'#fafafa'};color:${sel?'#bf360c':'#999'};font-size:0.76rem;font-weight:${sel?'800':'600'};cursor:pointer;touch-action:manipulation;">${v===0?'❌ OFF':v+'%'}</button>`;
-    }).join('');
-
-    const espAct = _ajEsp !== null ? _ajEsp : (p.especial || 0);
-    document.getElementById('ajusteEspActual').textContent = (p.especial||0) === 1 ? '(ACTIVA)' : '';
-    document.getElementById('ajusteEspGrid').innerHTML = [
-        {v:0,l:'❌ OFF',bg:'#fafafa',bc:'#e0e0e0',cl:'#999'},
-        {v:1,l:'✅ ON', bg:'#e0f7fa',bc:'#00838f',cl:'#006064'}
-    ].map(o => {
-        const sel = espAct === o.v;
-        return `<button onclick="_ajSetEsp(${o.v})" style="padding:7px 18px;border-radius:8px;border:2px solid ${sel?o.bc:'#e0e0e0'};background:${sel?o.bg:'#fafafa'};color:${sel?o.cl:'#999'};font-size:0.82rem;font-weight:${sel?'800':'600'};cursor:pointer;touch-action:manipulation;">${o.l}</button>`;
-    }).join('');
-}
-
-function _ajSetRel(v)  { _ajRel  = v; _renderAjusteOfertas(ajusteProducto); }
-function _ajSetDest(v) { _ajDest = v; _renderAjusteOfertas(ajusteProducto); }
-function _ajSetEsp(v)  { _ajEsp  = v; _renderAjusteOfertas(ajusteProducto); }
-
 async function guardarAjuste() {
     if (!ajusteProducto) return;
     const btn = document.getElementById('ajusteBtn');
@@ -5961,36 +5953,15 @@ async function guardarAjuste() {
                 ajusteProducto.name = nombreNuevoLocal;
                 generarBatRenombrarFoto(nombreViejo, nombreNuevoLocal);
             }
-            if (catAjuste && catAjuste !== ajusteProducto.category) ajusteProducto.category = catAjuste;
-            if (precioNuevo !== ajusteProducto.price) ajusteProducto.price = precioNuevo;
-
-            // Guardar ofertas si se tocaron
-            const ofertasTocadas = _ajRel !== null || _ajDest !== null || _ajEsp !== null;
-            if (ofertasTocadas) {
-                try {
-                    // Relámpago → action=relampago
-                    if (_ajRel !== null) {
-                        const urlRel = API_URL + '?action=relampago&data=' + encodeURIComponent(JSON.stringify({
-                            productoId: ajusteProducto.id, tipo: _ajRel, limpiarOfertas: _ajRel > 0
-                        }));
-                        await _apiFetchUrl('relampago', urlRel);
-                        ajusteProducto.relampago = _ajRel;
-                    }
-                    // Destacada y Especial → ajusteRapido con campos extra en Code.gs
-                    if (_ajDest !== null || _ajEsp !== null) {
-                        const dExtra = {
-                            producto: ajusteProducto.name,
-                            stockAntes: ajusteProducto.stock, stockDespues: ajusteProducto.stock,
-                        };
-                        if (_ajDest !== null) { dExtra.destacada = _ajDest; ajusteProducto.destacada = _ajDest; }
-                        if (_ajEsp  !== null) { dExtra.especial  = _ajEsp;  ajusteProducto.especial  = _ajEsp;  }
-                        const urlDE = API_URL + '?action=ajusteRapido&data=' + encodeURIComponent(JSON.stringify(dExtra));
-                        await _apiFetchUrl('ajusteRapido', urlDE);
-                    }
-                } catch(eOf) { console.warn('⚠️ Error guardando ofertas:', eOf); mostrarToast('⚠️ Ajuste OK pero ofertas fallaron', 'naranja'); }
+            if (catAjuste && catAjuste !== ajusteProducto.category) {
+                ajusteProducto.category = catAjuste;
             }
-
-            mostrarToast('✅ ' + (ofertasTocadas ? 'Producto y ofertas guardados' : precioNuevo !== ajusteProducto.price ? 'Precio actualizado' : 'Stock ajustado a ' + ajusteValor), 'verde');
+            if (precioNuevo !== ajusteProducto.price) {
+                ajusteProducto.price = precioNuevo;
+                mostrarToast('✅ Producto actualizado', 'verde');
+            } else {
+                mostrarToast('✅ Stock ajustado a ' + ajusteValor, 'verde');
+            }
             cerrarAjuste();
         } else {
             mostrarToast('❌ ' + resp.mensaje, 'rojo');
@@ -7250,7 +7221,7 @@ const _poolIdsDestacadas = new Set();
 const _poolIdsEspeciales = new Set();
 const _poolIdsUltimas    = new Map(); // id → diasParaVencer
 const _poolCervecero     = new Map(); // id → { descuento, precioPromo }
-const _poolMulticompra   = new Map(); // id → { tipo, cantidad, precio }
+const _poolMulticompra   = new Map(); // id → { tipo, cantidad, precio, grupo }
 let _limiteRelampago     = 3; // configurable desde GAS → limites.relampago
 let _limiteDestacadas    = 9; // configurable desde GAS → limites.destacadas
 let _limiteEspeciales    = 2; // configurable desde GAS → limites.especiales
@@ -7290,7 +7261,8 @@ async function cargarPoolsOfertas() {
             if (local) _poolMulticompra.set(local.id, {
                 tipo:     p.MULTICOMPRA_TIPO     || '',
                 cantidad: p.MULTICOMPRA_CANTIDAD || 0,
-                precio:   p.MULTICOMPRA_PRECIO   || 0
+                precio:   p.MULTICOMPRA_PRECIO   || 0,
+                grupo:    p.GRUPO_MULTICOMPRA    || ''
             });
         });
         (data.especialesActivas || []).filter(p => p.categoria !== 'CERVEZAS').forEach(p => _poolIdsEspeciales.add(Number(p.id)));
@@ -7511,30 +7483,52 @@ function calcularOfertaPOS(producto, qty) {
         r.tieneOferta = true; r.tipoOferta = 'especiales';
     }
     // 4b. MULTICOMPRA — pool desde getOfertas, cálculo dinámico por cantidad
+    //     Soporta GRUPO_MULTICOMPRA: combina qty de todas las líneas del carrito
+    //     que compartan el mismo grupo (ej. 6 sabores de Manaos 3L cuentan para el mismo pack).
     else if (_poolMulticompra.has(producto.id)) {
         const mc      = _poolMulticompra.get(producto.id);
         const AT      = mc.cantidad;
         const AU      = mc.precio;
         const tipo    = mc.tipo;
+        const grupo   = mc.grupo;
         const pnormal = producto.price;
-        let total     = qty * pnormal; // fallback: precio normal
 
-        if (qty >= AT && AT > 0 && AU > 0) {
+        // qty efectivo: si hay grupo, sumar qty de TODAS las líneas hermanas del carrito,
+        // empezando por el qty de ESTA línea (parámetro, siempre el más actual) para
+        // evitar contarla dos veces si ya existe en ventaActual.
+        let qtyGrupo = qty;
+        if (grupo) {
+            (ventaActual || []).forEach(item => {
+                if (item.id === producto.id) return; // ya contado vía "qty"
+                const itemMc = _poolMulticompra.get(item.id);
+                if (itemMc && itemMc.grupo === grupo) qtyGrupo += item.qty;
+            });
+        }
+
+        let total = qty * pnormal; // fallback: precio normal (sobre qty individual de ESTA línea)
+
+        if (qtyGrupo >= AT && AT > 0 && AU > 0) {
+            let totalGrupo;
             if (tipo === '2X' || tipo === '3X' || tipo === 'NX' || tipo === 'LLEVÁ-PAGÁ') {
-                const ciclos = Math.floor(qty / AT);
-                const resto  = qty % AT;
-                total = ciclos * AU + resto * pnormal;
+                const ciclos = Math.floor(qtyGrupo / AT);
+                const resto  = qtyGrupo % AT;
+                totalGrupo = ciclos * AU + resto * pnormal;
             } else if (tipo === '2DA_UNIDAD') {
-                const pares = Math.floor(qty / 2);
-                const resto  = qty % 2;
-                total = pares * (pnormal + AU) + resto * pnormal;
+                const pares = Math.floor(qtyGrupo / 2);
+                const resto = qtyGrupo % 2;
+                totalGrupo = pares * (pnormal + AU) + resto * pnormal;
+            } else {
+                totalGrupo = qtyGrupo * pnormal;
             }
+            // Reparto proporcional: esta línea paga su parte del descuento del grupo
+            // según qué fracción de qtyGrupo representa su propio qty.
+            total = grupo ? Math.round(totalGrupo * (qty / qtyGrupo)) : Math.round(totalGrupo);
             r.tieneOferta = true;
         }
 
         r.precioTotal    = Math.round(total);
         r.precioUnitario = qty > 0 ? Math.round(total / qty) : pnormal;
-        r.etiqueta       = `📦 ${AT}x $${AU.toLocaleString('es-AR')}`;
+        r.etiqueta       = grupo ? `📦 ${AT}x $${AU.toLocaleString('es-AR')} (combinable)` : `📦 ${AT}x $${AU.toLocaleString('es-AR')}`;
         r.tipoOferta     = 'multicompra';
     }
 
@@ -7564,6 +7558,30 @@ function calcularOfertaPOS(producto, qty) {
     }
 
     return r;
+}
+
+// ===== MULTICOMPRA GRUPAL =====
+// Tras agregar/modificar una línea con GRUPO_MULTICOMPRA, las líneas hermanas
+// del carrito (mismo grupo, distinto id) quedan con precios viejos hasta que
+// se recalculan. Esta función las actualiza in-place. Llamar SIEMPRE después
+// de tocar ventaActual y ANTES de renderVenta(), en los puntos donde se
+// agrega/quita/cambia cantidad de un producto con multicompra grupal.
+function _recalcularGrupoMulticompra(idTocado) {
+    const mc = _poolMulticompra.get(idTocado);
+    if (!mc || !mc.grupo) return; // no es multicompra grupal — nada que hacer
+    (ventaActual || []).forEach(item => {
+        if (item.id === idTocado) return; // la línea tocada ya se calculó en su propio flujo
+        const itemMc = _poolMulticompra.get(item.id);
+        if (!itemMc || itemMc.grupo !== mc.grupo) return; // no es del mismo grupo
+        const prodLocal = (typeof productos !== 'undefined') ? productos.find(p => p.id === item.id) : null;
+        if (!prodLocal) return;
+        const oferta = calcularOfertaPOS(prodLocal, item.qty);
+        item.price            = oferta.precioUnitario;
+        item.precioTotalCalc  = oferta.precioTotal;
+        item.precioModificado = oferta.tieneOferta;
+        item.ofertaTipo        = oferta.tipoOferta || null;
+        item.ofertaEtiqueta    = oferta.etiqueta || null;
+    });
 }
 
 // Badge de oferta para el buscador
@@ -8114,8 +8132,17 @@ function cerrarBuscadorFlotante() {
             if (ventaActual[idx].qty > 1) {
                 ventaActual[idx].qty--;
                 mostrarToast('−1 ' + ventaActual[idx].name.substring(0,25), 'rojo');
+                const p = productos.find(pr => pr.id === id);
+                if (p) {
+                    const oferta = calcularOfertaPOS(p, ventaActual[idx].qty);
+                    ventaActual[idx].price = oferta.precioUnitario;
+                    ventaActual[idx].precioTotalCalc = oferta.precioTotal;
+                    ventaActual[idx].ofertaEtiqueta = oferta.etiqueta || null;
+                }
+                _recalcularGrupoMulticompra(id);
             } else {
                 ventaActual.splice(idx, 1);
+                _recalcularGrupoMulticompra(id);
                 mostrarToast('🗑 Quitado', 'rojo');
             }
             renderVenta();
