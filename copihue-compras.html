@@ -183,6 +183,61 @@
         .toast.rojo  { background:#c62828; }
 
         @media (max-width:480px) { .rn { font-size:1.2rem; } .page-title { font-size:1rem; } }
+
+        /* BUSCADOR */
+        .buscador-wrap {
+            max-width:700px; margin:0 auto;
+            padding:8px 14px 4px;
+        }
+        .buscador-input-row {
+            display:flex; align-items:center; gap:8px;
+            background:#f5f5f5; border:1.5px solid #e0e0e0;
+            border-radius:12px; padding:8px 12px;
+            transition:border-color 0.2s;
+        }
+        .buscador-input-row:focus-within {
+            border-color:var(--primary); background:white;
+            box-shadow:0 0 0 3px rgba(46,125,50,0.12);
+        }
+        .buscador-input-row span { font-size:1rem; flex-shrink:0; }
+        .buscador-input {
+            flex:1; border:none; background:transparent;
+            font-size:0.9rem; color:#222; outline:none;
+        }
+        .buscador-input::placeholder { color:#aaa; }
+        .buscador-clear {
+            background:none; border:none; color:#aaa; font-size:1.1rem;
+            cursor:pointer; padding:0 2px; line-height:1; display:none;
+        }
+
+        /* RESULTADOS BUSCADOR */
+        .busq-resultados {
+            max-width:700px; margin:0 auto;
+            padding:0 14px 8px;
+            display:none;
+        }
+        .busq-item {
+            background:white; border:1.5px solid #e0e0e0;
+            border-radius:10px; padding:10px 12px;
+            margin-bottom:6px; display:flex; align-items:center; gap:10px;
+            cursor:default;
+        }
+        .busq-item.en-lista { border-color:#a5d6a7; background:#f8fff8; }
+        .busq-item.pausado  { opacity:0.55; }
+        .busq-item.otra-lista { border-color:#90caf9; background:#f0f7ff; }
+        .busq-icon { font-size:1.1rem; flex-shrink:0; }
+        .busq-info { flex:1; min-width:0; }
+        .busq-nombre { font-size:0.85rem; font-weight:700; color:#222; }
+        .busq-detalle { font-size:0.7rem; color:#888; margin-top:2px; display:flex; flex-wrap:wrap; gap:6px; }
+        .busq-badge {
+            font-size:0.62rem; font-weight:900; padding:2px 7px;
+            border-radius:6px; white-space:nowrap;
+        }
+        .busq-badge.en-lista  { background:#2e7d32; color:white; }
+        .busq-badge.otra      { background:#1565c0; color:white; }
+        .busq-badge.pausado   { background:#607d8b; color:white; }
+        .busq-badge.no-lista  { background:#f5f5f5; color:#888; }
+        .busq-empty { text-align:center; padding:16px; color:#aaa; font-size:0.82rem; }
     </style>
 </head>
 <body>
@@ -240,6 +295,21 @@
         <button class="bc-btn limpiar"  onclick="lcLimpiarSeleccion()">✕ Limpiar</button>
         <button class="bc-btn enviar"   onclick="lcEnviarWA()">📲 Enviar</button>
     </div>
+</div>
+
+<!-- BUSCADOR GLOBAL -->
+<div class="toolbar" style="top:auto; position:sticky; top:auto; z-index:89; border-top:1px solid #f0f0f0;">
+    <div class="buscador-wrap">
+        <div class="buscador-input-row">
+            <span>🔍</span>
+            <input class="buscador-input" id="busqInput" type="search"
+                placeholder="Buscar producto... (azúcar, arroz, leche...)"
+                oninput="buscarProducto(this.value)"
+                onkeydown="if(event.key==='Escape'){limpiarBusqueda();}">
+            <button class="buscador-clear" id="busqClear" onclick="limpiarBusqueda()">✕</button>
+        </div>
+    </div>
+    <div class="busq-resultados" id="busqResultados"></div>
 </div>
 
 <!-- LISTA -->
@@ -577,6 +647,116 @@ async function lcTogglePausado(id) {
     }
 }
 
+
+
+// ── BUSCADOR GLOBAL ───────────────────────────────────────────────
+// Busca en _items (lista activa) Y en _prodCache (todos los productos)
+function buscarProducto(q) {
+    var clear = document.getElementById('busqClear');
+    var resDiv = document.getElementById('busqResultados');
+    q = (q || '').trim().toLowerCase();
+    if (!q) {
+        resDiv.style.display = 'none';
+        resDiv.innerHTML = '';
+        clear.style.display = 'none';
+        return;
+    }
+    clear.style.display = '';
+    resDiv.style.display = 'block';
+
+    // Armar mapa de items en lista de compra (por nombre normalizado)
+    var enLista = {};
+    _items.forEach(function(it) {
+        enLista[norm(it.nombre)] = it;
+    });
+
+    // Resultados desde _prodCache (todos los productos del sistema)
+    var resultados = [];
+
+    if (_prodCache && _prodCache.length) {
+        _prodCache.forEach(function(pr) {
+            if (norm(pr.name).indexOf(q) === -1) return;
+            var itemLista = enLista[norm(pr.name)];
+            var estado, badge, icon;
+            if (itemLista) {
+                if (itemLista.pausado) {
+                    estado = 'pausado'; badge = 'pausado'; icon = '⛔';
+                } else {
+                    estado = 'en-lista'; badge = 'en-lista'; icon = '✅';
+                }
+            } else if (pr.pausadoListaCompra === 'SI' || pr.pausadoListaCompra === true) {
+                estado = 'pausado'; badge = 'pausado'; icon = '⛔';
+            } else {
+                estado = 'no-lista'; badge = 'no-lista'; icon = '📦';
+            }
+            resultados.push({ pr: pr, itemLista: itemLista, estado: estado, badge: badge, icon: icon });
+        });
+    } else {
+        // Si no hay prodCache aún, buscar solo en _items
+        _items.forEach(function(it) {
+            if (norm(it.nombre).indexOf(q) === -1) return;
+            var estado = it.pausado ? 'pausado' : 'en-lista';
+            resultados.push({ pr: { name: it.nombre }, itemLista: it, estado: estado, badge: estado, icon: it.pausado ? '⛔' : '✅' });
+        });
+    }
+
+    // Orden: en-lista primero, luego otra-lista, pausado, no-lista
+    var orden = { 'en-lista': 0, 'otra-lista': 1, 'pausado': 2, 'no-lista': 3 };
+    resultados.sort(function(a, b) { return (orden[a.estado] || 3) - (orden[b.estado] || 3); });
+
+    if (!resultados.length) {
+        resDiv.innerHTML = '<div class="busq-empty">🔎 No se encontró "<b>' + esc(q) + '</b>" en ningún producto.</div>';
+        return;
+    }
+
+    var html = '';
+    resultados.slice(0, 12).forEach(function(r) {
+        var nombre = r.pr.name || r.pr.nombre || '';
+        var it = r.itemLista;
+
+        var badgeTxt = '';
+        if (r.estado === 'en-lista')   badgeTxt = '✅ En lista de compra';
+        if (r.estado === 'pausado')    badgeTxt = '⛔ Desactivado de lista';
+        if (r.estado === 'no-lista')   badgeTxt = '📋 No en lista activa';
+
+        var detalles = [];
+        if (it) {
+            if (it.proveedor) detalles.push('🏪 ' + it.proveedor);
+            if (it.stock !== undefined) detalles.push('Stock: ' + it.stock);
+            if (it.cantidad) detalles.push('Pedir: x' + it.cantidad);
+            var urg = '';
+            if (it.urgencia <= 2) urg = ' · 🔴 URGENTE';
+            else if (it.urgencia <= 4) urg = ' · 🟡 Bajo';
+            if (urg) detalles.push(urg);
+        } else if (r.pr) {
+            if (r.pr.proveedor) detalles.push('🏪 ' + r.pr.proveedor);
+        }
+
+        html += '<div class="busq-item ' + r.estado + '">'
+            + '<div class="busq-icon">' + r.icon + '</div>'
+            + '<div class="busq-info">'
+            +   '<div class="busq-nombre">' + esc(nombre) + '</div>'
+            +   '<div class="busq-detalle">'
+            +     '<span class="busq-badge ' + r.badge + '">' + badgeTxt + '</span>'
+            +     (detalles.length ? '<span>' + detalles.join(' · ') + '</span>' : '')
+            +   '</div>'
+            + '</div>'
+            + '</div>';
+    });
+    if (resultados.length > 12) {
+        html += '<div class="busq-empty" style="padding:8px;">...y ' + (resultados.length - 12) + ' más. Refiná la búsqueda.</div>';
+    }
+    resDiv.innerHTML = html;
+}
+
+function limpiarBusqueda() {
+    var inp = document.getElementById('busqInput');
+    if (inp) inp.value = '';
+    buscarProducto('');
+}
+
+function norm(s) { return (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
+function esc(s)  { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
 
 document.addEventListener('DOMContentLoaded', cargarLista);

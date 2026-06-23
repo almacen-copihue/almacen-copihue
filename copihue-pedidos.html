@@ -784,6 +784,18 @@ async function confirmarPedido() {
 
   const observacion = document.getElementById('txtObs').value.trim();
 
+  // Armar el texto del pedido localmente (fallback siempre disponible)
+  function armarTextoWA() {
+    const hoy = new Date().toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
+    let texto = '🛒 *Pedido Almacén Copihue*\n' + hoy + '\n';
+    texto += '\n📦 *' + _provActual.proveedor + '*\n';
+    for (const { item, qty } of items) {
+      texto += '• ' + item.nombre + ' — x' + qty + ' ' + (item.unidad || 'u.') + '\n';
+    }
+    if (observacion) texto += '\n📝 ' + observacion;
+    return texto;
+  }
+
   const datos = {
     proveedor: _provActual.proveedor,
     items: items.map(({ item, qty }) => ({
@@ -799,6 +811,8 @@ async function confirmarPedido() {
   btn.textContent = '⏳ Generando…';
   btn.disabled = true;
 
+  let linkWA = null;
+
   try {
     const r = await fetch(
       API_URL + '?action=crearPedidoWA&data=' + encodeURIComponent(JSON.stringify(datos)),
@@ -807,7 +821,8 @@ async function confirmarPedido() {
     const d = await r.json();
 
     if (d.ok && d.linkWA) {
-      // Marcar como enviado y abrir WA
+      linkWA = d.linkWA;
+      // Marcar como enviado (fire-and-forget)
       try {
         await fetch(
           API_URL + '?action=marcarPedidoEnviado&data=' +
@@ -815,21 +830,35 @@ async function confirmarPedido() {
           { cache: 'no-store' }
         );
       } catch(e2) {}
-
-      window.open(d.linkWA, '_blank');
-      cerrarCarrito();
-      limpiarPedido();
-      showToast('✅ Pedido enviado por WhatsApp');
     } else {
-      showToast('❌ Error: ' + (d.error || 'Respuesta inválida'));
+      // GAS respondió pero sin linkWA — usar fallback local
+      console.warn('GAS sin linkWA:', d.error || d);
     }
   } catch(e) {
-    showToast('📡 Sin conexión. Intentá de nuevo.');
-    console.error(e);
-  } finally {
-    btn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="white"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 22C6.486 22 2 17.514 2 12S6.486 2 12 2s10 4.486 10 10-4.486 10-10 10z"/></svg> Enviar por WhatsApp`;
-    btn.disabled = false;
+    // Sin conexión o error — usar fallback local
+    console.warn('Error GAS, usando fallback local:', e);
   }
+
+  // Si el GAS no dio link, armar el link localmente
+  if (!linkWA) {
+    const texto = armarTextoWA();
+    // Usar teléfono del proveedor si está disponible, sino abrir selector
+    const tel = (_provActual.telefono || '').replace(/\D/g, '');
+    if (tel) {
+      linkWA = 'https://wa.me/' + tel + '?text=' + encodeURIComponent(texto);
+    } else {
+      linkWA = 'https://wa.me/?text=' + encodeURIComponent(texto);
+    }
+  }
+
+  window.open(linkWA, '_blank');
+  cerrarCarrito();
+  limpiarPedido();
+  showToast('✅ Pedido enviado por WhatsApp');
+
+  const btnIcon = `<svg width="18" height="18" viewBox="0 0 24 24" fill="white"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 22C6.486 22 2 17.514 2 12S6.486 2 12 2s10 4.486 10 10-4.486 10-10 10z"/></svg> Enviar por WhatsApp`;
+  btn.innerHTML = btnIcon;
+  btn.disabled = false;
 }
 
 // ── Toast ────────────────────────────────────────────────────────
