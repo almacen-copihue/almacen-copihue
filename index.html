@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Almacén Copihue v159</title>
+    <title>Almacén Copihue v158</title>
     <!--
     CHANGELOG
     v157 · 2026-06-21
@@ -2501,7 +2501,7 @@
 
 <script>
 // ========== VERSIÓN Y CONFIGURACIÓN ==========
-const APP_VERSION = 'copihue-index-v159';
+const APP_VERSION = 'copihue-index-v158';
 // Tag versión automático con fecha
 // versionTag se actualiza desde config_sistema (campo 'version')
 
@@ -2617,15 +2617,6 @@ const OFERTAS_RELAMPAGO_SISTEMA = {
 // ========== VARIABLES GLOBALES ==========
 let products = [];
 let cart = [];
-
-// Igual que en sendwa: envuelve los últimos 2 dígitos para el efecto visual
-// "termina en 99" (gancho psicológico), usado en la OFERTA PERSONALIZADA.
-function fmtPsico(n) {
-  if (!n && n !== 0) return '';
-  const str = Number(n).toLocaleString('es-AR');
-  const head = str.slice(0, -2), tail = str.slice(-2);
-  return `$${head}<sup style="font-size:.62em;font-weight:800;vertical-align:text-top;position:relative;top:-.35em;margin-left:1px;">${tail}</sup>`;
-}
 
 // ========== PAGINACIÓN ==========
 let paginaActual = 1;
@@ -3570,18 +3561,6 @@ function renderizarProductosNormales() {
             <span class="ahorro">-${Math.round(((product.price - product.normal) / product.price) * 100)}%</span>
         </div>
     ` : '';
-
-    // OFERTA PERSONALIZADA (ej. "Feliz Día del Padre") — campaña manual aplicada desde
-    // sendwa, máxima prioridad visual después de PROMO/COMBO. Precio ya viene con el
-    // redondeo psicológico (...499/...999) calculado en Code.gs.
-    const tienePersonalizada = !tienePrecioNormal && product.ofertaPersonalizada && product.ofertaPersonalizada.activa;
-    const badgePersonalizadaHTML = tienePersonalizada ? `
-        <div class="price-badge-promo" style="background:linear-gradient(135deg,#E91E63,#ad1457);box-shadow:0 4px 15px rgba(233,30,99,0.4);">
-            <span class="antes">ANTES $${product.price}</span>
-            <span class="ahora">AHORA<br>${fmtPsico(product.ofertaPersonalizada.precioFinal)}</span>
-            <span class="ahorro">🎉 ${product.ofertaPersonalizada.texto}</span>
-        </div>
-    ` : '';
     
     if (esPromo && stock === 0) {
         return `
@@ -3623,10 +3602,9 @@ function renderizarProductosNormales() {
                 ` : ''}
             </div>
             ${badgePrecioHTML}
-            ${badgePersonalizadaHTML}
             <div class="product-info">
                 <div class="product-name">${product.name}</div>
-                ${!tienePrecioNormal && !tienePersonalizada ? `
+                ${!tienePrecioNormal ? `
                     <div class="product-price-container">
                         <span class="product-price">$${product.price}</span>
                     </div>
@@ -4689,32 +4667,16 @@ function addToCart(productId, tipoForzado) {
     let esOfertaDestacada = false;
     let esOfertaRelampago = false;
     let esOfertaUltimas = false;
-    let esOfertaPersonalizada = false;
     let esPromo = false;
     let ofertaConfig = null;
     
     // ===== IMPORTANTE: Verificar ofertas ACTIVAS =====
-
-    // -1. OFERTA PERSONALIZADA (ej. "Feliz Día del Padre") — máxima prioridad,
-    // pisa cualquier otra oferta. Precio ya viene redondeado (...499/...999) desde Code.gs.
-    if (product.ofertaPersonalizada && product.ofertaPersonalizada.activa) {
-        esOfertaPersonalizada = true;
-        ofertaConfig = {
-            nombre: product.ofertaPersonalizada.texto,
-            tipo: 'personalizada',
-            precioFinal: product.ofertaPersonalizada.precioFinal,
-            eslogan: `🎉 ${product.ofertaPersonalizada.texto}`
-        };
-        console.log('✅ Producto tiene OFERTA PERSONALIZADA:', product.ofertaPersonalizada.texto);
-    }
+    
     // 0. Verificar si es PROMO o COMBO
-    else if (product.category === 'PROMOS' || product.category === 'COMBOS') {
+    if (product.category === 'PROMOS' || product.category === 'COMBOS') {
         esPromo = true;
     }
     
-    // 1-4. Solo evaluamos el resto de ofertas si NO hay oferta personalizada activa
-    // (la personalizada ya quedó resuelta arriba con prioridad máxima)
-    if (!esOfertaPersonalizada) {
     // 1. Verificar ESPECIALES (si está activa, si admin las fuerza, O si viene del botón de oferta)
     if (tipoForzado === 'especiales' ||
         (productosEspeciales.some(p => p.id === productId) && validarHorario('especiales')) ||
@@ -4786,7 +4748,6 @@ function addToCart(productId, tipoForzado) {
             console.log('✅ Producto tiene oferta MULTICOMPRA:', mc.MULTICOMPRA_TIPO);
         }
     }
-    } // fin guard !esOfertaPersonalizada
     
     console.log('🔍 Ofertas detectadas:', {
         esOfertaEspecial,
@@ -4805,7 +4766,6 @@ function addToCart(productId, tipoForzado) {
         existingItem.esOfertaDestacada = esOfertaDestacada;
         existingItem.esOfertaRelampago = esOfertaRelampago;
         existingItem.esOfertaUltimas = esOfertaUltimas;
-        existingItem.esOfertaPersonalizada = esOfertaPersonalizada;
         existingItem.esPromo = esPromo;
         existingItem.productRef = product; // Actualizar referencia
     } else {
@@ -4820,7 +4780,6 @@ function addToCart(productId, tipoForzado) {
             esOfertaDestacada: esOfertaDestacada,
             esOfertaRelampago: esOfertaRelampago,
             esOfertaUltimas: esOfertaUltimas,
-            esOfertaPersonalizada: esOfertaPersonalizada,
             esPromo: esPromo,
             productRef: product
         });
@@ -4913,18 +4872,8 @@ function renderCartItems() {
         let badgeColor = '#ddd';
         let esProductoNormal = true; // Flag para productos sin oferta
         
-        // ===== OFERTA PERSONALIZADA — máxima prioridad, precio ya viene de Code.gs =====
-        if (item.esOfertaPersonalizada && item.oferta && item.oferta.precioFinal) {
-            esProductoNormal = false;
-            const precioUnitario = item.oferta.precioFinal;
-            precioTotalItem = precioUnitario * item.quantity;
-            ahorroItem = precioNormalTotal - precioTotalItem;
-            badgeColor = '#E91E63';
-            badge = `🎉`;
-            formula = `<div style="color:#E91E63;font-size:0.7rem;">👉 ${item.oferta.eslogan}</div>`;
-        }
         // ===== JUEVES CERVECERO =====
-        else if (item.esJuevesCervecero && item.precioJC) {
+        if (item.esJuevesCervecero && item.precioJC) {
             esProductoNormal = false;
             const precioUnitario = item.precioJC;
             precioTotalItem = precioUnitario * item.quantity;
