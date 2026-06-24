@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>SendWA — Almacén Copihue ver.52</title>
+<title>SendWA — Almacén Copihue ver.53</title>
 <style>
   /* ===== VARIABLES ===== */
   :root {
@@ -476,6 +476,7 @@
   }
   #personal-modal.open #btn-personal-close-x { display: flex; }
   .personal-pct-btn.active { background: #E91E63 !important; border-color: #E91E63 !important; color: #fff !important; }
+  .psico-99 { font-size: .62em; font-weight: 800; vertical-align: text-top; position: relative; top: -.35em; margin-left: 1px; }
   .single-thumb {
     display: inline-flex; flex-direction: column; align-items: center;
     gap: 3px; cursor: pointer; padding: 4px; border-radius: 8px;
@@ -587,7 +588,7 @@
           style="width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.2);
                  border:none;color:#fff;font-size:12px;font-weight:800;cursor:pointer;
                  flex-shrink:0;display:flex;align-items:center;justify-content:center;">?</button>
-  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.52</div>
+  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.53</div>
   <button id="btn-dark" title="Modo oscuro">🌙</button>
 </div>
 
@@ -612,7 +613,6 @@
     <button class="filter-chip oferta-chip" data-filter="ultimas">🏷️ Últimas</button>
     <button class="filter-chip oferta-chip" data-filter="promo">🏷️ Promos</button>
     <button class="filter-chip oferta-chip" data-filter="combo">🎯 Combos</button>
-    <button class="filter-chip oferta-chip" data-filter="personalizada">🎉 Personalizada</button>
     <button class="filter-chip oferta-chip" data-filter="sinoferta">✅ Sin oferta</button>
   </div>
 </div>
@@ -766,7 +766,7 @@
     <div class="layout-section-label">🏷️ Oferta personalizada</div>
     <input type="text" id="personal-texto" maxlength="40" placeholder="Ej: Feliz día del padre"
            style="width:100%;height:40px;padding:0 12px;margin:8px 0;border-radius:10px;border:1.5px solid var(--border);background:var(--card-bg);color:var(--text);font-size:14px;box-sizing:border-box;">
-    <div class="layout-section-label">Descuento</div>
+    <div class="layout-section-label">Descuento (aproximado — el precio final se redondea a un valor terminado en 99)</div>
     <div class="layout-row" id="personal-pct-row" style="flex-wrap:wrap;margin:6px 0 12px;"></div>
     <div id="personal-info" style="font-size:12px;font-weight:700;color:var(--primary);margin-bottom:10px;"></div>
     <div style="display:flex;gap:8px;">
@@ -832,10 +832,12 @@ function calcularOferta(p) {
   const cat    = p.catOferta;
   if (!cat) return null;
 
-  // OFERTA PERSONALIZADA — texto + % manual elegido por el operador, máxima prioridad
+  // OFERTA PERSONALIZADA — texto + % manual elegido por el operador, máxima prioridad.
+  // El precio final y la etiqueta ya vienen calculados desde Code.gs (fuente única de
+  // verdad), así seba21/index/sendwa muestran siempre el mismo número.
   if (cat === 'personalizada' && p._personal) {
-    const { texto, porcentaje } = p._personal;
-    return { precio: Math.round(precio * (1 - porcentaje / 100)), etiqueta: `🎉 ${texto} -${porcentaje}%` };
+    const per = p._personal;
+    return { precio: per.precioFinal, etiqueta: per.etiqueta || `🎉 ${per.texto}`, psico: true };
   }
 
   // RELÁMPAGO
@@ -898,6 +900,22 @@ let recentSelection = JSON.parse(localStorage.getItem('sendwa_recent') || '[]');
 function fmt(n) {
   if (!n && n !== 0) return '';
   return '$' + Number(n).toLocaleString('es-AR');
+}
+// Redondeo "gancho psicológico" — sube al próximo escalón de 500 (precios chicos)
+// o 1000 (precios grandes) y le resta 1, para terminar en ...499 / ...999
+function psicoRound(precio) {
+  const step = precio < 10000 ? 500 : 1000;
+  let rounded = Math.ceil(precio / step) * step;
+  if (rounded - precio < step * 0.15) rounded += step; // si quedó muy pegado, sube un escalón más
+  return rounded - 1;
+}
+// Igual que fmt() pero envuelve los últimos 2 dígitos en <sup> para el efecto
+// "termina en 99" más chico y levantado, como en los carteles de súper
+function fmtPsico(n) {
+  if (!n && n !== 0) return '';
+  const str = Number(n).toLocaleString('es-AR');
+  const head = str.slice(0, -2), tail = str.slice(-2);
+  return `$${head}<sup class="psico-99">${tail}</sup>`;
 }
 function norm(s) {
   return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -1026,6 +1044,18 @@ async function _apiFetch(action) {
   return r.json();
 }
 
+// Para acciones que ESCRIBEN en la planilla (igual patrón que activarRelampago/ajusteRapido)
+async function _apiAction(action, datos) {
+  try {
+    const url = API_URL + '?action=' + action + '&data=' + encodeURIComponent(JSON.stringify(datos)) + '&t=' + Date.now();
+    const r = await fetch(url, { redirect: 'follow' });
+    return await r.json();
+  } catch (e) {
+    console.error('API action error:', action, e);
+    return { success: false, mensaje: 'Error de red' };
+  }
+}
+
 async function fetchData() {
   try {
     const r = await fetch(API_URL + '?t=' + Date.now(), { redirect: 'follow' });
@@ -1104,7 +1134,8 @@ function parseProducts(data) {
 
       // catOferta se resuelve en resolveOfertas() contra los pools activos
       return { id, nombre, precioVenta, categoria, stock, foto, vendidos,
-               relampago, destacada, especial, normal, costo, catOferta: '', _raw: r };
+               relampago, destacada, especial, normal, costo, catOferta: '',
+               ofertaPersonalizadaServer: r.ofertaPersonalizada || null, _raw: r };
     })
     .filter(p => p.nombre && p.precioVenta > 0);
 }
@@ -1116,8 +1147,12 @@ function parseProducts(data) {
 function resolveOfertas(products, modo = 'pool') {
   return products.map(p => {
     const pid = Number(p.id);
-    const personal = _personalizadaMap.get(String(p.id));
-    if (personal) return { ...p, catOferta: 'personalizada', _personal: personal };
+    // Oferta personalizada: fuente de verdad = planilla (Code.gs), no un mapa local —
+    // así seba21, index y sendwa muestran siempre lo mismo.
+    const personalServer = p.ofertaPersonalizadaServer;
+    if (personalServer && personalServer.activa) {
+      return { ...p, catOferta: 'personalizada', _personal: personalServer };
+    }
     const rawCat = String(p._raw?.categoriaOferta || '').toUpperCase().trim();
     let catOferta = '';
     // PROMO / COMBO siempre directo de col J — no tienen horario
@@ -1163,7 +1198,7 @@ function sortProducts(products, mode) {
   const sorted = [...products];
 
   const esVistaCategoria = !['oferta','activo','relampago','destacado','especial',
-    'promo','combo','ultimas','sinoferta','personalizada'].includes(currentFilter);
+    'promo','combo','ultimas','sinoferta'].includes(currentFilter);
 
   if (esVistaCategoria) {
     const esCategoriaUnica = currentFilter !== 'todos' && currentFilter !== '';
@@ -1247,7 +1282,6 @@ function applyFilter() {
       case 'ultimas':   return p.catOferta === 'ultimas';
       case 'promo':     return p.catOferta === 'promo';
       case 'combo':     return p.catOferta === 'combo';
-      case 'personalizada': return p.catOferta === 'personalizada';
       default:
         if (currentFilter === '' || currentFilter === 'todos') return p.stock > 0;
         return norm(p.categoria) === norm(currentFilter);
@@ -1282,17 +1316,10 @@ function getCatEmoji(cat) {
 function insertSeparators(products) {
   // Vista Ofertas estilo FLYER — sin separadores de categoría, un único header
   const esVistaOfertaFlyer = ['oferta','activo','relampago','destacado','especial',
-    'promo','combo','ultimas','personalizada'].includes(currentFilter);
+    'promo','combo','ultimas'].includes(currentFilter);
   if (esVistaOfertaFlyer) {
     if (!products.length) return products;
-    let label = '🛒 ALMACÉN COPIHUE — OFERTAS 🔥';
-    let flyerBg = 'linear-gradient(135deg,#8b1a1a,#c0392b)';
-    if (currentFilter === 'personalizada') {
-      const textos = [...new Set(products.map(p => p._personal?.texto).filter(Boolean))];
-      label = textos.length === 1 ? `🎉 ${textos[0].toUpperCase()} 🎉` : '🎉 OFERTA PERSONALIZADA 🎉';
-      flyerBg = 'linear-gradient(135deg,#880e4f,#e91e63)';
-    }
-    return [{ _sep: true, label, cat: '__flyer__', _flyer: true, _flyerBg: flyerBg }, ...products];
+    return [{ _sep: true, label: '🛒 ALMACÉN COPIHUE — OFERTAS 🔥', cat: '__flyer__', _flyer: true }, ...products];
   }
 
   // Separadores normales por categoría (vista categorías/todos)
@@ -1349,7 +1376,7 @@ function renderGrid() {
   grid.innerHTML = withSeps.map((p, i) => {
     if (p._sep) {
       if (p._flyer) {
-        return `<div class="separator-card" style="background:${p._flyerBg || 'linear-gradient(135deg,#8b1a1a,#c0392b)'};font-size:15px;letter-spacing:.5px;">${p.label}</div>`;
+        return `<div class="separator-card" style="background:linear-gradient(135deg,#8b1a1a,#c0392b);font-size:15px;letter-spacing:.5px;">${p.label}</div>`;
       }
       return `<div class="separator-card" onclick="selectCategoryFromSeparator('${p.cat}')" style="cursor:pointer" title="Tocar para seleccionar todos">${p.label} <span style="font-size:10px;opacity:.7">· tocar para seleccionar todos</span></div>`;
     }
@@ -1368,7 +1395,7 @@ function renderGrid() {
     const precioHTML = oferta
       ? `<div class="card-price-oferta">
            <span class="price-antes">${fmt(p.precioVenta)}</span>
-           <span class="price-oferta" style="color:${badgeColor}">${oferta.precio ? fmt(oferta.precio) : ''}</span>
+           <span class="price-oferta" style="color:${badgeColor}">${oferta.precio ? (oferta.psico ? fmtPsico(oferta.precio) : fmt(oferta.precio)) : ''}</span>
          </div>`
       : `<div class="card-price">${fmt(p.precioVenta)}</div>`;
 
@@ -1891,7 +1918,7 @@ async function drawSingleExpandidoFmt(p, W=1080, H=1080) {
     ctx.beginPath(); ctx.strokeStyle='rgba(255,255,255,.6)'; ctx.lineWidth=2;
     ctx.moveTo(W/2-tw/2,H-132); ctx.lineTo(W/2+tw/2,H-132); ctx.stroke();
     ctx.fillStyle='#fff'; ctx.font='bold 64px Segoe UI';
-    ctx.fillText(fmt(oferta.precio), W/2, H-52);
+    fillPriceCentered(ctx, oferta.precio, W/2, H-52, 64, '#fff', oferta.psico);
   } else {
     ctx.fillStyle='#fff'; ctx.font='bold 64px Segoe UI'; ctx.textAlign='center';
     ctx.fillText(fmt(p.precioVenta), W/2, H-52);
@@ -1991,6 +2018,33 @@ function countLines(ctx, text, maxW) {
     else line = test;
   }
   return lines;
+}
+
+// Dibuja el precio final centrado en (cx,y). Si psico=true, los últimos 2 dígitos
+// se dibujan más chicos y levantados (gancho ...99 estilo cartel de súper).
+function fillPriceCentered(ctx, precio, cx, y, fontPx, color, psico) {
+  const full = fmt(precio);
+  ctx.fillStyle = color;
+  if (!psico) {
+    ctx.font = `bold ${fontPx}px Segoe UI`;
+    ctx.textAlign = 'center';
+    ctx.fillText(full, cx, y);
+    return;
+  }
+  const head = full.slice(0, -2);
+  const tail = full.slice(-2);
+  const smallPx = Math.round(fontPx * 0.56);
+  ctx.font = `bold ${fontPx}px Segoe UI`;
+  const headW = ctx.measureText(head).width;
+  ctx.font = `bold ${smallPx}px Segoe UI`;
+  const tailW = ctx.measureText(tail).width;
+  const startX = cx - (headW + tailW) / 2;
+  ctx.textAlign = 'left';
+  ctx.font = `bold ${fontPx}px Segoe UI`;
+  ctx.fillText(head, startX, y);
+  ctx.font = `bold ${smallPx}px Segoe UI`;
+  ctx.fillText(tail, startX + headW, y - fontPx * 0.3);
+  ctx.textAlign = 'center';
 }
 
 async function drawProductCard(ctx, p, x, y, W, H, preloadedImg) {
@@ -2097,7 +2151,7 @@ async function drawProductCard(ctx, p, x, y, W, H, preloadedImg) {
     // Precio oferta
     ctx.fillStyle = badgeColor || '#c0392b';
     ctx.font = `bold ${FS_OFERTA}px Segoe UI`;
-    ctx.fillText(fmt(oferta.precio), mx, ty_a + FS_OFERTA + 2);
+    fillPriceCentered(ctx, oferta.precio, mx, ty_a + FS_OFERTA + 2, FS_OFERTA, badgeColor || '#c0392b', oferta.psico);
   } else {
     ctx.fillStyle = '#2d5a22';
     ctx.font = `bold ${FS_PRECIO}px Segoe UI`; ctx.textAlign = 'center';
@@ -2257,7 +2311,7 @@ async function drawSingleFmt(p, W=1080, H=1080) {
     ctx.moveTo(mx-tw/2, ty_a-10); ctx.lineTo(mx+tw/2, ty_a-10); ctx.stroke();
     // Precio oferta grande
     ctx.fillStyle = badgeColor||'#c0392b'; ctx.font='bold 56px Segoe UI';
-    ctx.fillText(fmt(oferta.precio), mx, curY+88);
+    fillPriceCentered(ctx, oferta.precio, mx, curY+88, 56, badgeColor||'#c0392b', oferta.psico);
   } else {
     ctx.fillStyle='#2d5a22'; ctx.font='bold 56px Segoe UI'; ctx.textAlign='center';
     ctx.fillText(fmt(p.precioVenta), mx, curY+58);
@@ -2388,15 +2442,16 @@ on('btn-collage-close', () => {
 // ============================================================
 // OFERTA PERSONALIZADA — texto + % manual, badge propio
 // ============================================================
-let _personalizadaMap = new Map(); // id (String) -> {texto, porcentaje}
+// NOTA: la oferta personalizada ya no usa un mapa local — la fuente de verdad
+// es la planilla (columna oferta_personalizada), vía Code.gs. Ver _apiAction() arriba.
 let _personalPct = 10;
-const PERSONAL_PCTS = [10,15,20,25,30,35,40,45,50];
+const PERSONAL_PCTS = [10,20,30,40,50,60];
 
 function buildPersonalPctRow() {
   const row = document.getElementById('personal-pct-row');
   if (!row) return;
   row.innerHTML = PERSONAL_PCTS.map(pct =>
-    `<button class="layout-btn personal-pct-btn${pct===_personalPct?' active':''}" data-pct="${pct}">${pct}%</button>`
+    `<button class="layout-btn personal-pct-btn${pct===_personalPct?' active':''}" data-pct="${pct}">≈${pct}%</button>`
   ).join('');
 }
 document.getElementById('personal-pct-row')?.addEventListener('click', e => {
@@ -2417,17 +2472,37 @@ on('btn-personalizada', () => {
 on('btn-personal-aplicar', () => {
   const texto = (document.getElementById('personal-texto').value || '').trim();
   if (!texto) { toast('⚠️ Escribí un texto para la oferta'); return; }
-  selectedIds.forEach(id => _personalizadaMap.set(String(id), { texto, porcentaje: _personalPct }));
+  const tipoCodigo = PERSONAL_PCTS.indexOf(_personalPct) + 1; // 10→1, 20→2 ... 60→6
+  const ids = [...selectedIds].map(id => Number(id));
+  const cantidad = ids.length;
   document.getElementById('personal-modal').classList.remove('open');
-  toast(`🏷️ "${texto}" -${_personalPct}% aplicada a ${selectedIds.size} producto${selectedIds.size>1?'s':''}`);
-  applyFilter();
+  toast(`⏳ Guardando "${texto}" -≈${_personalPct}% en ${cantidad} producto${cantidad>1?'s':''}...`);
+  _apiAction('ofertaPersonalizada', { productoIds: ids, tipo: tipoCodigo, texto })
+    .then(res => {
+      if (res && res.success) {
+        toast(`🏷️ ${res.mensaje || 'Oferta aplicada'}`);
+        return fetchData().then(data => { allProducts = parseProducts(data); applyFilter(); });
+      } else {
+        toast(`❌ ${res && res.mensaje ? res.mensaje : 'No se pudo guardar'}`);
+      }
+    })
+    .catch(() => toast('❌ Error de conexión al guardar'));
 });
 
 on('btn-personal-quitar', () => {
-  let q = 0;
-  selectedIds.forEach(id => { if (_personalizadaMap.delete(String(id))) q++; });
-  toast(q ? `🗑️ Oferta personalizada quitada de ${q} producto${q>1?'s':''}` : 'Ninguno tenía oferta personalizada');
-  applyFilter();
+  const ids = [...selectedIds].map(id => Number(id));
+  const cantidad = ids.length;
+  toast(`⏳ Quitando oferta de ${cantidad} producto${cantidad>1?'s':''}...`);
+  _apiAction('quitarOfertaPersonalizada', { productoIds: ids })
+    .then(res => {
+      if (res && res.success) {
+        toast(`🗑️ ${res.mensaje || 'Oferta quitada'}`);
+        return fetchData().then(data => { allProducts = parseProducts(data); applyFilter(); });
+      } else {
+        toast(`❌ ${res && res.mensaje ? res.mensaje : 'No se pudo quitar'}`);
+      }
+    })
+    .catch(() => toast('❌ Error de conexión al quitar'));
 });
 
 // ============================================================
