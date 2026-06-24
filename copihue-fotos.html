@@ -840,7 +840,10 @@ header {
       <strong>github.com → Settings → Developer settings → Personal access tokens → Fine-grained</strong><br>
       Permiso: <strong>Contents: Read &amp; Write</strong>
     </div>
+    <input type="file" id="cfgFileInput" accept="application/json,.json" style="display:none" onchange="cargarConfigDesdeArchivo(event)">
+    <button class="btn-cancel-cfg" style="margin-top:10px" onclick="document.getElementById('cfgFileInput').click()">📂 Cargar desde archivo</button>
     <button class="btn-save-cfg" onclick="guardarConfig()">💾 Guardar</button>
+    <button class="btn-cancel-cfg" onclick="exportarConfigArchivo()">⬇️ Exportar archivo</button>
     <button class="btn-cancel-cfg" onclick="cerrarConfig()">Cancelar</button>
   </div>
 </div>
@@ -1724,6 +1727,50 @@ function guardarConfig() {
   if (!owner||!repo||!token) { toast('⚠️ Completá usuario, repo y token','error'); return; }
   localStorage.setItem('copihue_gh_config',JSON.stringify({owner,repo,branch,token}));
   cerrarConfig(); toast('✅ Configuración guardada','ok');
+}
+
+function cargarConfigDesdeArchivo(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    let data;
+    try { data = JSON.parse(e.target.result); }
+    catch(err) { toast('⚠️ Archivo inválido (no es JSON)','error'); event.target.value=''; return; }
+
+    const owner  = (data.owner||'').trim();
+    const repo   = (data.repo||'').trim();
+    const branch = (data.branch||'main').trim();
+    const token  = (data.token||'').trim();
+    if (!owner||!repo||!token) { toast('⚠️ Faltan campos en el archivo (owner, repo, token)','error'); event.target.value=''; return; }
+
+    document.getElementById('ghOwner').value  = owner;
+    document.getElementById('ghRepo').value    = repo;
+    document.getElementById('ghBranch').value  = branch;
+    document.getElementById('ghToken').value   = token;
+
+    localStorage.setItem('copihue_gh_config',JSON.stringify({owner,repo,branch,token}));
+    toast('✅ Configuración cargada desde archivo','ok');
+    event.target.value = '';
+  };
+  reader.onerror = () => toast('⚠️ No se pudo leer el archivo','error');
+  reader.readAsText(file);
+}
+
+function exportarConfigArchivo() {
+  const owner  = document.getElementById('ghOwner').value.trim();
+  const repo   = document.getElementById('ghRepo').value.trim();
+  const branch = document.getElementById('ghBranch').value.trim()||'main';
+  const token  = document.getElementById('ghToken').value.trim();
+  if (!owner||!repo||!token) { toast('⚠️ Completá usuario, repo y token antes de exportar','error'); return; }
+  const data = {owner, repo, branch, token};
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'copihue-gh-config.json';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('⬇️ Archivo exportado','ok');
 }
 
 // ═══════════════════════════════════════════
