@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>v10 · Copihue · Ingreso</title>
+  <title>v11 · Copihue · Ingreso</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -254,6 +254,35 @@
     button.btn-guardar:hover { transform: translateY(-2px); }
     button.btn-guardar:disabled { opacity: 0.6; transform: none; cursor: not-allowed; }
 
+    .deshacer-wrap {
+      margin-top: 14px;
+      padding: 12px;
+      background: #fff8f0;
+      border: 2px dashed #f0ad4e;
+      border-radius: 10px;
+    }
+    .deshacer-info {
+      font-size: 13px;
+      color: #856404;
+      margin-bottom: 8px;
+      line-height: 1.5;
+    }
+    .deshacer-info strong { color: #5c4400; }
+    button.btn-deshacer {
+      width: 100%;
+      padding: 10px;
+      border-radius: 8px;
+      border: 2px solid #e74c3c;
+      background: #fff;
+      color: #e74c3c;
+      font-weight: 700;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    button.btn-deshacer:hover { background: #e74c3c; color: #fff; }
+    button.btn-deshacer:disabled { opacity: 0.5; cursor: not-allowed; }
+
     /* Toast */
     #toast {
       position: fixed;
@@ -283,7 +312,7 @@
 <div class="card">
   <h3>
     <span>📦 Ingreso Mercadería</span>
-    <span class="version">v10</span>
+    <span class="version">v11</span>
   </h3>
 
   <!-- PRODUCTO -->
@@ -292,7 +321,7 @@
   <label>Nombre del producto</label>
   <div class="autocomplete-wrap input-wrap">
     <input id="producto" type="text" placeholder="Escribí para buscar..."
-      autocomplete="off" oninput="onProductoInput();toggleClear('producto')" onfocus="onProductoInput()">
+      autocomplete="off" oninput="onProductoInput()" onfocus="onProductoInput()">
     <button class="btn-clear" id="clear-producto" onclick="clearField('producto')" tabindex="-1">✕</button>
     <div class="autocomplete-list" id="autoList"></div>
   </div>
@@ -362,12 +391,31 @@
   </div>
 
   <button class="btn-guardar" id="btnGuardar" onclick="guardar()">✅ Guardar Ingreso</button>
+
+  <div class="deshacer-wrap" id="deshacerWrap" style="display:none">
+    <div class="deshacer-info" id="deshacerInfo"></div>
+    <button class="btn-deshacer" id="btnDeshacer" onclick="deshacerUltimoIngreso()">↩️ Deshacer este ingreso</button>
+  </div>
 </div>
 
 <div id="toast"></div>
 
 <script>
 // ── Changelog ──────────────────────────────────────────────────────────────────
+// v11 — Anti-duplicados: lock duro contra doble-submit (_guardando), timeout subido
+//        de 15s a 30s (conexión Patagonia), idOperacion único enviado al GAS para
+//        detectar reintentos. Mensaje de error ahora avisa explícitamente "revisá
+//        el Historial antes de reintentar" en vez de invitar a reintentar a ciegas.
+//        NUEVO: panel "Deshacer este ingreso" tras guardar — permite revertir el
+//        último ingreso (elimina fila de Historial + resta stock sumado) sin tener
+//        que ir a la planilla a mano. REQUIERE acción 'deshacerIngreso' nueva en el
+//        GAS (ver nota abajo).
+// v10 — Botón ✕ para limpiar rápido: producto, costo, venta, proveedor, fecha venc.
+// v9  — Botón ✕ para limpiar categoría rápido.
+// v8  — Límite de autocomplete de productos subido de 8 a 15 resultados.
+// v7  — Mayúsculas forzadas (CSS) en producto y proveedor.
+// v6 — Fix: highlight de texto en dropdown de categorías partía mal las palabras
+//       (espacios raros). Se quitó el resaltado, queda texto plano.
 // v5 — Fix crítico: GAS devuelve campo 'category' (inglés) no 'categoria'.
 //       El fallback de extracción desde productos nunca encontraba nada porque
 //       buscaba p.categoria. Ahora lee p.category || p.categoria.
@@ -574,6 +622,7 @@ function setCategoriaByValue(val) {
 function onProductoInput() {
   const val  = document.getElementById('producto').value.trim();
   const list = document.getElementById('autoList');
+  toggleClear('producto');
 
   if (val.length < 2) {
     list.classList.remove('open');
@@ -757,8 +806,62 @@ function clearField(id) {
   document.getElementById(id).focus();
 }
 
+// ── DESHACER ÚLTIMO INGRESO ────────────────────────────────────────────────────
+function mostrarDeshacer(ingreso) {
+  document.getElementById('deshacerWrap').style.display = 'block';
+  document.getElementById('deshacerInfo').innerHTML =
+    `Último ingreso: <strong>${ingreso.producto}</strong> (+${ingreso.cantidad} unidades). ` +
+    `Si fue un error, podés deshacerlo ahora.`;
+}
+
+function ocultarDeshacer() {
+  document.getElementById('deshacerWrap').style.display = 'none';
+  _ultimoIngreso = null;
+}
+
+async function deshacerUltimoIngreso() {
+  if (!_ultimoIngreso) return;
+  if (!confirm(`↩️ ¿Deshacer el ingreso de "${_ultimoIngreso.producto}" (+${_ultimoIngreso.cantidad})?\n\nEsto elimina la fila del Historial y resta el stock que se sumó.`)) return;
+
+  const btn = document.getElementById('btnDeshacer');
+  btn.disabled    = true;
+  btn.textContent = '⏳ Deshaciendo...';
+
+  try {
+    const datos = {
+      idOperacion: _ultimoIngreso.idOperacion,
+      idVenta: _ultimoIngreso.idVenta,
+      producto: _ultimoIngreso.producto,
+      cantidad: _ultimoIngreso.cantidad
+    };
+    const url = API_URL + '?action=deshacerIngreso&data=' + encodeURIComponent(JSON.stringify(datos));
+    const r   = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(30000) });
+    const res = await r.json();
+
+    btn.disabled    = false;
+    btn.textContent = '↩️ Deshacer este ingreso';
+
+    if (res.success) {
+      toast('✅ Ingreso deshecho — stock restaurado');
+      ocultarDeshacer();
+    } else {
+      toast('❌ ' + (res.mensaje || 'No se pudo deshacer'), true);
+    }
+  } catch(e) {
+    btn.disabled    = false;
+    btn.textContent = '↩️ Deshacer este ingreso';
+    toast('❌ Error de conexión al deshacer', true);
+    console.error(e);
+  }
+}
+
 // ── GUARDAR ────────────────────────────────────────────────────────────────────
+let _guardando = false; // lock duro contra doble-submit
+let _ultimoIngreso = null; // referencia al último ingreso guardado, para poder deshacerlo
+
 async function guardar() {
+  if (_guardando) return; // ya hay un guardado en curso, ignorar clicks extra
+
   const nombre          = document.getElementById('producto').value.trim();
   const cantidad        = Number(document.getElementById('cantidad').value);
   const categoria       = document.getElementById('categoria').value;
@@ -782,21 +885,36 @@ async function guardar() {
     if (!confirm('⚠️ No ingresaste precio de costo. ¿Continuar igual?')) return;
   }
 
+  _guardando = true;
   const btn = document.getElementById('btnGuardar');
   btn.disabled    = true;
   btn.textContent = '⏳ Guardando...';
 
+  // ID único de esta operación — el GAS lo puede usar para detectar
+  // si esta misma request ya fue procesada (evita duplicados por reintento)
+  const idOperacion = 'ing_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+
   try {
-    const datos = { producto: nombre, cantidad, categoria, precioCosto, precioVenta, proveedor, fechaVencimiento };
+    const datos = { producto: nombre, cantidad, categoria, precioCosto, precioVenta, proveedor, fechaVencimiento, idOperacion };
     const url   = API_URL + '?action=ingresar&data=' + encodeURIComponent(JSON.stringify(datos));
-    const r     = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15000) });
+    // Timeout más generoso: conexión en Patagonia puede ser lenta, no confundir lentitud con falla
+    const r     = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(30000) });
     const res   = await r.json();
 
     btn.disabled    = false;
     btn.textContent = '✅ Guardar Ingreso';
+    _guardando = false;
 
     if (res.success) {
       toast('✅ ' + res.mensaje);
+      // Guardar referencia del último ingreso para poder deshacerlo
+      _ultimoIngreso = {
+        idOperacion,
+        producto: nombre,
+        cantidad,
+        idVenta: res.idVenta || res.idIngreso || res.id || null  // lo que devuelva el GAS para identificar la fila
+      };
+      mostrarDeshacer(_ultimoIngreso);
       limpiar();
     } else {
       toast('❌ ' + (res.mensaje || 'Error al guardar'), true);
@@ -804,7 +922,14 @@ async function guardar() {
   } catch(e) {
     btn.disabled    = false;
     btn.textContent = '✅ Guardar Ingreso';
-    toast('❌ Error de conexión — intentá de nuevo', true);
+    _guardando = false;
+    // Aviso explícito: si fue timeout, puede que el GAS SÍ haya guardado.
+    // No reintentar a ciegas — revisar el historial antes de volver a tocar "Guardar".
+    if (e.name === 'TimeoutError' || e.name === 'AbortError') {
+      toast('⚠️ Sin respuesta del servidor. Revisá el Historial antes de reintentar — puede que sí se haya guardado.', true);
+    } else {
+      toast('❌ Error de conexión — revisá el Historial antes de reintentar', true);
+    }
     console.error(e);
   }
 }
