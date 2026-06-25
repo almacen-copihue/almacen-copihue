@@ -436,13 +436,30 @@ const fmt=n=>'$'+Math.round(n).toLocaleString('es-AR');
 const hoyStr=()=>{const h=new Date();return h.getFullYear()+'-'+String(h.getMonth()+1).padStart(2,'0')+'-'+String(h.getDate()).padStart(2,'0');};
 
 // ====== INIT ======
+async function fetchReportesConReintento(intentos){
+  for(let i=0;i<intentos;i++){
+    try{
+      const r=await fetch(API_URL+'?action=getReportes',{redirect:'follow',signal:AbortSignal.timeout(35000)});
+      return await r.json();
+    }catch(e){
+      const esTimeout=e.name==='TimeoutError'||e.name==='AbortError';
+      if(i<intentos-1){
+        const elApp=document.getElementById('app');
+        if(elApp) elApp.innerHTML='<div class="ldg"><div class="spin"></div>Reintentando carga'+(esTimeout?' (se tardó demasiado)':'')+'...</div>';
+        continue;
+      }
+      throw new Error(esTimeout?'Tiempo de espera agotado al cargar reportes (probá de nuevo, puede ser red lenta)':'Error de conexión al cargar reportes: '+e.message);
+    }
+  }
+}
+
 async function init(){
   try{
     const [rRep, rFia] = await Promise.allSettled([
-      fetch(API_URL+'?action=getReportes',{redirect:'follow',signal:AbortSignal.timeout(20000)}).then(r=>r.json()),
+      fetchReportesConReintento(2),
       fetch(API_FIADOS+'?action=listarFiados&t='+Date.now(),{redirect:'follow',signal:AbortSignal.timeout(15000)}).then(r=>r.json())
     ]);
-    if(rRep.status==='rejected'||rRep.value?.error) throw new Error(rRep.value?.error||'Error al cargar reportes');
+    if(rRep.status==='rejected'||rRep.value?.error) throw new Error(rRep.value?.error||rRep.reason?.message||'Error al cargar reportes');
     const d=rRep.value;
     if(!d||!Array.isArray(d.items)||!Array.isArray(d.totales)) throw new Error('Respuesta inválida del servidor');
     raw=d;
