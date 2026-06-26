@@ -6,7 +6,20 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>SendWA — Almacén Copihue ver.57</title>
+<title>SendWA — Almacén Copihue ver.58</title>
+<!--
+  CHANGELOG sendwa.html
+  v58: Oferta Personalizada — rediseño completo:
+       - % por producto (antes era UN solo % para toda la tanda). Sigue habiendo
+         un atajo "aplicar a todos" arriba, pero cada producto se puede pisar individual.
+       - Botón cerrar (✕) movido adentro de la hoja, en el header, ya no flota
+         lejos arriba de la pantalla.
+       - Toast ahora con z-index por ENCIMA de los modales — antes quedaba tapado
+         por el fondo oscuro del modal y el feedback de "Aplicar"/"Quitar" no se veía.
+       - Botones "Aplicar"/"Quitar" muestran estado "⏳..." mientras procesan.
+       - Requiere Code.gs v9.4+ (aplicarOfertaPersonalizada ahora recibe
+         { items:[{id,tipo}], texto } en vez de { productoIds, tipo, texto }).
+-->
 <style>
   /* ===== VARIABLES ===== */
   :root {
@@ -392,7 +405,7 @@
   #toast {
     position: fixed; bottom: 175px; left: 50%; transform: translateX(-50%) translateY(20px);
     background: #222; color: #fff; padding: 10px 20px; border-radius: 20px;
-    font-size: 13px; font-weight: 600; opacity: 0; transition: all .3s; z-index: 300;
+    font-size: 13px; font-weight: 600; opacity: 0; transition: all .3s; z-index: 600;
     pointer-events: none; white-space: nowrap;
   }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
@@ -463,18 +476,58 @@
   #personal-modal.open { display: flex; }
   #personal-sheet {
     background: var(--card-bg); border-radius: 20px 20px 0 0;
-    width: 100%; max-height: 90vh; overflow-y: auto; padding: 56px 16px 30px;
+    width: 100%; max-height: 90vh; overflow-y: auto; padding: 0 16px 24px;
     position: relative;
   }
-  #btn-personal-close-x {
-    position: fixed; top: 12px; right: 12px; z-index: 410;
-    width: 44px; height: 44px; border-radius: 50%;
-    background: rgba(0,0,0,.7); color: #fff; font-size: 22px; font-weight: 700;
-    display: none; align-items: center; justify-content: center;
-    border: 2px solid rgba(255,255,255,.3);
-    box-shadow: 0 2px 12px rgba(0,0,0,.4);
+  /* El cierre vive DENTRO de la hoja, junto al título — ya no flota
+     pegado arriba de la pantalla, lejos del contenido. */
+  .personal-header {
+    position: sticky; top: 0; z-index: 2;
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    background: var(--card-bg); margin: 0 -16px; padding: 16px 16px 12px;
+    border-bottom: 1.5px solid var(--border); border-radius: 20px 20px 0 0;
   }
-  #personal-modal.open #btn-personal-close-x { display: flex; }
+  .personal-header-title { font-size: 15px; font-weight: 800; color: var(--text); }
+  #btn-personal-close-x {
+    width: 32px; height: 32px; border-radius: 50%; flex: 0 0 auto;
+    background: var(--bg); color: var(--text-muted); font-size: 16px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    border: 1.5px solid var(--border); cursor: pointer;
+  }
+  .personal-body { padding-top: 14px; }
+  .personal-texto-input {
+    width: 100%; height: 42px; padding: 0 12px; margin-bottom: 10px;
+    border-radius: 10px; border: 1.5px solid var(--border);
+    background: var(--card-bg); color: var(--text); font-size: 14px; box-sizing: border-box;
+  }
+  .personal-info { font-size: 12px; font-weight: 700; color: var(--primary); margin-bottom: 4px; }
+  /* Lista por producto: cada uno con su propia escalera de % */
+  .personal-items-list {
+    display: flex; flex-direction: column; gap: 8px; margin-top: 6px;
+    max-height: 38vh; overflow-y: auto;
+  }
+  .personal-item {
+    display: flex; align-items: center; gap: 8px;
+    border: 1.5px solid var(--border); border-radius: 10px; padding: 6px 8px; background: var(--bg);
+  }
+  .personal-item img {
+    width: 38px; height: 38px; border-radius: 6px; object-fit: cover; flex: 0 0 auto; background: #e8f0e5;
+  }
+  .personal-item-name {
+    flex: 0 0 auto; width: 76px; font-size: 10.5px; font-weight: 600; color: var(--text);
+    overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.2;
+  }
+  .personal-item-pills { display: flex; gap: 3px; flex: 1; overflow-x: auto; scrollbar-width: none; }
+  .personal-item-pills::-webkit-scrollbar { display: none; }
+  .personal-item-pills .layout-btn { padding: 5px 7px; font-size: 9.5px; }
+  .personal-actions { display: flex; gap: 8px; margin-top: 14px; }
+  .personal-actions button {
+    flex: 1; height: 42px; border-radius: 10px; font-weight: 700; font-size: 13px; cursor: pointer;
+    transition: opacity .15s;
+  }
+  .personal-actions button.is-busy { opacity: .65; pointer-events: none; }
+  #btn-personal-aplicar { background: var(--primary); color: #fff; border: none; }
+  #btn-personal-quitar  { background: var(--bg); border: 1.5px solid var(--border); color: var(--text); }
   .personal-pct-btn.active { background: #E91E63 !important; border-color: #E91E63 !important; color: #fff !important; }
   .psico-99 { font-size: .62em; font-weight: 800; vertical-align: text-top; position: relative; top: -.35em; margin-left: 1px; }
   .single-thumb {
@@ -763,17 +816,24 @@
 
 <!-- OFERTA PERSONALIZADA MODAL -->
 <div id="personal-modal">
-  <button id="btn-personal-close-x" onclick="document.getElementById('personal-modal').classList.remove('open')">✕</button>
   <div id="personal-sheet">
-    <div class="layout-section-label">🏷️ Oferta personalizada</div>
-    <input type="text" id="personal-texto" maxlength="40" placeholder="Ej: Feliz día del padre"
-           style="width:100%;height:40px;padding:0 12px;margin:8px 0;border-radius:10px;border:1.5px solid var(--border);background:var(--card-bg);color:var(--text);font-size:14px;box-sizing:border-box;">
-    <div class="layout-section-label">Descuento (aproximado — el precio final se redondea a un valor terminado en 99)</div>
-    <div class="layout-row" id="personal-pct-row" style="flex-wrap:wrap;margin:6px 0 12px;"></div>
-    <div id="personal-info" style="font-size:12px;font-weight:700;color:var(--primary);margin-bottom:10px;"></div>
-    <div style="display:flex;gap:8px;">
-      <button id="btn-personal-aplicar" style="flex:1;height:42px;border-radius:10px;font-weight:700;font-size:13px;background:var(--primary);color:#fff;border:none;cursor:pointer;">✅ Aplicar a selección</button>
-      <button id="btn-personal-quitar" style="flex:1;height:42px;border-radius:10px;font-weight:700;font-size:13px;background:var(--bg);border:1.5px solid var(--border);color:var(--text);cursor:pointer;">🗑️ Quitar</button>
+    <div class="personal-header">
+      <div class="personal-header-title">🏷️ Oferta personalizada</div>
+      <button id="btn-personal-close-x" onclick="document.getElementById('personal-modal').classList.remove('open')">✕</button>
+    </div>
+    <div class="personal-body">
+      <input type="text" id="personal-texto" maxlength="40" placeholder="Ej: Feliz día del padre" class="personal-texto-input">
+      <div id="personal-info" class="personal-info"></div>
+
+      <div class="layout-section-label">Aplicar este % a todos (después podés ajustar cada producto)</div>
+      <div class="layout-row" id="personal-pct-bulk" style="flex-wrap:wrap;margin:6px 0 14px;"></div>
+
+      <div class="layout-section-label">Descuento por producto (aproximado — el precio final redondea a un valor terminado en 99)</div>
+      <div id="personal-items-list" class="personal-items-list"></div>
+    </div>
+    <div class="personal-actions">
+      <button id="btn-personal-aplicar">✅ Aplicar a selección</button>
+      <button id="btn-personal-quitar">🗑️ Quitar</button>
     </div>
   </div>
 </div>
@@ -1777,9 +1837,10 @@ function openCollageModal(mode) {
   // del flujo de "Aplicar" en Oferta Personalizada, independiente del collage normal.
   const personalBanner = document.getElementById('collage-personal-banner');
   if (personalBanner) {
-    if (_collageIsPersonal && _personalPctApplied != null) {
+    if (_collageIsPersonal) {
       const n = _collageProds.length;
-      personalBanner.textContent = `🏷️ Oferta personalizada -≈${_personalPctApplied}% aplicada a ${n} producto${n>1?'s':''}`;
+      const pctTxt = _personalPctApplied != null ? `-≈${_personalPctApplied}%` : 'con escalera variada';
+      personalBanner.textContent = `🏷️ Oferta personalizada ${pctTxt} aplicada a ${n} producto${n>1?'s':''}`;
       personalBanner.style.display = 'block';
     } else {
       personalBanner.style.display = 'none';
@@ -2457,60 +2518,102 @@ on('btn-collage-close', () => {
 });
 
 // ============================================================
-// OFERTA PERSONALIZADA — texto + % manual, badge propio
+// OFERTA PERSONALIZADA — texto + % por producto, badge propio
 // ============================================================
 // NOTA: la oferta personalizada ya no usa un mapa local — la fuente de verdad
 // es la planilla (columna oferta_personalizada), vía Code.gs. Ver _apiAction() arriba.
-let _personalPct = 10;
+// Cada producto seleccionado tiene SU PROPIO % (1-6 → 10-60%); el botón de
+// arriba es solo un atajo para setear el mismo % a todos de una.
+let _personalItemTipo = new Map(); // id (Number) -> tipo (1-6)
+let _personalBulkPct  = 20;
 const PERSONAL_PCTS = [10,20,30,40,50,60];
 
-function buildPersonalPctRow() {
-  const row = document.getElementById('personal-pct-row');
+function buildPersonalBulkRow() {
+  const row = document.getElementById('personal-pct-bulk');
   if (!row) return;
   row.innerHTML = PERSONAL_PCTS.map(pct =>
-    `<button class="layout-btn personal-pct-btn${pct===_personalPct?' active':''}" data-pct="${pct}">≈${pct}%</button>`
+    `<button class="layout-btn" data-pct="${pct}">≈${pct}%</button>`
   ).join('');
 }
-document.getElementById('personal-pct-row')?.addEventListener('click', e => {
+document.getElementById('personal-pct-bulk')?.addEventListener('click', e => {
+  const btn = e.target.closest('.layout-btn');
+  if (!btn) return;
+  _personalBulkPct = parseInt(btn.dataset.pct);
+  const tipo = PERSONAL_PCTS.indexOf(_personalBulkPct) + 1;
+  for (const id of _personalItemTipo.keys()) _personalItemTipo.set(id, tipo);
+  renderPersonalItemsList();
+});
+
+function renderPersonalItemsList() {
+  const list = document.getElementById('personal-items-list');
+  if (!list) return;
+  const prods = getSelectedProducts();
+  list.innerHTML = prods.map(p => {
+    const id   = Number(p.id);
+    const tipo = _personalItemTipo.get(id) || 0;
+    const pills = PERSONAL_PCTS.map((pct, i) => {
+      const active = (i + 1) === tipo;
+      return `<button class="layout-btn personal-pct-btn${active ? ' active' : ''}" data-id="${id}" data-pct="${pct}">≈${pct}%</button>`;
+    }).join('');
+    return `<div class="personal-item">
+      <img src="${getImgUrl(p)}" alt="" loading="lazy">
+      <div class="personal-item-name">${p.nombre}</div>
+      <div class="personal-item-pills">${pills}</div>
+    </div>`;
+  }).join('');
+}
+document.getElementById('personal-items-list')?.addEventListener('click', e => {
   const btn = e.target.closest('.personal-pct-btn');
   if (!btn) return;
-  _personalPct = parseInt(btn.dataset.pct);
-  document.querySelectorAll('.personal-pct-btn').forEach(b => b.classList.toggle('active', b === btn));
+  const id  = Number(btn.dataset.id);
+  const pct = parseInt(btn.dataset.pct);
+  _personalItemTipo.set(id, PERSONAL_PCTS.indexOf(pct) + 1);
+  renderPersonalItemsList();
 });
 
 on('btn-personalizada', () => {
   if (!selectedIds.size) { toast('⚠️ Seleccioná al menos un producto primero'); return; }
-  buildPersonalPctRow();
+  const prods = getSelectedProducts();
+  const tipoDefault = PERSONAL_PCTS.indexOf(_personalBulkPct) + 1;
+  _personalItemTipo = new Map(prods.map(p => [Number(p.id), tipoDefault]));
+  buildPersonalBulkRow();
+  renderPersonalItemsList();
   const info = document.getElementById('personal-info');
-  if (info) info.textContent = `📌 Se aplicará a ${selectedIds.size} producto${selectedIds.size>1?'s':''} seleccionado${selectedIds.size>1?'s':''}`;
+  if (info) info.textContent = `📌 Se aplicará a ${selectedIds.size} producto${selectedIds.size > 1 ? 's' : ''} seleccionado${selectedIds.size > 1 ? 's' : ''}`;
   document.getElementById('personal-modal').classList.add('open');
 });
 
 on('btn-personal-aplicar', () => {
   const texto = (document.getElementById('personal-texto').value || '').trim();
   if (!texto) { toast('⚠️ Escribí un texto para la oferta'); return; }
-  const tipoCodigo = PERSONAL_PCTS.indexOf(_personalPct) + 1; // 10→1, 20→2 ... 60→6
-  const ids = [...selectedIds].map(id => Number(id));
-  const cantidad = ids.length;
-  const pctAplicado = _personalPct;
-  document.getElementById('personal-modal').classList.remove('open');
-  toast(`⏳ Guardando "${texto}" -≈${pctAplicado}% en ${cantidad} producto${cantidad>1?'s':''}...`);
-  _apiAction('ofertaPersonalizada', { productoIds: ids, tipo: tipoCodigo, texto })
+  const items = [..._personalItemTipo.entries()].map(([id, tipo]) => ({ id, tipo }));
+  if (!items.length) { toast('⚠️ Seleccioná al menos un producto primero'); return; }
+  const cantidad     = items.length;
+  const tiposUsados  = new Set(items.map(it => it.tipo));
+  const pctResumen   = tiposUsados.size === 1 ? `≈${PERSONAL_PCTS[[...tiposUsados][0] - 1]}%` : 'escalera variada';
+  const btnAplicar   = document.getElementById('btn-personal-aplicar');
+  btnAplicar.classList.add('is-busy');
+  btnAplicar.textContent = '⏳ Guardando...';
+  toast(`⏳ Guardando "${texto}" (${pctResumen}) en ${cantidad} producto${cantidad > 1 ? 's' : ''}...`);
+  _apiAction('ofertaPersonalizada', { items, texto })
     .then(res => {
+      btnAplicar.classList.remove('is-busy');
+      btnAplicar.textContent = '✅ Aplicar a selección';
       if (res && res.success) {
         toast(`🏷️ ${res.mensaje || 'Oferta aplicada'}`);
+        document.getElementById('personal-modal').classList.remove('open');
         return fetchData().then(data => {
           allProducts = parseProducts(data);
           applyFilter();
           // Collage independiente del normal: solo los productos recién
           // afectados, con su oferta personalizada ya resuelta, y el banner
           // avisando qué % se aplicó.
-          const idsSet = new Set(ids);
+          const idsSet = new Set(items.map(it => it.id));
           const afectados = allProducts.filter(p => idsSet.has(Number(p.id)));
           if (afectados.length) {
             const prods = resolveOfertas(afectados, getModoResolucion());
             _collageIsPersonal  = true;
-            _personalPctApplied = pctAplicado;
+            _personalPctApplied = tiposUsados.size === 1 ? PERSONAL_PCTS[[...tiposUsados][0] - 1] : null;
             _collageProds = prods;
             _collagePage  = 0;
             _singleIdx    = 0;
@@ -2521,24 +2624,39 @@ on('btn-personal-aplicar', () => {
         toast(`❌ ${res && res.mensaje ? res.mensaje : 'No se pudo guardar'}`);
       }
     })
-    .catch(() => toast('❌ Error de conexión al guardar'));
+    .catch(() => {
+      btnAplicar.classList.remove('is-busy');
+      btnAplicar.textContent = '✅ Aplicar a selección';
+      toast('❌ Error de conexión al guardar');
+    });
 });
 
 on('btn-personal-quitar', () => {
   const ids = [...selectedIds].map(id => Number(id));
-  const cantidad = ids.length;
-  toast(`⏳ Quitando oferta de ${cantidad} producto${cantidad>1?'s':''}...`);
+  const cantidad   = ids.length;
+  const btnQuitar  = document.getElementById('btn-personal-quitar');
+  btnQuitar.classList.add('is-busy');
+  btnQuitar.textContent = '⏳ Quitando...';
+  toast(`⏳ Quitando oferta de ${cantidad} producto${cantidad > 1 ? 's' : ''}...`);
   _apiAction('quitarOfertaPersonalizada', { productoIds: ids })
     .then(res => {
+      btnQuitar.classList.remove('is-busy');
+      btnQuitar.textContent = '🗑️ Quitar';
       if (res && res.success) {
         toast(`🗑️ ${res.mensaje || 'Oferta quitada'}`);
+        document.getElementById('personal-modal').classList.remove('open');
         return fetchData().then(data => { allProducts = parseProducts(data); applyFilter(); });
       } else {
         toast(`❌ ${res && res.mensaje ? res.mensaje : 'No se pudo quitar'}`);
       }
     })
-    .catch(() => toast('❌ Error de conexión al quitar'));
+    .catch(() => {
+      btnQuitar.classList.remove('is-busy');
+      btnQuitar.textContent = '🗑️ Quitar';
+      toast('❌ Error de conexión al quitar');
+    });
 });
+
 
 // ============================================================
 // IA SUGGEST
