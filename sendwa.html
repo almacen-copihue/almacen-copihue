@@ -6,9 +6,17 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>SendWA — Almacén Copihue ver.58</title>
+<title>SendWA — Almacén Copihue ver.59</title>
 <!--
   CHANGELOG sendwa.html
+  v59: - Oferta Personalizada: filtra productos sin stock ANTES de mostrarlos en
+         la lista del modal (no tenía sentido asignarles un % si después no
+         iban a aparecer con el descuento — Code.gs ya los excluye al armar el
+         catálogo). Avisa cuántos se excluyeron.
+       - ✨ IA selecciona (modo estado): límite subido de 12 a 36 productos.
+         ⚠️ OJO: el aviso de "demasiados para Estado" se dispara a partir de
+         WA_LIMIT_ESTADO=30, así que con 36 vas a ver ese cartel seguido — es
+         solo informativo, no bloquea nada.
   v58: Oferta Personalizada — rediseño completo:
        - % por producto (antes era UN solo % para toda la tanda). Sigue habiendo
          un atajo "aplicar a todos" arriba, pero cada producto se puede pisar individual.
@@ -2525,7 +2533,8 @@ on('btn-collage-close', () => {
 // Cada producto seleccionado tiene SU PROPIO % (1-6 → 10-60%); el botón de
 // arriba es solo un atajo para setear el mismo % a todos de una.
 let _personalItemTipo = new Map(); // id (Number) -> tipo (1-6)
-let _personalBulkPct  = 20;
+let _personalProds     = [];       // productos elegibles del modal (ya filtrados por stock)
+let _personalBulkPct   = 20;
 const PERSONAL_PCTS = [10,20,30,40,50,60];
 
 function buildPersonalBulkRow() {
@@ -2547,8 +2556,7 @@ document.getElementById('personal-pct-bulk')?.addEventListener('click', e => {
 function renderPersonalItemsList() {
   const list = document.getElementById('personal-items-list');
   if (!list) return;
-  const prods = getSelectedProducts();
-  list.innerHTML = prods.map(p => {
+  list.innerHTML = _personalProds.map(p => {
     const id   = Number(p.id);
     const tipo = _personalItemTipo.get(id) || 0;
     const pills = PERSONAL_PCTS.map((pct, i) => {
@@ -2574,12 +2582,25 @@ document.getElementById('personal-items-list')?.addEventListener('click', e => {
 on('btn-personalizada', () => {
   if (!selectedIds.size) { toast('⚠️ Seleccioná al menos un producto primero'); return; }
   const prods = getSelectedProducts();
+  // Sin stock no se ofrece — mismo criterio que usa Code.gs para activar la
+  // oferta (ver getProductos). Filtramos ACÁ también para no hacerle elegir un
+  // % a un producto que después ni va a aparecer con el descuento.
+  const sinStock = prods.filter(p => !(p.stock > 0));
+  _personalProds = prods.filter(p => p.stock > 0);
+  if (!_personalProds.length) {
+    toast('⚠️ Ninguno de los seleccionados tiene stock — no hay nada para aplicar');
+    return;
+  }
   const tipoDefault = PERSONAL_PCTS.indexOf(_personalBulkPct) + 1;
-  _personalItemTipo = new Map(prods.map(p => [Number(p.id), tipoDefault]));
+  _personalItemTipo = new Map(_personalProds.map(p => [Number(p.id), tipoDefault]));
   buildPersonalBulkRow();
   renderPersonalItemsList();
   const info = document.getElementById('personal-info');
-  if (info) info.textContent = `📌 Se aplicará a ${selectedIds.size} producto${selectedIds.size > 1 ? 's' : ''} seleccionado${selectedIds.size > 1 ? 's' : ''}`;
+  if (info) {
+    let txt = `📌 Se aplicará a ${_personalProds.length} producto${_personalProds.length > 1 ? 's' : ''}`;
+    if (sinStock.length) txt += ` — ⚠️ ${sinStock.length} sin stock excluido${sinStock.length > 1 ? 's' : ''}`;
+    info.textContent = txt;
+  }
   document.getElementById('personal-modal').classList.add('open');
 });
 
@@ -2887,7 +2908,7 @@ on('btn-ia-suggest', async () => {
 
   if (!candidatos.length) { toast('⚠️ Sin productos para ese criterio'); return; }
 
-  const limite = currentMode === 'estado' ? 12 : 20;
+  const limite = currentMode === 'estado' ? 36 : 20;
   selectedIds.clear(); selectionOrder = [];
   candidatos.slice(0, limite).forEach(p => {
     selectedIds.add(p.id); selectionOrder.push(p.id);
