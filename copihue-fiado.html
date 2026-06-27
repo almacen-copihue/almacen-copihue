@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Copihue — Fiados v23</title>
+<title>Copihue — Fiados v25-DEBUG</title>
 <meta name="theme-color" content="#1b5e20">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -324,19 +324,59 @@ function renderClientes(){
 
   setHdrSub(clis.length+' con deuda · '+sinDeuda.length+' sin deuda · '+fmt(totG));
 
-  let html=
-    // Buscador unificado
-    `<div style="padding:10px 12px 4px">
-      <input type="text" placeholder="🔍 Buscar cliente..." value="${_busqCliente}"
-        oninput="_busqCliente=this.value;renderClientes()"
-        style="width:100%;padding:9px 13px;border:1.5px solid var(--borde);border-radius:12px;font-size:.85rem;font-family:inherit;box-sizing:border-box">
-    </div>`;
+  // ── Buscador: se crea UNA sola vez, nunca se destruye en renders posteriores ──
+  // Esto evita que el input pierda el foco al escribir (innerHTML lo recreaba en cada tecla).
+  const cont=document.getElementById('cuerpoClientes');
+  let busqInput=document.getElementById('inpBusqCliente');
+  if(!busqInput){
+    cont.innerHTML=
+      `<div style="padding:10px 12px 4px">
+        <input id="inpBusqCliente" type="text" placeholder="🔍 Buscar cliente..." value="${_busqCliente}"
+          style="width:100%;padding:9px 13px;border:1.5px solid var(--borde);border-radius:12px;font-size:.85rem;font-family:inherit;box-sizing:border-box">
+      </div>
+      <div id="listaClientesBody"></div>`;
+    busqInput=document.getElementById('inpBusqCliente');
+    busqInput.addEventListener('input',()=>{
+      console.log('[DEBUG] input event fired. activeElement ANTES de renderClientesLista():', document.activeElement, document.activeElement.id);
+      _busqCliente=busqInput.value;
+      renderClientesLista(); // solo redibuja la lista, el input queda intacto
+      console.log('[DEBUG] activeElement DESPUÉS de renderClientesLista():', document.activeElement, document.activeElement.id);
+    });
+  } else if(document.activeElement!==busqInput){
+    // Si el input existe pero no tiene foco (ej: volvimos de otra vista), sincronizamos su valor
+    busqInput.value=_busqCliente;
+  }
+
+  renderClientesLista(clis,sinDeuda,pend,totG,q);
+}
+
+// Redibuja SOLO la lista (resumen + tarjetas), nunca el input de búsqueda
+function renderClientesLista(clis,sinDeuda,pend,totG,q){
+  // Si se llama sin argumentos (desde el listener del input), recalculamos todo de nuevo
+  if(clis===undefined){
+    const pend2=_todos.filter(f=>f.estado!=='PAGADO');
+    const map2={};
+    pend2.forEach(f=>{if(!map2[f.cliente])map2[f.cliente]={nom:f.cliente,tel:f.telefono||'',fiados:[],tot:0};map2[f.cliente].fiados.push(f);map2[f.cliente].tot+=parseFloat(f.total||0);});
+    clis=Object.values(map2).sort((a,b)=>b.tot-a.tot);
+    totG=clis.reduce((s,c)=>s+c.tot,0);
+    const nomConDeuda2=new Set(Object.keys(map2).map(n=>n.toUpperCase()));
+    sinDeuda=_todosClientes.filter(c=>!nomConDeuda2.has((c.nombre||'').toUpperCase()));
+    q=_busqCliente.toLowerCase().trim();
+    if(q){
+      clis=clis.filter(c=>c.nom.toLowerCase().includes(q)||(c.tel||'').includes(q));
+      sinDeuda=sinDeuda.filter(c=>(c.nombre||'').toLowerCase().includes(q)||(c.telefono||'').includes(q));
+    }
+    pend=pend2;
+    setHdrSub(clis.length+' con deuda · '+sinDeuda.length+' sin deuda · '+fmt(totG));
+  }
+
+  const hoy=new Date();hoy.setHours(0,0,0,0);
+  let html='';
 
   // Resumen
   html+=`<div class="resumen"><div><div class="lbl">Total deuda general</div><div class="sub">${pend.length} fiado${pend.length!==1?'s':''} en ${clis.length} cliente${clis.length!==1?'s':''}</div></div><div class="monto">${fmt(totG)}</div></div>`;
 
   // Sección CON DEUDA
-  const hoy=new Date();hoy.setHours(0,0,0,0);
   if(clis.length){
     html+=`<div class="sec-lbl" style="color:var(--rojo)">🔴 CON DEUDA (${clis.length})</div>`;
     clis.forEach((c,idx)=>{
@@ -347,10 +387,12 @@ function renderClientes(){
     });
   } else if(!q){
     html+='<div class="empty"><div class="icon">✅</div>No hay fiados pendientes</div>';
+  } else {
+    html+='<div class="empty" style="font-size:.8rem">Sin resultados para "'+q+'"</div>';
   }
 
   // Sección SIN DEUDA — colapsable
-  html+=`<div class="sec-lbl" style="cursor:pointer;color:var(--verde)" onclick="_showSinDeuda=!_showSinDeuda;renderClientes()">
+  html+=`<div class="sec-lbl" style="cursor:pointer;color:var(--verde)" onclick="_showSinDeuda=!_showSinDeuda;renderClientesLista()">
     ${_showSinDeuda?'▲':'▼'} ✅ SIN DEUDA (${sinDeuda.length})
   </div>`;
   if(_showSinDeuda){
@@ -364,7 +406,9 @@ function renderClientes(){
     }
   }
 
-  document.getElementById('cuerpoClientes').innerHTML=html;
+  console.log('[DEBUG] activeElement justo ANTES de listaClientesBody.innerHTML=html:', document.activeElement, document.activeElement.id);
+  document.getElementById('listaClientesBody').innerHTML=html;
+  console.log('[DEBUG] activeElement justo DESPUÉS de listaClientesBody.innerHTML=html:', document.activeElement, document.activeElement.id);
   // Event listeners — solo tarjetas con deuda abren fiados
   document.querySelectorAll('.cli-card[data-idx]').forEach(el=>{
     el.addEventListener('click',()=>abrirCli(clis[parseInt(el.dataset.idx)].nom));
