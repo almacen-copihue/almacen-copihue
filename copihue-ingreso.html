@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>v11 · Copihue · Ingreso</title>
+  <title>v13 · Copihue · Ingreso</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -254,6 +254,29 @@
     button.btn-guardar:hover { transform: translateY(-2px); }
     button.btn-guardar:disabled { opacity: 0.6; transform: none; cursor: not-allowed; }
 
+    /* Botón de alerta para cantidades/precios fuera de rango */
+    @keyframes parpadeoRojo {
+      0%, 100% { background: #e74c3c; box-shadow: 0 4px 20px rgba(231,76,60,0.6); }
+      50%      { background: #c0392b; box-shadow: 0 4px 30px rgba(231,76,60,0.9); }
+    }
+    button.btn-guardar.alerta-valor {
+      animation: parpadeoRojo 0.8s infinite;
+      background: #e74c3c;
+    }
+    .aviso-valor-raro {
+      background: linear-gradient(135deg, #ffebee 0%, #ffcdd2 100%);
+      border-left: 4px solid #e74c3c;
+      padding: 12px 14px;
+      margin-top: 10px;
+      border-radius: 8px;
+      font-size: 13px;
+      color: #b71c1c;
+      line-height: 1.6;
+      display: none;
+    }
+    .aviso-valor-raro.visible { display: block; }
+    .aviso-valor-raro strong { display: block; margin-bottom: 4px; font-size: 14px; }
+
     .deshacer-wrap {
       margin-top: 14px;
       padding: 12px;
@@ -312,7 +335,7 @@
 <div class="card">
   <h3>
     <span>📦 Ingreso Mercadería</span>
-    <span class="version">v11</span>
+    <span class="version">v13</span>
   </h3>
 
   <!-- PRODUCTO -->
@@ -332,7 +355,7 @@
   <div class="info" id="info"></div>
 
   <label>Cantidad a ingresar</label>
-  <input id="cantidad" type="number" min="1" value="1" oninput="calcularSugerido()">
+  <input id="cantidad" type="number" min="1" value="1" oninput="calcularSugerido();verificarValoresRaros()">
 
   <label>Categoría</label>
   <!-- Se renderiza dinámicamente en buildCategoriaWidget() -->
@@ -357,8 +380,8 @@
   <label>Precio de COSTO (unitario)</label>
   <div class="input-wrap">
     <input id="precioCosto" type="number" min="0" step="1" placeholder="Ej: 1500"
-      oninput="calcularSugerido();toggleClear('precioCosto')">
-    <button class="btn-clear" id="clear-precioCosto" onclick="clearField('precioCosto');calcularSugerido()" tabindex="-1">✕</button>
+      oninput="calcularSugerido();toggleClear('precioCosto');verificarValoresRaros()">
+    <button class="btn-clear" id="clear-precioCosto" onclick="clearField('precioCosto');calcularSugerido();verificarValoresRaros()" tabindex="-1">✕</button>
   </div>
 
   <div class="precio-sugerido" id="precioSugerido">
@@ -369,8 +392,8 @@
   <label>Precio de VENTA <span class="opcional">(vacío = mantener actual)</span></label>
   <div class="input-wrap">
     <input id="precioVenta" type="number" min="0" step="1" placeholder="Precio al público"
-      oninput="toggleClear('precioVenta')">
-    <button class="btn-clear" id="clear-precioVenta" onclick="clearField('precioVenta')" tabindex="-1">✕</button>
+      oninput="toggleClear('precioVenta');verificarValoresRaros()">
+    <button class="btn-clear" id="clear-precioVenta" onclick="clearField('precioVenta');verificarValoresRaros()" tabindex="-1">✕</button>
   </div>
 
   <!-- ADICIONAL -->
@@ -390,6 +413,8 @@
     <button class="btn-clear" id="clear-fechaVencimiento" onclick="clearField('fechaVencimiento')" tabindex="-1">✕</button>
   </div>
 
+  <div class="aviso-valor-raro" id="avisoValorRaro"></div>
+
   <button class="btn-guardar" id="btnGuardar" onclick="guardar()">✅ Guardar Ingreso</button>
 
   <div class="deshacer-wrap" id="deshacerWrap" style="display:none">
@@ -402,14 +427,21 @@
 
 <script>
 // ── Changelog ──────────────────────────────────────────────────────────────────
+// v13 — Límites de alerta bajados a la escala real del negocio:
+//        cantidad > 100u, costo unitario > $50.000, venta > $80.000.
+// v12 — Validación de valores fuera de rango (típico error de tipeo: un cero de
+//        más). Límites: cantidad > 500, costo unitario > $500.000, venta >
+//        $1.000.000. Al superarlos: banner rojo explicando qué está mal +
+//        botón Guardar parpadea en rojo + al tocar Guardar pide confirmación
+//        explícita con los números en pantalla (Cancelar = vuelve sin guardar).
+//        Se chequea en vivo mientras se escribe, no solo al guardar.
 // v11 — Anti-duplicados: lock duro contra doble-submit (_guardando), timeout subido
 //        de 15s a 30s (conexión Patagonia), idOperacion único enviado al GAS para
 //        detectar reintentos. Mensaje de error ahora avisa explícitamente "revisá
 //        el Historial antes de reintentar" en vez de invitar a reintentar a ciegas.
-//        NUEVO: panel "Deshacer este ingreso" tras guardar — permite revertir el
+//        Panel "Deshacer este ingreso" tras guardar — permite revertir el
 //        último ingreso (elimina fila de Historial + resta stock sumado) sin tener
-//        que ir a la planilla a mano. REQUIERE acción 'deshacerIngreso' nueva en el
-//        GAS (ver nota abajo).
+//        que ir a la planilla a mano. REQUIERE acción 'deshacerIngreso' en el GAS.
 // v10 — Botón ✕ para limpiar rápido: producto, costo, venta, proveedor, fecha venc.
 // v9  — Botón ✕ para limpiar categoría rápido.
 // v8  — Límite de autocomplete de productos subido de 8 a 15 resultados.
@@ -859,6 +891,47 @@ async function deshacerUltimoIngreso() {
 let _guardando = false; // lock duro contra doble-submit
 let _ultimoIngreso = null; // referencia al último ingreso guardado, para poder deshacerlo
 
+// Límites razonables — más allá de esto, casi seguro es un error de tipeo
+// (ej: 10000000000 en vez de 10, o un cero de más por apoyar el dedo)
+const LIMITES = {
+  cantidadMax: 100,        // un ingreso normal de mercadería no supera esto
+  precioCostoMax: 50000,   // costo unitario por encima de esto es sospechoso
+  precioVentaMax: 80000
+};
+
+function verificarValoresRaros() {
+  const cantidad    = Number(document.getElementById('cantidad').value) || 0;
+  const precioCosto = parseFloat(document.getElementById('precioCosto').value) || 0;
+  const precioVenta = parseFloat(document.getElementById('precioVenta').value) || 0;
+
+  const motivos = [];
+  if (cantidad > LIMITES.cantidadMax) {
+    motivos.push(`Cantidad de <strong>${cantidad.toLocaleString('es-AR')}</strong> unidades es muy alta`);
+  }
+  if (precioCosto > LIMITES.precioCostoMax) {
+    motivos.push(`Costo de <strong>$${precioCosto.toLocaleString('es-AR')}</strong> por unidad es muy alto`);
+  }
+  if (precioVenta > LIMITES.precioVentaMax) {
+    motivos.push(`Precio de venta de <strong>$${precioVenta.toLocaleString('es-AR')}</strong> es muy alto`);
+  }
+
+  const btn   = document.getElementById('btnGuardar');
+  const aviso = document.getElementById('avisoValorRaro');
+
+  if (motivos.length > 0) {
+    btn.classList.add('alerta-valor');
+    aviso.classList.add('visible');
+    aviso.innerHTML = '<strong>⚠️ Revisá antes de guardar:</strong>' + motivos.join('<br>') +
+      '<br>¿Seguro que no es un error de tipeo (un cero de más)?';
+    return true;
+  } else {
+    btn.classList.remove('alerta-valor');
+    aviso.classList.remove('visible');
+    aviso.innerHTML = '';
+    return false;
+  }
+}
+
 async function guardar() {
   if (_guardando) return; // ya hay un guardado en curso, ignorar clicks extra
 
@@ -883,6 +956,18 @@ async function guardar() {
   }
   if (!precioCosto) {
     if (!confirm('⚠️ No ingresaste precio de costo. ¿Continuar igual?')) return;
+  }
+
+  // Bloqueo duro: valores fuera de rango razonable (posible error de tipeo)
+  if (verificarValoresRaros()) {
+    const ok = confirm(
+      '🚨 VALORES INUSUALES DETECTADOS\n\n' +
+      `Cantidad: ${cantidad.toLocaleString('es-AR')}\n` +
+      (precioCosto ? `Costo unitario: $${precioCosto.toLocaleString('es-AR')}\n` : '') +
+      (precioVenta ? `Precio venta: $${precioVenta.toLocaleString('es-AR')}\n` : '') +
+      '\n¿Estás SEGURO de que estos números son correctos?\n(presioná Cancelar si fue un error de tipeo)'
+    );
+    if (!ok) return;
   }
 
   _guardando = true;
@@ -953,6 +1038,9 @@ function limpiar() {
   document.getElementById('autoList').classList.remove('open');
   ocultarBannerPrecargado();
   resetCategoria();
+  document.getElementById('btnGuardar').classList.remove('alerta-valor');
+  document.getElementById('avisoValorRaro').classList.remove('visible');
+  document.getElementById('avisoValorRaro').innerHTML = '';
   document.getElementById('producto').focus();
 }
 
