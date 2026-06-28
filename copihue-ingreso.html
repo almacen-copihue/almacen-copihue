@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>v15 · Copihue · Ingreso</title>
+  <title>v16 · Copihue · Ingreso</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -425,7 +425,7 @@
       <span class="conn-status" id="connStatus" title="Verificando conexión...">
         <span class="conn-dot"></span><span class="conn-text">Conectando...</span>
       </span>
-      <span class="version">v15</span>
+      <span class="version">v16</span>
     </span>
   </h3>
 
@@ -525,6 +525,12 @@
 
 <script>
 // ── Changelog ──────────────────────────────────────────────────────────────────
+// v16 — Fix: parpadeo "no encontrado" → "encontrado" al escribir el nombre de un
+//        producto. Causa real: condición de carrera — si tipeabas rápido, varias
+//        búsquedas quedaban en vuelo y la que respondía último (no la más nueva)
+//        pisaba la pantalla. Ahora cada búsqueda tiene un ID de secuencia y se
+//        descartan las respuestas obsoletas. Además: aparece "🔎 Buscando..."
+//        de inmediato en vez de dejar el panel vacío durante el debounce.
 // v15 — Reemplaza el panel "deshacer último ingreso" (1 solo) por un panel
 //        plegable "🕘 Últimos ingresos" con los últimos 8 movimientos, cada uno
 //        con su propio botón Deshacer. Cubre el caso de detectar el error 2-3
@@ -830,7 +836,17 @@ function onProductoInput() {
   }
 
   clearTimeout(_infoTimer);
+  // Mostrar "buscando..." de inmediato en vez de dejar el panel vacío/viejo
+  // mientras se espera el debounce y la respuesta del GAS
+  mostrarBuscando();
   _infoTimer = setTimeout(() => buscarInfo(val), 600);
+}
+
+function mostrarBuscando() {
+  const infoDiv = document.getElementById('info');
+  ocultarBannerPrecargado();
+  infoDiv.style.display = 'block';
+  infoDiv.innerHTML = '<span style="color:#95a5a6">🔎 Buscando...</span>';
 }
 
 function seleccionarProducto(nombre) {
@@ -851,19 +867,28 @@ document.addEventListener('click', function(e) {
 });
 
 // ── BUSCAR INFO PRODUCTO ───────────────────────────────────────────────────────
+let _buscarInfoSeq = 0; // contador de búsquedas — evita que una respuesta vieja pise a una más nueva
+
 async function buscarInfo(nombre) {
   if (!nombre || nombre.length < 2) return;
+
+  const miSeq = ++_buscarInfoSeq; // esta búsqueda es la más reciente al momento de salir
 
   const infoDiv = document.getElementById('info');
   const loading = document.getElementById('loadingInfo');
   loading.classList.add('active');
-  infoDiv.style.display = 'none';
-  ocultarBannerPrecargado();
+  mostrarBuscando();
 
   try {
-    const r    = await fetch(API_URL + '?action=getInfoProducto&nombre=' + encodeURIComponent(nombre) + '&t=' + Date.now(), { redirect: 'follow' });
+    const r    = await fetch(API_URL + '?action=getInfoProducto&nombre=' + encodeURIComponent(nombre) + '&t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(15000) });
     const data = await r.json();
+
+    // Si mientras esperábamos la respuesta el usuario ya disparó otra búsqueda
+    // más nueva, esta respuesta llegó tarde — la descartamos sin tocar la pantalla
+    if (miSeq !== _buscarInfoSeq) return;
+
     loading.classList.remove('active');
+    setConnStatus('online');
 
     if (!data.encontrado) {
       _esNuevo = true;
@@ -925,7 +950,9 @@ async function buscarInfo(nombre) {
     `;
 
   } catch(e) {
+    if (miSeq !== _buscarInfoSeq) return; // respuesta obsoleta, ignorar
     loading.classList.remove('active');
+    setConnStatus('offline');
     console.warn('Error buscando info:', e);
   }
 }
