@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>v16 · Copihue · Ingreso</title>
+  <title>v17 · Copihue · Ingreso</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -201,13 +201,41 @@
     }
     .autocomplete-list.open { display: block; }
     .autocomplete-item {
-      padding: 10px 14px;
+      padding: 8px 14px;
       cursor: pointer;
       font-size: 14px;
       border-bottom: 1px solid #f0f0f0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
     }
     .autocomplete-item:hover { background: #f0f4ff; }
     .autocomplete-item .match { font-weight: 700; color: #667eea; }
+    .autocomplete-item .item-texto { flex: 1; min-width: 0; }
+    .autocomplete-thumb {
+      width: 36px; height: 36px;
+      border-radius: 6px;
+      object-fit: contain;
+      background: #f5f6f8;
+      border: 1px solid #eee;
+      flex-shrink: 0;
+    }
+
+    /* Foto grande en panel de info del producto */
+    .info-foto-wrap {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+    }
+    .info-foto {
+      width: 72px; height: 72px;
+      border-radius: 10px;
+      object-fit: contain;
+      background: #fff;
+      border: 1px solid #e0e6ed;
+      flex-shrink: 0;
+    }
+    .info-texto { flex: 1; min-width: 0; }
 
     /* Categoría autocomplete */
     .cat-wrap { position: relative; }
@@ -425,7 +453,7 @@
       <span class="conn-status" id="connStatus" title="Verificando conexión...">
         <span class="conn-dot"></span><span class="conn-text">Conectando...</span>
       </span>
-      <span class="version">v16</span>
+      <span class="version">v17</span>
     </span>
   </h3>
 
@@ -525,6 +553,14 @@
 
 <script>
 // ── Changelog ──────────────────────────────────────────────────────────────────
+// v17 — Fotos de producto. Reutiliza el mismo patrón de index.html (catálogo):
+//        URL = raw.githubusercontent.com/almacen-copihue/almacen-copihue/main/
+//        imagenes-productos/ + simplificarNombre(producto) + .jpg. Mismo
+//        algoritmo de slug que el catálogo, así apuntan al mismo archivo.
+//        Se ve en 3 lugares: miniatura en cada opción del autocomplete,
+//        foto grande en el panel de info (encontrado y no encontrado), y
+//        miniatura en cada ítem del panel de últimos ingresos/deshacer.
+//        Si la foto no existe, se oculta sola (onerror) sin romper el layout.
 // v16 — Fix: parpadeo "no encontrado" → "encontrado" al escribir el nombre de un
 //        producto. Causa real: condición de carrera — si tipeabas rápido, varias
 //        búsquedas quedaban en vuelo y la que respondía último (no la más nueva)
@@ -580,6 +616,23 @@
 // ──────────────────────────────────────────────────────────────────────────────
 
 const API_URL = 'https://script.google.com/macros/s/AKfycbzWZzDvdGfW8vd2-FpQolT852cdPMeHbfKugn9DBOlju75bE1D0SUNB5EKEDOsI2vP4lA/exec';
+
+// Mismo patrón que usa index.html (catálogo) para las fotos de producto
+const IMG_BASE = 'https://raw.githubusercontent.com/almacen-copihue/almacen-copihue/main/imagenes-productos/';
+
+function simplificarNombre(nombre) {
+  return nombre
+    .toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9 ]/g, "")
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .trim();
+}
+
+function urlFoto(nombreProducto) {
+  return IMG_BASE + simplificarNombre(nombreProducto) + '.jpg';
+}
 
 // Fallback: categorías reales de Copihue (se usa si el GAS no las devuelve)
 const CATS_FALLBACK = [
@@ -828,8 +881,9 @@ function onProductoInput() {
       const before = p.substring(0, idx);
       const match  = p.substring(idx, idx + val.length);
       const after  = p.substring(idx + val.length);
-      return `<div class="autocomplete-item" onclick="seleccionarProducto('${p.replace(/'/g,"\\'")}')">\
-        ${before}<span class="match">${match}</span>${after}\
+      return `<div class="autocomplete-item" onclick="seleccionarProducto('${p.replace(/'/g,"\\'")}')">
+        <img class="autocomplete-thumb" src="${urlFoto(p)}" onerror="this.style.display='none'" loading="lazy">
+        <span class="item-texto">${before}<span class="match">${match}</span>${after}</span>
       </div>`;
     }).join('');
     list.classList.add('open');
@@ -895,7 +949,14 @@ async function buscarInfo(nombre) {
       document.getElementById('catInputBox').classList.add('nuevo-producto');
       document.getElementById('avisoCategoria').classList.add('visible');
       infoDiv.style.display = 'block';
-      infoDiv.innerHTML = '<span class="alerta">⚠️ Producto no encontrado</span><br><small>Se creará como nuevo — seleccioná la categoría antes de guardar</small>';
+      infoDiv.innerHTML = `
+        <div class="info-foto-wrap">
+          <img class="info-foto" src="${urlFoto(nombre)}" onerror="this.style.display='none'" loading="lazy">
+          <div class="info-texto">
+            <span class="alerta">⚠️ Producto no encontrado</span><br>
+            <small>Se creará como nuevo — seleccioná la categoría antes de guardar</small>
+          </div>
+        </div>`;
       return;
     }
 
@@ -942,11 +1003,16 @@ async function buscarInfo(nombre) {
     // Panel info (stock actual)
     infoDiv.style.display = 'block';
     infoDiv.innerHTML = `
-      <strong>📊 Datos actuales en planilla:</strong><br>
-      Stock actual: <strong>${data.stockActual ?? '—'}</strong> unidades<br>
-      Precio venta: <span class="precio-grande">$${Number(data.precioVenta||0).toLocaleString('es-AR')}</span>
-      ${data.precioCosto ? '<br>Último costo: <strong>$' + Number(data.precioCosto).toLocaleString('es-AR') + '</strong>' : ''}
-      ${data.proveedor   ? '<br>Proveedor: <strong>' + data.proveedor + '</strong>' : ''}
+      <div class="info-foto-wrap">
+        <img class="info-foto" src="${urlFoto(nombre)}" onerror="this.style.display='none'" loading="lazy">
+        <div class="info-texto">
+          <strong>📊 Datos actuales en planilla:</strong><br>
+          Stock actual: <strong>${data.stockActual ?? '—'}</strong> unidades<br>
+          Precio venta: <span class="precio-grande">$${Number(data.precioVenta||0).toLocaleString('es-AR')}</span>
+          ${data.precioCosto ? '<br>Último costo: <strong>$' + Number(data.precioCosto).toLocaleString('es-AR') + '</strong>' : ''}
+          ${data.proveedor   ? '<br>Proveedor: <strong>' + data.proveedor + '</strong>' : ''}
+        </div>
+      </div>
     `;
 
   } catch(e) {
@@ -1044,6 +1110,7 @@ async function cargarHistorial() {
       const detalle = `${r.fecha} · +${r.cantidad}u` + (r.proveedor ? ' · ' + r.proveedor : '');
       return `
         <div class="historial-item" id="hist-item-${idx}">
+          <img class="autocomplete-thumb" src="${urlFoto(r.producto)}" onerror="this.style.display='none'" loading="lazy">
           <div class="historial-item-info">
             <div class="historial-item-nombre">${r.producto}</div>
             <div class="historial-item-detalle">${detalle}</div>
