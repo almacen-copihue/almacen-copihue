@@ -60,11 +60,10 @@
         .filtros-prov {
             max-width:700px; margin:0 auto;
             padding:4px 14px 8px; display:flex; gap:6px; flex-wrap:wrap;
-            max-height:200px; opacity:1; overflow:hidden;
-            transition:max-height 0.25s ease, opacity 0.2s ease, padding 0.25s ease;
+            transition:opacity 0.25s ease;
         }
         .filtros-prov.oculto {
-            max-height:0; opacity:0; padding-top:0; padding-bottom:0;
+            opacity:0; pointer-events:none;
         }
 
         /* BARRA CARRITO — siempre visible cuando hay seleccionados */
@@ -556,7 +555,7 @@ function renderLista() {
                 ? '<span class="lc-badge urgente">' + (esPiso ? '🔔 PISO' : it.prioridad || '⚠️') + '</span>'
                 : '<span class="lc-badge ok">✅ OK</span>';
 
-        var diasTxt = (it.diasStock !== null && it.diasStock !== undefined) ? it.diasStock + 'd stock' : 'sin historial';
+        var diasTxt = (it.diasStock !== null && it.diasStock !== undefined) ? Math.round(it.diasStock) + 'd stock' : 'sin historial';
         var provTxt = it.proveedor ? '<span>🏪 ' + it.proveedor + '</span>' : '';
 
         // Historial precios
@@ -752,27 +751,35 @@ function lcLimpiarBusqueda() {
 
 document.addEventListener('DOMContentLoaded', cargarLista);
 
-// ── Ocultar chips de proveedor al bajar, mostrar al subir ──
+// ── Ocultar chips de proveedor al bajar (solo móvil, opacity-only) ──
 (function() {
-    var lastY = window.scrollY || 0;
-    var timer = null;
-    var UMBRAL = 40;        // px de desplazamiento para reaccionar
-    var DELAY  = 120;       // ms de espera antes de ejecutar
+    // Solo activar en pantallas angostas — en desktop los chips siempre visibles
+    if (window.innerWidth > 600) return;
+
+    var lastY  = window.scrollY || 0;
+    var timer  = null;
+    var locked = false;   // impide re-entrar mientras se procesa
 
     window.addEventListener('scroll', function() {
+        if (locked) return;
         clearTimeout(timer);
         timer = setTimeout(function() {
+            locked = true;
             var y    = window.scrollY || document.documentElement.scrollTop;
             var diff = y - lastY;
-            if (Math.abs(diff) < UMBRAL) return;   // movimiento insuficiente, ignorar
-            var prov = document.getElementById('lcProvChips');
-            if (diff > 0 && y > 80) {
-                prov.classList.add('oculto');        // bajando
-            } else {
-                prov.classList.remove('oculto');     // subiendo
+            // Solo reaccionar a desplazamientos intencionales grandes
+            if (Math.abs(diff) >= 80) {
+                var prov = document.getElementById('lcProvChips');
+                if (diff > 0 && y > 120) {
+                    prov.classList.add('oculto');
+                } else {
+                    prov.classList.remove('oculto');
+                }
+                lastY = y;
             }
-            lastY = y;
-        }, DELAY);
+            // Liberar el lock en el siguiente frame, cuando el layout ya se estabilizó
+            requestAnimationFrame(function() { locked = false; });
+        }, 250);
     }, { passive: true });
 })();
 </script>
