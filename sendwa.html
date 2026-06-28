@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>SendWA — Almacén Copihue ver.59</title>
+<title>SendWA — Almacén Copihue ver.61</title>
 <!--
   CHANGELOG sendwa.html
   v59: - Oferta Personalizada: filtra productos sin stock ANTES de mostrarlos en
@@ -649,7 +649,7 @@
           style="width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.2);
                  border:none;color:#fff;font-size:12px;font-weight:800;cursor:pointer;
                  flex-shrink:0;display:flex;align-items:center;justify-content:center;">?</button>
-  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.59</div>
+  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.61</div>
   <button id="btn-dark" title="Modo oscuro">🌙</button>
 </div>
 
@@ -781,9 +781,9 @@
         <span id="collage-sel-info" style="font-size:11px;font-weight:700;color:var(--primary);margin-left:4px;"></span>
       </div>
       <div id="collage-page-nav" style="display:none;align-items:center;justify-content:center;gap:10px;">
-        <button onclick="collagePrevPage()" style="width:36px;height:36px;border-radius:50%;background:var(--primary-dark);color:#fff;border:none;font-size:22px;cursor:pointer;line-height:1;">‹</button>
+        <button onclick="pageNavRouter('prev')" style="width:36px;height:36px;border-radius:50%;background:var(--primary-dark);color:#fff;border:none;font-size:22px;cursor:pointer;line-height:1;">‹</button>
         <span id="collage-page-lbl" style="font-size:13px;font-weight:800;color:var(--text-muted);min-width:110px;text-align:center;">Pág 1/1</span>
-        <button onclick="collageNextPage()" style="width:36px;height:36px;border-radius:50%;background:var(--primary-dark);color:#fff;border:none;font-size:22px;cursor:pointer;line-height:1;">›</button>
+        <button onclick="pageNavRouter('next')" style="width:36px;height:36px;border-radius:50%;background:var(--primary-dark);color:#fff;border:none;font-size:22px;cursor:pointer;line-height:1;">›</button>
       </div>
     </div>
     <!-- Selector de producto (modo 1 foto) -->
@@ -1765,6 +1765,18 @@ let _personalPctApplied = null;
 const _gridCols = { 4:2, 6:3, 9:3, 12:4 };
 const _gridRows = { 4:2, 6:2, 9:3, 12:3 };
 
+// Router único de navegación — decide según el modo activo, sin pisar onclick
+window.pageNavRouter = function(dir) {
+  if (_collageMode === 'historia') {
+    const total = historiaTotalPages();
+    if (dir === 'prev' && _historiaPage > 0) { _historiaPage--; drawHistoria(_collageProds); }
+    if (dir === 'next' && _historiaPage < total - 1) { _historiaPage++; drawHistoria(_collageProds); }
+  } else {
+    if (dir === 'prev') collagePrevPage();
+    if (dir === 'next') collageNextPage();
+  }
+};
+
 function collageTotalPages() {
   return Math.max(1, Math.ceil(_collageProds.length / _collagePerPage));
 }
@@ -1821,6 +1833,17 @@ document.getElementById('collage-collage-controls')?.addEventListener('click', e
   });
   _collagePage = 0;
   renderCollagePage();
+  // Refrescar visibilidad/texto de "Descargar TODAS" según la nueva paginación
+  const btnTodas = document.getElementById('btn-dl-todas');
+  if (btnTodas && _collageMode === 'collage') {
+    const totalPag = Math.max(1, Math.ceil(_collageProds.length / _collagePerPage));
+    if (totalPag > 1) {
+      btnTodas.classList.add('show');
+      btnTodas.textContent = `⬇️ Descargar TODAS (${totalPag} páginas)`;
+    } else {
+      btnTodas.classList.remove('show');
+    }
+  }
 });
 
 // Tabs de modo
@@ -2481,15 +2504,39 @@ async function drawHistoria(prodsAll) {
     const desde = start + 1, hasta = Math.min(start + HISTORIA_PER_PAGE, _collageProds.length);
     if (lbl) lbl.textContent = `Pág ${_historiaPage+1}/${total}  (${desde}–${hasta})`;
     const btns = nav.querySelectorAll('button');
-    if (btns[0]) { btns[0].style.opacity = _historiaPage > 0 ? '1' : '.3'; btns[0].onclick = () => { if(_historiaPage>0){_historiaPage--;drawHistoria(_collageProds);} }; }
-    if (btns[1]) { btns[1].style.opacity = _historiaPage < total-1 ? '1' : '.3'; btns[1].onclick = () => { if(_historiaPage<total-1){_historiaPage++;drawHistoria(_collageProds);} }; }
+    if (btns[0]) btns[0].style.opacity = _historiaPage > 0 ? '1' : '.3';
+    if (btns[1]) btns[1].style.opacity = _historiaPage < total-1 ? '1' : '.3';
   }
   const info = document.getElementById('collage-sel-info');
   if (info) info.textContent = `📷 ${_collageProds.length} fotos · ${total} pág${total>1?'s':''}`;
 }
 
-// Descargar TODAS: itera cada producto con el layout actual
+// Descargar TODAS:
+//  - Modo "1 Foto": una imagen por producto (como antes)
+//  - Modo "Collage": una imagen por PÁGINA de la grilla paginada
 on('btn-dl-todas', async () => {
+  if (_collageMode === 'collage') {
+    const totalPag = Math.max(1, Math.ceil(_collageProds.length / _collagePerPage));
+    if (totalPag <= 1) { toast('Solo hay 1 página'); return; }
+    toast(`⬇️ Descargando ${totalPag} páginas…`, totalPag*700+1000);
+    const savedPage = _collagePage;
+    for (let pg = 0; pg < totalPag; pg++) {
+      _collagePage = pg;
+      await renderCollagePage();
+      const cvs = document.getElementById('collage-canvas');
+      const a = document.createElement('a');
+      a.href = cvs.toDataURL('image/jpeg', .92);
+      a.download = `copihue_collage_pag${pg+1}de${totalPag}.jpg`;
+      a.click();
+      await new Promise(r => setTimeout(r, 600));
+    }
+    _collagePage = savedPage;
+    await renderCollagePage();
+    toast(`✅ ${totalPag} páginas descargadas`);
+    return;
+  }
+
+  // Modo single — comportamiento original
   const prods = _collageProds;
   if (!prods.length) return;
   toast(`⬇️ Descargando ${prods.length} imágenes…`, prods.length*600+1000);
@@ -2505,7 +2552,6 @@ on('btn-dl-todas', async () => {
     await new Promise(r => setTimeout(r, 500));
   }
   _singleIdx = savedIdx;
-  // Restaurar canvas
   await drawSingleLayout(prods[savedIdx], _singleLayout);
   toast(`✅ ${prods.length} imágenes descargadas`);
 });
