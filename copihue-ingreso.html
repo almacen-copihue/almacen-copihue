@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>v14 · Copihue · Ingreso</title>
+  <title>v15 · Copihue · Ingreso</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -314,34 +314,83 @@
     .aviso-valor-raro.visible { display: block; }
     .aviso-valor-raro strong { display: block; margin-bottom: 4px; font-size: 14px; }
 
-    .deshacer-wrap {
-      margin-top: 14px;
-      padding: 12px;
-      background: #fff8f0;
-      border: 2px dashed #f0ad4e;
+    /* Panel de últimos ingresos / deshacer */
+    .historial-wrap {
+      margin-top: 16px;
+      border: 1px solid #e0e6ed;
       border-radius: 10px;
+      overflow: hidden;
     }
-    .deshacer-info {
+    .historial-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 14px;
+      background: #f8f9fa;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      color: #34495e;
+      user-select: none;
+    }
+    .historial-toggle:hover { background: #f0f2f5; }
+    .historial-chevron { transition: transform 0.2s; color: #95a5a6; font-size: 12px; }
+    .historial-chevron.open { transform: rotate(180deg); }
+    .historial-lista {
+      max-height: 360px;
+      overflow-y: auto;
+      border-top: 1px solid #e0e6ed;
+    }
+    .historial-loading {
+      padding: 16px;
+      text-align: center;
+      color: #95a5a6;
       font-size: 13px;
-      color: #856404;
-      margin-bottom: 8px;
-      line-height: 1.5;
     }
-    .deshacer-info strong { color: #5c4400; }
-    button.btn-deshacer {
-      width: 100%;
-      padding: 10px;
-      border-radius: 8px;
-      border: 2px solid #e74c3c;
+    .historial-vacio {
+      padding: 16px;
+      text-align: center;
+      color: #95a5a6;
+      font-size: 13px;
+    }
+    .historial-item {
+      padding: 10px 14px;
+      border-bottom: 1px solid #f0f2f5;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .historial-item:last-child { border-bottom: none; }
+    .historial-item-info { flex: 1; min-width: 0; }
+    .historial-item-nombre {
+      font-size: 13px;
+      font-weight: 600;
+      color: #2c3e50;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .historial-item-detalle {
+      font-size: 12px;
+      color: #95a5a6;
+      margin-top: 2px;
+    }
+    button.btn-deshacer-item {
+      flex-shrink: 0;
+      padding: 6px 10px;
+      border-radius: 6px;
+      border: 1.5px solid #e74c3c;
       background: #fff;
       color: #e74c3c;
       font-weight: 700;
-      font-size: 14px;
+      font-size: 12px;
       cursor: pointer;
+      white-space: nowrap;
       transition: all 0.2s;
     }
-    button.btn-deshacer:hover { background: #e74c3c; color: #fff; }
-    button.btn-deshacer:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.btn-deshacer-item:hover { background: #e74c3c; color: #fff; }
+    button.btn-deshacer-item:disabled { opacity: 0.5; cursor: not-allowed; }
 
     /* Toast */
     #toast {
@@ -376,7 +425,7 @@
       <span class="conn-status" id="connStatus" title="Verificando conexión...">
         <span class="conn-dot"></span><span class="conn-text">Conectando...</span>
       </span>
-      <span class="version">v14</span>
+      <span class="version">v15</span>
     </span>
   </h3>
 
@@ -459,16 +508,30 @@
 
   <button class="btn-guardar" id="btnGuardar" onclick="guardar()">✅ Guardar Ingreso</button>
 
-  <div class="deshacer-wrap" id="deshacerWrap" style="display:none">
-    <div class="deshacer-info" id="deshacerInfo"></div>
-    <button class="btn-deshacer" id="btnDeshacer" onclick="deshacerUltimoIngreso()">↩️ Deshacer este ingreso</button>
+  <!-- Panel de últimos ingresos con opción de deshacer cada uno -->
+  <div class="historial-wrap">
+    <div class="historial-toggle" id="historialToggle" onclick="toggleHistorial()">
+      <span>🕘 Últimos ingresos</span>
+      <span class="historial-chevron" id="historialChevron">▼</span>
+    </div>
+    <div class="historial-lista" id="historialLista" style="display:none">
+      <div class="historial-loading" id="historialLoading">Cargando...</div>
+    </div>
   </div>
 </div>
+
 
 <div id="toast"></div>
 
 <script>
 // ── Changelog ──────────────────────────────────────────────────────────────────
+// v15 — Reemplaza el panel "deshacer último ingreso" (1 solo) por un panel
+//        plegable "🕘 Últimos ingresos" con los últimos 8 movimientos, cada uno
+//        con su propio botón Deshacer. Cubre el caso de detectar el error 2-3
+//        productos después, no solo el inmediato anterior. Se auto-abre y
+//        refresca tras guardar con éxito. REQUIERE Code.gs actualizado:
+//        getUltimosIngresos() + deshacerIngreso() nuevas, más columna
+//        idOperacion/stockAnterior en Historial (ver Code.gs adjunto).
 // v14 — Indicador de estado de conexión junto al badge de versión: punto + texto
 //        que muestra "Conectando..." / "Conectado" / "Sin conexión" en tiempo real.
 //        Se actualiza al cargar, al guardar (éxito o falla), y con un chequeo
@@ -922,58 +985,96 @@ function clearField(id) {
   document.getElementById(id).focus();
 }
 
-// ── DESHACER ÚLTIMO INGRESO ────────────────────────────────────────────────────
-function mostrarDeshacer(ingreso) {
-  document.getElementById('deshacerWrap').style.display = 'block';
-  document.getElementById('deshacerInfo').innerHTML =
-    `Último ingreso: <strong>${ingreso.producto}</strong> (+${ingreso.cantidad} unidades). ` +
-    `Si fue un error, podés deshacerlo ahora.`;
+// ── PANEL DE ÚLTIMOS INGRESOS / DESHACER ────────────────────────────────────────
+let _historialAbierto = false;
+let _historialCargado = false;
+
+function toggleHistorial() {
+  _historialAbierto = !_historialAbierto;
+  const lista = document.getElementById('historialLista');
+  const chev  = document.getElementById('historialChevron');
+  lista.style.display = _historialAbierto ? 'block' : 'none';
+  chev.classList.toggle('open', _historialAbierto);
+  if (_historialAbierto) cargarHistorial();
 }
 
-function ocultarDeshacer() {
-  document.getElementById('deshacerWrap').style.display = 'none';
-  _ultimoIngreso = null;
-}
-
-async function deshacerUltimoIngreso() {
-  if (!_ultimoIngreso) return;
-  if (!confirm(`↩️ ¿Deshacer el ingreso de "${_ultimoIngreso.producto}" (+${_ultimoIngreso.cantidad})?\n\nEsto elimina la fila del Historial y resta el stock que se sumó.`)) return;
-
-  const btn = document.getElementById('btnDeshacer');
-  btn.disabled    = true;
-  btn.textContent = '⏳ Deshaciendo...';
+async function cargarHistorial() {
+  const lista = document.getElementById('historialLista');
+  lista.innerHTML = '<div class="historial-loading">Cargando...</div>';
 
   try {
-    const datos = {
-      idOperacion: _ultimoIngreso.idOperacion,
-      idVenta: _ultimoIngreso.idVenta,
-      producto: _ultimoIngreso.producto,
-      cantidad: _ultimoIngreso.cantidad
-    };
-    const url = API_URL + '?action=deshacerIngreso&data=' + encodeURIComponent(JSON.stringify(datos));
-    const r   = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(30000) });
-    const res = await r.json();
+    const r    = await fetch(API_URL + '?action=getUltimosIngresos&limite=8&t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(15000) });
+    const data = await r.json();
+    setConnStatus('online');
 
-    btn.disabled    = false;
-    btn.textContent = '↩️ Deshacer este ingreso';
+    if (!data.ok || !data.registros || !data.registros.length) {
+      lista.innerHTML = '<div class="historial-vacio">Todavía no hay ingresos registrados</div>';
+      _historialCargado = true;
+      return;
+    }
+
+    lista.innerHTML = data.registros.map((r, idx) => {
+      const detalle = `${r.fecha} · +${r.cantidad}u` + (r.proveedor ? ' · ' + r.proveedor : '');
+      return `
+        <div class="historial-item" id="hist-item-${idx}">
+          <div class="historial-item-info">
+            <div class="historial-item-nombre">${r.producto}</div>
+            <div class="historial-item-detalle">${detalle}</div>
+          </div>
+          <button class="btn-deshacer-item" id="hist-btn-${idx}"
+            onclick='deshacerItem(${idx}, ${r.fila}, ${JSON.stringify(r.producto)}, ${r.cantidad})'>
+            ↩️ Deshacer
+          </button>
+        </div>`;
+    }).join('');
+    _historialCargado = true;
+
+  } catch(e) {
+    lista.innerHTML = '<div class="historial-vacio">⚠️ No se pudo cargar — revisá la conexión</div>';
+    setConnStatus('offline');
+    console.error(e);
+  }
+}
+
+async function deshacerItem(idx, fila, producto, cantidad) {
+  if (!confirm(`↩️ ¿Deshacer este ingreso?\n\n📦 ${producto}\n➕ +${cantidad} unidades\n\nEsto elimina la fila del Historial y resta el stock que se sumó.`)) return;
+
+  const btn = document.getElementById('hist-btn-' + idx);
+  const item = document.getElementById('hist-item-' + idx);
+  btn.disabled    = true;
+  btn.textContent = '⏳...';
+
+  try {
+    const datos = { fila, producto, cantidad };
+    const url   = API_URL + '?action=deshacerIngreso&data=' + encodeURIComponent(JSON.stringify(datos));
+    const r     = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(30000) });
+    const res   = await r.json();
+    setConnStatus('online');
 
     if (res.success) {
       toast('✅ Ingreso deshecho — stock restaurado');
-      ocultarDeshacer();
+      if (item) item.remove();
+      // Si era el último ingreso pendiente de revertir, limpiar referencia
+      if (_ultimoIngreso && _ultimoIngreso.producto === producto && _ultimoIngreso.cantidad === cantidad) {
+        _ultimoIngreso = null;
+      }
     } else {
       toast('❌ ' + (res.mensaje || 'No se pudo deshacer'), true);
+      btn.disabled    = false;
+      btn.textContent = '↩️ Deshacer';
     }
   } catch(e) {
-    btn.disabled    = false;
-    btn.textContent = '↩️ Deshacer este ingreso';
+    setConnStatus('offline');
     toast('❌ Error de conexión al deshacer', true);
+    btn.disabled    = false;
+    btn.textContent = '↩️ Deshacer';
     console.error(e);
   }
 }
 
 // ── GUARDAR ────────────────────────────────────────────────────────────────────
 let _guardando = false; // lock duro contra doble-submit
-let _ultimoIngreso = null; // referencia al último ingreso guardado, para poder deshacerlo
+let _ultimoIngreso = null; // referencia al último ingreso guardado (informativo)
 
 // Límites razonables — más allá de esto, casi seguro es un error de tipeo
 // (ej: 10000000000 en vez de 10, o un cero de más por apoyar el dedo)
@@ -1077,14 +1178,11 @@ async function guardar() {
 
     if (res.success) {
       toast('✅ ' + res.mensaje);
-      // Guardar referencia del último ingreso para poder deshacerlo
-      _ultimoIngreso = {
-        idOperacion,
-        producto: nombre,
-        cantidad,
-        idVenta: res.idVenta || res.idIngreso || res.id || null  // lo que devuelva el GAS para identificar la fila
-      };
-      mostrarDeshacer(_ultimoIngreso);
+      // Guardar referencia informativa del último ingreso
+      _ultimoIngreso = { idOperacion, producto: nombre, cantidad };
+      // Abrir (o refrescar) el panel de historial para que el botón de
+      // deshacer quede visible de inmediato si el operador se equivocó
+      if (!_historialAbierto) toggleHistorial(); else cargarHistorial();
       limpiar();
     } else {
       toast('❌ ' + (res.mensaje || 'Error al guardar'), true);
