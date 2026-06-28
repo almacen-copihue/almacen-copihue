@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>SendWA — Almacén Copihue ver.61</title>
+<title>SendWA — Almacén Copihue ver.63</title>
 <!--
   CHANGELOG sendwa.html
   v59: - Oferta Personalizada: filtra productos sin stock ANTES de mostrarlos en
@@ -622,6 +622,7 @@
     height: calc(var(--panel-h) + 90px);
   }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 <body>
 
@@ -649,7 +650,7 @@
           style="width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.2);
                  border:none;color:#fff;font-size:12px;font-weight:800;cursor:pointer;
                  flex-shrink:0;display:flex;align-items:center;justify-content:center;">?</button>
-  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.61</div>
+  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.63</div>
   <button id="btn-dark" title="Modo oscuro">🌙</button>
 </div>
 
@@ -741,6 +742,7 @@
     <button class="tool-btn t-blue"   id="btn-copy">📋 Copiar texto</button>
     <button class="tool-btn t-orange" id="btn-dl">⬇️ Descargar</button>
     <button class="tool-btn t-dark"   id="btn-ia-suggest">✨ IA Sugerencia</button>
+    <button class="tool-btn" id="btn-reset-total" style="background:#7b241c;color:#fff;">🧹 Resetear TODAS las ofertas personalizadas</button>
   </div>
   <button id="tools-toggle" title="Herramientas">⚙️</button>
 </div>
@@ -819,6 +821,7 @@
       <button id="btn-collage-close">✕ Cerrar</button>
     </div>
     <button id="btn-dl-todas">⬇️ Descargar TODAS (${0})</button>
+    <button id="btn-dl-zip" style="display:none;width:100%;margin-top:6px;height:42px;border-radius:10px;border:none;background:#8e44ad;color:#fff;font-weight:800;font-size:13px;cursor:pointer;">📦 Descargar TODO en .ZIP</button>
   </div>
 </div>
 
@@ -1833,15 +1836,18 @@ document.getElementById('collage-collage-controls')?.addEventListener('click', e
   });
   _collagePage = 0;
   renderCollagePage();
-  // Refrescar visibilidad/texto de "Descargar TODAS" según la nueva paginación
+  // Refrescar visibilidad/texto de "Descargar TODAS" / ZIP según la nueva paginación
   const btnTodas = document.getElementById('btn-dl-todas');
+  const btnZip   = document.getElementById('btn-dl-zip');
   if (btnTodas && _collageMode === 'collage') {
     const totalPag = Math.max(1, Math.ceil(_collageProds.length / _collagePerPage));
     if (totalPag > 1) {
       btnTodas.classList.add('show');
       btnTodas.textContent = `⬇️ Descargar TODAS (${totalPag} páginas)`;
+      if (btnZip) btnZip.style.display = 'block';
     } else {
       btnTodas.classList.remove('show');
+      if (btnZip) btnZip.style.display = 'none';
     }
   }
 });
@@ -1892,6 +1898,8 @@ function openCollageModal(mode) {
   if (promoPanel) promoPanel.style.display = 'none';
   canvasWrap.style.display = '';
 
+  const btnZip = document.getElementById('btn-dl-zip');
+
   if (mode === 'single') {
     picker.style.display = 'block';
     layoutBar.classList.add('show');
@@ -1899,13 +1907,28 @@ function openCollageModal(mode) {
     if (_collageProds.length > 1) {
       btnTodas.classList.add('show');
       btnTodas.textContent = `⬇️ Descargar TODAS (${_collageProds.length} fotos)`;
+      if (btnZip) btnZip.style.display = 'block';
     } else {
       btnTodas.classList.remove('show');
+      if (btnZip) btnZip.style.display = 'none';
+    }
+  } else if (mode === 'collage') {
+    picker.style.display = 'none';
+    layoutBar.classList.remove('show');
+    const totalPag = Math.max(1, Math.ceil(_collageProds.length / _collagePerPage));
+    if (totalPag > 1) {
+      btnTodas.classList.add('show');
+      btnTodas.textContent = `⬇️ Descargar TODAS (${totalPag} páginas)`;
+      if (btnZip) btnZip.style.display = 'block';
+    } else {
+      btnTodas.classList.remove('show');
+      if (btnZip) btnZip.style.display = 'none';
     }
   } else {
     picker.style.display = 'none';
     layoutBar.classList.remove('show');
     btnTodas.classList.remove('show');
+    if (btnZip) btnZip.style.display = 'none';
   }
   renderCollageMode();
 }
@@ -2556,6 +2579,48 @@ on('btn-dl-todas', async () => {
   toast(`✅ ${prods.length} imágenes descargadas`);
 });
 
+on('btn-dl-zip', async () => {
+  if (typeof JSZip === 'undefined') { toast('❌ No se pudo cargar el empaquetador ZIP'); return; }
+  const zip = new JSZip();
+  toast('📦 Generando ZIP, un momento…', 4000);
+
+  if (_collageMode === 'collage') {
+    const totalPag = Math.max(1, Math.ceil(_collageProds.length / _collagePerPage));
+    const savedPage = _collagePage;
+    for (let pg = 0; pg < totalPag; pg++) {
+      _collagePage = pg;
+      await renderCollagePage();
+      const cvs = document.getElementById('collage-canvas');
+      const blob = await new Promise(res => cvs.toBlob(res, 'image/jpeg', .92));
+      zip.file(`copihue_collage_pag${pg+1}de${totalPag}.jpg`, blob);
+    }
+    _collagePage = savedPage;
+    await renderCollagePage();
+  } else {
+    // Modo single — un jpg por producto
+    const prods = _collageProds;
+    const savedIdx = _singleIdx;
+    for (let i = 0; i < prods.length; i++) {
+      _singleIdx = i;
+      await drawSingleLayout(prods[i], _singleLayout);
+      const cvs = document.getElementById('collage-canvas');
+      const blob = await new Promise(res => cvs.toBlob(res, 'image/jpeg', .92));
+      zip.file(`copihue_${norm(prods[i].nombre).slice(0,30)}.jpg`, blob);
+    }
+    _singleIdx = savedIdx;
+    await drawSingleLayout(prods[savedIdx], _singleLayout);
+  }
+
+  const zipBlob = await zip.generateAsync({ type: 'blob' });
+  const url = URL.createObjectURL(zipBlob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `copihue_${_collageMode}_${Date.now()}.zip`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  toast('✅ ZIP descargado');
+});
+
 on('btn-collage-dl', () => {
   const a = document.createElement('a');
   const isHistoria = _collageMode === 'historia';
@@ -2889,6 +2954,31 @@ document.getElementById('btn-sel-clear').onclick = () => {
   renderGrid();
 };
 // ─── TOOLS-FAB ──────────────────────────────────────────────
+on('btn-reset-total', () => {
+  document.getElementById('tools-panel').classList.remove('open');
+  document.getElementById('tools-toggle').classList.remove('open');
+  const ok1 = confirm(
+    '⚠️ Esto va a borrar TODAS las ofertas personalizadas de la planilla,\n' +
+    'no solo las que tenés seleccionadas ahora — incluye productos de\n' +
+    'campañas viejas que ya no se ven en pantalla.\n\n' +
+    'POS, catálogo y todas las páginas derivadas van a dejar de mostrar\n' +
+    'esas ofertas apenas se actualicen.\n\n' +
+    '¿Confirmás el reseteo total?'
+  );
+  if (!ok1) return;
+  toast('🧹 Reseteando columna completa de ofertas personalizadas...');
+  _apiAction('resetOfertaPersonalizadaTotal', {})
+    .then(res => {
+      if (res && res.success) {
+        toast(`✅ ${res.mensaje || 'Reseteado correctamente'}`);
+        return fetchData().then(data => { allProducts = parseProducts(data); applyFilter(); });
+      } else {
+        toast(`❌ ${res && res.mensaje ? res.mensaje : 'No se pudo resetear'}`);
+      }
+    })
+    .catch(() => toast('❌ Error de conexión al resetear'));
+});
+
 document.getElementById('tools-toggle').onclick = () => {
   document.getElementById('tools-panel').classList.toggle('open');
   document.getElementById('tools-toggle').classList.toggle('open');
