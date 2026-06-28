@@ -239,7 +239,7 @@
             <div>
                 <div class="page-title">🛒 Lista de Compras</div>
                 <div class="page-subtitle" id="lcSub">Cargando...</div>
-                <div style="font-size:0.6rem;opacity:0.6;margin-top:1px;letter-spacing:0.3px;">v1.4.0 · 27/06/26</div>
+                <div style="font-size:0.6rem;opacity:0.6;margin-top:1px;letter-spacing:0.3px;">v1.4.1 · 27/06/26</div>
             </div>
         </div>
         <div class="ha">
@@ -578,7 +578,7 @@ function renderLista() {
               + '<div class="lc-cref">$' + it.costo.toLocaleString('es-AR') + ' c/u</div>'
             : '<div style="font-size:0.7rem;color:#e53935;">Sin precio</div>';
 
-        // Botón pausar — se renderiza fuera de la card
+        // Botón pausar — usa nombre como clave, no depende de prodCache
         var prodId = null;
         if (_prodCache.length) {
             var pr = _prodCache.find(function(p) { return p.name === it.nombre; });
@@ -606,31 +606,48 @@ function renderLista() {
             + '</div>';
 
         // Botón pausar FUERA de la card (no interfiere con el tap de selección)
-        if (prodId !== null) {
-            html += '<div style="margin:-4px 0 8px;padding:0 4px;">'
-                + '<button class="btn-pausar" onclick="lcTogglePausado(' + prodId + ')">'
-                + (esPausado ? '▶️ Reactivar en lista' : '⏸ Quitar de lista de compra')
-                + '</button></div>';
-        }
+        var pausarParam = prodId !== null ? prodId : ("'" + nombreEsc + "'");
+        html += '<div style="margin:-4px 0 8px;padding:0 4px;">'
+            + '<button class="btn-pausar" onclick="lcTogglePausado(' + pausarParam + ')">'
+            + (esPausado ? '▶️ Reactivar en lista' : '⏸ Quitar de lista de compra')
+            + '</button></div>';
     });
 
     document.getElementById('lcCuerpo').innerHTML = html;
 }
 
 // ── Pausar / reactivar ────────────────────────────
-async function lcTogglePausado(id) {
-    var p = _prodCache.find(function(pr) { return pr.id === id; });
-    var esPausado = p && (p.pausadoListaCompra === true || p.pausadoListaCompra === 'SI');
+async function lcTogglePausado(idONombre) {
+    // Buscar en caché por id (número) o por nombre (string)
+    var p = null;
+    if (_prodCache.length) {
+        p = typeof idONombre === 'number'
+            ? _prodCache.find(function(pr) { return pr.id === idONombre; })
+            : _prodCache.find(function(pr) { return pr.name === idONombre; });
+    }
+    var esPausado = p
+        ? (p.pausadoListaCompra === true || p.pausadoListaCompra === 'SI')
+        : (_items.find(function(i) { return i.nombre === idONombre; }) || {}).pausado === true;
+
     var nuevo = !esPausado;
     if (p) p.pausadoListaCompra = nuevo ? 'SI' : '';
-    var lcIt = _items.find(function(i) { return p && i.nombre === p.name; });
+
+    // Actualizar _items localmente
+    var nombre = p ? p.name : idONombre;
+    var lcIt = _items.find(function(i) { return i.nombre === nombre; });
     if (lcIt) { lcIt.pausado = nuevo; lcIt.urgencia = nuevo ? 99 : 7; }
     renderLista();
+
     try {
-        var resp = await _api('setPausadoListaCompra', { id:id, pausado: nuevo ? 'SI' : '' });
+        // Mandar id si lo tenemos, sino nombre
+        var payload = p
+            ? { id: p.id, pausado: nuevo ? 'SI' : '' }
+            : { nombre: nombre, pausado: nuevo ? 'SI' : '' };
+        var resp = await _api('setPausadoListaCompra', payload);
         if (!resp.success) throw new Error('sin ok');
-        toast(nuevo ? '⛔ Marcado inactivo' : '▶️ Reactivado', nuevo ? '' : 'verde');
+        toast(nuevo ? '⏸ Quitado de lista' : '▶️ Reactivado', nuevo ? '' : 'verde');
     } catch(e) {
+        // Revertir
         if (p) p.pausadoListaCompra = esPausado ? 'SI' : '';
         if (lcIt) { lcIt.pausado = esPausado; lcIt.urgencia = esPausado ? 99 : 7; }
         renderLista();
