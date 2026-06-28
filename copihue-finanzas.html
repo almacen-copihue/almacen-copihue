@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Copihue · Finanzas v13</title>
+<title>Copihue · Finanzas v15</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -36,8 +36,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
 .btn-hoy{width:100%;padding:8px;margin-bottom:10px;border:none;border-radius:12px;background:var(--naranja);color:#fff;font-size:.78rem;font-weight:700;cursor:pointer;font-family:inherit}
 
 /* TABS */
-.tabs{display:flex;gap:5px;margin-bottom:12px;overflow-x:auto;padding-bottom:2px;scrollbar-width:none}
-.tab{padding:7px 14px;border:2px solid var(--borde);border-radius:20px;background:#fff;font-size:.74rem;font-weight:700;cursor:pointer;color:var(--gris);white-space:nowrap;font-family:inherit}
+.tabs{display:flex;gap:5px;margin-bottom:12px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none;-webkit-overflow-scrolling:touch;scroll-snap-type:x proximity}
+.tab{padding:7px 14px;border:2px solid var(--borde);border-radius:20px;background:#fff;font-size:.74rem;font-weight:700;cursor:pointer;color:var(--gris);white-space:nowrap;font-family:inherit;scroll-snap-align:start;flex-shrink:0}
 .tab.activo{background:var(--vd);border-color:var(--vd);color:#fff}
 
 /* CARDS */
@@ -177,9 +177,13 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
 .modal-title{font-size:1rem;font-weight:900}
 .btn-close{background:var(--rl);border:none;border-radius:50%;width:32px;height:32px;font-size:1.1rem;cursor:pointer;color:var(--rojo)}
 
+/* ALERTA CANTIDAD ABSURDA */
+@keyframes parpadeo{0%,100%{opacity:1}50%{opacity:.3}}
+.btn-confirmar-absurdo{background:#c62828;color:#fff;border:2px solid #ff1744;border-radius:10px;padding:8px 14px;font-size:.8rem;font-weight:900;cursor:pointer;font-family:inherit;animation:parpadeo 1s ease-in-out infinite;width:100%;margin-top:6px}
+.alerta-absurdo{background:#ffebee;border:2px solid #c62828;border-radius:12px;padding:10px 12px;margin-bottom:8px}
 /* TOAST */
-#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(60px);background:#1b5e20;color:#fff;padding:8px 18px;border-radius:20px;font-size:.8rem;font-weight:700;z-index:9999;transition:transform .3s;pointer-events:none}
-#toast.show{transform:translateX(-50%) translateY(0)}
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(120px);background:#1b5e20;color:#fff;padding:8px 18px;border-radius:20px;font-size:.8rem;font-weight:700;z-index:9999;transition:transform .3s;pointer-events:none;visibility:hidden}
+#toast.show{transform:translateX(-50%) translateY(0);visibility:visible}
 #toast.err{background:var(--rojo)}
 </style>
 </head>
@@ -187,7 +191,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
 
 <div class="hdr">
   <div class="hdr-icon">💰</div>
-  <div><div class="hdr-t">Copihue · Finanzas <span id="ver-badge" style="font-size:.6rem;background:rgba(255,255,255,.25);padding:2px 7px;border-radius:10px;font-weight:900;letter-spacing:.5px">v13</span></div><div class="hdr-s" id="hdr-sub">Panel financiero</div></div>
+  <div><div class="hdr-t">Copihue · Finanzas <span id="ver-badge" style="font-size:.6rem;background:rgba(255,255,255,.25);padding:2px 7px;border-radius:10px;font-weight:900;letter-spacing:.5px">v15</span></div><div class="hdr-s" id="hdr-sub">Panel financiero</div></div>
   <button class="btn-back" onclick="location.href='./copihue-herramientas.html'">← Volver</button>
 </div>
 
@@ -266,7 +270,8 @@ function parseCompraReg(r){
   return {fecha:d, producto:str(r.producto), cantidad:cant,
           proveedor:str(r.proveedor)||'SIN PROVEEDOR', costo:costo,
           precioVenta:Math.round(num(r.precioVenta)), total:total,
-          vencimiento:str(r.vencimiento)};
+          vencimiento:str(r.vencimiento),
+          cantidadSospechosa: cant > 100};
 }
 
 function parseCajaReg(r){
@@ -814,6 +819,47 @@ function buildCategorias(){
     </div>`;
   }
 
+  // ── Suscripciones: comparativa mensual ──
+  const todosSusc = egresosData.filter(e=>(e.categoria||'').toUpperCase()==='SUSCRIPCIONES');
+  if(todosSusc.length > 0){
+    // Agrupar por mes (últimos 6 meses)
+    const suscPorMes = {};
+    todosSusc.forEach(e=>{
+      const k = e.fecha.getFullYear()+'-'+String(e.fecha.getMonth()+1).padStart(2,'0');
+      if(!suscPorMes[k]) suscPorMes[k]={total:0,items:[]};
+      suscPorMes[k].total += e.monto;
+      suscPorMes[k].items.push(e);
+    });
+    const mesesSusc = Object.keys(suscPorMes).sort().slice(-6);
+    const maxSusc = Math.max(...mesesSusc.map(m=>suscPorMes[m].total),1);
+    // Servicios activos este mes
+    const suscEsteMs = getEgrPeriodo().filter(e=>(e.categoria||'').toUpperCase()==='SUSCRIPCIONES');
+    const serviciosActivos = [...new Set(suscEsteMs.map(e=>e.obs||e.motivo).filter(Boolean))];
+
+    h += `<div class="tar"><div class="tar-t">📺 Suscripciones — comparativa mensual</div>`;
+    mesesSusc.forEach(m=>{
+      const [anio,mes] = m.split('-');
+      const lbl = MESES[parseInt(mes)-1].slice(0,3)+' '+anio;
+      const tot = suscPorMes[m].total;
+      const servicios = [...new Set(suscPorMes[m].items.map(e=>e.obs||e.motivo).filter(Boolean))];
+      h += `<div style="margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+          <span style="font-size:.78rem;font-weight:700">${lbl}</span>
+          <span style="font-size:.78rem;font-weight:900;color:var(--rojo)">${fmt(tot)}</span>
+        </div>
+        <div class="barra-bg"><div class="barra-f bar-r" style="width:${Math.round(tot/maxSusc*100)}%"></div></div>
+        <div style="font-size:.62rem;color:var(--gris);margin-top:2px">${servicios.slice(0,4).join(' · ')}</div>
+      </div>`;
+    });
+    if(serviciosActivos.length){
+      h += `<div style="background:var(--al);border-radius:10px;padding:8px 10px;margin-top:6px">
+        <div style="font-size:.68rem;font-weight:700;color:var(--azul);margin-bottom:4px">📋 Activos este período</div>
+        ${serviciosActivos.map(s=>`<div style="font-size:.72rem;color:var(--texto);padding:2px 0">• ${s}</div>`).join('')}
+      </div>`;
+    }
+    h += '</div>';
+  }
+
   // Tarjeta especial FAMILIA CHILE con historial CLP
   const egresosFamChile = getEgrPeriodo().filter(e=>e.categoria==='FAMILIA CHILE');
   if(egresosFamChile.length){
@@ -889,10 +935,10 @@ function buildCompras(){
   const te = getEgrPeriodo().reduce((s,r)=>s+r.monto,0);
   const neto = ti-te;
 
-  // Detectar posibles errores de carga (sin filtrar — la planilla es fuente de verdad)
+  // Detectar posibles errores de carga — cantidad > 100 es sospechosa
   const cantidades = comp.map(r=>r.cantidad).filter(c=>c>0).sort((a,b)=>a-b);
   const mediana = cantidades[Math.floor(cantidades.length/2)]||1;
-  const sospechosos = comp.filter(r=>r.cantidad > mediana*50 && r.cantidad > 100);
+  const sospechosos = comp.filter(r=>r.cantidadSospechosa || (r.cantidad > mediana*50 && r.cantidad > 100));
 
   // Separar almacén vs tecnología/ML
   const PROVS_TEC = ['TECNOLOGIA','MERCADO LIBRE'];
@@ -944,23 +990,24 @@ function buildCompras(){
     </div>
   </div>`;
 
-  // Área de alertas de datos sospechosos (sin filtrar nada)
+  // Área de alertas de datos sospechosos (sin filtrar nada — planilla es fuente de verdad)
   if(sospechosos.length > 0){
-    h += '<div style="background:#fff8e1;border:2px solid #f9a825;border-radius:12px;padding:12px;margin-bottom:12px">';
-    h += '<div style="font-size:.72rem;font-weight:900;color:#e65100;margin-bottom:6px">⚠️ POSIBLES ERRORES DE CARGA — verificar en planilla</div>';
+    h += '<div class="alerta-absurdo">';
+    h += '<div style="font-size:.72rem;font-weight:900;color:#c62828;margin-bottom:6px">⚠️ CANTIDADES INUSUALES (>100 u.) — verificar en planilla</div>';
     sospechosos.forEach(s=>{
-      h += `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #ffe082">
+      h += `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #ffcdd2">
         <div>
           <div style="font-size:.78rem;font-weight:700;color:#333">${s.producto}</div>
           <div style="font-size:.65rem;color:#888">${fmtFecha(s.fecha)} · ${s.proveedor}</div>
         </div>
         <div style="text-align:right">
-          <div style="font-size:.85rem;font-weight:900;color:#e65100">${Math.round(s.cantidad)} u.</div>
-          <div style="font-size:.62rem;color:#888">mediana: ${Math.round(mediana)} u.</div>
+          <div style="font-size:.9rem;font-weight:900;color:#c62828">${Math.round(s.cantidad)} u.</div>
+          <div style="font-size:.6rem;color:#888">esperado ~${Math.round(mediana)} u.</div>
         </div>
       </div>`;
     });
-    h += '<div style="font-size:.62rem;color:#888;margin-top:6px">Los datos se muestran tal cual. Corregí en la planilla si es un error.</div>';
+    h += '<div style="font-size:.62rem;color:#666;margin-top:6px">Los datos se muestran tal cual. Corregí en la planilla si es un error.</div>';
+    h += `<button class="btn-confirmar-absurdo" onclick="this.closest('.alerta-absurdo').style.display='none'">🔴 Entendido — los datos son correctos</button>`;
     h += '</div>';
   }
 
@@ -1346,7 +1393,7 @@ function abrirDetalleDia(iso){
 }
 
 function abrirDetalleCat(cat){
-  const items = getEgrPeriodo().filter(e=>(e.categoria||e.motivo||'').trim().toUpperCase()===cat).sort((a,b)=>b.monto-a.monto);
+  const items = getEgrPeriodo().filter(e=>(e.categoria||e.motivo||'').trim().toUpperCase()===cat).sort((a,b)=>b.fecha-a.fecha);
   const total = items.reduce((s,e)=>s+e.monto,0);
   let h = `<div class="modal-hdr">
     <div>
