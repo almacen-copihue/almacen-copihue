@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>v13 · Copihue · Ingreso</title>
+  <title>v14 · Copihue · Ingreso</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -33,6 +33,43 @@
       gap: 8px;
     }
     .version { font-size: 11px; color: #aaa; font-weight: 400; }
+
+    /* Estado de conexión */
+    .conn-status {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 20px;
+      background: #f0f0f0;
+      color: #999;
+    }
+    .conn-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #bbb;
+      flex-shrink: 0;
+    }
+    .conn-status.conectando .conn-dot {
+      background: #f0ad4e;
+      animation: pulso 1s infinite;
+    }
+    .conn-status.online {
+      background: #e8f5e9;
+      color: #2e7d32;
+    }
+    .conn-status.online .conn-dot { background: #43a047; }
+    .conn-status.offline {
+      background: #ffebee;
+      color: #c62828;
+    }
+    .conn-status.offline .conn-dot { background: #e74c3c; }
+    @keyframes pulso {
+      0%, 100% { opacity: 1; }
+      50%      { opacity: 0.3; }
+    }
     .section-title {
       font-size: 13px;
       font-weight: 700;
@@ -335,7 +372,12 @@
 <div class="card">
   <h3>
     <span>📦 Ingreso Mercadería</span>
-    <span class="version">v13</span>
+    <span style="display:flex; align-items:center; gap:8px;">
+      <span class="conn-status" id="connStatus" title="Verificando conexión...">
+        <span class="conn-dot"></span><span class="conn-text">Conectando...</span>
+      </span>
+      <span class="version">v14</span>
+    </span>
   </h3>
 
   <!-- PRODUCTO -->
@@ -427,6 +469,10 @@
 
 <script>
 // ── Changelog ──────────────────────────────────────────────────────────────────
+// v14 — Indicador de estado de conexión junto al badge de versión: punto + texto
+//        que muestra "Conectando..." / "Conectado" / "Sin conexión" en tiempo real.
+//        Se actualiza al cargar, al guardar (éxito o falla), y con un chequeo
+//        liviano automático cada 60s mientras el formulario está abierto.
 // v13 — Límites de alerta bajados a la escala real del negocio:
 //        cantidad > 100u, costo unitario > $50.000, venta > $80.000.
 // v12 — Validación de valores fuera de rango (típico error de tipeo: un cero de
@@ -500,9 +546,11 @@ let _catAbierta   = false;
 
 // ── INIT ───────────────────────────────────────────────────────────────────────
 async function init() {
+  setConnStatus('conectando');
   try {
-    const r    = await fetch(API_URL + '?t=' + Date.now(), { redirect: 'follow' });
+    const r    = await fetch(API_URL + '?t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(12000) });
     const data = await r.json();
+    setConnStatus('online');
 
     // Productos
     const rawProductos = data.productos || [];
@@ -554,11 +602,47 @@ async function init() {
 
   } catch(e) {
     console.warn('Error cargando datos:', e);
+    setConnStatus('offline');
     // Usar fallback para no bloquear al usuario
     _categorias = CATS_FALLBACK;
     buildCategoriaWidget();
   }
 }
+
+// ── ESTADO DE CONEXIÓN ──────────────────────────────────────────────────────────
+function setConnStatus(estado) {
+  const el = document.getElementById('connStatus');
+  el.classList.remove('conectando', 'online', 'offline');
+  el.classList.add(estado);
+  const textos = {
+    conectando: 'Conectando...',
+    online:     'Conectado',
+    offline:    'Sin conexión'
+  };
+  const titulos = {
+    conectando: 'Verificando conexión con la planilla...',
+    online:     'Conectado a la planilla — datos al día',
+    offline:    'No se pudo conectar con la planilla. Categorías y autocompletado pueden estar desactualizados.'
+  };
+  el.querySelector('.conn-text').textContent = textos[estado];
+  el.title = titulos[estado];
+}
+
+// Re-chequeo periódico liviano (cada 60s) — detecta si se cae la conexión
+// mientras el operador sigue trabajando con el formulario ya cargado.
+// Reutiliza el mismo endpoint principal (ya sabemos que responde) en vez de
+// una acción 'ping' que no existe en el GAS.
+async function chequearConexion() {
+  try {
+    const r = await fetch(API_URL + '?t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(8000) });
+    if (r.ok) { setConnStatus('online'); return; }
+    setConnStatus('offline');
+  } catch(e) {
+    setConnStatus('offline');
+  }
+}
+setInterval(chequearConexion, 60000);
+
 init();
 // Construir el widget de categoría de inmediato con el fallback —
 // init() lo enriquecerá con datos reales del GAS cuando termine
@@ -989,6 +1073,7 @@ async function guardar() {
     btn.disabled    = false;
     btn.textContent = '✅ Guardar Ingreso';
     _guardando = false;
+    setConnStatus('online');
 
     if (res.success) {
       toast('✅ ' + res.mensaje);
@@ -1008,6 +1093,7 @@ async function guardar() {
     btn.disabled    = false;
     btn.textContent = '✅ Guardar Ingreso';
     _guardando = false;
+    setConnStatus('offline');
     // Aviso explícito: si fue timeout, puede que el GAS SÍ haya guardado.
     // No reintentar a ciegas — revisar el historial antes de volver a tocar "Guardar".
     if (e.name === 'TimeoutError' || e.name === 'AbortError') {
