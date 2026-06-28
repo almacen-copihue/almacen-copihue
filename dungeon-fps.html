@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>DUNGEON CRAWLER</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{width:100%;height:100%;background:#000;overflow:hidden;user-select:none;touch-action:none;}
+
+#hud-top{
+  position:fixed;top:0;left:0;right:0;height:36px;
+  display:flex;justify-content:space-between;align-items:center;
+  padding:0 14px;z-index:20;
+  background:linear-gradient(180deg,#000a,transparent);
+  color:#fff;font-family:monospace;font-size:11px;letter-spacing:1px;
+}
+#hp-bar-wrap{display:flex;align-items:center;gap:6px;}
+#hp-bar{width:90px;height:8px;background:#330000;border:1px solid #660000;border-radius:2px;}
+#hp-fill{height:100%;background:linear-gradient(90deg,#ff2200,#ff6600);border-radius:2px;transition:width 0.2s;}
+#ammo{color:#FFD700;}
+#score-disp{color:#aaffaa;}
+
+canvas{position:fixed;top:36px;left:0;display:block;}
+
+/* Crosshair */
+#xhair{
+  position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+  pointer-events:none;z-index:15;
+}
+#xhair::before,#xhair::after{content:'';position:absolute;background:#ffffff99;}
+#xhair::before{width:14px;height:2px;top:50%;left:50%;transform:translate(-50%,-50%);}
+#xhair::after{width:2px;height:14px;top:50%;left:50%;transform:translate(-50%,-50%);}
+
+/* Flash on hit */
+#hit-flash{position:fixed;inset:0;background:#ff000000;pointer-events:none;z-index:18;transition:background 0.1s;}
+
+/* Controls */
+#ctrl-left{position:fixed;left:14px;bottom:20px;z-index:110;touch-action:none;}
+#joy-base{
+  width:130px;height:130px;border-radius:50%;
+  background:radial-gradient(ellipse at 42% 38%,#2a2a3a,#0d0d18 65%);
+  box-shadow:0 8px 28px #000c,0 2px 0 #ffffff12 inset,0 -3px 0 #00000099 inset,
+             0 0 0 3px #1a1a28,0 0 0 5px #0a0a10;
+  display:flex;align-items:center;justify-content:center;position:relative;
+  touch-action:none;
+}
+#joy-cap{
+  width:52px;height:52px;border-radius:50%;pointer-events:none;
+  background:radial-gradient(ellipse at 40% 35%,#3a3a4a,#181825 60%,#0a0a14);
+  box-shadow:0 4px 14px #000c,0 1px 0 #ffffff10 inset;
+}
+.ja{position:absolute;color:#ffffff18;font-size:8px;pointer-events:none;font-family:monospace;}
+.ja.u{top:10px;left:50%;transform:translateX(-50%);}
+.ja.d{bottom:10px;left:50%;transform:translateX(-50%);}
+.ja.l{left:10px;top:50%;transform:translateY(-50%);}
+.ja.r{right:10px;top:50%;transform:translateY(-50%);}
+
+/* Right side: shoot button + look joystick */
+#ctrl-right{position:fixed;right:14px;bottom:20px;z-index:110;display:flex;flex-direction:column;align-items:center;gap:14px;touch-action:none;}
+#shoot-btn{
+  width:68px;height:68px;border-radius:50%;border:none;
+  background:radial-gradient(ellipse at 42% 38%,#6a0000,#300000);
+  color:#ff6666;font-size:28px;
+  box-shadow:0 6px 24px #000c,0 0 0 3px #440000,0 0 16px #ff000033;
+  cursor:pointer;touch-action:manipulation;
+  display:flex;align-items:center;justify-content:center;
+}
+#shoot-btn:active{transform:scale(0.88);box-shadow:0 2px 8px #000c,0 0 0 3px #880000,0 0 24px #ff000066;}
+
+#look-base{
+  width:100px;height:100px;border-radius:50%;
+  background:radial-gradient(ellipse at 42% 38%,#1a2a1a,#080e08 65%);
+  box-shadow:0 6px 20px #000c,0 2px 0 #ffffff10 inset,0 0 0 3px #121e12;
+  display:flex;align-items:center;justify-content:center;position:relative;
+  touch-action:none;
+}
+#look-cap{
+  width:40px;height:40px;border-radius:50%;pointer-events:none;
+  background:radial-gradient(ellipse at 40% 35%,#2a4a2a,#0e180e 60%);
+  box-shadow:0 3px 10px #000c;
+}
+
+/* Overlays */
+.ov{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:300;gap:20px;background:#000d;}
+.ov-title{color:#cc4400;font-size:clamp(22px,7vw,36px);font-family:monospace;font-weight:bold;letter-spacing:4px;text-shadow:0 0 30px #cc440088;}
+.ov-sub{color:#888;font-size:10px;font-family:monospace;text-align:center;line-height:2.2;max-width:280px;}
+.ov-btn{padding:14px 30px;font-size:12px;font-weight:bold;font-family:monospace;border:none;border-radius:6px;cursor:pointer;letter-spacing:2px;touch-action:manipulation;background:linear-gradient(135deg,#cc4400,#882200);color:#fff;box-shadow:0 0 20px #cc440066;}
+.ov-btn:active{transform:scale(0.94);}
+#wave-disp{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#cc4400;font-size:24px;font-family:monospace;font-weight:bold;letter-spacing:3px;text-shadow:0 0 20px #cc4400;opacity:0;pointer-events:none;z-index:200;transition:opacity 0.4s;}
+</style>
+</head>
+<body>
+
+<div id="hud-top">
+  <div id="hp-bar-wrap">
+    <span>HP</span>
+    <div id="hp-bar"><div id="hp-fill" style="width:100%"></div></div>
+  </div>
+  <span id="score-disp">SCORE: 0</span>
+  <span id="ammo">⚡ ∞</span>
+</div>
+
+<canvas id="c"></canvas>
+<div id="xhair"></div>
+<div id="hit-flash"></div>
+
+<!-- Left: movement joystick -->
+<div id="ctrl-left">
+  <div id="joy-base">
+    <span class="ja u">▲</span><span class="ja d">▼</span>
+    <span class="ja l">◄</span><span class="ja r">►</span>
+    <div id="joy-cap"></div>
+  </div>
+</div>
+
+<!-- Right: look joystick + shoot -->
+<div id="ctrl-right">
+  <button id="shoot-btn">🔥</button>
+  <div id="look-base">
+    <div id="look-cap"></div>
+  </div>
+</div>
+
+<!-- Overlays -->
+<div class="ov" id="ov-start">
+  <div class="ov-title">DUNGEON<br>CRAWLER</div>
+  <div class="ov-sub">Joystick izquierdo → mover<br>Joystick derecho → girar<br>Botón 🔥 → disparar<br><br>Mata todos los monstruos</div>
+  <button class="ov-btn" id="btn-start">▶  ENTRAR</button>
+</div>
+<div class="ov" id="ov-over" style="display:none">
+  <div class="ov-title">HAS MUERTO</div>
+  <div class="ov-sub">SCORE: <span id="final-score">0</span></div>
+  <button class="ov-btn" id="btn-restart">↩  REINTENTAR</button>
+</div>
+<div id="wave-disp"></div>
+
+<script>
+// ============================================================
+//  CANVAS & RESIZE
+// ============================================================
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+let W,H;
+function resize(){
+  W=window.innerWidth;
+  H=window.innerHeight-36;
+  canvas.width=W;canvas.height=H;
+}
+window.addEventListener('resize',resize);resize();
+
+// ============================================================
+//  MAP  (1=wall, 0=floor)
+// ============================================================
+const MAP=[
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,1,1,0,1,1,1,0,1,1,0,1,1,0,1],
+  [1,0,1,0,0,0,0,1,0,0,1,0,0,1,0,1],
+  [1,0,0,0,1,0,0,0,0,1,0,0,0,0,0,1],
+  [1,0,1,0,1,0,1,1,0,1,0,1,0,1,0,1],
+  [1,0,1,0,0,0,1,0,0,0,0,1,0,1,0,1],
+  [1,0,0,0,1,0,0,0,1,0,0,0,0,0,0,1],
+  [1,0,1,0,1,1,0,1,1,1,0,1,1,0,0,1],
+  [1,0,1,0,0,0,0,0,0,0,0,0,1,0,0,1],
+  [1,0,0,0,1,0,1,0,1,0,1,0,0,0,0,1],
+  [1,0,1,1,1,0,1,0,1,0,1,1,1,1,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+];
+const MROWS=MAP.length,MCOLS=MAP[0].length;
+function isWall(x,y){
+  const mx=Math.floor(x),my=Math.floor(y);
+  if(mx<0||mx>=MCOLS||my<0||my>=MROWS)return true;
+  return MAP[my][mx]===1;
+}
+
+// ============================================================
+//  PLAYER
+// ============================================================
+let player,score,hp,wave,gameState,bullets,monsters,particles;
+
+function initGame(){
+  player={x:1.5,y:1.5,angle:0,moveX:0,moveY:0,rotSpeed:0};
+  score=0;hp=100;wave=1;gameState='playing';
+  bullets=[];monsters=[];particles=[];
+  document.getElementById('score-disp').textContent='SCORE: 0';
+  updateHP(100);
+  spawnWave(wave);
+  showOv(null);
+}
+
+// ============================================================
+//  MONSTERS
+// ============================================================
+const MONSTER_COLORS=['#cc2200','#aa00cc','#00aacc','#cc8800'];
+function spawnWave(w){
+  const count=3+w*2;
+  for(let i=0;i<count;i++){
+    let mx,my;
+    do{mx=1+Math.floor(Math.random()*(MCOLS-2));my=1+Math.floor(Math.random()*(MROWS-2));}
+    while(MAP[my][mx]===1||Math.hypot(mx+0.5-player.x,my+0.5-player.y)<3);
+    monsters.push({
+      x:mx+0.5,y:my+0.5,
+      hp:2+w,maxHp:2+w,
+      speed:0.015+w*0.003,
+      color:MONSTER_COLORS[w%MONSTER_COLORS.length],
+      angle:0,dist:0,dying:false,deadTimer:0
+    });
+  }
+  showWaveText('OLEADA '+w);
+}
+
+function showWaveText(txt){
+  const el=document.getElementById('wave-disp');
+  el.textContent=txt;el.style.opacity=1;
+  setTimeout(()=>el.style.opacity=0,1500);
+}
+
+// ============================================================
+//  RAYCASTING ENGINE
+// ============================================================
+function castRays(){
+  const FOV=Math.PI/2.8;
+  const RAYS=W;
+  const HALF=RAYS/2;
+  const WALL_H_SCALE=H*0.9;
+
+  // Sky gradient
+  const skyGrad=ctx.createLinearGradient(0,0,0,H/2);
+  skyGrad.addColorStop(0,'#080010');
+  skyGrad.addColorStop(1,'#1a0030');
+  ctx.fillStyle=skyGrad;
+  ctx.fillRect(0,0,W,H/2);
+
+  // Floor gradient
+  const floorGrad=ctx.createLinearGradient(0,H/2,0,H);
+  floorGrad.addColorStop(0,'#1a0a00');
+  floorGrad.addColorStop(1,'#0a0500');
+  ctx.fillStyle=floorGrad;
+  ctx.fillRect(0,H/2,W,H/2);
+
+  const zBuffer=new Float32Array(RAYS);
+
+  for(let i=0;i<RAYS;i++){
+    const rayAngle=player.angle-FOV/2+FOV*(i/RAYS);
+    const cos=Math.cos(rayAngle),sin=Math.sin(rayAngle);
+
+    // DDA algorithm
+    let mapX=Math.floor(player.x),mapY=Math.floor(player.y);
+    const deltaX=Math.abs(1/cos),deltaY=Math.abs(1/sin);
+    let stepX,stepY,sideDistX,sideDistY;
+    if(cos<0){stepX=-1;sideDistX=(player.x-mapX)*deltaX;}
+    else{stepX=1;sideDistX=(mapX+1-player.x)*deltaX;}
+    if(sin<0){stepY=-1;sideDistY=(player.y-mapY)*deltaY;}
+    else{stepY=1;sideDistY=(mapY+1-player.y)*deltaY;}
+
+    let hit=false,side=0,dist=0;
+    for(let s=0;s<32&&!hit;s++){
+      if(sideDistX<sideDistY){sideDistX+=deltaX;mapX+=stepX;side=0;}
+      else{sideDistY+=deltaY;mapY+=stepY;side=1;}
+      if(mapX>=0&&mapX<MCOLS&&mapY>=0&&mapY<MROWS&&MAP[mapY][mapX]===1)hit=true;
+    }
+    dist=side===0?(sideDistX-deltaX):(sideDistY-deltaY);
+    // Fix fisheye
+    const corrDist=dist*Math.cos(rayAngle-player.angle);
+    zBuffer[i]=corrDist;
+
+    const wallH=Math.min(H*3,WALL_H_SCALE/corrDist);
+    const wallTop=(H-wallH)/2;
+
+    // Wall color with distance shading + side shading
+    let shade=Math.max(0,1-corrDist/12);
+    if(side===1)shade*=0.65;
+    const r=Math.floor(80*shade),g=Math.floor(30*shade),b=Math.floor(60*shade);
+    ctx.fillStyle=`rgb(${r},${g},${b})`;
+    ctx.fillRect(i,wallTop,1,wallH);
+  }
+
+  return zBuffer;
+}
+
+// ============================================================
+//  SPRITE RENDERING (monsters)
+// ============================================================
+function renderSprites(zBuffer){
+  const FOV=Math.PI/2.8;
+  // Sort by distance (far first)
+  const sprites=[...monsters].filter(m=>!m.dying||m.deadTimer<8);
+  sprites.sort((a,b)=>b.dist-a.dist);
+
+  sprites.forEach(m=>{
+    const dx=m.x-player.x,dy=m.y-player.y;
+    m.dist=Math.sqrt(dx*dx+dy*dy);
+    const spriteAngle=Math.atan2(dy,dx)-player.angle;
+    // Normalize angle to [-PI,PI]
+    let sa=spriteAngle;
+    while(sa>Math.PI)sa-=Math.PI*2;
+    while(sa<-Math.PI)sa+=Math.PI*2;
+    if(Math.abs(sa)>FOV)return;
+
+    const screenX=Math.floor((0.5+sa/FOV)*W);
+    const sprH=Math.min(H*2,Math.floor(H*0.8/m.dist));
+    const sprTop=Math.floor((H-sprH)/2);
+    const sprW=sprH;
+    const sprLeft=screenX-sprW/2;
+
+    // Draw column by column, respect z-buffer
+    const col=Math.floor(sprW);
+    for(let sx=0;sx<col;sx++){
+      const screenCol=Math.floor(sprLeft+sx);
+      if(screenCol<0||screenCol>=W)continue;
+      if(zBuffer[screenCol]<m.dist)continue;
+
+      // Simple monster: colored rectangle with eyes
+      const u=sx/col; // 0..1 across sprite
+      // Body color
+      let color=m.dying?`rgba(255,100,0,${1-m.deadTimer/10})`:m.color;
+      ctx.fillStyle=color;
+      ctx.fillRect(screenCol,sprTop,1,sprH);
+
+      // Eyes (white dots in upper third)
+      if(!m.dying&&sprH>20){
+        const eyeY=sprTop+sprH*0.25;
+        const eyeH=Math.max(2,sprH*0.12);
+        if(u>0.2&&u<0.35||u>0.65&&u<0.8){
+          ctx.fillStyle='#ffffff';
+          ctx.fillRect(screenCol,eyeY,1,eyeH);
+        }
+        // Pupils
+        if(u>0.24&&u<0.31||u>0.69&&u<0.76){
+          ctx.fillStyle='#ff0000';
+          ctx.fillRect(screenCol,eyeY+eyeH*0.3,1,eyeH*0.5);
+        }
+      }
+
+      // HP bar above monster
+      if(!m.dying&&sprH>30&&sx===Math.floor(col/2)){
+        const barW=sprW*0.6;
+        const barX=sprLeft+sprW*0.2;
+        const barY=sprTop-8;
+        ctx.fillStyle='#330000';
+        ctx.fillRect(barX,barY,barW,4);
+        ctx.fillStyle='#ff2200';
+        ctx.fillRect(barX,barY,barW*(m.hp/m.maxHp),4);
+      }
+    }
+  });
+}
+
+// ============================================================
+//  PARTICLES
+// ============================================================
+function spawnBlood(x,y,count=6){
+  for(let i=0;i<count;i++){
+    particles.push({
+      x,y,
+      vx:(Math.random()-0.5)*0.08,
+      vy:(Math.random()-0.5)*0.08,
+      life:1,color:'#ff2200'
+    });
+  }
+}
+
+// ============================================================
+//  SHOOTING
+// ============================================================
+let shootCooldown=0;
+function shoot(){
+  if(shootCooldown>0||gameState!=='playing')return;
+  shootCooldown=12;
+  // Muzzle flash
+  document.getElementById('hit-flash').style.background='rgba(255,160,0,0.18)';
+  setTimeout(()=>document.getElementById('hit-flash').style.background='rgba(255,0,0,0)',80);
+
+  // Ray from player center
+  const cos=Math.cos(player.angle),sin=Math.sin(player.angle);
+  // Find closest monster in crosshair (±5° cone)
+  let best=null,bestDist=Infinity;
+  monsters.forEach(m=>{
+    if(m.dying)return;
+    const dx=m.x-player.x,dy=m.y-player.y;
+    const dist=Math.sqrt(dx*dx+dy*dy);
+    const angleToM=Math.atan2(dy,dx);
+    let diff=angleToM-player.angle;
+    while(diff>Math.PI)diff-=Math.PI*2;
+    while(diff<-Math.PI)diff+=Math.PI*2;
+    if(Math.abs(diff)<0.14&&dist<bestDist){best=m;bestDist=dist;}
+  });
+  if(best){
+    const dmg=1;
+    best.hp-=dmg;
+    spawnBlood(best.x,best.y,8);
+    if(best.hp<=0){best.dying=true;score+=100;document.getElementById('score-disp').textContent='SCORE: '+score;}
+  }
+}
+
+// ============================================================
+//  MONSTER AI
+// ============================================================
+function updateMonsters(){
+  const toRemove=[];
+  monsters.forEach((m,i)=>{
+    if(m.dying){
+      m.deadTimer++;
+      if(m.deadTimer>12)toRemove.push(i);
+      return;
+    }
+    const dx=player.x-m.x,dy=player.y-m.y;
+    const dist=Math.sqrt(dx*dx+dy*dy);
+    // Move toward player, simple collision
+    const nx=m.x+dx/dist*m.speed;
+    const ny=m.y+dy/dist*m.speed;
+    if(!isWall(nx,m.y))m.x=nx;
+    if(!isWall(m.x,ny))m.y=ny;
+    // Attack player
+    if(dist<0.6){
+      hp=Math.max(0,hp-0.4);
+      updateHP(hp);
+      if(hp<=0){gameState='over';document.getElementById('final-score').textContent=score;showOv('ov-over');}
+    }
+  });
+  for(let i=toRemove.length-1;i>=0;i--)monsters.splice(toRemove[i],1);
+  if(monsters.filter(m=>!m.dying).length===0&&gameState==='playing'){
+    wave++;spawnWave(wave);
+  }
+}
+
+function updateHP(v){
+  hp=Math.max(0,Math.min(100,v));
+  document.getElementById('hp-fill').style.width=hp+'%';
+  document.getElementById('hp-fill').style.background=hp>50?
+    'linear-gradient(90deg,#ff2200,#ff6600)':
+    hp>25?'linear-gradient(90deg,#ff6600,#ffaa00)':
+    'linear-gradient(90deg,#ff0000,#ff2200)';
+}
+
+// ============================================================
+//  PLAYER MOVEMENT
+// ============================================================
+function updatePlayer(){
+  const SPEED=0.045,DIAG=SPEED*0.707;
+  const cos=Math.cos(player.angle),sin=Math.sin(player.angle);
+  // Move joystick: mx/my are -1..1
+  const mx=moveJoy.x,my=moveJoy.y;
+  if(mx!==0||my!==0){
+    // Forward/back + strafe
+    const fwd=-my*SPEED; // joystick up = forward
+    const str=mx*SPEED;
+    const nx=player.x+cos*fwd-sin*str;
+    const ny=player.y+sin*fwd+cos*str;
+    if(!isWall(nx+cos*0.2,player.y))player.x=nx;
+    if(!isWall(player.x,ny+sin*0.2))player.y=ny;
+  }
+  // Look joystick
+  player.angle+=lookJoy.x*0.04;
+}
+
+// ============================================================
+//  MAIN LOOP
+// ============================================================
+function loop(){
+  if(gameState==='playing'){
+    updatePlayer();
+    updateMonsters();
+    if(shootCooldown>0)shootCooldown--;
+  }
+  // Render
+  const zBuf=castRays();
+  renderSprites(zBuf);
+
+  // Damage vignette
+  if(hp<40){
+    const vig=ctx.createRadialGradient(W/2,H/2,H*0.2,W/2,H/2,H*0.8);
+    vig.addColorStop(0,'transparent');
+    vig.addColorStop(1,`rgba(180,0,0,${(40-hp)/80})`);
+    ctx.fillStyle=vig;
+    ctx.fillRect(0,0,W,H);
+  }
+
+  requestAnimationFrame(loop);
+}
+
+// ============================================================
+//  JOYSTICK SYSTEM
+// ============================================================
+const moveJoy={x:0,y:0},lookJoy={x:0,y:0};
+
+function makeJoystick(baseEl,capEl,output,deadzone=0.15){
+  const MAXD=38;
+  let active=false,tid=-1;
+  function center(){const r=baseEl.getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2};}
+  function apply(cx,cy){
+    const c=center(),ox=cx-c.x,oy=cy-c.y;
+    const d=Math.sqrt(ox*ox+oy*oy),cl=Math.min(d,MAXD),a=Math.atan2(oy,ox);
+    capEl.style.transform=`translate(${Math.cos(a)*cl}px,${Math.sin(a)*cl}px)`;
+    const norm=d/MAXD;
+    if(norm>deadzone){output.x=(ox/d)*Math.min(norm,1);output.y=(oy/d)*Math.min(norm,1);}
+    else{output.x=0;output.y=0;}
+  }
+  function reset(){active=false;tid=-1;capEl.style.transform='';output.x=0;output.y=0;}
+  baseEl.addEventListener('touchstart',e=>{e.preventDefault();e.stopPropagation();if(active)return;const t=e.changedTouches[0];tid=t.identifier;active=true;apply(t.clientX,t.clientY);},{passive:false});
+  baseEl.addEventListener('touchmove',e=>{e.preventDefault();e.stopPropagation();for(const t of e.changedTouches)if(t.identifier===tid)apply(t.clientX,t.clientY);},{passive:false});
+  baseEl.addEventListener('touchend',e=>{e.preventDefault();e.stopPropagation();for(const t of e.changedTouches)if(t.identifier===tid)reset();},{passive:false});
+  baseEl.addEventListener('touchcancel',e=>{e.preventDefault();reset();},{passive:false});
+  baseEl.addEventListener('mousedown',e=>{active=true;apply(e.clientX,e.clientY);});
+  window.addEventListener('mousemove',e=>{if(active)apply(e.clientX,e.clientY);});
+  window.addEventListener('mouseup',()=>{if(active)reset();});
+}
+
+makeJoystick(document.getElementById('joy-base'),document.getElementById('joy-cap'),moveJoy);
+makeJoystick(document.getElementById('look-base'),document.getElementById('look-cap'),lookJoy);
+
+// Shoot button
+document.getElementById('shoot-btn').addEventListener('touchstart',e=>{e.preventDefault();shoot();},{passive:false});
+document.getElementById('shoot-btn').addEventListener('mousedown',shoot);
+
+// Keyboard
+const keys={};
+document.addEventListener('keydown',e=>keys[e.key]=true);
+document.addEventListener('keyup',e=>keys[e.key]=false);
+function keyboardInput(){
+  if(keys['ArrowLeft']||keys['a'])lookJoy.x=-1;
+  else if(keys['ArrowRight']||keys['d'])lookJoy.x=1;
+  else lookJoy.x=0;
+  if(keys['ArrowUp']||keys['w'])moveJoy.y=-1;
+  else if(keys['ArrowDown']||keys['s'])moveJoy.y=1;
+  else moveJoy.y=0;
+  if(keys[' ']||keys['f'])shoot();
+}
+setInterval(keyboardInput,16);
+
+// ============================================================
+//  UI
+// ============================================================
+function showOv(id){
+  ['ov-start','ov-over'].forEach(s=>document.getElementById(s).style.display=s===id?'flex':'none');
+}
+document.getElementById('btn-start').onclick=initGame;
+document.getElementById('btn-restart').onclick=initGame;
+
+// ============================================================
+//  START
+// ============================================================
+showOv('ov-start');
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
