@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>SendWA — Almacén Copihue ver.63</title>
+<title>SendWA — Almacén Copihue ver.65</title>
 <!--
   CHANGELOG sendwa.html
   v59: - Oferta Personalizada: filtra productos sin stock ANTES de mostrarlos en
@@ -650,7 +650,7 @@
           style="width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.2);
                  border:none;color:#fff;font-size:12px;font-weight:800;cursor:pointer;
                  flex-shrink:0;display:flex;align-items:center;justify-content:center;">?</button>
-  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.63</div>
+  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.65</div>
   <button id="btn-dark" title="Modo oscuro">🌙</button>
 </div>
 
@@ -2647,20 +2647,29 @@ let _personalItemTipo = new Map(); // id (Number) -> tipo (1-6)
 let _personalProds     = [];       // productos elegibles del modal (ya filtrados por stock)
 let _personalBulkPct   = 20;
 const PERSONAL_PCTS = [10,20,30,40,50,60];
+// 'off' no es un % real — significa tipo:0, que el GAS interpreta como
+// "sin oferta" y descarta al aplicar (la columna ya se resetea a 0 antes de
+// escribir la tanda nueva). Lo modelamos como pct especial -1 solo para la UI.
+const PCT_OFF = -1;
 
 function buildPersonalBulkRow() {
   const row = document.getElementById('personal-pct-bulk');
   if (!row) return;
   row.innerHTML = PERSONAL_PCTS.map(pct =>
     `<button class="layout-btn" data-pct="${pct}">≈${pct}%</button>`
-  ).join('');
+  ).join('') + `<button class="layout-btn" data-pct="${PCT_OFF}" style="background:#7a7a7a;color:#fff;border-color:#5a5a5a;">⛔ off</button>`;
 }
 document.getElementById('personal-pct-bulk')?.addEventListener('click', e => {
   const btn = e.target.closest('.layout-btn');
   if (!btn) return;
   _personalBulkPct = parseInt(btn.dataset.pct);
-  const tipo = PERSONAL_PCTS.indexOf(_personalBulkPct) + 1;
-  for (const id of _personalItemTipo.keys()) _personalItemTipo.set(id, tipo);
+  if (_personalBulkPct === PCT_OFF) {
+    // "off" para todos = tipo 0 (el GAS lo descarta, queda sin oferta)
+    for (const id of _personalItemTipo.keys()) _personalItemTipo.set(id, 0);
+  } else {
+    const tipo = PERSONAL_PCTS.indexOf(_personalBulkPct) + 1;
+    for (const id of _personalItemTipo.keys()) _personalItemTipo.set(id, tipo);
+  }
   renderPersonalItemsList();
 });
 
@@ -2670,13 +2679,15 @@ function renderPersonalItemsList() {
   list.innerHTML = _personalProds.map(p => {
     const id   = Number(p.id);
     const tipo = _personalItemTipo.get(id) || 0;
+    const isOff = tipo === 0;
     const pills = PERSONAL_PCTS.map((pct, i) => {
       const active = (i + 1) === tipo;
       return `<button class="layout-btn personal-pct-btn${active ? ' active' : ''}" data-id="${id}" data-pct="${pct}">≈${pct}%</button>`;
-    }).join('');
-    return `<div class="personal-item">
-      <img src="${getImgUrl(p)}" alt="" loading="lazy">
-      <div class="personal-item-name">${p.nombre}</div>
+    }).join('') + `<button class="layout-btn personal-pct-btn${isOff ? ' active' : ''}" data-id="${id}" data-pct="${PCT_OFF}"
+        style="background:${isOff ? '#7a7a7a' : 'var(--card-bg)'};color:${isOff ? '#fff' : '#7a7a7a'};border-color:#7a7a7a;">⛔ off</button>`;
+    return `<div class="personal-item${isOff ? ' personal-item-off' : ''}">
+      <img src="${getImgUrl(p)}" alt="" loading="lazy" style="${isOff ? 'opacity:.4' : ''}">
+      <div class="personal-item-name" style="${isOff ? 'opacity:.5;text-decoration:line-through' : ''}">${p.nombre}</div>
       <div class="personal-item-pills">${pills}</div>
     </div>`;
   }).join('');
@@ -2686,7 +2697,11 @@ document.getElementById('personal-items-list')?.addEventListener('click', e => {
   if (!btn) return;
   const id  = Number(btn.dataset.id);
   const pct = parseInt(btn.dataset.pct);
-  _personalItemTipo.set(id, PERSONAL_PCTS.indexOf(pct) + 1);
+  if (pct === PCT_OFF) {
+    _personalItemTipo.set(id, 0); // off = sin oferta, el GAS lo descarta al aplicar
+  } else {
+    _personalItemTipo.set(id, PERSONAL_PCTS.indexOf(pct) + 1);
+  }
   renderPersonalItemsList();
 });
 
@@ -2718,15 +2733,29 @@ on('btn-personalizada', () => {
 on('btn-personal-aplicar', () => {
   const texto = (document.getElementById('personal-texto').value || '').trim();
   if (!texto) { toast('⚠️ Escribí un texto para la oferta'); return; }
+  // Todos los items (incluye tipo:0 = "off") van al GAS — el backend ya resetea
+  // la columna completa antes de escribir, así que los "off" simplemente quedan
+  // sin oferta (no hace falta filtrarlos, son inválidos para PCT_OFERTA_PERSONALIZADA
+  // y el backend los descarta solo).
   const items = [..._personalItemTipo.entries()].map(([id, tipo]) => ({ id, tipo }));
   if (!items.length) { toast('⚠️ Seleccioná al menos un producto primero'); return; }
-  const cantidad     = items.length;
-  const tiposUsados  = new Set(items.map(it => it.tipo));
+
+  // Para el resumen y el collage posterior, contamos solo los que SÍ llevan oferta real
+  const itemsConOferta = items.filter(it => it.tipo > 0);
+  const itemsOff       = items.filter(it => it.tipo === 0);
+  if (!itemsConOferta.length) {
+    toast('⚠️ Todos los productos están en "off" — no hay nada para aplicar. Tocá "Quitar" si querés sacarles la oferta.');
+    return;
+  }
+
+  const cantidad     = itemsConOferta.length;
+  const tiposUsados  = new Set(itemsConOferta.map(it => it.tipo));
   const pctResumen   = tiposUsados.size === 1 ? `≈${PERSONAL_PCTS[[...tiposUsados][0] - 1]}%` : 'escalera variada';
   const btnAplicar   = document.getElementById('btn-personal-aplicar');
   btnAplicar.classList.add('is-busy');
   btnAplicar.textContent = '⏳ Guardando...';
-  toast(`⏳ Guardando "${texto}" (${pctResumen}) en ${cantidad} producto${cantidad > 1 ? 's' : ''}...`);
+  const offTxt = itemsOff.length ? ` (${itemsOff.length} en off, excluidos)` : '';
+  toast(`⏳ Guardando "${texto}" (${pctResumen}) en ${cantidad} producto${cantidad > 1 ? 's' : ''}${offTxt}...`);
   _apiAction('ofertaPersonalizada', { items, texto })
     .then(res => {
       btnAplicar.classList.remove('is-busy');
@@ -2737,10 +2766,9 @@ on('btn-personal-aplicar', () => {
         return fetchData().then(data => {
           allProducts = parseProducts(data);
           applyFilter();
-          // Collage independiente del normal: solo los productos recién
-          // afectados, con su oferta personalizada ya resuelta, y el banner
-          // avisando qué % se aplicó.
-          const idsSet = new Set(items.map(it => it.id));
+          // Collage solo con los productos que SÍ quedaron con oferta real —
+          // los marcados "off" no entran al flyer porque no tienen descuento.
+          const idsSet = new Set(itemsConOferta.map(it => it.id));
           const afectados = allProducts.filter(p => idsSet.has(Number(p.id)));
           if (afectados.length) {
             const prods = resolveOfertas(afectados, getModoResolucion());
