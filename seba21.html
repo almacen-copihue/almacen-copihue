@@ -36,6 +36,66 @@
 
 ================================================================================
 
+  v394 — 01/07/2026
+  -----------------
+  • FIX — Pedido del pan: enviarPedidoPanadero() ahora usa _normNumWA() para
+    normalizar el número (agrega 549 + número, maneja casos con o sin 54/9
+    adelante) y abrirWABusiness() para abrir WhatsApp Business en Android
+    (protocolo whatsapp://) en vez de wa.me que abría WA personal.
+    El número 2944341969 se convierte automáticamente a 5492944341969.
+
+================================================================================
+
+  v393 — 01/07/2026
+  -----------------
+  • FIX — Badge del scroll/buscador: badgeOfertaPOS() tenía su propia lógica
+    con el porcentaje hardcodeado, independiente de calcularOfertaPOS(). Eliminado
+    el % en los badges de PROMO y COMBO del scroll. Ahora muestran solo
+    "🏷️ PROMO" y "🎯 COMBO".
+
+================================================================================
+
+  v392 — 01/07/2026
+  -----------------
+  • FIX — Badge promo: eliminado el porcentaje calculado ("PROMO -5% OFF" →
+    "🏷️ PROMO"). El % no es real en ventas por peso ni en combos con gramos.
+    Mismo fix para combo ("COMBO -5% OFF" → "🎯 COMBO").
+  • FIX — Panel lateral y modal de confirmar venta: eliminada la línea −$X
+    (ahorro en pesos) para items de peso. Para peso solo se muestra precio
+    tachado + precio final, sin ahorro calculado (el número es incorrecto
+    porque depende de gramos exactos no de porcentaje fijo).
+
+================================================================================
+
+  v391 — 01/07/2026
+  -----------------
+  • FIX — Venta por peso: actualizarDisplayPeso() ahora usa el precio promo
+    (si hay oferta activa) para calcular los gramos que se muestran en tiempo
+    real mientras se escribe el monto. Antes siempre usaba el precio normal,
+    mostrando gramos incorrectos cuando había promo activa.
+  • FIX — Panel lateral: items de peso ahora muestran los gramos reales
+    (ej: "936gr") en vez de "1g" (qty siempre era 1 para peso).
+  • FIX — Modal de confirmar venta: items de peso ahora muestran los gramos
+    reales y solo el botón 🗑 eliminar (sin + y - que no aplican al peso).
+
+================================================================================
+
+  v390 — 01/07/2026
+  -----------------
+  • REDISEÑO — Multicompra grupal: el reparto proporcional entre líneas generaba
+    números confusos al mezclar sabores (ej. Lima Limón a $4.200, Granadina sin
+    badge, Manzana absorbiendo todo el descuento). Nuevo diseño: cada línea del
+    grupo siempre muestra su precio normal con un indicador chico "📦 cuenta para
+    pack NxP". El ahorro grupal total aparece en una línea única al pie, tanto en
+    el panel lateral como en el modal de confirmar venta. Cuatro funciones nuevas:
+    _resumenGruposMulticompra, _totalCarritoConDescuentosGrupales, _resumenGrupalHTML,
+    _actualizarResumenGrupalPanel. Se corrigieron los 16 puntos donde se sumaba
+    item.price*item.qty directo (incluyendo QR de pago, fiado, recuperación de
+    carrito, modal de cierre de sesión). _modalQty y _modalDel usan _reRenderModal
+    cuando la línea tocada pertenece a un grupo (para actualizar el resumen al pie).
+
+================================================================================
+
   v389 — 23/06/2026
   -----------------
   • NUEVO — OFERTA PERSONALIZADA: lee columna oferta_personalizada (AJ, código 1-6
@@ -633,7 +693,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v389</title>
+    <title>Copihue — POS v394</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2725,11 +2785,15 @@ function enviarPedidoPanadero() {
     const cant = Math.max(1, Math.ceil(((cfg.stockMinimo||1)*2) - stockPan));
     const msg = (cfg.mensaje || 'Hola {nombre}! 🍞 Te pido {cantidad} kg de pan. ¡Gracias!')
         .replace('{nombre}', cfg.nombre).replace('{cantidad}', cant).replace('{productos}', '- Pan: ' + cant + ' kg');
-    const tel = (cfg.telefono || '').replace(/\D/g, '');
+    const tel = _normNumWA(cfg.telefono || '');
     localStorage.setItem('pedido_panadero_sugerido_' + fechaArgentina(), '1');
     const n = document.getElementById('sugerenciaPanadero'); if (n) n.remove();
-    window.open(tel ? 'https://wa.me/'+tel+'?text='+encodeURIComponent(msg) : 'https://wa.me/?text='+encodeURIComponent(msg), '_blank');
-    if (!tel) mostrarToast('⚠️ Agregá el teléfono en ⚙️ Configuración', 'naranja');
+    if (tel) {
+        abrirWABusiness(msg, tel);
+    } else {
+        window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
+        mostrarToast('⚠️ Agregá el teléfono en ⚙️ Configuración', 'naranja');
+    }
 }
 
 // ── MINIMIZAR / EXPANDIR PANEL ───────────────────────────────────────────────
@@ -2739,7 +2803,7 @@ function abrirModalCerrar() {
     const modal = document.getElementById('modalCerrarSesion');
     const texto = document.getElementById('modalCerrarTexto');
     if (ventaActual && ventaActual.length > 0) {
-        const total = ventaActual.reduce((s,i) => s + i.price * i.qty, 0);
+        const total = _totalCarritoConDescuentosGrupales();
         texto.innerHTML = `<div style="font-size:0.88rem;color:#555;text-align:center;margin-bottom:16px;">
             Tenés <strong>${ventaActual.length} producto(s)</strong> en la venta actual por
             <strong>$${Math.round(total).toLocaleString('es-AR')}</strong>.<br><br>
@@ -2800,7 +2864,7 @@ function togglePanelFullscreen() {
 }
 function actualizarBarraMinimizada() {
     if (MOBILE) return;
-    const total = ventaActual.reduce((s,i) => s+i.price*i.qty, 0);
+    const total = _totalCarritoConDescuentosGrupales();
     const items = ventaActual.reduce((s,i) => s+i.qty, 0);
     if (document.getElementById('barraMinTotal'))
         document.getElementById('barraMinTotal').textContent = '$' + Math.round(total).toLocaleString('es-AR');
@@ -3625,7 +3689,8 @@ function _patchPanelLateral() {
         const subtotalSpan = fila.querySelector('.item-subtotal');
         if (subtotalSpan) subtotalSpan.textContent = '$' + (item.price * item.qty).toLocaleString('es-AR');
     });
-    const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
+    _actualizarResumenGrupalPanel();
+    const total = _totalCarritoConDescuentosGrupales();
     const totalMonto = document.getElementById('totalMonto');
     if (totalMonto) totalMonto.textContent = '$' + total.toLocaleString('es-AR');
     if (MOBILE) {
@@ -3767,7 +3832,7 @@ function _renderVentaCompleta(ligero) {
 
     _setHeaderModoVenta(true);
 
-    const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
+    const total = _totalCarritoConDescuentosGrupales();
     const totalItems = ventaActual.reduce((s, i) => s + i.qty, 0);
     if (totalEl) totalEl.textContent = '$' + total.toLocaleString('es-AR');
     if (btnConfirmar) btnConfirmar.disabled = false;
@@ -3775,7 +3840,6 @@ function _renderVentaCompleta(ligero) {
 
     if (MOBILE) {
         document.getElementById('fabStack').style.display = 'flex';
-        document.getElementById('btnCobrarTotal').textContent = '$' + Math.round(ventaActual.reduce((s,i)=>s+i.price*i.qty,0)).toLocaleString('es-AR');
         const hayMultiple = ventaActual.some(i => i.qty > 1);
         document.getElementById('fabSubir').style.display = hayMultiple ? 'block' : 'none';
         document.getElementById('btnCobrarTotal').textContent = '$' + Math.round(total).toLocaleString('es-AR');
@@ -3784,6 +3848,8 @@ function _renderVentaCompleta(ligero) {
         if (pv) pv.style.display = 'flex';
         actualizarBarraMinimizada();
     }
+
+    _actualizarResumenGrupalPanel(); // resumen multicompra grupal — se actualiza en modo ligero y completo
 
     if (ligero) return; // modo ligero: solo totales/header, sin tocar el scroll
 
@@ -3808,7 +3874,7 @@ function _renderVentaCompleta(ligero) {
         // ── Texto de fórmula según tipo ────────────────────────────
         let formulaHTML = '';
         let colOferta   = '';   // color del badge
-        if (tieneOferta && item.ofertaEtiqueta) {
+        if ((tieneOferta || item.ofertaTipo === 'multicompra-grupal') && item.ofertaEtiqueta) {
             const tipo = item.ofertaTipo || '';
             if (tipo === 'cervecero') {
                 colOferta = '#1565c0';
@@ -3826,6 +3892,9 @@ function _renderVentaCompleta(ligero) {
             } else if (tipo === 'multicompra') {
                 colOferta = '#7C3AED';
                 formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">${item.ofertaEtiqueta || '📦 Multicompra'}</div>`;
+            } else if (tipo === 'multicompra-grupal') {
+                colOferta = '#7C3AED';
+                formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta};opacity:.85;">${item.ofertaEtiqueta || '📦 cuenta para pack'}</div>`;
             } else if (tipo === 'ultimas') {
                 colOferta = '#b71c1c';
                 formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">${item.ofertaEtiqueta || '🏷️ ÚLTIMAS UNIDADES'}</div>`;
@@ -3846,7 +3915,7 @@ function _renderVentaCompleta(ligero) {
             ? `<div style="flex-shrink:0;text-align:right;min-width:64px;">
                 <span class="item-precio-antes">$${item.precioOriginal.toLocaleString('es-AR')}</span>
                 <span class="item-precio-con-oferta" style="color:${colOferta||'var(--verde-oscuro)'}">$${precioUnit.toLocaleString('es-AR')}</span>
-                <span class="item-ahorro-badge">−$${ahorroTotal.toLocaleString('es-AR')}</span>
+                ${item.esPeso ? '' : `<span class="item-ahorro-badge">−$${ahorroTotal.toLocaleString('es-AR')}</span>`}
               </div>`
             : `<span class="item-precio-editable ${item.precioModificado ? 'modificado' : ''}"
                      onclick="editarPrecioCarrito('${item.id}')"
@@ -3869,7 +3938,7 @@ function _renderVentaCompleta(ligero) {
             <div class="item-venta-controles">
                 ${item.esPeso ? `
                     <button class="btn-cant" onclick="cambiarCantidad('${item.id}', -99)" style="background:#ffebee;color:#e53935;font-size:0.8rem;">🗑</button>
-                    <span class="item-cant" style="font-size:0.75rem;">${item.qty}g</span>
+                    <span class="item-cant" style="font-size:0.75rem;">${item.gramos}gr</span>
                 ` : `
                     <button class="btn-cant" onclick="cambiarCantidad('${item.id}', -1)">−</button>
                     <span class="item-cant">${item.qty}</span>
@@ -3898,7 +3967,7 @@ function calcularRedondeo(total) {
 }
 
 function actualizarTotalConRedondeo() {
-    const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
+    const total = _totalCarritoConDescuentosGrupales();
     const totalMostrar = _redondeoActivo ? calcularRedondeo(total) : total;
     const descuento = total - totalMostrar;
 
@@ -3977,7 +4046,7 @@ function limpiarBusqueda() {
 // ===== MODAL CONFIRMAR: helpers para editar desde el modal =====
 function _buildDetalleModalHTML() {
     const esDesktop = window.innerWidth >= 768;
-    const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
+    const total = _totalCarritoConDescuentosGrupales();
     const items = ventaActual.map((item, idx) => {
         const subtotal    = Math.round(item.price * item.qty);
         const tieneOferta = (item.precioModificado && item.precioOriginal > item.price)
@@ -3988,7 +4057,7 @@ function _buildDetalleModalHTML() {
             destacadas: '#ff6f00', especiales: '#00bcd4',
             ultimas: '#b71c1c', normal: '#43a047',
             promo: '#6a1b9a', combo: '#00838f',
-            multicompra: '#7C3AED'
+            multicompra: '#7C3AED', 'multicompra-grupal': '#7C3AED'
         };
         const col = colores[item.ofertaTipo] || '#f9a825';
 
@@ -4004,9 +4073,9 @@ function _buildDetalleModalHTML() {
                 <span style="font-weight:800;font-size:0.9rem;color:${col};">
                     $${subtotal.toLocaleString('es-AR')}
                 </span>
-                <span style="font-size:0.55rem;background:#e8f5e9;color:#2e7d32;border-radius:4px;padding:0 4px;display:block;">
+                ${item.esPeso ? '' : `<span style="font-size:0.55rem;background:#e8f5e9;color:#2e7d32;border-radius:4px;padding:0 4px;display:block;">
                     −$${((item.precioOriginal - item.price) * item.qty).toLocaleString('es-AR')}
-                </span>
+                </span>`}
                </div>`
             : `<span style="font-weight:700;min-width:64px;text-align:right;font-size:0.9rem;flex-shrink:0;">$${subtotal.toLocaleString('es-AR')}</span>`;
 
@@ -4022,6 +4091,13 @@ function _buildDetalleModalHTML() {
                 <div style="font-size:0.82rem;line-height:1.3;word-break:break-word;">${item.name.substring(0,34)}${badgeHTML}</div>
             </div>
             <div style="display:flex;align-items:center;gap:3px;flex-shrink:0;" onclick="event.stopPropagation()">
+                ${item.esPeso ? `
+                <button onclick="_modalDel(${idx})"
+                        style="width:28px;height:28px;border:1.5px solid #ffcdd2;border-radius:50%;background:#ffebee;
+                               font-size:0.8rem;cursor:pointer;touch-action:manipulation;
+                               display:flex;align-items:center;justify-content:center;line-height:1;color:#e53935;">🗑</button>
+                <span style="min-width:40px;text-align:center;font-weight:800;font-size:0.82rem;color:#5B2A9E;">${item.gramos}gr</span>
+                ` : `
                 <button onclick="_modalQty(${idx},-1)"
                         style="width:28px;height:28px;border:1.5px solid #ccc;border-radius:50%;background:white;
                                font-size:1.1rem;font-weight:900;cursor:pointer;touch-action:manipulation;
@@ -4031,11 +4107,13 @@ function _buildDetalleModalHTML() {
                         style="width:28px;height:28px;border:1.5px solid #ccc;border-radius:50%;background:white;
                                font-size:1.1rem;font-weight:900;cursor:pointer;touch-action:manipulation;
                                display:flex;align-items:center;justify-content:center;line-height:1;color:#333;">+</button>
+                `}
             </div>
             ${precioColModal}
         </div>`;
     }).join('');
-    return items + `<div class="confirm-total-row"><span>TOTAL</span><span>$${total.toLocaleString('es-AR')}</span></div>`;
+    const resumenModal = _resumenGrupalHTML();
+    return items + resumenModal + `<div class="confirm-total-row"><span>TOTAL</span><span>$${total.toLocaleString('es-AR')}</span></div>`;
 }
 
 function _modalQty(idx, delta) {
@@ -4055,22 +4133,14 @@ function _modalQty(idx, delta) {
         item.precioTotalCalc = oferta.precioTotal;
         item.ofertaEtiqueta = oferta.etiqueta || null;
     }
-    // Sin renderVenta — el modal gestiona su propio display, no tocar elementos detrás
     _guardarCarritoDiferido();
-    _patchFilaModal(idx); // quirúrgico: solo actualiza qty+subtotal de esta fila
-
-    // MULTICOMPRA GRUPAL: si este producto comparte grupo con otras líneas
-    // (ej. distintos sabores del mismo pack), recalcular y parchear también las hermanas.
-    if (p) {
+    // MULTICOMPRA GRUPAL: reconstruir el modal completo (resumen al pie cambia)
+    const mc = p ? _poolMulticompra.get(item.id) : null;
+    if (mc && mc.grupo) {
         _recalcularGrupoMulticompra(item.id);
-        const mc = _poolMulticompra.get(item.id);
-        if (mc && mc.grupo) {
-            ventaActual.forEach((otroItem, otroIdx) => {
-                if (otroIdx === idx) return;
-                const otroMc = _poolMulticompra.get(otroItem.id);
-                if (otroMc && otroMc.grupo === mc.grupo) _patchFilaModal(otroIdx);
-            });
-        }
+        _reRenderModal();
+    } else {
+        _patchFilaModal(idx);
     }
 }
 
@@ -4082,48 +4152,34 @@ function _modalDel(idx) {
     const filaElim = el ? el.querySelector(`.confirm-fila-editable[data-idx="${idx}"]`) : null;
 
     const _doDelete = () => {
-        const idEliminado = ventaActual[idx].id; // capturar antes del splice
+        const idEliminado = ventaActual[idx].id;
+        const mcElim = _poolMulticompra.get(idEliminado);
         ventaActual.splice(idx, 1);
         _guardarCarritoDiferido();
-        if (ventaActual.length === 0) {
-            renderVenta(true);
-            cerrarConfirm();
-            return;
-        }
+        if (ventaActual.length === 0) { renderVenta(true); cerrarConfirm(); return; }
+
+        // MULTICOMPRA GRUPAL: reconstruir modal completo (resumen al pie cambia)
+        if (mcElim && mcElim.grupo) { _recalcularGrupoMulticompra(idEliminado); _reRenderModal(); return; }
+
         if (!el) { _reRenderModal(); return; }
         const filaActual = el.querySelector(`.confirm-fila-editable[data-idx="${idx}"]`);
         if (!filaActual) { _reRenderModal(); return; }
         filaActual.remove();
 
-        // 2. Reindexar filas que vienen después
-    el.querySelectorAll('.confirm-fila-editable').forEach(fila => {
-        const fi = parseInt(fila.dataset.idx);
-        if (fi > idx) {
-            const nuevoIdx = fi - 1;
-            fila.dataset.idx = nuevoIdx;
-            // Actualizar los onclick inline que usan el índice
-            fila.setAttribute('onclick', `_modalQty(${nuevoIdx},1)`);
-            const btnMinus = fila.querySelector(`button[onclick="_modalQty(${fi},-1)"]`);
-            const btnPlus  = fila.querySelector(`button[onclick="_modalQty(${fi},1)"]`);
-            if (btnMinus) btnMinus.setAttribute('onclick', `_modalQty(${nuevoIdx},-1)`);
-            if (btnPlus)  btnPlus.setAttribute('onclick',  `_modalQty(${nuevoIdx},1)`);
-        }
-    });
-
-    // MULTICOMPRA GRUPAL: tras eliminar esta línea, las hermanas del mismo grupo
-    // deben recalcular su qtyGrupo sin ella. Recalcular y parchear con los
-    // índices ya reindexados (post-eliminación).
-    _recalcularGrupoMulticompra(idEliminado);
-    const mcElim = _poolMulticompra.get(idEliminado);
-    if (mcElim && mcElim.grupo) {
-        ventaActual.forEach((otroItem, otroIdx) => {
-            const otroMc = _poolMulticompra.get(otroItem.id);
-            if (otroMc && otroMc.grupo === mcElim.grupo) _patchFilaModal(otroIdx);
+        // Reindexar filas posteriores
+        el.querySelectorAll('.confirm-fila-editable').forEach(fila => {
+            const fi = parseInt(fila.dataset.idx);
+            if (fi > idx) {
+                const nuevoIdx = fi - 1;
+                fila.dataset.idx = nuevoIdx;
+                fila.setAttribute('onclick', `_modalQty(${nuevoIdx},1)`);
+                const btnMinus = fila.querySelector(`button[onclick="_modalQty(${fi},-1)"]`);
+                const btnPlus  = fila.querySelector(`button[onclick="_modalQty(${fi},1)"]`);
+                if (btnMinus) btnMinus.setAttribute('onclick', `_modalQty(${nuevoIdx},-1)`);
+                if (btnPlus)  btnPlus.setAttribute('onclick',  `_modalQty(${nuevoIdx},1)`);
+            }
         });
-    }
-
-    // 3. Actualizar total en la fila de total
-        const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
+        const total = _totalCarritoConDescuentosGrupales();
         window._totalConRedondeo = total;
         const totalRow = el.querySelector('.confirm-total-row span:last-child');
         if (totalRow) totalRow.textContent = '$' + total.toLocaleString('es-AR');
@@ -4170,7 +4226,7 @@ function _patchFilaModal(idx) {
     }
 
     // Actualizar total general
-    const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
+    const total = _totalCarritoConDescuentosGrupales();
     window._totalConRedondeo = total;
     const totalRow = el.querySelector('.confirm-total-row span:last-child');
     if (totalRow) totalRow.textContent = '$' + total.toLocaleString('es-AR');
@@ -4179,7 +4235,7 @@ function _patchFilaModal(idx) {
 function _reRenderModal() {
     const el = document.getElementById('confirmDetalle');
     if (!el) return;
-    const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
+    const total = _totalCarritoConDescuentosGrupales();
     window._totalConRedondeo = total;
     window._descuentoRedondeo = 0;
     el.innerHTML = _buildDetalleModalHTML();
@@ -4232,7 +4288,7 @@ function _bindSwipeConfirmacion() {
 function abrirConfirmacion() {
     if (ventaActual.length === 0) return;
 
-    const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
+    const total = _totalCarritoConDescuentosGrupales();
     if (total === 0) return; // guarda: no abrir modal con total $0
 
     document.getElementById('confirmDetalle').innerHTML = _buildDetalleModalHTML();
@@ -4283,7 +4339,7 @@ async function confirmarVenta() {
     // Borrar carrito INMEDIATAMENTE — antes del await a la API
     if (typeof _saveCartTimer !== 'undefined') clearTimeout(_saveCartTimer);
     localStorage.removeItem(CARRITO_KEY);
-    const totalOriginal = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
+    const totalOriginal = _totalCarritoConDescuentosGrupales();
     const total = window._totalConRedondeo || totalOriginal;
     const descuentoRedondeo = window._descuentoRedondeo || 0;
     const _t = new Date(); const hora = _t.getHours().toString().padStart(2,'0') + ':' + _t.getMinutes().toString().padStart(2,'0');
@@ -5163,7 +5219,7 @@ function recuperarVenta() {
         ocultarBannerPendiente();
         renderVenta();
         
-        const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
+        const total = _totalCarritoConDescuentosGrupales();
         mostrarToast(`✅ Carrito recuperado — $${total.toLocaleString('es-AR')}`, 'verde');
     } catch(e) {
         localStorage.removeItem(CARRITO_KEY);
@@ -5238,7 +5294,11 @@ function pesoBorrar() {
 
 function actualizarDisplayPeso() {
     const totalPesos = parseInt(pesoValor) || 0;
-    const precioPorKg = pesoProductoActual ? pesoProductoActual.price : 0;
+    // Usar precio promo si hay oferta activa, igual que confirmarPeso()
+    const ofertaDisplay = pesoProductoActual ? calcularOfertaPOS(pesoProductoActual, 1) : null;
+    const precioPorKg = ofertaDisplay && ofertaDisplay.tieneOferta
+        ? ofertaDisplay.precioUnitario
+        : (pesoProductoActual ? pesoProductoActual.price : 0);
     const gramos = precioPorKg > 0 ? Math.round((totalPesos / precioPorKg) * 1000) : 0;
 
     document.getElementById('pesoGramos').textContent = totalPesos > 0
@@ -5327,7 +5387,7 @@ function seleccionarMetodo(metodo) {
     const panelPosnet = document.getElementById('panelQRPosnet');
     const panelTransf = document.getElementById('panelQRTransf');
     if (panelQR) {
-        const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
+        const total = _totalCarritoConDescuentosGrupales();
         if (metodo === 'posnet') {
             panelQR.style.display = 'block';
             if (panelPosnet) panelPosnet.style.display = 'block';
@@ -7523,8 +7583,9 @@ function calcularOfertaPOS(producto, qty) {
         r.tieneOferta = true; r.tipoOferta = 'especiales';
     }
     // 4b. MULTICOMPRA — pool desde getOfertas, cálculo dinámico por cantidad
-    //     Soporta GRUPO_MULTICOMPRA: combina qty de todas las líneas del carrito
-    //     que compartan el mismo grupo (ej. 6 sabores de Manaos 3L cuentan para el mismo pack).
+    //     Grupal (GRUPO_MULTICOMPRA): cada línea muestra precio normal — el ahorro
+    //     se calcula aparte con _resumenGruposMulticompra() y se muestra al pie.
+    //     Individual (sin grupo): descuento aplicado directo en la línea.
     else if (_poolMulticompra.has(producto.id)) {
         const mc      = _poolMulticompra.get(producto.id);
         const AT      = mc.cantidad;
@@ -7533,43 +7594,33 @@ function calcularOfertaPOS(producto, qty) {
         const grupo   = mc.grupo;
         const pnormal = producto.price;
 
-        // qty efectivo: si hay grupo, sumar qty de TODAS las líneas hermanas del carrito,
-        // empezando por el qty de ESTA línea (parámetro, siempre el más actual) para
-        // evitar contarla dos veces si ya existe en ventaActual.
-        let qtyGrupo = qty;
         if (grupo) {
-            (ventaActual || []).forEach(item => {
-                if (item.id === producto.id) return; // ya contado vía "qty"
-                const itemMc = _poolMulticompra.get(item.id);
-                if (itemMc && itemMc.grupo === grupo) qtyGrupo += item.qty;
-            });
-        }
-
-        let total = qty * pnormal; // fallback: precio normal (sobre qty individual de ESTA línea)
-
-        if (qtyGrupo >= AT && AT > 0 && AU > 0) {
-            let totalGrupo;
-            if (tipo === '2X' || tipo === '3X' || tipo === 'NX' || tipo === 'LLEVÁ-PAGÁ') {
-                const ciclos = Math.floor(qtyGrupo / AT);
-                const resto  = qtyGrupo % AT;
-                totalGrupo = ciclos * AU + resto * pnormal;
-            } else if (tipo === '2DA_UNIDAD') {
-                const pares = Math.floor(qtyGrupo / 2);
-                const resto = qtyGrupo % 2;
-                totalGrupo = pares * (pnormal + AU) + resto * pnormal;
-            } else {
-                totalGrupo = qtyGrupo * pnormal;
+            // GRUPAL: precio siempre normal en la línea.
+            r.precioTotal    = pnormal * qty;
+            r.precioUnitario = pnormal;
+            r.tieneOferta    = false;
+            r.etiqueta       = `📦 cuenta para pack ${AT}x $${AU.toLocaleString('es-AR')}`;
+            r.tipoOferta     = 'multicompra-grupal';
+        } else {
+            // INDIVIDUAL: comportamiento original.
+            let total = qty * pnormal;
+            if (qty >= AT && AT > 0 && AU > 0) {
+                if (tipo === '2X' || tipo === '3X' || tipo === 'NX' || tipo === 'LLEVÁ-PAGÁ') {
+                    const ciclos = Math.floor(qty / AT);
+                    const resto  = qty % AT;
+                    total = ciclos * AU + resto * pnormal;
+                } else if (tipo === '2DA_UNIDAD') {
+                    const pares = Math.floor(qty / 2);
+                    const resto = qty % 2;
+                    total = pares * (pnormal + AU) + resto * pnormal;
+                }
+                r.tieneOferta = true;
             }
-            // Reparto proporcional: esta línea paga su parte del descuento del grupo
-            // según qué fracción de qtyGrupo representa su propio qty.
-            total = grupo ? Math.round(totalGrupo * (qty / qtyGrupo)) : Math.round(totalGrupo);
-            r.tieneOferta = true;
+            r.precioTotal    = Math.round(total);
+            r.precioUnitario = qty > 0 ? Math.round(total / qty) : pnormal;
+            r.etiqueta       = `📦 ${AT}x $${AU.toLocaleString('es-AR')}`;
+            r.tipoOferta     = 'multicompra';
         }
-
-        r.precioTotal    = Math.round(total);
-        r.precioUnitario = qty > 0 ? Math.round(total / qty) : pnormal;
-        r.etiqueta       = grupo ? `📦 ${AT}x $${AU.toLocaleString('es-AR')} (combinable)` : `📦 ${AT}x $${AU.toLocaleString('es-AR')}`;
-        r.tipoOferta     = 'multicompra';
     }
 
     // 4. PROMO ACTIVA — col J = "promo activa", col L = precio promo (sin toggle)
@@ -7581,7 +7632,7 @@ function calcularOfertaPOS(producto, qty) {
         const pct = Math.round((1 - producto.normal / producto.price) * 100);
         r.precioUnitario = producto.normal;
         r.precioTotal    = producto.normal * qty;
-        r.etiqueta       = `🏷️ PROMO -${pct}% OFF`;
+        r.etiqueta       = `🏷️ PROMO`;
         r.tieneOferta = true; r.tipoOferta = 'promo';
     }
     // 5. COMBO ACTIVO — col J = "combo activo", col L = precio combo (sin toggle)
@@ -7590,10 +7641,9 @@ function calcularOfertaPOS(producto, qty) {
         (producto.normal || 0) > 0 &&
         (producto.normal || 0) < (producto.price || 0)
     ) {
-        const pct = Math.round((1 - producto.normal / producto.price) * 100);
         r.precioUnitario = producto.normal;
         r.precioTotal    = producto.normal * qty;
-        r.etiqueta       = `🎯 COMBO -${pct}% OFF`;
+        r.etiqueta       = `🎯 COMBO`;
         r.tieneOferta = true; r.tipoOferta = 'combo';
     }
 
@@ -7622,6 +7672,86 @@ function _recalcularGrupoMulticompra(idTocado) {
         item.ofertaTipo        = oferta.tipoOferta || null;
         item.ofertaEtiqueta    = oferta.etiqueta || null;
     });
+}
+
+// Calcula por grupo: unidades combinadas y ahorro total. Solo lectura.
+// items: opcional, por defecto ventaActual. Cubre también snapshots (Fiado).
+// Devuelve: [{ grupo, qtyTotal, totalNormal, totalConPack, ahorro, etiquetaPack }, ...]
+function _resumenGruposMulticompra(items) {
+    const lista = items || ventaActual || [];
+    const porGrupo = new Map();
+    lista.forEach(item => {
+        const mc = _poolMulticompra.get(item.id);
+        if (!mc || !mc.grupo) return;
+        const prodLocal = (typeof productos !== 'undefined') ? productos.find(p => p.id === item.id) : null;
+        const pnormal = prodLocal ? prodLocal.price : (item.price || 0);
+        if (!porGrupo.has(mc.grupo)) {
+            porGrupo.set(mc.grupo, { qtyTotal: 0, totalNormal: 0, AT: mc.cantidad, AU: mc.precio, tipo: mc.tipo });
+        }
+        const g = porGrupo.get(mc.grupo);
+        g.qtyTotal    += item.qty;
+        g.totalNormal += pnormal * item.qty;
+    });
+    const resumen = [];
+    porGrupo.forEach((g, grupo) => {
+        const AT = g.AT, AU = g.AU, tipo = g.tipo, qty = g.qtyTotal;
+        if (!(AT > 0 && AU > 0 && qty >= AT)) return;
+        const pnormalProm = g.totalNormal / qty;
+        let totalConPack;
+        if (tipo === '2X' || tipo === '3X' || tipo === 'NX' || tipo === 'LLEVÁ-PAGÁ') {
+            const ciclos = Math.floor(qty / AT);
+            totalConPack = ciclos * AU + (qty % AT) * pnormalProm;
+        } else if (tipo === '2DA_UNIDAD') {
+            const pares = Math.floor(qty / 2);
+            totalConPack = pares * (pnormalProm + AU) + (qty % 2) * pnormalProm;
+        } else {
+            totalConPack = g.totalNormal;
+        }
+        const ahorro = Math.round(g.totalNormal - totalConPack);
+        if (ahorro <= 0) return;
+        resumen.push({ grupo, qtyTotal: qty,
+            totalNormal: Math.round(g.totalNormal),
+            totalConPack: Math.round(totalConPack),
+            ahorro, etiquetaPack: `📦 ${AT}x $${AU.toLocaleString('es-AR')}` });
+    });
+    return resumen;
+}
+
+// Total real descontando ahorro grupal. Usar en lugar de ventaActual.reduce.
+function _totalCarritoConDescuentosGrupales(items) {
+    const lista = items || ventaActual || [];
+    const totalBruto = lista.reduce((s, i) => s + i.price * i.qty, 0);
+    const ahorroGrupal = _resumenGruposMulticompra(lista).reduce((s, g) => s + g.ahorro, 0);
+    return Math.round(totalBruto - ahorroGrupal);
+}
+
+// Construye HTML del resumen de grupos para panel lateral y modal.
+function _resumenGrupalHTML() {
+    return _resumenGruposMulticompra().map(g => `
+        <div style="display:flex;justify-content:space-between;align-items:center;
+             padding:6px 12px;background:#F5F0FF;border-radius:6px;margin:4px 0;
+             font-size:0.78rem;color:#5B2A9E;">
+            <span>${g.etiquetaPack} · ${g.qtyTotal} unidades combinadas</span>
+            <span style="font-weight:800;">−$${g.ahorro.toLocaleString('es-AR')}</span>
+        </div>`).join('');
+}
+
+// Actualiza el bloque visual de resumen grupal en el panel lateral.
+function _actualizarResumenGrupalPanel() {
+    const contenedor = document.getElementById('itemsVenta');
+    if (!contenedor) return;
+    let el = document.getElementById('resumenMulticompraGrupal');
+    const html = _resumenGrupalHTML();
+    if (html) {
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'resumenMulticompraGrupal';
+            contenedor.insertAdjacentElement('afterend', el);
+        }
+        el.innerHTML = html;
+    } else if (el) {
+        el.innerHTML = '';
+    }
 }
 
 // Badge de oferta para el buscador
@@ -7655,16 +7785,14 @@ function badgeOfertaPOS(producto) {
         (producto.normal || 0) > 0 &&
         (producto.normal || 0) < (producto.price || 0)
     ) {
-        const pct = Math.round((1 - producto.normal / producto.price) * 100);
-        return `<span style="background:linear-gradient(135deg,#7b1fa2,#ab47bc);color:#fff;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">🏷️ PROMO -${pct}%</span>`;
+        return `<span style="background:linear-gradient(135deg,#7b1fa2,#ab47bc);color:#fff;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">🏷️ PROMO</span>`;
     }
     if (
         String(producto.catOferta || '').toUpperCase() === 'COMBO ACTIVO' &&
         (producto.normal || 0) > 0 &&
         (producto.normal || 0) < (producto.price || 0)
     ) {
-        const pct = Math.round((1 - producto.normal / producto.price) * 100);
-        return `<span style="background:linear-gradient(135deg,#ff9800,#ff5722);color:#fff;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">🎯 COMBO -${pct}%</span>`;
+        return `<span style="background:linear-gradient(135deg,#ff9800,#ff5722);color:#fff;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">🎯 COMBO</span>`;
     }
     return '';
 }
@@ -8239,7 +8367,7 @@ cargarProductos().then(async () => {
                 });
                 if (ventaActual.length > 0) {
                     renderVenta();
-                    const total = ventaActual.reduce((s, i) => s + i.price * i.qty, 0);
+                    const total = _totalCarritoConDescuentosGrupales();
                     mostrarBannerRecuperado(total);
                 } else {
                     localStorage.removeItem(CARRITO_KEY);
@@ -10983,7 +11111,7 @@ async function _precargarClientes() {
 }
 
 async function abrirModalFiado() {
-    const total = window._totalConRedondeo || ventaActual.reduce((s,i) => s + i.price * i.qty, 0);
+    const total = window._totalConRedondeo || _totalCarritoConDescuentosGrupales();
     document.getElementById('fiadoTotal').textContent = '$' + Math.round(total).toLocaleString('es-AR');
     // Vencimiento default +7 días
     const venc = new Date();
@@ -11163,7 +11291,7 @@ async function confirmarFiado() {
 
     // ✅ CAPTURAR ITEMS ANTES DE CERRAR MODAL Y VACIAR CARRITO
     const itemsSnapshot = [...ventaActual];
-    const total = window._totalConRedondeo || itemsSnapshot.reduce((s,i) => s + i.price * i.qty, 0);
+    const total = window._totalConRedondeo || _totalCarritoConDescuentosGrupales(itemsSnapshot);
 
     const now = new Date();
     const idFiado = 'FIADO-' + now.getFullYear() +
@@ -11214,7 +11342,7 @@ async function _confirmarFiadoSinTel() {
     const _fiadoGuardTimeout = setTimeout(() => { window._fiadoEnProceso = false; }, 30000);
 
     const itemsSnapshot = [...ventaActual];
-    const total = window._totalConRedondeo || itemsSnapshot.reduce((s,i) => s + i.price * i.qty, 0);
+    const total = window._totalConRedondeo || _totalCarritoConDescuentosGrupales(itemsSnapshot);
 
     const now = new Date();
     const idFiado = 'FIADO-' + now.getFullYear() +
@@ -11253,7 +11381,7 @@ async function _confirmarFiadoSinTel() {
 
 async function _procesarVentaFiado(datosFiado, itemsSnapshot) {
     // itemsSnapshot viene desde confirmarFiado — capturado antes de cerrar modal
-    const totalOriginal = itemsSnapshot.reduce((s,i) => s + i.price * i.qty, 0);
+    const totalOriginal = _totalCarritoConDescuentosGrupales(itemsSnapshot);
     const total = window._totalConRedondeo || totalOriginal;
     const _t = new Date();
     const hora = _t.getHours().toString().padStart(2,'0') + ':' + _t.getMinutes().toString().padStart(2,'0');
