@@ -1,3 +1,24 @@
+<!--
+  horario.html — v3
+  CHANGELOG v3:
+  - El texto que se envía al compartir horario ahora distingue abierto/cerrado:
+    · Abierto: "Almacén Copihue está atendiendo, los esperamos hasta las X hs"
+    · Cerrado: "Cerrado — abrimos mañana a las X hs" (o "el <día>" si el próximo
+      día abierto no es mañana, según Días ofertas.../diasAbierto de la planilla)
+  - Se agregó proximoDiaAbierto(): recorre los próximos 7 días usando el mismo
+    array diasAbierto (leído de planilla) para encontrar el próximo día abierto
+    y su hora de apertura correspondiente (columna de ese día en la planilla).
+  - parseHora y valorDia se movieron a nivel de módulo para reutilizarlos fuera
+    de cargarConfig(); CFG ahora también guarda aperturaRaw/cierreRaw (arrays
+    crudos por día) para poder calcular la apertura de cualquier día, no solo hoy.
+
+  CHANGELOG v2:
+  - FIX: la hora de apertura/cierre tomaba siempre el primer valor no vacío de la
+    fila (columna LUN), ignorando el día actual. Ahora selecciona la columna del
+    día de hoy (mismo mapeo PLAN_A_JS ya usado para diasAbierto), con fallback al
+    primer valor no vacío solo si la celda de hoy está vacía en la planilla.
+  - No se tocó nada más: misma API_URL, misma estructura, mismo resto de lógica.
+-->
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -411,10 +432,27 @@
   const MINUTOS_AVISO = 30;
 
   // Fallback si la API no responde
-  let CFG = { aperturaH:11, aperturaM:30, cierreH:22, cierreM:0, diasAbierto:[1,1,1,1,1,1,1] };
+  let CFG = { aperturaH:11, aperturaM:30, cierreH:22, cierreM:0, diasAbierto:[1,1,1,1,1,1,1], aperturaRaw:null, cierreRaw:null };
 
   // Planilla cols B-H = L M M J V S D → mapeo a día JS (0=Dom)
   const PLAN_A_JS = [1,2,3,4,5,6,0];
+  const DIAS_NOMBRE = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+
+  const parseHora = v => {
+    if (v === null || v === undefined || v === '') return null;
+    const s = String(v);
+    if (s.includes(':')) { const [h,m] = s.split(':'); return { h: parseInt(h), m: parseInt(m||0) }; }
+    return { h: parseInt(s), m: 0 };
+  };
+
+  // Valor de la planilla para un día puntual (planIdx = índice L..D). Si esa celda
+  // está vacía, cae de fallback al primer valor no vacío de la semana.
+  const valorDia = (arr, planIdx) => {
+    if (!arr) return null;
+    const v = arr[planIdx];
+    if (v !== null && v !== undefined && v !== '') return v;
+    return arr.find(x => x !== null && x !== undefined && x !== '');
+  };
 
   async function cargarConfig() {
     try {
@@ -422,21 +460,34 @@
       const d = await r.json();
       if (d.success && d.config) {
         const c = d.config;
-        const parseHora = v => {
-          if (v === null || v === undefined || v === '') return null;
-          const s = String(v);
-          if (s.includes(':')) { const [h,m] = s.split(':'); return { h: parseInt(h), m: parseInt(m||0) }; }
-          return { h: parseInt(s), m: 0 };
-        };
-        const ap = c['Horario apertura local'] && parseHora(c['Horario apertura local'].find(x => x !== null && x !== ''));
-        const ci = c['Horario cierre local']   && parseHora(c['Horario cierre local'].find(x => x !== null && x !== ''));
+        CFG.aperturaRaw = c['Horario apertura local'] || null;
+        CFG.cierreRaw   = c['Horario cierre local']   || null;
+        // Tomar el valor de HOY (columna correspondiente al día actual), no el primero de la fila
+        const hoyPlanIdx = PLAN_A_JS.indexOf(new Date().getDay());
+        const ap = parseHora(valorDia(CFG.aperturaRaw, hoyPlanIdx));
+        const ci = parseHora(valorDia(CFG.cierreRaw, hoyPlanIdx));
         if (ap) { CFG.aperturaH = ap.h; CFG.aperturaM = ap.m; }
         if (ci) { CFG.cierreH   = ci.h; CFG.cierreM   = ci.m; }
-        const diasRow = c['Horario apertura local'] || c['Horario cierre local'];
+        const diasRow = CFG.aperturaRaw || CFG.cierreRaw;
         if (diasRow) CFG.diasAbierto = diasRow.map(v => (v !== null && v !== '' && String(v) !== '0') ? 1 : 0);
       }
     } catch(e) { console.warn('Config fallback:', e.message); }
     inicializarUI();
+  }
+
+  // Busca el próximo día (empezando por mañana) marcado como abierto en la planilla
+  // y devuelve su hora de apertura. Si en 7 días no encuentra ninguno abierto, null.
+  function proximoDiaAbierto() {
+    const hoyJs = new Date().getDay();
+    for (let offset = 1; offset <= 7; offset++) {
+      const jsDay = (hoyJs + offset) % 7;
+      const planIdx = PLAN_A_JS.indexOf(jsDay);
+      if (CFG.diasAbierto[planIdx] === 1) {
+        const ap = parseHora(valorDia(CFG.aperturaRaw, planIdx)) || { h: CFG.aperturaH, m: CFG.aperturaM };
+        return { jsDay, planIdx, offset, h: ap.h, m: ap.m };
+      }
+    }
+    return null;
   }
 
   function esDiaAbierto() {
@@ -675,6 +726,22 @@
       ctx.textAlign = 'center';
       ctx.fillText('almacen-copihue.vercel.app', W/2, H - 40);
 
+      // Texto del mensaje: distinto según esté abierto o cerrado
+      let estadoTexto;
+      if (estaAbierto) {
+        estadoTexto = `Almacén Copihue está atendiendo, los esperamos hasta las ${hCierre} hs`;
+      } else {
+        const prox = proximoDiaAbierto();
+        if (prox) {
+          const horaAp = String(prox.h).padStart(2,'0') + ':' + String(prox.m).padStart(2,'0');
+          const cuando = prox.offset === 1 ? 'mañana' : `el ${DIAS_NOMBRE[prox.jsDay]}`;
+          estadoTexto = `Cerrado — abrimos ${cuando} a las ${horaAp} hs`;
+        } else {
+          estadoTexto = 'Cerrado';
+        }
+      }
+      const textoCompartir = `🏪 Almacén Copihue • Bariloche\n${estadoTexto}`;
+
       // Convertir a blob y compartir
       canvas.toBlob(async (blob) => {
         const file = new File([blob], 'horario-copihue.png', { type: 'image/png' });
@@ -683,7 +750,7 @@
             await navigator.share({
               files: [file],
               title: 'Almacén Copihue — Horario',
-              text: `🏪 Almacén Copihue • Bariloche\nCerramos a las ${hCierre} hs`
+              text: textoCompartir
             });
           } catch(e) {
             if (e.name !== 'AbortError') descargarImagen(canvas);
