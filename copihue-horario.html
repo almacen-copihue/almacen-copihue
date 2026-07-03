@@ -1,5 +1,16 @@
 <!--
-  copihue-horario-FIX.html — v11
+  copihue-horario-FIX.html — v12
+  CHANGELOG v12:
+  - FIX: "Abrimos a las X hs" siempre leía la apertura de HOY, aunque el local
+    ya estuviera abierto o ya hubiese cerrado por hoy (dato irrelevante en esos
+    casos). Ahora textoAperturaProxima() distingue:
+      · Todavía no abrió hoy → "Hoy abrimos a las X hs" (horario de hoy)
+      · Ya abrió / ya cerró / hoy no atiende → "Mañana abrimos a las X hs"
+        (horario de MAÑANA por default, vía proximaApertura())
+      · Si el próximo día abierto no es mañana → "El <día> abrimos a las X hs"
+    Aplicado en la tarjeta, el postMessage (uso como iframe) y la imagen que
+    se genera al compartir.
+
   CHANGELOG v11:
   - "hs" pasó de estar debajo de la hora (línea propia, centrado) a estar a la
     derecha, alineado a la base de los números ("22:00 hs" como unidad, más
@@ -542,7 +553,7 @@
     <div class="nombre-principal">Almacén<br>Copihue</div>
     <div class="nombre-sub">Bariloche</div>
     <div id="versionBadge" style="position:absolute; top:2px; right:-58px; z-index:999; background:rgba(0,0,0,0.55); color:#69f0ae; font-family:monospace; font-size:11px; padding:4px 10px; border-radius:8px; letter-spacing:0.5px; pointer-events:none;">
-      v11
+      v12
     </div>
   </div>
 
@@ -722,6 +733,24 @@
     return planIdx === -1 || CFG.diasAbierto[planIdx] === 1;
   }
 
+  // Texto de "próxima apertura", contemplando 3 casos:
+  //  1. Todavía no abrió hoy (es día de atención y aún no llegó la hora)  → "Hoy abrimos a las X hs"
+  //  2. Ya está abierto, o ya cerró por hoy, o hoy no atiende            → "Mañana abrimos a las X hs"
+  //     (usando el horario de MAÑANA, no el de hoy, vía proximaApertura())
+  //  3. Si el próximo día abierto no es mañana (ej. cerrado 2 días)      → "El <día> abrimos a las X hs"
+  function textoAperturaProxima() {
+    const ahora = new Date(), h = ahora.getHours(), m = ahora.getMinutes();
+    const todaviaNoAbrioHoy = esDiaAbierto() && (h < CFG.aperturaH || (h === CFG.aperturaH && m < CFG.aperturaM));
+    if (todaviaNoAbrioHoy) {
+      const hHoy = String(CFG.aperturaH).padStart(2,'0') + ':' + String(CFG.aperturaM).padStart(2,'0');
+      return `Hoy abrimos a las ${hHoy} hs`;
+    }
+    const prox = proximaApertura();
+    const hProx = String(prox.h).padStart(2,'0') + ':' + String(prox.m).padStart(2,'0');
+    const cuando = prox.esManana ? 'Mañana' : (prox.nombreDia ? `El ${prox.nombreDia}` : 'Pronto');
+    return `${cuando} abrimos a las ${hProx} hs`;
+  }
+
   // Saludo dinámico según la hora (zona horaria Bariloche, no la del dispositivo)
   function saludoSegunHora() {
     const hora = parseInt(new Intl.DateTimeFormat('es-AR', {
@@ -770,7 +799,7 @@
     const elHora = document.getElementById('horarioHora');
     if (elHora) elHora.textContent = hCierre;
     const elAp = document.getElementById('aperturaTexto');
-    if (elAp) elAp.textContent = 'Abrimos a las ' + hApertura + ' hs';
+    if (elAp) elAp.textContent = textoAperturaProxima();
     actualizarReloj();
     setInterval(actualizarReloj, 1000);
   }
@@ -803,13 +832,13 @@
       if (puntoBadge){ puntoBadge.style.background='#ef9a9a'; puntoBadge.style.boxShadow='none'; puntoBadge.style.animation='none'; }
       if (cdWrap)   cdWrap.classList.add('oculto');
       if (btnLlego) btnLlego.classList.remove('visible');
-      if (apTexto)  apTexto.textContent = 'Abrimos a las ' + hApertura + ' hs';
+      if (apTexto)  apTexto.textContent = textoAperturaProxima();
     } else {
       // ── ABIERTO ──
       if (badge)    badge.classList.remove('cerrado');
       if (puntoBadge){ puntoBadge.style.background='#69f0ae'; puntoBadge.style.boxShadow='0 0 8px #69f0ae'; puntoBadge.style.animation=''; }
       if (cdWrap)   cdWrap.classList.remove('oculto');
-      if (apTexto)  apTexto.textContent = 'Abrimos a las ' + hApertura + ' hs';
+      if (apTexto)  apTexto.textContent = textoAperturaProxima();
 
       // Countdown
       const horas  = Math.floor(mins / 60);
@@ -848,7 +877,7 @@
     // postMessage al padre cuando se usa como iframe
     const hCierre = String(CFG.cierreH).padStart(2,'0') + ':' + String(CFG.cierreM).padStart(2,'0');
     let estadoMsg = mins <= 0
-      ? `🔴 Cerrado. Abrimos a las ${hApertura} hs`
+      ? `🔴 Cerrado. ${textoAperturaProxima()}`
       : mins <= MINUTOS_AVISO
         ? `⚠️ Cerramos en ${mins} min (${hCierre} hs)`
         : `✅ Abierto. Cerramos a las ${hCierre} hs`;
@@ -1025,10 +1054,9 @@ async function compartirHorario() {
     ctx.fillText('hs', W / 2, 590);
 
     // Apertura
-    const hApertura = String(CFG.aperturaH).padStart(2, '0') + ':' + String(CFG.aperturaM).padStart(2, '0');
     ctx.fillStyle = 'rgba(255,255,255,0.5)';
     ctx.font = 'bold 22px Nunito, Arial, sans-serif';
-    ctx.fillText(`Abrimos a las ${hApertura} hs`, W / 2, 635);
+    ctx.fillText(textoAperturaProxima(), W / 2, 635);
 
     // Días de la semana
     const DIAS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
