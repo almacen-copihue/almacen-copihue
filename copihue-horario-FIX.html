@@ -1,3 +1,34 @@
+<!--
+  copihue-horario-FIX.html — v3
+  CHANGELOG v3:
+  - Badge de versión simplificado: antes tenía un nombre descriptivo largo +
+    fecha ("v.FIX-normalizacion-horarios · 03-07-26") que no aportaba nada de
+    un vistazo. Ahora es solo un número que sube +1 en cada entrega (v3).
+  - Mensaje de compartir (estado abierto) ahora usa saludo dinámico según la
+    hora real de Bariloche (Buenos días / Buenas tardes / Buenas noches), en
+    vez de texto fijo. Ejemplo a la tarde:
+    "¡Buenas tardes, vecino! Estamos atendiendo hasta las 22:00 hs 🧡"
+  - Se achicó el contenedor principal un 10% (transform: scale(0.9)).
+
+  CHANGELOG (versiones previas):
+  - FIX parseHora: cuando la celda de la planilla queda con formato Fecha/Hora,
+    GAS la manda como ISO UTC con día base 1899-12-30 (ej "1899-12-30T22:16:00.000Z").
+    Antes se convertía con d.getHours()/d.getMinutes() (zona horaria del
+    dispositivo). Ahora se fuerza siempre America/Argentina/Buenos_Aires vía
+    Intl.DateTimeFormat, así el resultado no depende de la zona horaria del
+    teléfono/PC que abre la página.
+  - Normalización de horarios documentada y reforzada: acepta "2" → 02:00,
+    "22" → 22:00, "2:30" → 02:30, "22:00" → 22:00. Nunca marca error por un
+    número entero 0-23 (con o sin ':'). Todo se normaliza a {h,m} antes de
+    cualquier comparación; la UI siempre muestra HH:MM, nunca el texto crudo.
+    (La visualización HH:MM DENTRO de la planilla de Google Sheets es un tema
+    de formato de celda en Sheets, no de este HTML — no se puede forzar desde
+    acá.)
+  - Texto del mensaje al compartir horario, redacción exacta pedida:
+    · Abierto: "Almacén Copihue está atendiendo, los esperamos hasta las X hs"
+    · Cerrado: "Cerrado — abrimos mañana a las X hs" (o "el <día>" si el
+      próximo día abierto no es mañana, usando proximaApertura()).
+-->
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -69,6 +100,7 @@
     flex-direction: column;
     align-items: center;
     gap: 20px;
+    transform: scale(0.9);
   }
 
   /* Nombre del almacén */
@@ -444,7 +476,7 @@
 <body>
 
 <div id="versionBadge" style="position:fixed; top:8px; left:50%; transform:translateX(-50%); z-index:999; background:rgba(0,0,0,0.55); color:#69f0ae; font-family:monospace; font-size:11px; padding:4px 10px; border-radius:8px; letter-spacing:0.5px; pointer-events:none;">
-  v.FIX-proxima-apertura · 02-07-26
+  v3
 </div>
 
 <div class="fondo"></div>
@@ -527,22 +559,55 @@
   // Planilla cols B-H = L M M J V S D → mapeo a día JS (0=Dom)
   const PLAN_A_JS = [1,2,3,4,5,6,0];
 
+  // ─────────────────────────────────────────────────────────────
+  // NORMALIZACIÓN DE HORARIOS (tolerante en la entrada, prolija en la salida)
+  //   2      → 02:00      11    → 11:00      22    → 22:00
+  //   2:30   → 02:30      02:30 → 02:30      22:00 → 22:00
+  // Reglas:
+  //  1. Entero 0-23 solo  → hora exacta HH:00
+  //  2. Contiene ':'      → formato HH:MM
+  //  3. Compatible con el formato actual HH:MM (sin cambios de comportamiento)
+  //  4. Internamente todo se normaliza a {h,m} para todas las comparaciones
+  //  5. La UI siempre muestra HH:MM (padStart), nunca el texto crudo ingresado
+  //  6. Nunca se marca error por un número válido 0-23 (con o sin ':')
+  //  7. minutosParaCerrar()/proximaApertura() usan siempre el valor normalizado,
+  //     nunca el string original de la planilla
   // Parsea un valor de celda (ISO UTC, "22:10" o "22") a {h, m}. Global para reusar fuera de cargarConfig.
   const parseHora = v => {
     if (v === null || v === undefined || v === '') return null;
     const s = String(v).trim();
-    // ISO UTC que envía GAS cuando la celda tiene minutos (ej: "1899-12-31T01:10:00.000Z")
-    // Usar Date.getHours/getMinutes para convertir al timezone local del browser
+    // ISO UTC que envía GAS cuando la celda quedó con formato Fecha/Hora en la
+    // planilla (ej: "1899-12-30T22:16:00.000Z"). Se convierte SIEMPRE a la hora
+    // local de Bariloche explícitamente (no la del dispositivo/navegador), para
+    // que el resultado no dependa de en qué zona horaria esté configurado el
+    // teléfono o PC que abre la página.
     if (s.includes('T') && s.includes('Z')) {
       try {
         const d = new Date(s);
-        if (!isNaN(d)) return { h: d.getHours(), m: d.getMinutes() };
+        if (!isNaN(d)) {
+          const partes = new Intl.DateTimeFormat('es-AR', {
+            timeZone: 'America/Argentina/Buenos_Aires',
+            hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+          }).formatToParts(d);
+          return {
+            h: parseInt(partes.find(p => p.type === 'hour').value),
+            m: parseInt(partes.find(p => p.type === 'minute').value)
+          };
+        }
       } catch(e) {}
       return null;
     }
-    // String "22:10" o "22"
-    if (s.includes(':')) { const [h,m] = s.split(':'); return { h: parseInt(h), m: parseInt(m||0) }; }
-    return { h: parseInt(s), m: 0 };
+    // "22:10", "2:30" → HH:MM
+    if (s.includes(':')) {
+      const [h, m] = s.split(':');
+      const hh = parseInt(h), mm = parseInt(m || 0);
+      if (isNaN(hh)) return null;
+      return { h: hh, m: isNaN(mm) ? 0 : mm };
+    }
+    // "2", "11", "22" → hora exacta, nunca error por ser solo un número 0-23
+    const hh = parseInt(s);
+    if (isNaN(hh)) return null;
+    return { h: hh, m: 0 };
   };
 
   async function cargarConfig() {
@@ -602,6 +667,16 @@
   function esDiaAbierto() {
     const planIdx = PLAN_A_JS.indexOf(new Date().getDay());
     return planIdx === -1 || CFG.diasAbierto[planIdx] === 1;
+  }
+
+  // Saludo dinámico según la hora (zona horaria Bariloche, no la del dispositivo)
+  function saludoSegunHora() {
+    const hora = parseInt(new Intl.DateTimeFormat('es-AR', {
+      timeZone: 'America/Argentina/Buenos_Aires', hour: '2-digit', hourCycle: 'h23'
+    }).format(new Date()));
+    if (hora < 12) return 'Buenos días';
+    if (hora < 19) return 'Buenas tardes';
+    return 'Buenas noches';
   }
 
   function minutosParaCerrar() {
@@ -960,12 +1035,12 @@ async function compartirHorario() {
     // muestra cuándo vuelve a abrir (mañana, o el día que corresponda).
     let textoCompartir;
     if (estaAbierto) {
-      textoCompartir = `🏪 Almacén Copihue • Abierto\nEstamos atendiendo hasta las ${hCierre} hs`;
+      textoCompartir = `🏪 Almacén Copihue • Bariloche\n¡${saludoSegunHora()}, vecino! Estamos atendiendo hasta las ${hCierre} hs 🧡`;
     } else {
       const prox = proximaApertura();
       const hProx = String(prox.h).padStart(2, '0') + ':' + String(prox.m).padStart(2, '0');
       const cuando = prox.esManana ? 'mañana' : (prox.nombreDia ? `el ${prox.nombreDia}` : 'pronto');
-      textoCompartir = `🏪 Almacén Copihue • Cerrado\nLos esperamos ${cuando} a las ${hProx} hs`;
+      textoCompartir = `🏪 Almacén Copihue • Bariloche\nCerrado — abrimos ${cuando} a las ${hProx} hs`;
     }
 
     if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
