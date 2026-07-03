@@ -1,5 +1,19 @@
 <!--
-  copihue-horario-FIX.html — v14
+  copihue-horario-FIX.html — v15
+  CHANGELOG v15:
+  - Nueva sección "Ver horario completo": un botón chico y sutil (mismo estilo
+    de pill que el de compartir, pero discreto — fondo semitransparente, sin
+    animación de pulso) debajo de los chips de días. Al tocarlo despliega,
+    con una animación suave, la lista de los 7 días con su horario real
+    (ej. "Viernes  11:00 – 22:00" / "Domingo  Cerrado").
+  - Los datos de esa lista salen SIEMPRE de CFG.arrApertura / CFG.arrCierre,
+    es decir de la planilla — no hay ningún horario fijo en el código. Si un
+    día no tiene apertura o cierre cargados en la planilla, se muestra
+    "Sin dato" en vez de inventar un horario.
+  - El botón queda oculto mientras no haya datos reales cargados (mismo
+    criterio que el resto de la tarjeta: CFG.cargado === true), así nunca
+    se puede abrir un horario semanal con datos inventados.
+
   CHANGELOG v14 (AUDITORÍA — planilla como única fuente de verdad):
   - Se eliminó el horario hardcodeado que servía de "fallback" cuando el GAS
     no respondía o la planilla no tenía apertura/cierre válidos para hoy
@@ -450,7 +464,82 @@
     animation: none;
   }
 
-  /* Botón compartir */
+  /* Ver horario semanal — botón sutil */
+  .toggle-semana {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: rgba(255,255,255,0.55);
+    padding: 7px 16px;
+    border-radius: 50px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    font-family: 'Nunito', sans-serif;
+    cursor: pointer;
+    margin-top: 14px;
+    transition: background 0.2s, color 0.2s, border-color 0.2s;
+  }
+  .toggle-semana:hover {
+    background: rgba(255,255,255,0.1);
+    color: rgba(255,255,255,0.85);
+    border-color: rgba(255,255,255,0.2);
+  }
+  .toggle-semana svg.icono-cal { width: 13px; height: 13px; flex-shrink: 0; opacity: 0.8; }
+  .toggle-semana svg.chevron {
+    width: 11px; height: 11px; flex-shrink: 0;
+    transition: transform 0.3s ease;
+  }
+  .toggle-semana.abierto svg.chevron { transform: rotate(180deg); }
+
+  .panel-semana {
+    width: 100%;
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: max-height 0.35s ease, opacity 0.25s ease, margin-top 0.35s ease;
+    margin-top: 0;
+  }
+  .panel-semana.abierto {
+    max-height: 320px;
+    opacity: 1;
+    margin-top: 12px;
+  }
+  .fila-semana {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 7px 4px;
+    font-size: 0.78rem;
+    font-family: 'Nunito', sans-serif;
+    color: rgba(255,255,255,0.65);
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+  }
+  .fila-semana:last-child { border-bottom: none; }
+  .fila-semana.hoy {
+    color: white;
+    font-weight: 800;
+  }
+  .fila-semana .nombre-dia { text-transform: capitalize; letter-spacing: 0.3px; }
+  .fila-semana.hoy .nombre-dia::before {
+    content: '';
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--naranja-brillante);
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  .fila-semana .rango-horario { font-variant-numeric: tabular-nums; }
+  .fila-semana.dia-cerrado .rango-horario {
+    color: rgba(255,255,255,0.35);
+    font-style: italic;
+  }
+
+
   .btn-compartir {
     display: flex;
     align-items: center;
@@ -589,7 +678,7 @@
     <div class="nombre-principal">Almacén<br>Copihue</div>
     <div class="nombre-sub">Bariloche</div>
     <div id="versionBadge" style="position:absolute; top:2px; right:-58px; z-index:999; background:rgba(0,0,0,0.55); color:#69f0ae; font-family:monospace; font-size:11px; padding:4px 10px; border-radius:8px; letter-spacing:0.5px; pointer-events:none;">
-      v14
+      v15
     </div>
   </div>
 
@@ -615,6 +704,13 @@
     <div class="apertura-texto" id="aperturaTexto">Abrimos a las --:-- hs</div>
 
     <div class="dias" id="dias"></div>
+
+    <button class="toggle-semana" id="toggleSemana" style="display:none;" onclick="toggleHorarioSemana()">
+      <svg class="icono-cal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="3"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>
+      <span>Ver horario completo</span>
+      <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+    </button>
+    <div class="panel-semana" id="panelSemana"></div>
   </div>
 
   <div class="reloj-vivo">
@@ -845,6 +941,8 @@
     const elHora      = document.getElementById('horarioHora');
     const elAp        = document.getElementById('aperturaTexto');
     const diasDiv     = document.getElementById('dias');
+    const toggleSemana= document.getElementById('toggleSemana');
+    const panelSemana = document.getElementById('panelSemana');
 
     if (tarjeta) tarjeta.classList.remove('urgencia-4','urgencia-2','urgencia-1');
     if (badge)   badge.classList.add('cerrado');
@@ -855,6 +953,8 @@
     if (elHora) elHora.textContent = '--:--';
     if (elAp) elAp.textContent = 'No se pudo leer el horario desde la planilla';
     if (diasDiv) diasDiv.innerHTML = '';
+    if (toggleSemana) toggleSemana.style.display = 'none';
+    if (panelSemana) { panelSemana.classList.remove('abierto'); panelSemana.innerHTML = ''; }
 
     // El reloj en vivo (hora real del dispositivo/servidor) sigue funcionando
     // igual: no depende de la planilla, así que no hay motivo para ocultarlo.
@@ -900,6 +1000,61 @@
     if (elAp) elAp.textContent = textoAperturaProxima();
     actualizarReloj();
     setInterval(actualizarReloj, 1000);
+
+    const toggleSemana = document.getElementById('toggleSemana');
+    if (toggleSemana) toggleSemana.style.display = '';
+    renderHorarioSemana();
+  }
+
+  // Arma la lista de LUN..DOM con la apertura/cierre reales de la planilla
+  // (CFG.arrApertura / CFG.arrCierre), tal cual están cargados — ningún
+  // horario se inventa acá, si un día no tiene datos se muestra "Cerrado".
+  function renderHorarioSemana() {
+    const panel = document.getElementById('panelSemana');
+    if (!panel || !CFG.cargado) return;
+    const DIAS = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+    const hoyJsDay = new Date().getDay();
+    panel.innerHTML = '';
+    DIAS.forEach((nombre, jsIdx) => {
+      const planIdx = PLAN_A_JS.indexOf(jsIdx);
+      const abierto = planIdx !== -1 && CFG.diasAbierto[planIdx] === 1;
+      const fila = document.createElement('div');
+      fila.className = 'fila-semana' + (jsIdx === hoyJsDay ? ' hoy' : '') + (!abierto ? ' dia-cerrado' : '');
+
+      const spanNombre = document.createElement('span');
+      spanNombre.className = 'nombre-dia';
+      spanNombre.textContent = nombre;
+
+      const spanRango = document.createElement('span');
+      spanRango.className = 'rango-horario';
+      if (abierto) {
+        const apRaw = CFG.arrApertura && parseHora(CFG.arrApertura[planIdx]);
+        const ciRaw = CFG.arrCierre   && parseHora(CFG.arrCierre[planIdx]);
+        if (apRaw && ciRaw) {
+          const hAp = String(apRaw.h).padStart(2,'0') + ':' + String(apRaw.m).padStart(2,'0');
+          const hCi = String(ciRaw.h).padStart(2,'0') + ':' + String(ciRaw.m).padStart(2,'0');
+          spanRango.textContent = `${hAp} – ${hCi}`;
+        } else {
+          spanRango.textContent = 'Sin dato';
+        }
+      } else {
+        spanRango.textContent = 'Cerrado';
+      }
+
+      fila.appendChild(spanNombre);
+      fila.appendChild(spanRango);
+      panel.appendChild(fila);
+    });
+  }
+
+  function toggleHorarioSemana() {
+    const btn   = document.getElementById('toggleSemana');
+    const panel = document.getElementById('panelSemana');
+    if (!btn || !panel) return;
+    const abrir = !panel.classList.contains('abierto');
+    panel.classList.toggle('abierto', abrir);
+    btn.classList.toggle('abierto', abrir);
+    btn.querySelector('span').textContent = abrir ? 'Ocultar horario completo' : 'Ver horario completo';
   }
 
   // Reloj en vivo (usado solo cuando CFG.cargado === true; el interval que
