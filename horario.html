@@ -1,5 +1,15 @@
 <!--
-  horario.html — v4
+  horario.html — v5
+  CHANGELOG v5:
+  - FIX bug "1899:16" (u otros valores tipo "1899:XX"): si una celda de horario
+    en la planilla quedó con formato Fecha/Hora en vez de texto/número plano,
+    Google Apps Script la serializa en JSON como fecha ISO UTC con día base
+    1899-12-30 (ej: "1899-12-30T22:16:00.000Z"). El parser anterior partía por
+    ':' a lo bruto y agarraba "1899" como si fuera la hora. Ahora parseHora()
+    detecta ese formato ISO, lo parsea como fecha real y lo convierte a la hora
+    local de Bariloche (America/Argentina/Buenos_Aires) para recuperar el valor
+    correcto. No cambia nada para celdas con texto/número plano (ej "22:00" o 22).
+
   CHANGELOG v4:
   - Se achicó el widget completo (.contenedor) un 10% con transform: scale(0.9),
     manteniéndolo centrado. No afecta la imagen que se genera al compartir
@@ -447,6 +457,23 @@
   const parseHora = v => {
     if (v === null || v === undefined || v === '') return null;
     const s = String(v);
+    // Si la celda de la planilla quedó con formato Fecha/Hora, Apps Script la
+    // serializa como ISO UTC con fecha base 1899-12-30 (ej: "1899-12-30T22:16:00.000Z").
+    // Partir por ':' a lo bruto agarra "1899" como si fuera la hora → bug "1899:16".
+    // Hay que parsear la fecha real y leerla en la zona horaria de Bariloche.
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s)) {
+      const fecha = new Date(s);
+      if (!isNaN(fecha.getTime())) {
+        const partes = new Intl.DateTimeFormat('es-AR', {
+          timeZone: 'America/Argentina/Buenos_Aires',
+          hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+        }).formatToParts(fecha);
+        return {
+          h: parseInt(partes.find(p => p.type === 'hour').value),
+          m: parseInt(partes.find(p => p.type === 'minute').value)
+        };
+      }
+    }
     if (s.includes(':')) { const [h,m] = s.split(':'); return { h: parseInt(h), m: parseInt(m||0) }; }
     return { h: parseInt(s), m: 0 };
   };
