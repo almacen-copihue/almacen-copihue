@@ -1,5 +1,34 @@
 <!--
-  copihue-horario-FIX.html — v13
+  copihue-horario-FIX.html — v14
+  CHANGELOG v14 (AUDITORÍA — planilla como única fuente de verdad):
+  - Se eliminó el horario hardcodeado que servía de "fallback" cuando el GAS
+    no respondía o la planilla no tenía apertura/cierre válidos para hoy
+    (antes: CFG = {aperturaH:11, aperturaM:30, cierreH:22, cierreM:0, ...}).
+    Ese fallback hacía que la tarjeta mostrara, por ejemplo, "Mañana abrimos
+    a las 11:30 hs" AUNQUE ese dato no viniera realmente de la planilla —
+    o sea, mentía si Sheets/GAS estaban caídos o la celda del día estaba vacía.
+  - Ahora CFG arranca con cargado:false y todos los valores en null. Solo se
+    pasa a cargado:true si el GAS respondió success:true Y la planilla trae
+    una hora de apertura Y una de cierre válidas para hoy (parseHora() las
+    pudo interpretar). Si falta cualquiera de esas dos cosas, se considera
+    que no hay horario real para mostrar.
+  - Nueva función mostrarErrorHorario(): si no se pudo leer la planilla,
+    la tarjeta muestra honestamente "Horario no disponible" / "No se pudo
+    leer el horario desde la planilla" (badge ámbar), oculta el countdown y
+    el botón "Aún llego", y NO dibuja ningún número de hora. El reloj en vivo
+    (hora real del dispositivo) sigue andando aparte, porque no depende de
+    la planilla.
+  - Auto-reintento: si falla la carga, cargarConfig() se vuelve a llamar solo
+    cada 20s (REINTENTO_MS) hasta lograr datos reales — sin recargar la
+    página. Apenas la planilla/GAS vuelven a responder, la tarjeta se
+    autocorrige con el horario real.
+  - compartirHorario(): si CFG.cargado es false, ya no genera ni comparte una
+    imagen con horarios inventados — avisa que todavía no hay datos reales y
+    corta ahí.
+  - Resumen: la planilla (vía GAS) es la ÚNICA fuente de verdad para
+    apertura/cierre/días. Si esa fuente no responde, la app lo dice en vez
+    de rellenar con un número fijo en el código.
+
   CHANGELOG v13:
   - FIX posible causa de "cambié la planilla y no se refleja": el fetch a
     getConfig no tenía cache-busting, así que el navegador (sobre todo mobile
@@ -560,7 +589,7 @@
     <div class="nombre-principal">Almacén<br>Copihue</div>
     <div class="nombre-sub">Bariloche</div>
     <div id="versionBadge" style="position:absolute; top:2px; right:-58px; z-index:999; background:rgba(0,0,0,0.55); color:#69f0ae; font-family:monospace; font-size:11px; padding:4px 10px; border-radius:8px; letter-spacing:0.5px; pointer-events:none;">
-      v13
+      v14
     </div>
   </div>
 
@@ -623,9 +652,12 @@
   const API_URL = 'https://script.google.com/macros/s/AKfycbzWZzDvdGfW8vd2-FpQolT852cdPMeHbfKugn9DBOlju75bE1D0SUNB5EKEDOsI2vP4lA/exec';
   const WA_NUMBER = '542944907380';
   const MINUTOS_AVISO = 30;
+  const REINTENTO_MS = 20000; // si falla la carga, reintenta cada 20s hasta lograrlo
 
-  // Fallback si la API no responde
-  let CFG = { aperturaH:11, aperturaM:30, cierreH:22, cierreM:0, diasAbierto:[1,1,1,1,1,1,1] };
+  // SIN fallback hardcodeado. La planilla es la única fuente de verdad:
+  // si no se pudo leer, CFG.cargado queda en false y la UI lo muestra
+  // honestamente ("Horario no disponible") en vez de inventar un horario.
+  let CFG = { cargado:false, aperturaH:null, aperturaM:null, cierreH:null, cierreM:null, diasAbierto:null, arrApertura:null, arrCierre:null };
 
   // Planilla cols B-H = L M M J V S D → mapeo a día JS (0=Dom)
   const PLAN_A_JS = [1,2,3,4,5,6,0];
@@ -685,31 +717,46 @@
     try {
       const r = await fetch(API_URL + '?action=getConfig&_=' + Date.now(), { signal: AbortSignal.timeout(6000), cache: 'no-store' });
       const d = await r.json();
-      if (d.success && d.config) {
-        const c = d.config;
-        // Índice de la columna correspondiente al día de HOY (0=Lun...6=Dom en la planilla)
-        const hoyPlanIdx = PLAN_A_JS.indexOf(new Date().getDay());
+      if (!d.success || !d.config) throw new Error('Respuesta del GAS sin success/config');
+      const c = d.config;
 
-        // Toma el valor de la columna de hoy; si está vacía, cae al primer valor no vacío (fallback)
-        const valorDeHoy = (arr) => {
-          if (!arr) return null;
-          if (hoyPlanIdx !== -1 && arr[hoyPlanIdx] !== null && arr[hoyPlanIdx] !== '') return arr[hoyPlanIdx];
-          return arr.find(x => x !== null && x !== '');
-        };
+      // Índice de la columna correspondiente al día de HOY (0=Lun...6=Dom en la planilla)
+      const hoyPlanIdx = PLAN_A_JS.indexOf(new Date().getDay());
 
-        const ap = c['Horario apertura local'] && parseHora(valorDeHoy(c['Horario apertura local']));
-        const ci = c['Horario cierre local']   && parseHora(valorDeHoy(c['Horario cierre local']));
-        if (ap) { CFG.aperturaH = ap.h; CFG.aperturaM = ap.m; }
-        if (ci) { CFG.cierreH   = ci.h; CFG.cierreM   = ci.m; }
-        const diasRow = c['Horario apertura local'] || c['Horario cierre local'];
-        if (diasRow) CFG.diasAbierto = diasRow.map(v => (v !== null && v !== '' && String(v) !== '0') ? 1 : 0);
+      // Toma el valor de la columna de hoy; si está vacía, cae al primer valor no vacío
+      // de la MISMA fila de la planilla (sigue siendo dato real, no un invento nuestro).
+      const valorDeHoy = (arr) => {
+        if (!arr) return null;
+        if (hoyPlanIdx !== -1 && arr[hoyPlanIdx] !== null && arr[hoyPlanIdx] !== '') return arr[hoyPlanIdx];
+        return arr.find(x => x !== null && x !== '');
+      };
 
-        // Guardamos los arrays crudos (por día de la semana) para poder calcular "próxima apertura"
-        CFG.arrApertura = c['Horario apertura local'] || null;
-        CFG.arrCierre   = c['Horario cierre local']   || null;
-      }
-    } catch(e) { console.warn('Config fallback:', e.message); }
-    inicializarUI();
+      const ap = c['Horario apertura local'] && parseHora(valorDeHoy(c['Horario apertura local']));
+      const ci = c['Horario cierre local']   && parseHora(valorDeHoy(c['Horario cierre local']));
+
+      // Si la planilla no trajo apertura o cierre reales, NO seguimos: no hay
+      // horario válido que mostrar. Mejor decirlo honestamente que inventar uno.
+      if (!ap || !ci) throw new Error('Planilla sin apertura/cierre válidos para hoy');
+
+      CFG.aperturaH = ap.h; CFG.aperturaM = ap.m;
+      CFG.cierreH   = ci.h; CFG.cierreM   = ci.m;
+
+      const diasRow = c['Horario apertura local'] || c['Horario cierre local'];
+      CFG.diasAbierto = diasRow.map(v => (v !== null && v !== '' && String(v) !== '0') ? 1 : 0);
+
+      // Guardamos los arrays crudos (por día de la semana) para poder calcular "próxima apertura"
+      CFG.arrApertura = c['Horario apertura local'] || null;
+      CFG.arrCierre   = c['Horario cierre local']   || null;
+
+      CFG.cargado = true;
+      inicializarUI();
+    } catch(e) {
+      console.warn('No se pudo leer el horario de la planilla:', e.message);
+      CFG.cargado = false;
+      mostrarErrorHorario();
+      // Reintenta solo: si vuelve la conexión con el GAS, se autocorrige sin recargar la página
+      setTimeout(cargarConfig, REINTENTO_MS);
+    }
   }
 
   // Busca el próximo día en que el local abre (empezando mañana) y su horario.
@@ -786,7 +833,51 @@
     window.open(`https://wa.me/${WA_NUMBER}?text=${encodeURIComponent(texto)}`, '_blank');
   }
 
+  // Estado honesto cuando NO se pudo leer la planilla: no se muestra ningún
+  // horario inventado, se avisa claramente que falta el dato real.
+  function mostrarErrorHorario() {
+    const badge      = document.getElementById('estadoBadge');
+    const estadoTxt   = document.getElementById('estadoTexto');
+    const puntoBadge  = document.getElementById('puntoBadge');
+    const cdWrap      = document.getElementById('countdownWrap');
+    const btnLlego    = document.getElementById('btnAunLlego');
+    const tarjeta     = document.getElementById('tarjetaEstado');
+    const elHora      = document.getElementById('horarioHora');
+    const elAp        = document.getElementById('aperturaTexto');
+    const diasDiv     = document.getElementById('dias');
+
+    if (tarjeta) tarjeta.classList.remove('urgencia-4','urgencia-2','urgencia-1');
+    if (badge)   badge.classList.add('cerrado');
+    if (estadoTxt) estadoTxt.textContent = 'Horario no disponible';
+    if (puntoBadge){ puntoBadge.style.background='#ffb300'; puntoBadge.style.boxShadow='none'; puntoBadge.style.animation='none'; }
+    if (cdWrap) cdWrap.classList.add('oculto');
+    if (btnLlego) btnLlego.classList.remove('visible');
+    if (elHora) elHora.textContent = '--:--';
+    if (elAp) elAp.textContent = 'No se pudo leer el horario desde la planilla';
+    if (diasDiv) diasDiv.innerHTML = '';
+
+    // El reloj en vivo (hora real del dispositivo/servidor) sigue funcionando
+    // igual: no depende de la planilla, así que no hay motivo para ocultarlo.
+    actualizarRelojSolo();
+    if (!window.__relojIntervalId) {
+      window.__relojIntervalId = setInterval(actualizarRelojSolo, 1000);
+    }
+  }
+
+  // Solo actualiza el reloj visual, sin tocar nada que dependa de CFG (usado
+  // mientras no hay datos válidos de la planilla).
+  function actualizarRelojSolo() {
+    const ahora = new Date();
+    const h = String(ahora.getHours()).padStart(2,'0');
+    const m = String(ahora.getMinutes()).padStart(2,'0');
+    const s = String(ahora.getSeconds()).padStart(2,'0');
+    const el = document.getElementById('relojHora');
+    if (el) el.textContent = `${h}:${m}:${s}`;
+  }
+
   function inicializarUI() {
+    if (!CFG.cargado) { mostrarErrorHorario(); return; }
+    if (window.__relojIntervalId) { clearInterval(window.__relojIntervalId); window.__relojIntervalId = null; }
     const DIAS = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
     const hoyJsDay = new Date().getDay();
     const diasDiv = document.getElementById('dias');
@@ -811,8 +902,10 @@
     setInterval(actualizarReloj, 1000);
   }
 
-  // Reloj en vivo
+  // Reloj en vivo (usado solo cuando CFG.cargado === true; el interval que
+  // llama a esta función se arranca en inicializarUI(), que ya filtra ese caso)
   function actualizarReloj() {
+    if (!CFG.cargado) { mostrarErrorHorario(); return; }
     const ahora = new Date();
     const h = String(ahora.getHours()).padStart(2,'0');
     const m = String(ahora.getMinutes()).padStart(2,'0');
@@ -895,6 +988,12 @@
 
 async function compartirHorario() {
   const btn = document.querySelector('.btn-compartir');
+
+  if (!CFG.cargado) {
+    alert('Todavía no se pudo leer el horario desde la planilla. Esperá unos segundos e intentá de nuevo.');
+    return;
+  }
+
   const originalText = btn.innerHTML;
   btn.innerHTML = '⏳ Generando imagen...';
   btn.style.pointerEvents = 'none';
