@@ -73,6 +73,23 @@
     no parece cerveza (detecta gaseosas, agua, jugos, etc.). Genera notificación
     persistente roja en el panel 🔔 para revisar. No bloquea el ingreso.
 
+  v403 — 04/07/2026
+  -----------------
+  • FIX — _patchPanelLateral: el reindexado de onclick agregado en v402 no
+    aplicaba (los botones del panel se referencian por item.id, no por
+    índice) y además pisaba el display de gramos con item.qty. Se quitó el
+    reindexado y se restauró mostrar `${gramos}gr` para items por peso.
+  • CAMBIO — Productos por peso: la papelera 🗑 (panel y modal de confirmar
+    venta) se reemplazó por botones − / +, igual que los productos normales.
+    El − borra el item al llegar a 0 (mismo comportamiento que antes). El +
+    no suma unidades (no aplica a peso) y ahora muestra un toast en vez de
+    duplicar mal el subtotal.
+  • FIX — _modalDel / _modalQty (borrado/edición dentro del modal de
+    confirmar venta) no llamaban a _refreshResultadosBadges(), por lo que el
+    scroll de búsqueda de atrás quedaba con productos marcados "en carrito"
+    ya borrados. Se agregó el refresh en ambas funciones y una llamada de
+    seguridad en cerrarConfirm() (cubre el cierre por botón atrás/popstate).
+
   v402 — 04/07/2026
   -----------------
   • FIX — Eliminar item del carrito: ya no llama renderVenta() completo (que
@@ -792,7 +809,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v401</title>
+    <title>Copihue — POS v403</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -4272,6 +4289,7 @@ function _modalQty(idx, delta) {
         item.ofertaEtiqueta = oferta.etiqueta || null;
     }
     _guardarCarritoDiferido();
+    _refreshResultadosBadges(item.esPeso ? null : Number(item.id)); // FIX: sincronizar scroll de atrás
     // MULTICOMPRA GRUPAL: reconstruir el modal completo (resumen al pie cambia)
     const mc = p ? _poolMulticompra.get(item.id) : null;
     if (mc && mc.grupo) {
@@ -4294,6 +4312,7 @@ function _modalDel(idx) {
         const mcElim = _poolMulticompra.get(idEliminado);
         ventaActual.splice(idx, 1);
         _guardarCarritoDiferido();
+        _refreshResultadosBadges(); // FIX: el borrado desde el modal no avisaba al scroll de atrás
         if (ventaActual.length === 0) { renderVenta(true); cerrarConfirm(); return; }
 
         // MULTICOMPRA GRUPAL: reconstruir modal completo (resumen al pie cambia)
@@ -4707,6 +4726,10 @@ function enviarTicketWA() {
 
 function cerrarConfirm() {
     document.getElementById('modalConfirm').classList.remove('open');
+    // FIX: red de seguridad — sincronizar el scroll de resultados al cerrar el
+    // modal (incluye cierre por botón atrás del navegador vía popstate), por si
+    // se borró/editó algo adentro y el refresh puntual no llegó a dispararse.
+    _refreshResultadosBadges();
     // Restaurar FABs si hay items en el carrito
     if (MOBILE && ventaActual.length > 0) document.getElementById('fabStack').style.display = 'flex';
     // Safety: liberar cualquier guard de venta colgado
