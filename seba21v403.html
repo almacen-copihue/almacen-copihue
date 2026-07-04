@@ -3840,6 +3840,13 @@ function cambiarCantidad(id, delta) {
     const item = ventaActual.find(i => String(i.id) === String(id));
     if (!item) return;
 
+    // Items de peso: "+" no suma unidades (qty siempre es 1, price ya es el
+    // total de esos gramos). Para sumar más peso hay que volver a pesar.
+    if (item.esPeso && delta > 0) {
+        mostrarToast('⚖️ Para sumar más peso, volvé a pesar el producto', 'naranja');
+        return;
+    }
+
     const nuevaCant = item.qty + delta;
     if (nuevaCant <= 0) {
         const idx = ventaActual.findIndex(i => String(i.id) === String(id));
@@ -4059,8 +4066,9 @@ function _renderVentaCompleta(ligero) {
             </div>
             <div class="item-venta-controles">
                 ${item.esPeso ? `
-                    <button class="btn-cant" onclick="cambiarCantidad('${item.id}', -99)" style="background:#ffebee;color:#e53935;font-size:0.8rem;">🗑</button>
+                    <button class="btn-cant" onclick="cambiarCantidad('${item.id}', -1)">−</button>
                     <span class="item-cant" style="font-size:0.75rem;">${item.gramos}gr</span>
+                    <button class="btn-cant" onclick="cambiarCantidad('${item.id}', +1)">+</button>
                 ` : `
                     <button class="btn-cant" onclick="cambiarCantidad('${item.id}', -1)">−</button>
                     <span class="item-cant">${item.qty}</span>
@@ -4214,11 +4222,15 @@ function _buildDetalleModalHTML() {
             </div>
             <div style="display:flex;align-items:center;gap:3px;flex-shrink:0;" onclick="event.stopPropagation()">
                 ${item.esPeso ? `
-                <button onclick="_modalDel(${idx})"
-                        style="width:28px;height:28px;border:1.5px solid #ffcdd2;border-radius:50%;background:#ffebee;
-                               font-size:0.8rem;cursor:pointer;touch-action:manipulation;
-                               display:flex;align-items:center;justify-content:center;line-height:1;color:#e53935;">🗑</button>
+                <button onclick="_modalQty(${idx},-1)"
+                        style="width:28px;height:28px;border:1.5px solid #ccc;border-radius:50%;background:white;
+                               font-size:1.1rem;font-weight:900;cursor:pointer;touch-action:manipulation;
+                               display:flex;align-items:center;justify-content:center;line-height:1;color:#333;">−</button>
                 <span style="min-width:40px;text-align:center;font-weight:800;font-size:0.82rem;color:#5B2A9E;">${item.gramos}gr</span>
+                <button onclick="_modalQty(${idx},1)"
+                        style="width:28px;height:28px;border:1.5px solid #ccc;border-radius:50%;background:white;
+                               font-size:1.1rem;font-weight:900;cursor:pointer;touch-action:manipulation;
+                               display:flex;align-items:center;justify-content:center;line-height:1;color:#333;">+</button>
                 ` : `
                 <button onclick="_modalQty(${idx},-1)"
                         style="width:28px;height:28px;border:1.5px solid #ccc;border-radius:50%;background:white;
@@ -4241,6 +4253,10 @@ function _buildDetalleModalHTML() {
 function _modalQty(idx, delta) {
     if (idx < 0 || idx >= ventaActual.length) return;
     const item = ventaActual[idx];
+    if (item.esPeso && delta > 0) {
+        mostrarToast('⚖️ Para sumar más peso, volvé a pesar el producto', 'naranja');
+        return;
+    }
     const newQty = (item.qty || 1) + delta;
     if (newQty <= 0) { _modalDel(idx); return; }
     if (delta > 0 && !item.esPeso && newQty > (item.stockDisponible || 999)) {
