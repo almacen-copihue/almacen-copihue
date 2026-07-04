@@ -75,10 +75,14 @@
 
   v402 — 04/07/2026
   -----------------
-  • FIX — _patchPanelLateral: reindexea onclick de botones (− + 🗑) cuando el
-    índice cambia tras un splice. Antes los botones quedaban con el índice viejo
-    hardcodeado, causando que el último item de peso no pudiera eliminarse de
-    arriba hacia abajo.
+  • FIX — Eliminar item del carrito: ya no llama renderVenta() completo (que
+    destruía el DOM y causaba timing issues al hacer click rápido). Ahora
+    remueve la fila específica del panel y llama _patchPanelLateral().
+    Incluye reindexado de onclick buttons en _patchPanelLateral.
+  • FIX — Items de peso: al eliminar de arriba hacia abajo el último item
+    ahora se puede borrar correctamente. El DOM ya no se destruye entre clicks.
+  • FIX — _patchPanelLateral: reindexea onclick de botones (− + 🗑) cuando
+    el índice cambia tras un splice.
 
   v401 — 02/07/2026
   -----------------
@@ -3864,18 +3868,31 @@ function cambiarCantidad(id, delta) {
                 if (ventaActual.length === 0) {
                     renderVenta();
                 } else {
-                    const hayPeso = ventaActual.some(i => i.esPeso);
-                    if (hayPeso) { renderVenta(); } else { _patchPanelLateral(); }
+                    filaPanel.remove();
+                    _patchPanelLateral();
                 }
                 _guardarCarritoDiferido();
                 _refreshResultadosBadges();
             }, 150);
         } else {
+            // Item de peso: eliminar directo sin animación
+            const idEliminado = ventaActual[idx].id;
             ventaActual.splice(idx, 1);
             _recalcularGrupoMulticompra(Number(id));
-            if (ventaActual.length === 0) { renderVenta(); } else {
-                const hayPeso = ventaActual.some(i => i.esPeso);
-                if (hayPeso) { renderVenta(); } else { _patchPanelLateral(); }
+            if (ventaActual.length === 0) {
+                renderVenta();
+            } else {
+                // Remover la fila específica del panel sin reconstruir todo el DOM
+                const contenedorPanel = document.getElementById('itemsVenta');
+                if (contenedorPanel) {
+                    const filas = contenedorPanel.querySelectorAll('.item-venta');
+                    // Buscar la fila que tiene el onclick con este id
+                    for (const fila of filas) {
+                        const btnDel = fila.querySelector(`button[onclick*="${idEliminado}"]`);
+                        if (btnDel) { fila.remove(); break; }
+                    }
+                }
+                _patchPanelLateral();
             }
             _guardarCarritoDiferido();
             _refreshResultadosBadges();
