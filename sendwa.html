@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>SendWA — Almacén Copihue ver.70</title>
+<title>SendWA — Almacén Copihue ver.71</title>
 <!--
   CHANGELOG sendwa.html
   v59: - Oferta Personalizada: filtra productos sin stock ANTES de mostrarlos en
@@ -652,7 +652,7 @@
           style="width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.2);
                  border:none;color:#fff;font-size:12px;font-weight:800;cursor:pointer;
                  flex-shrink:0;display:flex;align-items:center;justify-content:center;">?</button>
-  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.70</div>
+  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.71</div>
   <button id="btn-dark" title="Modo oscuro">🌙</button>
 </div>
 
@@ -3012,36 +3012,99 @@ document.getElementById('btn-sel-clear').onclick = () => {
   renderGrid();
 };
 // ─── TOOLS-FAB ──────────────────────────────────────────────
-on('btn-reset-total', () => {
+// ── Helpers oferta personalizada ─────────────────────────────
+function contarOfertasPersonalizadasActivas() {
+  return allProducts.filter(p => p.ofertaPersonalizadaServer && p.ofertaPersonalizadaServer !== '0').length;
+}
+function verOfertasPersonalizadasActivas() {
   document.getElementById('tools-panel').classList.remove('open');
   document.getElementById('tools-toggle').classList.remove('open');
-  const ok1 = confirm(
-    '⚠️ Esto va a borrar TODAS las ofertas personalizadas de la planilla,\n' +
-    'no solo las que tenés seleccionadas ahora — incluye productos de\n' +
-    'campañas viejas que ya no se ven en pantalla.\n\n' +
-    'POS, catálogo y todas las páginas derivadas van a dejar de mostrar\n' +
-    'esas ofertas apenas se actualicen.\n\n' +
-    '¿Confirmás el reseteo total?'
-  );
-  if (!ok1) return;
-  toast('🧹 Reseteando columna completa de ofertas personalizadas...');
+  currentFilter = 'oferta';
+  document.querySelectorAll('.filter-chip').forEach(c =>
+    c.classList.toggle('active', c.dataset.filter === 'oferta'));
+  applyFilter();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  toast('📍 Mostrando productos con oferta activa');
+}
+function _ejecutarResetTotal() {
+  toast('🧹 Reseteando columna completa...');
   _apiAction('resetOfertaPersonalizadaTotal', {})
     .then(res => {
       if (res && res.success) {
-        toast(`✅ ${res.mensaje || 'Reseteado correctamente'}`);
+        toast('✅ ' + (res.mensaje || 'Reseteado correctamente'));
         return fetchData().then(data => { allProducts = parseProducts(data); applyFilter(); });
       } else {
-        toast(`❌ ${res && res.mensaje ? res.mensaje : 'No se pudo resetear'}`);
+        toast('❌ ' + (res && res.mensaje ? res.mensaje : 'No se pudo resetear'));
       }
     })
     .catch(() => toast('❌ Error de conexión al resetear'));
+}
+function _overlayOfertas(html, onMounted) {
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+  const box = document.createElement('div');
+  box.style.cssText = 'background:var(--card-bg);border-radius:16px;padding:22px 20px;max-width:360px;width:100%;';
+  box.innerHTML = html;
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+  const close = () => document.body.removeChild(ov);
+  ov.addEventListener('click', e => { if (e.target === ov) close(); });
+  if (onMounted) onMounted(box, close);
+}
+
+on('btn-reset-total', () => {
+  document.getElementById('tools-panel').classList.remove('open');
+  document.getElementById('tools-toggle').classList.remove('open');
+  const n = contarOfertasPersonalizadasActivas();
+  if (n > 0) {
+    _overlayOfertas(`
+      <div style="font-size:17px;font-weight:800;margin-bottom:12px;color:var(--text);">🧹 Resetear ofertas personalizadas</div>
+      <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.5;">
+        Hay <b style="color:#E53935;">${n} producto${n>1?'s':''}</b> con oferta personalizada activa en la planilla.<br><br>
+        Al resetear se borran <b>todas</b> — incluyendo campañas viejas fuera de pantalla.<br>
+        POS y catálogo dejarán de mostrarlas en cuanto se actualicen.
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <button id="_rv" style="padding:11px;border-radius:10px;border:2px solid var(--primary);background:transparent;color:var(--primary);font-size:13px;font-weight:700;cursor:pointer;">🔍 Ver las ${n} activas primero</button>
+        <button id="_rc" style="padding:11px;border-radius:10px;border:none;background:#7b241c;color:#fff;font-size:13px;font-weight:700;cursor:pointer;">🗑️ Resetear todo de todas formas</button>
+        <button id="_rx" style="padding:11px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg);color:var(--text-muted);font-size:13px;cursor:pointer;">✕ Cancelar</button>
+      </div>`,
+    (box, close) => {
+      box.querySelector('#_rv').onclick = () => { close(); verOfertasPersonalizadasActivas(); };
+      box.querySelector('#_rc').onclick = () => { close(); _ejecutarResetTotal(); };
+      box.querySelector('#_rx').onclick = close;
+    });
+  } else {
+    if (confirm('No hay ofertas personalizadas activas.\n¿Resetear igual para asegurarse de que la columna esté limpia?')) _ejecutarResetTotal();
+  }
 });
+
 
 document.getElementById('tools-toggle').onclick = () => {
   document.getElementById('tools-panel').classList.toggle('open');
   document.getElementById('tools-toggle').classList.toggle('open');
 };
 on('btn-ia-suggest', async () => {
+  // Bloquear si hay ofertas personalizadas activas
+  const nP = contarOfertasPersonalizadasActivas();
+  if (nP > 0) {
+    _overlayOfertas(`
+      <div style="font-size:17px;font-weight:800;margin-bottom:12px;color:var(--text);">⚠️ IA bloqueada</div>
+      <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.5;">
+        Hay <b style="color:#E53935;">${nP} producto${nP>1?'s':''}</b> con oferta personalizada activa.<br><br>
+        Usar la IA ahora generaría una tanda que se <b>pisaría con la campaña actual</b>.<br>
+        Primero reseteá las ofertas y luego usá la IA con la selección limpia.
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <button id="_iv" style="padding:11px;border-radius:10px;border:2px solid var(--primary);background:transparent;color:var(--primary);font-size:13px;font-weight:700;cursor:pointer;">🔍 Ver las ${nP} activas</button>
+        <button id="_ix" style="padding:11px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg);color:var(--text-muted);font-size:13px;cursor:pointer;">✕ Cerrar</button>
+      </div>`,
+    (box, close) => {
+      box.querySelector('#_iv').onclick = () => { close(); verOfertasPersonalizadasActivas(); };
+      box.querySelector('#_ix').onclick = close;
+    });
+    return;
+  }
   const modo = await new Promise(resolve => {
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:flex-end;justify-content:center';
