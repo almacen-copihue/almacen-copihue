@@ -520,12 +520,18 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); font-family:
 <div id="panelCarrito" onclick="if(event.target===this)cerrarCarrito()">
   <div id="panelInner">
     <div id="panelHead">
-      <h2>🛒 Mi Pedido</h2>
+      <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
+        <h2 style="margin:0;font-size:1rem;">🛒</h2>
+        <span id="panelProvNombre" style="font-weight:800;font-size:0.95rem;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Mi Pedido</span>
+        <button onclick="editarNombrePedido()" style="background:none;border:1px solid #ddd;border-radius:6px;padding:3px 8px;font-size:0.7rem;color:#555;cursor:pointer;">✏️ Editar</button>
+      </div>
       <button id="btnCerrarPanel" onclick="cerrarCarrito()">✕</button>
     </div>
     <div id="listaResumen"></div>
-    <div id="panelObs">
-      <textarea id="txtObs" placeholder="Observación general (opcional)…"></textarea>
+    <div id="panelObs" style="position:relative;">
+      <textarea id="txtObs" placeholder="Observación (opcional)…" style="padding-right:36px;" oninput="document.getElementById('btnBorrarObs').style.display=this.value?''  :'none'"></textarea>
+      <button id="btnBorrarObs" onclick="borrarObservacion()" title="Borrar observación"
+        style="position:absolute;right:10px;top:10px;background:none;border:none;font-size:1rem;color:#ccc;cursor:pointer;line-height:1;">✕</button>
     </div>
     <div id="panelActions">
       <button id="btnConfirmar" onclick="confirmarPedido()">
@@ -617,6 +623,8 @@ function seleccionarProveedor(nombre) {
   const ph = document.getElementById('provHeader');
   ph.style.display = 'block';
   document.getElementById('provNombre').textContent = _provActual.proveedor;
+  const ppn = document.getElementById('panelProvNombre');
+  if (ppn) ppn.textContent = _provActual.proveedor;
   document.getElementById('provTel').textContent =
     _provActual.telefono ? '📱 ' + _provActual.telefono : 'Sin teléfono cargado';
 
@@ -783,17 +791,25 @@ async function confirmarPedido() {
   if (!_provActual)  { showToast('⚠️ Seleccioná un proveedor'); return; }
 
   const observacion = document.getElementById('txtObs').value.trim();
+  const nombrePedido = document.getElementById('panelProvNombre')?.textContent || _provActual.proveedor;
 
-  // Armar texto del pedido localmente (siempre disponible como fallback)
+  // Armar texto localmente — siempre disponible
   function armarTextoWA() {
-    const hoy = new Date().toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
-    let texto = '🛒 *Pedido Almacén Copihue*\n' + hoy + '\n';
-    texto += '\n📦 *' + _provActual.proveedor + '*\n';
+    const hoy = new Date().toLocaleDateString('es-AR', {day:'2-digit',month:'2-digit',year:'numeric'});
+    let txt = '🛒 *Pedido – ' + nombrePedido + '*
+' + hoy + '
+
+';
     for (const { item, qty } of items) {
-      texto += '• ' + item.nombre + ' — x' + qty + ' ' + (item.unidad || 'u.') + '\n';
+      txt += '• ' + item.nombre + ' — x' + qty + ' ' + (item.unidad || 'u.') + '
+';
     }
-    if (observacion) texto += '\n📝 ' + observacion;
-    return texto;
+    if (observacion) txt += '
+📝 ' + observacion;
+    txt += '
+
+Saludos. Almacén Copihue, km23';
+    return txt;
   }
 
   const datos = {
@@ -808,21 +824,18 @@ async function confirmarPedido() {
   };
 
   const btn = document.getElementById('btnConfirmar');
-  const btnIconHTML = btn.innerHTML;
+  const btnOrigHTML = btn.innerHTML;
   btn.textContent = '⏳ Generando…';
   btn.disabled = true;
 
-  let linkWA = null;
-
+  // Intentar registrar en GAS (solo para log en Sheet, no para obtener el link)
   try {
     const r = await fetch(
       API_URL + '?action=crearPedidoWA&data=' + encodeURIComponent(JSON.stringify(datos)),
-      { cache: 'no-store' }
+      { cache: 'no-store', signal: AbortSignal.timeout(6000) }
     );
     const d = await r.json();
-
-    if (d.ok && d.linkWA) {
-      // Registrar en GAS como enviado
+    if (d.ok && d.idPedido) {
       try {
         await fetch(
           API_URL + '?action=marcarPedidoEnviado&data=' +
@@ -830,25 +843,39 @@ async function confirmarPedido() {
           { cache: 'no-store' }
         );
       } catch(e2) {}
-      linkWA = d.linkWA;
     }
   } catch(e) {
-    console.warn('GAS no disponible, usando fallback local:', e);
+    console.warn('GAS no disponible — pedido no registrado en Sheet:', e.message);
   }
 
-  // Si el GAS no dio link → armar localmente, siempre sin número
-  // (evita errores de código de país como "2944439290")
-  if (!linkWA) {
-    linkWA = 'https://wa.me/?text=' + encodeURIComponent(armarTextoWA());
-  }
-
+  // SIEMPRE usar selector de contactos (wa.me sin número)
+  // Evita errores de código de país para todos los proveedores
+  const linkWA = 'https://wa.me/?text=' + encodeURIComponent(armarTextoWA());
   window.open(linkWA, '_blank');
+
   cerrarCarrito();
   limpiarPedido();
-  showToast('✅ Pedido listo — elegí el contacto en WhatsApp');
+  showToast('✅ Elegí el proveedor en WhatsApp');
 
-  btn.innerHTML = btnIconHTML;
+  btn.innerHTML = btnOrigHTML;
   btn.disabled = false;
+}
+
+// ── Editar nombre del pedido ──────────────────────────────────────
+function editarNombrePedido() {
+  const el = document.getElementById('panelProvNombre');
+  if (!el) return;
+  const actual = el.textContent;
+  const nuevo = prompt('Nombre del pedido:', actual);
+  if (nuevo !== null && nuevo.trim()) el.textContent = nuevo.trim();
+}
+
+// ── Borrar observación ────────────────────────────────────────────
+function borrarObservacion() {
+  const obs = document.getElementById('txtObs');
+  const btn = document.getElementById('btnBorrarObs');
+  if (obs) { obs.value = ''; obs.focus(); }
+  if (btn) btn.style.display = 'none';
 }
 
 // ── Toast ────────────────────────────────────────────────────────
