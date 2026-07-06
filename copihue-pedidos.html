@@ -298,6 +298,12 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); font-family:
 }
 .card-prod.seleccionado .check-badge { display: flex; }
 .card-prod.seleccionado .prod-nombre { padding-left: 24px; }
+.btn-pausar-ped {
+  width:100%; margin-top:8px; padding:6px 0;
+  border:1.5px solid #e0e0e0; border-radius:8px; background:white;
+  font-size:0.72rem; font-weight:700; color:#607d8b; cursor:pointer;
+}
+.btn-pausar-ped:active { background:#f5f5f5; }
 
 /* ── ESTADO VACÍO / CARGANDO ─────────────────────────────────── */
 #stateMsg {
@@ -474,7 +480,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); font-family:
   <div id="header">
     <h1>
       🏪 Copihue
-      <span>PEDIDOS WA</span>
+      <span>PEDIDOS WA <span id="pedVerBadge" style="font-size:0.55rem;font-weight:700;background:rgba(255,255,255,0.2);padding:1px 5px;border-radius:5px;letter-spacing:0.3px;"></span></span>
     </h1>
     <button id="btnCarrito" onclick="abrirCarrito()">
       🛒 <span id="txtCarrito">Pedido</span>
@@ -520,18 +526,12 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); font-family:
 <div id="panelCarrito" onclick="if(event.target===this)cerrarCarrito()">
   <div id="panelInner">
     <div id="panelHead">
-      <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
-        <h2 style="margin:0;font-size:1rem;">🛒</h2>
-        <span id="panelProvNombre" style="font-weight:800;font-size:0.95rem;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Mi Pedido</span>
-        <button onclick="editarNombrePedido()" style="background:none;border:1px solid #ddd;border-radius:6px;padding:3px 8px;font-size:0.7rem;color:#555;cursor:pointer;">✏️ Editar</button>
-      </div>
+      <h2>🛒 Mi Pedido</h2>
       <button id="btnCerrarPanel" onclick="cerrarCarrito()">✕</button>
     </div>
     <div id="listaResumen"></div>
-    <div id="panelObs" style="position:relative;">
-      <textarea id="txtObs" placeholder="Observación (opcional)…" style="padding-right:36px;" oninput="document.getElementById(&apos;btnBorrarObs&apos;).style.display=this.value?&apos;block&apos;:&apos;none&apos;"></textarea>
-      <button id="btnBorrarObs" onclick="borrarObservacion()" title="Borrar observación"
-        style="position:absolute;right:10px;top:10px;background:none;border:none;font-size:1rem;color:#ccc;cursor:pointer;line-height:1;">✕</button>
+    <div id="panelObs">
+      <textarea id="txtObs" placeholder="Observación general (opcional)…"></textarea>
     </div>
     <div id="panelActions">
       <button id="btnConfirmar" onclick="confirmarPedido()">
@@ -554,6 +554,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); font-family:
 // copihue-pedidos.html v1 — Sistema táctil pedidos WhatsApp
 // ══════════════════════════════════════════════════════════════════
 
+const VERSION = 'v1';
 const API_URL = 'https://script.google.com/macros/s/AKfycbzWZzDvdGfW8vd2-FpQolT852cdPMeHbfKugn9DBOlju75bE1D0SUNB5EKEDOsI2vP4lA/exec';
 
 // ── Estado global ────────────────────────────────────────────────
@@ -562,6 +563,20 @@ let _provActual    = null; // proveedor seleccionado
 let _carrito       = {};   // { ID_PRODUCTO: { item, qty } }
 
 // ── Boot ─────────────────────────────────────────────────────────
+async function pedTogglePausado(id, nombre) {
+  try {
+    const resp = await fetch(API_URL + '?action=setPausadoListaCompra&data=' + encodeURIComponent(JSON.stringify({ id: id, pausado: 'SI' })), { cache: 'no-store' });
+    const d = await resp.json();
+    if (d.success) {
+      if (_provActual) {
+        _provActual.productos = _provActual.productos.filter(function(pr){ return pr.id != id; });
+        _renderProductos();
+      }
+      showToast('⛔ Desactivado: ' + nombre);
+    } else { showToast('❌ Error al desactivar'); }
+  } catch(e) { showToast('📡 Sin conexión'); }
+}
+
 document.addEventListener('DOMContentLoaded', cargarProveedores);
 
 async function cargarProveedores() {
@@ -623,8 +638,7 @@ function seleccionarProveedor(nombre) {
   const ph = document.getElementById('provHeader');
   ph.style.display = 'block';
   document.getElementById('provNombre').textContent = _provActual.proveedor;
-  const ppn = document.getElementById('panelProvNombre');
-  if (ppn) ppn.textContent = _provActual.proveedor;
+  const pvb = document.getElementById('pedVerBadge'); if(pvb) pvb.textContent = VERSION;
   document.getElementById('provTel').textContent =
     _provActual.telefono ? '📱 ' + _provActual.telefono : 'Sin teléfono cargado';
 
@@ -673,7 +687,8 @@ function _crearCardProd(p) {
       <button class="qty-btn" onclick="cambiarQty(event,'${p.id}',-1)">−</button>
       <span class="qty-num" id="qty_${p.id}">${enCarrito ? enCarrito.qty : qty}</span>
       <button class="qty-btn" onclick="cambiarQty(event,'${p.id}',+1)">+</button>
-    </div>`;
+    </div>
+    <button class="btn-pausar-ped" onclick="event.stopPropagation();pedTogglePausado('${p.id}','${p.nombre.replace(/'/g,"\\'")}')">⏸ Desactivar de pedidos</button>`;
 
   card.addEventListener('click', (e) => {
     if (e.target.classList.contains('qty-btn')) return;
@@ -791,24 +806,15 @@ async function confirmarPedido() {
   if (!_provActual)  { showToast('⚠️ Seleccioná un proveedor'); return; }
 
   const observacion = document.getElementById('txtObs').value.trim();
-  const nombrePedido = document.getElementById('panelProvNombre')?.textContent || _provActual.proveedor;
 
-  // Armar texto localmente — siempre disponible
   function armarTextoWA() {
     const hoy = new Date().toLocaleDateString('es-AR', {day:'2-digit',month:'2-digit',year:'numeric'});
-    let txt = '🛒 *Pedido – ' + nombrePedido + '*
-' + hoy + '
-
-';
+    let txt = '🛒 *Pedido – ' + _provActual.proveedor + '*\n' + hoy + '\n\n';
     for (const { item, qty } of items) {
-      txt += '• ' + item.nombre + ' — x' + qty + ' ' + (item.unidad || 'u.') + '
-';
+      txt += '• ' + item.nombre + ' — x' + qty + ' ' + (item.unidad || 'u.') + '\n';
     }
-    if (observacion) txt += '
-📝 ' + observacion;
-    txt += '
-
-Saludos. Almacén Copihue, km23';
+    if (observacion) txt += '\n📝 ' + observacion;
+    txt += '\n\nSaludos. Almacén Copihue, km23';
     return txt;
   }
 
@@ -828,54 +834,20 @@ Saludos. Almacén Copihue, km23';
   btn.textContent = '⏳ Generando…';
   btn.disabled = true;
 
-  // Intentar registrar en GAS (solo para log en Sheet, no para obtener el link)
   try {
-    const r = await fetch(
-      API_URL + '?action=crearPedidoWA&data=' + encodeURIComponent(JSON.stringify(datos)),
-      { cache: 'no-store' }
-    );
+    const r = await fetch(API_URL + '?action=crearPedidoWA&data=' + encodeURIComponent(JSON.stringify(datos)), { cache: 'no-store' });
     const d = await r.json();
     if (d.ok && d.idPedido) {
-      try {
-        await fetch(
-          API_URL + '?action=marcarPedidoEnviado&data=' +
-          encodeURIComponent(JSON.stringify({ idPedido: d.idPedido })),
-          { cache: 'no-store' }
-        );
-      } catch(e2) {}
+      try { await fetch(API_URL + '?action=marcarPedidoEnviado&data=' + encodeURIComponent(JSON.stringify({ idPedido: d.idPedido })), { cache: 'no-store' }); } catch(e2) {}
     }
-  } catch(e) {
-    console.warn('GAS no disponible — pedido no registrado en Sheet:', e.message);
-  }
+  } catch(e) { console.warn('GAS no disponible:', e.message); }
 
-  // SIEMPRE usar selector de contactos (wa.me sin número)
-  // Evita errores de código de país para todos los proveedores
-  const linkWA = 'https://wa.me/?text=' + encodeURIComponent(armarTextoWA());
-  window.open(linkWA, '_blank');
-
+  window.open('https://wa.me/?text=' + encodeURIComponent(armarTextoWA()), '_blank');
   cerrarCarrito();
   limpiarPedido();
   showToast('✅ Elegí el proveedor en WhatsApp');
-
   btn.innerHTML = btnOrigHTML;
   btn.disabled = false;
-}
-
-// ── Editar nombre del pedido ──────────────────────────────────────
-function editarNombrePedido() {
-  const el = document.getElementById('panelProvNombre');
-  if (!el) return;
-  const actual = el.textContent;
-  const nuevo = prompt('Nombre del pedido:', actual);
-  if (nuevo !== null && nuevo.trim()) el.textContent = nuevo.trim();
-}
-
-// ── Borrar observación ────────────────────────────────────────────
-function borrarObservacion() {
-  const obs = document.getElementById('txtObs');
-  const btn = document.getElementById('btnBorrarObs');
-  if (obs) { obs.value = ''; obs.focus(); }
-  if (btn) btn.style.display = 'none';
 }
 
 // ── Toast ────────────────────────────────────────────────────────
