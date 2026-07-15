@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>SendWA — Almacén Copihue ver.72</title>
+<title>SendWA — Almacén Copihue ver.73</title>
 <!--
   CHANGELOG sendwa.html
   v59: - Oferta Personalizada: filtra productos sin stock ANTES de mostrarlos en
@@ -656,7 +656,7 @@
           style="width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.2);
                  border:none;color:#fff;font-size:12px;font-weight:800;cursor:pointer;
                  flex-shrink:0;display:flex;align-items:center;justify-content:center;">?</button>
-  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.72</div>
+  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.73</div>
   <button id="btn-dark" title="Modo oscuro">🌙</button>
 </div>
 
@@ -3149,9 +3149,88 @@ on('btn-ia-suggest', async () => {
     return;
   }
 
-  // Respeta el precio mínimo configurado — excluye productos dummy/de prueba
+  // ── PASO 2: Selector de categorías ──────────────────────────
+  // Obtener todas las categorías con stock disponible
+  const todasCats = [...new Set(allProducts
+    .filter(p => p.stock > 0)
+    .map(p => p.categoria).filter(Boolean))].sort();
+
+  // Por defecto todas activas EXCEPTO las de tecnología/electrónica
+  const catsExcluidasPorDefecto = ['tecnologia', 'electronica', 'electronónica'];
+  const selCats = await new Promise(resolve => {
+    const estadoCats = new Map(todasCats.map(c => [
+      c,
+      !catsExcluidasPorDefecto.some(ex => norm(c).includes(ex))
+    ]));
+
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9999;display:flex;align-items:flex-end;justify-content:center';
+
+    function buildSheet() {
+      const activas = [...estadoCats.values()].filter(Boolean).length;
+      const chks = todasCats.map(c => {
+        const on = estadoCats.get(c);
+        return `<label style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);cursor:pointer;">
+          <input type="checkbox" data-cat="${c}" ${on ? 'checked' : ''}
+                 style="width:16px;height:16px;accent-color:var(--primary);cursor:pointer;">
+          <span style="font-size:13px;color:var(--text);">${getCatEmoji(c)} ${c}</span>
+        </label>`;
+      }).join('');
+      return `<div style="background:var(--card-bg);border-radius:20px 20px 0 0;width:100%;max-width:500px;padding:18px 16px 24px;max-height:80vh;overflow-y:auto;">
+        <div style="font-size:15px;font-weight:800;color:var(--text);margin-bottom:4px;text-align:center;">✨ Paso 2 — Categorías</div>
+        <div style="font-size:12px;color:var(--text-muted);text-align:center;margin-bottom:12px;">${activas} de ${todasCats.length} seleccionadas</div>
+        <div style="display:flex;gap:8px;margin-bottom:10px;">
+          <button id="_ia-all" style="flex:1;padding:7px;border-radius:8px;border:1px solid var(--border);background:var(--bg);font-size:12px;cursor:pointer;">✅ Todas</button>
+          <button id="_ia-none" style="flex:1;padding:7px;border-radius:8px;border:1px solid var(--border);background:var(--bg);font-size:12px;cursor:pointer;">⬜ Ninguna</button>
+        </div>
+        ${chks}
+        <div style="display:flex;gap:8px;margin-top:14px;">
+          <button id="_ia-ok" style="flex:2;padding:12px;border-radius:10px;border:none;background:var(--primary);color:#fff;font-size:13px;font-weight:700;cursor:pointer;">✨ Sugerir con estas categorías</button>
+          <button id="_ia-bk" style="flex:1;padding:12px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--text-muted);font-size:12px;cursor:pointer;">✕ Cancelar</button>
+        </div>
+      </div>`;
+    }
+
+    ov.innerHTML = buildSheet();
+    document.body.appendChild(ov);
+
+    ov.addEventListener('change', e => {
+      const cb = e.target.closest('input[data-cat]');
+      if (!cb) return;
+      estadoCats.set(cb.dataset.cat, cb.checked);
+      // Actualizar contador
+      const activas = [...estadoCats.values()].filter(Boolean).length;
+      ov.querySelector('div[style*="seleccionadas"]').textContent = `${activas} de ${todasCats.length} seleccionadas`;
+    });
+    ov.addEventListener('click', e => {
+      if (e.target.id === '_ia-all') {
+        todasCats.forEach(c => estadoCats.set(c, true));
+        document.body.removeChild(ov); ov.innerHTML = buildSheet(); document.body.appendChild(ov);
+        // re-registrar eventos
+        ov.dispatchEvent(new Event('_reinit'));
+      } else if (e.target.id === '_ia-none') {
+        todasCats.forEach(c => estadoCats.set(c, false));
+        document.body.removeChild(ov); ov.innerHTML = buildSheet(); document.body.appendChild(ov);
+      } else if (e.target.id === '_ia-ok') {
+        document.body.removeChild(ov);
+        resolve([...estadoCats.entries()].filter(([,v])=>v).map(([k])=>k));
+      } else if (e.target.id === '_ia-bk') {
+        document.body.removeChild(ov); resolve(null);
+      }
+    });
+    ov.addEventListener('click', e => { if (e.target === ov) { document.body.removeChild(ov); resolve(null); } }, true);
+  });
+
+  if (!selCats || !selCats.length) { toast('⚠️ Cancelado o sin categorías seleccionadas'); return; }
+
+  // ── PASO 3: Sugerir y AGREGAR a la selección actual ─────────
   const pisoPrecio = Math.max(precioMinimo, 1);
-  let candidatos = allProducts.filter(p => p.stock > 0 && p.precioVenta >= pisoPrecio);
+  const selCatsNorm = new Set(selCats.map(c => norm(c)));
+  let candidatos = allProducts.filter(p =>
+    p.stock > 0 &&
+    p.precioVenta >= pisoPrecio &&
+    selCatsNorm.has(norm(p.categoria))
+  );
 
   if (modo === 'rotacion') {
     candidatos.sort((a,b) => (b.vendidos||0) - (a.vendidos||0));
@@ -3169,15 +3248,20 @@ on('btn-ia-suggest', async () => {
     candidatos.sort((a,b) => (PRIORITY_ORDER[a.catOferta]||6) - (PRIORITY_ORDER[b.catOferta]||6));
   }
 
-  if (!candidatos.length) { toast('⚠️ Sin productos para ese criterio'); return; }
+  if (!candidatos.length) { toast('⚠️ Sin productos para ese criterio en esas categorías'); return; }
 
   const limite = currentMode === 'estado' ? 36 : 20;
-  selectedIds.clear(); selectionOrder = [];
-  candidatos.slice(0, limite).forEach(p => {
-    selectedIds.add(p.id); selectionOrder.push(p.id);
-  });
+  let agregados = 0;
+  for (const p of candidatos) {
+    if (selectedIds.size >= limite) break;
+    if (!selectedIds.has(p.id)) {
+      selectedIds.add(p.id);
+      selectionOrder.push(p.id);
+      agregados++;
+    }
+  }
   saveRecent();
-  toast(`✨ IA seleccionó ${selectedIds.size} productos`);
+  toast(`✨ IA agregó ${agregados} producto${agregados !== 1 ? 's' : ''} (total: ${selectedIds.size})`);
   renderGrid();
 });
 
