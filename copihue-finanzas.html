@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Copihue · Finanzas v15</title>
+<title>Copihue · Finanzas v16</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -191,7 +191,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
 
 <div class="hdr">
   <div class="hdr-icon">💰</div>
-  <div><div class="hdr-t">Copihue · Finanzas <span id="ver-badge" style="font-size:.6rem;background:rgba(255,255,255,.25);padding:2px 7px;border-radius:10px;font-weight:900;letter-spacing:.5px">v15</span></div><div class="hdr-s" id="hdr-sub">Panel financiero</div></div>
+  <div><div class="hdr-t">Copihue · Finanzas <span id="ver-badge" style="font-size:.6rem;background:rgba(255,255,255,.25);padding:2px 7px;border-radius:10px;font-weight:900;letter-spacing:.5px">v16</span></div><div class="hdr-s" id="hdr-sub">Panel financiero</div></div>
   <button class="btn-back" onclick="location.href='./copihue-herramientas.html'">← Volver</button>
 </div>
 
@@ -819,43 +819,108 @@ function buildCategorias(){
     </div>`;
   }
 
-  // ── Suscripciones: comparativa mensual ──
+  // ── Suscripciones: tabla servicio × mes (siempre visible) ──
   const todosSusc = egresosData.filter(e=>(e.categoria||'').toUpperCase()==='SUSCRIPCIONES');
-  if(todosSusc.length > 0){
-    // Agrupar por mes (últimos 6 meses)
-    const suscPorMes = {};
+  {
+    // Últimos 6 meses desde el mes activo hacia atrás
+    const mesesTab = [];
+    for(let i=5; i>=0; i--){
+      let m2 = mesSel-i, a2 = anioSel;
+      if(m2<0){m2+=12;a2--;}
+      mesesTab.push({m:m2, a:a2, k:a2+'-'+String(m2+1).padStart(2,'0'), lbl:MESES[m2].slice(0,3)});
+    }
+
+    // Todos los servicios únicos (por obs o motivo)
+    const todosServ = [...new Set(todosSusc.map(e=>(e.obs||e.motivo||'').trim().toLowerCase()).filter(Boolean))];
+    // Normalizar nombres: capitalizar
+    const servNorm = todosServ.map(s=>s.split(' ').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' '));
+
+    // Mapa: servicio → mes → {pagado, monto}
+    const mapaServMes = {};
+    todosServ.forEach(s=>{ mapaServMes[s]={}; mesesTab.forEach(({k})=>{ mapaServMes[s][k]={pagado:false,monto:0}; }); });
     todosSusc.forEach(e=>{
       const k = e.fecha.getFullYear()+'-'+String(e.fecha.getMonth()+1).padStart(2,'0');
-      if(!suscPorMes[k]) suscPorMes[k]={total:0,items:[]};
-      suscPorMes[k].total += e.monto;
-      suscPorMes[k].items.push(e);
+      const s = (e.obs||e.motivo||'').trim().toLowerCase();
+      if(mapaServMes[s] && mapaServMes[s][k] !== undefined){
+        mapaServMes[s][k].pagado = true;
+        mapaServMes[s][k].monto += e.monto;
+      }
     });
-    const mesesSusc = Object.keys(suscPorMes).sort().slice(-6);
-    const maxSusc = Math.max(...mesesSusc.map(m=>suscPorMes[m].total),1);
-    // Servicios activos este mes
-    const suscEsteMs = getEgrPeriodo().filter(e=>(e.categoria||'').toUpperCase()==='SUSCRIPCIONES');
-    const serviciosActivos = [...new Set(suscEsteMs.map(e=>e.obs||e.motivo).filter(Boolean))];
 
-    h += `<div class="tar"><div class="tar-t">📺 Suscripciones — comparativa mensual</div>`;
-    mesesSusc.forEach(m=>{
-      const [anio,mes] = m.split('-');
-      const lbl = MESES[parseInt(mes)-1].slice(0,3)+' '+anio;
-      const tot = suscPorMes[m].total;
-      const servicios = [...new Set(suscPorMes[m].items.map(e=>e.obs||e.motivo).filter(Boolean))];
-      h += `<div style="margin-bottom:8px">
-        <div style="display:flex;justify-content:space-between;margin-bottom:3px">
-          <span style="font-size:.78rem;font-weight:700">${lbl}</span>
-          <span style="font-size:.78rem;font-weight:900;color:var(--rojo)">${fmt(tot)}</span>
-        </div>
-        <div class="barra-bg"><div class="barra-f bar-r" style="width:${Math.round(tot/maxSusc*100)}%"></div></div>
-        <div style="font-size:.62rem;color:var(--gris);margin-top:2px">${servicios.slice(0,4).join(' · ')}</div>
-      </div>`;
+    // Totales por mes
+    const totalPorMes = {};
+    mesesTab.forEach(({k})=>{
+      totalPorMes[k] = Object.values(mapaServMes).reduce((s,m2)=>s+(m2[k]?.monto||0),0);
     });
-    if(serviciosActivos.length){
-      h += `<div style="background:var(--al);border-radius:10px;padding:8px 10px;margin-top:6px">
-        <div style="font-size:.68rem;font-weight:700;color:var(--azul);margin-bottom:4px">📋 Activos este período</div>
-        ${serviciosActivos.map(s=>`<div style="font-size:.72rem;color:var(--texto);padding:2px 0">• ${s}</div>`).join('')}
+
+    // Mes activo
+    const kActual = anioSel+'-'+String(mesSel+1).padStart(2,'0');
+
+    h += `<div class="tar"><div class="tar-t" style="display:flex;justify-content:space-between;align-items:center">
+      <span>📺 Suscripciones</span>
+      <span style="font-size:.68rem;color:var(--gris);font-weight:400">últimos 6 meses</span>
+    </div>`;
+
+    if(todosServ.length === 0){
+      h += '<div class="empty">Sin suscripciones registradas</div>';
+    } else {
+      // Tabla
+      h += `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+        <table style="width:100%;border-collapse:collapse;font-size:.72rem">
+          <thead>
+            <tr>
+              <th style="text-align:left;padding:4px 6px;color:var(--gris);font-weight:700;border-bottom:2px solid var(--borde);white-space:nowrap">Servicio</th>
+              ${mesesTab.map(({k,lbl})=>`<th style="text-align:center;padding:4px 4px;color:${k===kActual?'var(--vd)':'var(--gris)'};font-weight:${k===kActual?'900':'700'};border-bottom:2px solid var(--borde);white-space:nowrap">${lbl}${k===kActual?' ★':''}</th>`).join('')}
+            </tr>
+          </thead>
+          <tbody>
+            ${todosServ.map((s,i)=>{
+              const nombre = servNorm[i];
+              // Ver si estuvo ausente en meses anteriores (posible pendiente)
+              const ausenteActual = !mapaServMes[s][kActual]?.pagado;
+              const tuvoAntes = mesesTab.slice(0,-1).some(({k})=>mapaServMes[s][k]?.pagado);
+              const esPendiente = ausenteActual && tuvoAntes;
+              return `<tr style="border-bottom:1px solid #f5f5f5;background:${esPendiente?'#fff3e0':''}">
+                <td style="padding:5px 6px;font-weight:700;white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis" title="${nombre}">
+                  ${esPendiente?'⚠️ ':''}${nombre}
+                </td>
+                ${mesesTab.map(({k})=>{
+                  const d = mapaServMes[s][k];
+                  return d.pagado
+                    ? `<td style="text-align:center;padding:4px;background:#e8f5e9;border-radius:4px;color:var(--vd);font-weight:900" title="${fmt(d.monto)}">✅</td>`
+                    : `<td style="text-align:center;padding:4px;color:#ccc">—</td>`;
+                }).join('')}
+              </tr>`;
+            }).join('')}
+          </tbody>
+          <tfoot>
+            <tr style="border-top:2px solid var(--borde)">
+              <td style="padding:5px 6px;font-weight:900;font-size:.68rem;color:var(--gris)">TOTAL</td>
+              ${mesesTab.map(({k})=>`<td style="text-align:center;padding:4px;font-weight:900;font-size:.68rem;color:${k===kActual?'var(--rojo)':'var(--gris)'}">${totalPorMes[k]>0?fmtK(totalPorMes[k]):'—'}</td>`).join('')}
+            </tr>
+          </tfoot>
+        </table>
       </div>`;
+
+      // Alertas de pendientes
+      const pendientes = todosServ.filter((s,i)=>{
+        const ausenteActual = !mapaServMes[s][kActual]?.pagado;
+        const tuvoAntes = mesesTab.slice(0,-1).some(({k})=>mapaServMes[s][k]?.pagado);
+        return ausenteActual && tuvoAntes;
+      });
+      if(pendientes.length){
+        h += `<div style="background:#fff3e0;border:1.5px solid #ff9800;border-radius:10px;padding:9px 11px;margin-top:8px">
+          <div style="font-size:.72rem;font-weight:900;color:#e65100;margin-bottom:4px">⚠️ Sin registro este mes (posibles pendientes)</div>
+          ${pendientes.map(s=>{
+            const nombre = servNorm[todosServ.indexOf(s)];
+            const ultimo = [...mesesTab].reverse().find(({k})=>mapaServMes[s][k]?.pagado);
+            return `<div style="font-size:.75rem;padding:3px 0;display:flex;justify-content:space-between">
+              <span>• ${nombre}</span>
+              <span style="color:var(--gris);font-size:.65rem">último: ${ultimo?MESES[parseInt(ultimo.k.split('-')[1])-1].slice(0,3):'—'}</span>
+            </div>`;
+          }).join('')}
+        </div>`;
+      }
     }
     h += '</div>';
   }
