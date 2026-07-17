@@ -6,7 +6,28 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>SendWA — Almacén Copihue ver.57</title>
+<title>SendWA — Almacén Copihue ver.72</title>
+<!--
+  CHANGELOG sendwa.html
+  v59: - Oferta Personalizada: filtra productos sin stock ANTES de mostrarlos en
+         la lista del modal (no tenía sentido asignarles un % si después no
+         iban a aparecer con el descuento — Code.gs ya los excluye al armar el
+         catálogo). Avisa cuántos se excluyeron.
+       - ✨ IA selecciona (modo estado): límite subido de 12 a 36 productos.
+         ⚠️ OJO: el aviso de "demasiados para Estado" se dispara a partir de
+         WA_LIMIT_ESTADO=30, así que con 36 vas a ver ese cartel seguido — es
+         solo informativo, no bloquea nada.
+  v58: Oferta Personalizada — rediseño completo:
+       - % por producto (antes era UN solo % para toda la tanda). Sigue habiendo
+         un atajo "aplicar a todos" arriba, pero cada producto se puede pisar individual.
+       - Botón cerrar (✕) movido adentro de la hoja, en el header, ya no flota
+         lejos arriba de la pantalla.
+       - Toast ahora con z-index por ENCIMA de los modales — antes quedaba tapado
+         por el fondo oscuro del modal y el feedback de "Aplicar"/"Quitar" no se veía.
+       - Botones "Aplicar"/"Quitar" muestran estado "⏳..." mientras procesan.
+       - Requiere Code.gs v9.4+ (aplicarOfertaPersonalizada ahora recibe
+         { items:[{id,tipo}], texto } en vez de { productoIds, tipo, texto }).
+-->
 <style>
   /* ===== VARIABLES ===== */
   :root {
@@ -392,7 +413,7 @@
   #toast {
     position: fixed; bottom: 175px; left: 50%; transform: translateX(-50%) translateY(20px);
     background: #222; color: #fff; padding: 10px 20px; border-radius: 20px;
-    font-size: 13px; font-weight: 600; opacity: 0; transition: all .3s; z-index: 300;
+    font-size: 13px; font-weight: 600; opacity: 0; transition: all .3s; z-index: 600;
     pointer-events: none; white-space: nowrap;
   }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
@@ -463,18 +484,60 @@
   #personal-modal.open { display: flex; }
   #personal-sheet {
     background: var(--card-bg); border-radius: 20px 20px 0 0;
-    width: 100%; max-height: 90vh; overflow-y: auto; padding: 56px 16px 30px;
-    position: relative;
+    width: 100%; max-width: 720px; height: 92vh; max-height: 92vh;
+    overflow: hidden; padding: 0 16px 24px;
+    position: relative; display: flex; flex-direction: column;
   }
+  /* El cierre vive DENTRO de la hoja, junto al título — ya no flota
+     pegado arriba de la pantalla, lejos del contenido. */
+  .personal-header {
+    flex: 0 0 auto;
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    background: var(--card-bg); margin: 0 -16px; padding: 16px 16px 12px;
+    border-bottom: 1.5px solid var(--border); border-radius: 20px 20px 0 0;
+  }
+  .personal-header-title { font-size: 15px; font-weight: 800; color: var(--text); }
   #btn-personal-close-x {
-    position: fixed; top: 12px; right: 12px; z-index: 410;
-    width: 44px; height: 44px; border-radius: 50%;
-    background: rgba(0,0,0,.7); color: #fff; font-size: 22px; font-weight: 700;
-    display: none; align-items: center; justify-content: center;
-    border: 2px solid rgba(255,255,255,.3);
-    box-shadow: 0 2px 12px rgba(0,0,0,.4);
+    width: 32px; height: 32px; border-radius: 50%; flex: 0 0 auto;
+    background: var(--bg); color: var(--text-muted); font-size: 16px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    border: 1.5px solid var(--border); cursor: pointer;
   }
-  #personal-modal.open #btn-personal-close-x { display: flex; }
+  .personal-body { padding-top: 14px; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .personal-texto-input {
+    width: 100%; height: 42px; padding: 0 12px; margin-bottom: 10px;
+    border-radius: 10px; border: 1.5px solid var(--border);
+    background: var(--card-bg); color: var(--text); font-size: 14px; box-sizing: border-box;
+    flex: 0 0 auto;
+  }
+  .personal-info { font-size: 13px; font-weight: 800; color: var(--primary); margin-bottom: 6px; flex: 0 0 auto; }
+  /* Lista por producto: cada uno con su propia escalera de % */
+  .personal-items-list {
+    display: flex; flex-direction: column; gap: 8px; margin-top: 6px;
+    flex: 1; min-height: 0; overflow-y: auto;
+  }
+  .personal-item {
+    display: flex; align-items: center; gap: 8px;
+    border: 1.5px solid var(--border); border-radius: 10px; padding: 6px 8px; background: var(--bg);
+  }
+  .personal-item img {
+    width: 38px; height: 38px; border-radius: 6px; object-fit: cover; flex: 0 0 auto; background: #e8f0e5;
+  }
+  .personal-item-name {
+    flex: 0 0 auto; width: 76px; font-size: 10.5px; font-weight: 600; color: var(--text);
+    overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.2;
+  }
+  .personal-item-pills { display: flex; gap: 3px; flex: 1; overflow-x: auto; scrollbar-width: none; }
+  .personal-item-pills::-webkit-scrollbar { display: none; }
+  .personal-item-pills .layout-btn { padding: 5px 7px; font-size: 9.5px; }
+  .personal-actions { display: flex; gap: 8px; margin-top: 14px; flex: 0 0 auto; }
+  .personal-actions button {
+    flex: 1; height: 42px; border-radius: 10px; font-weight: 700; font-size: 13px; cursor: pointer;
+    transition: opacity .15s;
+  }
+  .personal-actions button.is-busy { opacity: .65; pointer-events: none; }
+  #btn-personal-aplicar { background: var(--primary); color: #fff; border: none; }
+  #btn-personal-quitar  { background: var(--bg); border: 1.5px solid var(--border); color: var(--text); }
   .personal-pct-btn.active { background: #E91E63 !important; border-color: #E91E63 !important; color: #fff !important; }
   .psico-99 { font-size: .62em; font-weight: 800; vertical-align: text-top; position: relative; top: -.35em; margin-left: 1px; }
   .single-thumb {
@@ -561,6 +624,7 @@
     height: calc(var(--panel-h) + 90px);
   }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 <body>
 
@@ -588,7 +652,7 @@
           style="width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.2);
                  border:none;color:#fff;font-size:12px;font-weight:800;cursor:pointer;
                  flex-shrink:0;display:flex;align-items:center;justify-content:center;">?</button>
-  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.57</div>
+  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.72</div>
   <button id="btn-dark" title="Modo oscuro">🌙</button>
 </div>
 
@@ -611,9 +675,9 @@
     <button class="filter-chip oferta-chip" data-filter="destacado">🔥 Destacado</button>
     <button class="filter-chip oferta-chip" data-filter="especial">💜 Especial</button>
     <button class="filter-chip oferta-chip" data-filter="ultimas">🏷️ Últimas</button>
-    <button class="filter-chip oferta-chip" data-filter="multicompra">📦 Multicompra</button>
     <button class="filter-chip oferta-chip" data-filter="promo">🏷️ Promos</button>
     <button class="filter-chip oferta-chip" data-filter="combo">🎯 Combos</button>
+    <button class="filter-chip oferta-chip" data-filter="multicompra">📦 Multicompra</button>
     <button class="filter-chip oferta-chip" data-filter="sinoferta">✅ Sin oferta</button>
   </div>
 </div>
@@ -681,6 +745,7 @@
     <button class="tool-btn t-blue"   id="btn-copy">📋 Copiar texto</button>
     <button class="tool-btn t-orange" id="btn-dl">⬇️ Descargar</button>
     <button class="tool-btn t-dark"   id="btn-ia-suggest">✨ IA Sugerencia</button>
+    <button class="tool-btn" id="btn-reset-total" style="background:#7b241c;color:#fff;">🧹 Resetear TODAS las ofertas personalizadas</button>
   </div>
   <button id="tools-toggle" title="Herramientas">⚙️</button>
 </div>
@@ -701,6 +766,8 @@
 <div id="collage-modal">
   <button id="btn-modal-close-x" onclick="document.getElementById('collage-modal').classList.remove('open')">✕</button>
   <div id="collage-sheet">
+    <!-- Banner exclusivo de oferta personalizada -->
+    <div id="collage-personal-banner" style="display:none;background:linear-gradient(135deg,#880e4f,#e91e63);color:#fff;font-weight:800;font-size:13px;padding:8px 12px;border-radius:10px;margin-bottom:8px;text-align:center;"></div>
     <!-- Selector de modo -->
     <div id="collage-mode-tabs" style="display:flex;gap:6px;margin-bottom:8px;">
       <button class="collage-tab active" data-cmode="collage">🖼️ Collage</button>
@@ -716,13 +783,12 @@
         <button class="grid-btn active" data-g="6" style="height:26px;padding:0 10px;border-radius:13px;border:1.5px solid var(--primary);background:var(--primary);color:#fff;font-size:11px;font-weight:700;cursor:pointer;">3×2</button>
         <button class="grid-btn" data-g="9"  style="height:26px;padding:0 10px;border-radius:13px;border:1.5px solid var(--border);background:var(--bg);color:var(--text-muted);font-size:11px;font-weight:700;cursor:pointer;">3×3</button>
         <button class="grid-btn" data-g="12" style="height:26px;padding:0 10px;border-radius:13px;border:1.5px solid var(--border);background:var(--bg);color:var(--text-muted);font-size:11px;font-weight:700;cursor:pointer;">4×3</button>
-        <button class="grid-btn" data-g="48" style="height:26px;padding:0 10px;border-radius:13px;border:1.5px solid var(--border);background:var(--bg);color:var(--text-muted);font-size:11px;font-weight:700;cursor:pointer;">48</button>
         <span id="collage-sel-info" style="font-size:11px;font-weight:700;color:var(--primary);margin-left:4px;"></span>
       </div>
       <div id="collage-page-nav" style="display:none;align-items:center;justify-content:center;gap:10px;">
-        <button onclick="collagePrevPage()" style="width:36px;height:36px;border-radius:50%;background:var(--primary-dark);color:#fff;border:none;font-size:22px;cursor:pointer;line-height:1;">‹</button>
+        <button onclick="pageNavRouter('prev')" style="width:36px;height:36px;border-radius:50%;background:var(--primary-dark);color:#fff;border:none;font-size:22px;cursor:pointer;line-height:1;">‹</button>
         <span id="collage-page-lbl" style="font-size:13px;font-weight:800;color:var(--text-muted);min-width:110px;text-align:center;">Pág 1/1</span>
-        <button onclick="collageNextPage()" style="width:36px;height:36px;border-radius:50%;background:var(--primary-dark);color:#fff;border:none;font-size:22px;cursor:pointer;line-height:1;">›</button>
+        <button onclick="pageNavRouter('next')" style="width:36px;height:36px;border-radius:50%;background:var(--primary-dark);color:#fff;border:none;font-size:22px;cursor:pointer;line-height:1;">›</button>
       </div>
     </div>
     <!-- Selector de producto (modo 1 foto) -->
@@ -758,27 +824,53 @@
       <button id="btn-collage-close">✕ Cerrar</button>
     </div>
     <button id="btn-dl-todas">⬇️ Descargar TODAS (${0})</button>
+    <button id="btn-dl-zip" style="display:none;width:100%;margin-top:6px;height:42px;border-radius:10px;border:none;background:#8e44ad;color:#fff;font-weight:800;font-size:13px;cursor:pointer;">📦 Descargar TODO en .ZIP</button>
   </div>
 </div>
 
 <!-- OFERTA PERSONALIZADA MODAL -->
 <div id="personal-modal">
-  <button id="btn-personal-close-x" onclick="document.getElementById('personal-modal').classList.remove('open')">✕</button>
   <div id="personal-sheet">
-    <div class="layout-section-label">🏷️ Oferta personalizada</div>
-    <input type="text" id="personal-texto" maxlength="40" placeholder="Ej: Feliz día del padre"
-           style="width:100%;height:40px;padding:0 12px;margin:8px 0;border-radius:10px;border:1.5px solid var(--border);background:var(--card-bg);color:var(--text);font-size:14px;box-sizing:border-box;">
-    <div class="layout-section-label">Descuento (aproximado — el precio final se redondea a un valor terminado en 99)</div>
-    <div class="layout-row" id="personal-pct-row" style="flex-wrap:wrap;margin:6px 0 12px;"></div>
-    <div id="personal-info" style="font-size:12px;font-weight:700;color:var(--primary);margin-bottom:10px;"></div>
-    <div style="display:flex;gap:8px;">
-      <button id="btn-personal-aplicar" style="flex:1;height:42px;border-radius:10px;font-weight:700;font-size:13px;background:var(--primary);color:#fff;border:none;cursor:pointer;">✅ Aplicar a selección</button>
-      <button id="btn-personal-quitar" style="flex:1;height:42px;border-radius:10px;font-weight:700;font-size:13px;background:var(--bg);border:1.5px solid var(--border);color:var(--text);cursor:pointer;">🗑️ Quitar</button>
+    <div class="personal-header">
+      <div class="personal-header-title">🏷️ Oferta personalizada</div>
+      <button id="btn-personal-close-x" onclick="document.getElementById('personal-modal').classList.remove('open')">✕</button>
+    </div>
+    <div class="personal-body">
+      <input type="text" id="personal-texto" maxlength="40" placeholder="Ej: Feliz día del padre" class="personal-texto-input">
+      <div id="personal-info" class="personal-info"></div>
+
+      <div class="layout-section-label" style="flex:0 0 auto;">Aplicar este % a todos (después podés ajustar cada producto)</div>
+      <div class="layout-row" id="personal-pct-bulk" style="flex:0 0 auto;flex-wrap:wrap;margin:6px 0 14px;"></div>
+
+      <div class="layout-section-label" style="flex:0 0 auto;">Descuento por producto (aproximado — el precio final redondea a un valor terminado en 99)</div>
+      <div id="personal-items-list" class="personal-items-list"></div>
+    </div>
+    <div class="personal-actions">
+      <button id="btn-personal-aplicar">✅ Aplicar a selección</button>
+      <button id="btn-personal-quitar">🗑️ Quitar</button>
     </div>
   </div>
 </div>
 
 <script>
+// ============================================================
+// BACK BUTTON GUARD — debe correr LO ANTES POSIBLE, antes de cualquier
+// fetch/render, para que el "colchón" en el historial exista incluso si
+// el usuario toca atrás antes de que termine de cargar todo lo demás.
+// El handler real (_sendwaPopstateHandler) se define más abajo, una vez
+// que ya existen las funciones de las que depende (renderGrid, applyFilter,
+// etc.); acá solo garantizamos el pushState inicial.
+// ============================================================
+if (window.history && window.history.pushState) {
+  // Doble pushState: crea un "colchón" de 2 entradas en vez de 1.
+  // Algunos navegadores (sobre todo en PC, o cuando SendWA es la primera
+  // página de la pestaña sin historial previo) consumen la primera entrada
+  // de forma distinta al primer back; con 2 entradas el comportamiento es
+  // consistente entre PC y celular.
+  history.pushState({ sendwa: true, layer: 1 }, '', location.href);
+  history.pushState({ sendwa: true, layer: 2 }, '', location.href);
+}
+
 // ============================================================
 // CONFIG
 // ============================================================
@@ -788,7 +880,7 @@ const IMG_SIZE_MB = 0.15;
 
 // Priority map
 // Orden flyer: Promos → Combos → Especial → Destacada → Relámpago → Últimas
-const PRIORITY_ORDER = { personalizada: 0, promo: 1, combo: 2, especial: 3, destacado: 4, relampago: 5, ultimas: 6, '': 7 };
+const PRIORITY_ORDER = { personalizada: 0, promo: 1, combo: 2, multicompra: 3, especial: 4, destacado: 5, relampago: 6, ultimas: 7, '': 8 };
 const BADGE_COLORS = {
   relampago: '#F9A825', destacado: '#FF9800', especial: '#00BCD4',
   multicompra: '#9C27B0', ultimas: '#E53935', promo: '#43A047',
@@ -833,21 +925,6 @@ function calcularOferta(p) {
   const precio = p.precioVenta;
   const cat    = p.catOferta;
   if (!cat) return null;
-
-  // MULTICOMPRA — precio pack desde _poolMulticompraData
-  if (cat === 'multicompra') {
-    const mc = _poolMulticompraData.get(Number(p.id));
-    if (mc && mc.tipo && mc.cantidad > 0 && mc.precio > 0) {
-      const tipo = mc.tipo; // '2X1', 'NXM', 'PACK', etc
-      const etiqueta = tipo === '2X1'
-        ? `📦 2 × $${Number(mc.precio).toLocaleString('es-AR')}`
-        : tipo === '3X2'
-        ? `📦 3 × $${Number(mc.precio).toLocaleString('es-AR')}`
-        : `📦 ${mc.cantidad} × $${Number(mc.precio).toLocaleString('es-AR')}`;
-      return { precio: mc.precio, etiqueta, multicompra: mc };
-    }
-    return { precio: null, etiqueta: '📦 MULTICOMPRA' };
-  }
 
   // OFERTA PERSONALIZADA — texto + % manual elegido por el operador, máxima prioridad.
   // El precio final y la etiqueta ya vienen calculados desde Code.gs (fuente única de
@@ -894,6 +971,14 @@ function calcularOferta(p) {
     const icono = cat === 'combo' ? '🎯' : '🏷️';
     return { precio: p.normal, etiqueta: `${icono} ${cat.toUpperCase()} -${pct}% OFF` };
   }
+  if (cat === 'multicompra') {
+    const mc = _poolMulticompraData.get(Number(p.id));
+    if (mc && mc.tipo && mc.cantidad > 0 && mc.precio > 0) {
+      const et = mc.tipo==='2X1' ? `📦 2 × $${Number(mc.precio).toLocaleString('es-AR')}` : mc.tipo==='3X2' ? `📦 3 × $${Number(mc.precio).toLocaleString('es-AR')}` : `📦 ${mc.cantidad} × $${Number(mc.precio).toLocaleString('es-AR')}`;
+      return { precio: mc.precio, etiqueta: et, multicompra: mc };
+    }
+    return { precio: null, etiqueta: '📦 MULTICOMPRA' };
+  }
   return null;
 }
 
@@ -918,21 +1003,15 @@ function fmt(n) {
   if (!n && n !== 0) return '';
   return '$' + Number(n).toLocaleString('es-AR');
 }
-// Redondeo "gancho psicológico" — sube al próximo escalón de 500 (precios chicos)
-// o 1000 (precios grandes) y le resta 1, para terminar en ...499 / ...999
-function psicoRound(precio) {
-  const step = precio < 10000 ? 500 : 1000;
-  let rounded = Math.ceil(precio / step) * step;
-  if (rounded - precio < step * 0.15) rounded += step; // si quedó muy pegado, sube un escalón más
-  return rounded - 1;
-}
+// NOTA: el cálculo del redondeo psicológico (psicoRound_) ahora vive SOLO en
+// Code.gs — sendwa ya no lo recalcula, solo muestra precioFinal que llega del
+// servidor. Así hay una sola fuente de verdad (ver MANUAL_IA_COPIHUE.md).
 // Igual que fmt() pero envuelve los últimos 2 dígitos en <sup> para el efecto
 // "termina en 99" más chico y levantado, como en los carteles de súper
 function fmtPsico(n) {
   if (!n && n !== 0) return '';
-  const str = Number(n).toLocaleString('es-AR');
-  const head = str.slice(0, -2), tail = str.slice(-2);
-  return `$${head}<sup class="psico-99">${tail}</sup>`;
+  const full = Number(n).toLocaleString('es-AR');
+  return `$${full}<sup class="psico-99">99</sup>`;
 }
 function norm(s) {
   return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -1093,7 +1172,6 @@ async function cargarPools() {
 
     _poolRelampago.clear(); _poolDestacadas.clear();
     _poolEspeciales.clear(); _poolUltimas.clear(); _poolUltimasData.clear();
-    _poolMulticompra.clear(); _poolMulticompraData.clear();
 
     (data.relampagoActivo   || []).forEach(p => _poolRelampago.add(Number(p.id)));
     (data.destacadasActivas || []).filter(p => p.categoria !== 'CERVEZAS')
@@ -1110,17 +1188,14 @@ async function cargarPools() {
         diasParaVencer: p.diasParaVencer != null ? p.diasParaVencer : null,
       });
     });
+
+    // Guardar horarios para mensaje fuera de horario
+    _poolMulticompra.clear(); _poolMulticompraData.clear();
     (data.multicompraActiva || []).forEach(p => {
       const id = Number(p.id);
       _poolMulticompra.add(id);
-      _poolMulticompraData.set(id, {
-        tipo:     p.MULTICOMPRA_TIPO     || '',
-        cantidad: p.MULTICOMPRA_CANTIDAD || 0,
-        precio:   p.MULTICOMPRA_PRECIO   || 0,
-        grupo:    p.GRUPO_MULTICOMPRA    || '',
-      });
+      _poolMulticompraData.set(id, { tipo: p.MULTICOMPRA_TIPO||'', cantidad: p.MULTICOMPRA_CANTIDAD||0, precio: p.MULTICOMPRA_PRECIO||0, grupo: p.GRUPO_MULTICOMPRA||'' });
     });
-
     window._horariosOferta = data.horariosOferta || {};
     console.log(`📊 Pools SendWA — ⚡${_poolRelampago.size} 🔥${_poolDestacadas.size} 🌙${_poolEspeciales.size} 🏷️${_poolUltimas.size} 📦${_poolMulticompra.size}`);
   } catch(e) {
@@ -1164,7 +1239,8 @@ function parseProducts(data) {
       // catOferta se resuelve en resolveOfertas() contra los pools activos
       return { id, nombre, precioVenta, categoria, stock, foto, vendidos,
                relampago, destacada, especial, normal, costo, catOferta: '',
-               ofertaPersonalizadaServer: r.ofertaPersonalizada || null, _raw: r };    })
+               ofertaPersonalizadaServer: r.ofertaPersonalizada || null, _raw: r };
+    })
     .filter(p => p.nombre && p.precioVenta > 0);
 }
 
@@ -1192,7 +1268,6 @@ function resolveOfertas(products, modo = 'pool') {
       const enPoolD  = p.destacada > 0 && _poolDestacadas.has(pid);
       const enPoolE  = p.especial  > 0 && _poolEspeciales.has(pid);
       const enPoolU  = _poolUltimas.has(pid);
-
       if (modo === 'activo') {
         if      (enPoolMC)                                    catOferta = 'multicompra';
         else if (enPoolR && _tipoActivoAhora('relampago'))    catOferta = 'relampago';
@@ -1610,9 +1685,8 @@ ${tituloOferta[tiposPresentes[0]]}
     if (cat === 'multicompra') {
       const mc = _poolMulticompraData.get(Number(p.id));
       if (mc && mc.tipo && mc.cantidad > 0 && mc.precio > 0) {
-        const tipo = mc.tipo;
-        if (tipo === '2X1') return ` _(Llevá 2 pagás 1 × $${Number(mc.precio).toLocaleString('es-AR')})_`;
-        if (tipo === '3X2') return ` _(Llevá 3 pagás 2 × $${Number(mc.precio).toLocaleString('es-AR')})_`;
+        if (mc.tipo==='2X1') return ` _(Llevá 2 pagás 1 × $${Number(mc.precio).toLocaleString('es-AR')})_`;
+        if (mc.tipo==='3X2') return ` _(Llevá 3 pagás 2 × $${Number(mc.precio).toLocaleString('es-AR')})_`;
         return ` _(${mc.cantidad} × $${Number(mc.precio).toLocaleString('es-AR')})_`;
       }
       return ' _(multicompra)_';
@@ -1700,10 +1774,10 @@ on('btn-dl', async () => {
   const conBadge = confirm('¿Descargar con badge de oferta?\n\nOK = Con badge (tarjeta completa)\nCancelar = Solo la foto original');
   if (conBadge) {
     // Usar drawSingle (que quedó perfecto) para cada producto
-    toast(`⬇️ Generando ${Math.min(prods.length,48)} tarjetas…`, 4000);
+    toast(`⬇️ Generando ${Math.min(prods.length,12)} tarjetas…`, 4000);
     const resolved = resolveOfertas(prods);
     const cvs = document.getElementById('collage-canvas');
-    for (const p of resolved.slice(0,48)) {
+    for (const p of resolved.slice(0,12)) {
       await drawSingle(p);  // mismo render que "1 Foto"
       const a = document.createElement('a');
       a.href = cvs.toDataURL('image/jpeg', .93);
@@ -1732,8 +1806,25 @@ let _singleIdx   = 0;
 let _collageProds   = [];
 let _collagePage    = 0;
 let _collagePerPage = 6;
-const _gridCols = { 4:2, 6:3, 9:3, 12:4, 48:8 };
-const _gridRows = { 4:2, 6:2, 9:3, 12:3, 48:6 };
+// Collage independiente para Oferta Personalizada: cuando es true, el modal
+// muestra el banner con el % aplicado y usa el set de productos que acaban
+// de recibir la oferta — no toca ni depende de la selección general (selectedIds).
+let _collageIsPersonal  = false;
+let _personalPctApplied = null;
+const _gridCols = { 4:2, 6:3, 9:3, 12:4 };
+const _gridRows = { 4:2, 6:2, 9:3, 12:3 };
+
+// Router único de navegación — decide según el modo activo, sin pisar onclick
+window.pageNavRouter = function(dir) {
+  if (_collageMode === 'historia') {
+    const total = historiaTotalPages();
+    if (dir === 'prev' && _historiaPage > 0) { _historiaPage--; drawHistoria(_collageProds); }
+    if (dir === 'next' && _historiaPage < total - 1) { _historiaPage++; drawHistoria(_collageProds); }
+  } else {
+    if (dir === 'prev') collagePrevPage();
+    if (dir === 'next') collageNextPage();
+  }
+};
 
 function collageTotalPages() {
   return Math.max(1, Math.ceil(_collageProds.length / _collagePerPage));
@@ -1764,19 +1855,14 @@ window.collagePrevPage = function() { if (_collagePage > 0) { _collagePage--; re
 window.collageNextPage = function() { if (_collagePage < collageTotalPages()-1) { _collagePage++; renderCollagePage(); } };
 
 on('btn-collage', () => {
-  let base = getSelectedProducts();
+  const base = getSelectedProducts();
   if (!base.length) { toast('⚠️ Seleccioná al menos un producto primero'); return; }
-  // Aplicar filtro de precio mínimo activo — excluye chicles y productos baratos
-  if (precioMinimo > 0) {
-    base = base.filter(p => {
-      const of = p.catOferta ? calcularOferta(p) : null;
-      const precio = (of && of.precio) ? of.precio : p.precioVenta;
-      return precio >= precioMinimo;
-    });
-    if (!base.length) { toast(`⚠️ Ningún producto supera el precio mínimo $${precioMinimo.toLocaleString('es-AR')}`); return; }
-  }
+  // Resolver con modo actual para que el canvas sepa qué tipo de oferta mostrar
   const prods = resolveOfertas(base, getModoResolucion());
+  // Marcar sin oferta para el marco del canvas
   if (currentFilter === 'sinoferta') prods.forEach(p => p._sinOferta = true);
+  _collageIsPersonal  = false;
+  _personalPctApplied = null;
   _collageProds = prods;
   _collagePage  = 0;
   _singleIdx    = 0;
@@ -1796,6 +1882,20 @@ document.getElementById('collage-collage-controls')?.addEventListener('click', e
   });
   _collagePage = 0;
   renderCollagePage();
+  // Refrescar visibilidad/texto de "Descargar TODAS" / ZIP según la nueva paginación
+  const btnTodas = document.getElementById('btn-dl-todas');
+  const btnZip   = document.getElementById('btn-dl-zip');
+  if (btnTodas && _collageMode === 'collage') {
+    const totalPag = Math.max(1, Math.ceil(_collageProds.length / _collagePerPage));
+    if (totalPag > 1) {
+      btnTodas.classList.add('show');
+      btnTodas.textContent = `⬇️ Descargar TODAS (${totalPag} páginas)`;
+      if (btnZip) btnZip.style.display = 'block';
+    } else {
+      btnTodas.classList.remove('show');
+      if (btnZip) btnZip.style.display = 'none';
+    }
+  }
 });
 
 // Tabs de modo
@@ -1816,6 +1916,20 @@ function openCollageModal(mode) {
   const promoPanel = document.getElementById('promo-manual-panel');
   const canvasWrap = document.getElementById('collage-canvas-wrap');
 
+  // Banner de oferta personalizada — solo visible cuando este collage vino
+  // del flujo de "Aplicar" en Oferta Personalizada, independiente del collage normal.
+  const personalBanner = document.getElementById('collage-personal-banner');
+  if (personalBanner) {
+    if (_collageIsPersonal) {
+      const n = _collageProds.length;
+      const pctTxt = _personalPctApplied != null ? `-≈${_personalPctApplied}%` : 'con escalera variada';
+      personalBanner.textContent = `🏷️ Oferta personalizada ${pctTxt} aplicada a ${n} producto${n>1?'s':''}`;
+      personalBanner.style.display = 'block';
+    } else {
+      personalBanner.style.display = 'none';
+    }
+  }
+
   if (mode === 'promo') {
     if (!promoPanel) { toast('⚠️ Modo Promo no disponible todavía'); return; }
     picker.style.display = 'none';
@@ -1830,6 +1944,8 @@ function openCollageModal(mode) {
   if (promoPanel) promoPanel.style.display = 'none';
   canvasWrap.style.display = '';
 
+  const btnZip = document.getElementById('btn-dl-zip');
+
   if (mode === 'single') {
     picker.style.display = 'block';
     layoutBar.classList.add('show');
@@ -1837,13 +1953,28 @@ function openCollageModal(mode) {
     if (_collageProds.length > 1) {
       btnTodas.classList.add('show');
       btnTodas.textContent = `⬇️ Descargar TODAS (${_collageProds.length} fotos)`;
+      if (btnZip) btnZip.style.display = 'block';
     } else {
       btnTodas.classList.remove('show');
+      if (btnZip) btnZip.style.display = 'none';
+    }
+  } else if (mode === 'collage') {
+    picker.style.display = 'none';
+    layoutBar.classList.remove('show');
+    const totalPag = Math.max(1, Math.ceil(_collageProds.length / _collagePerPage));
+    if (totalPag > 1) {
+      btnTodas.classList.add('show');
+      btnTodas.textContent = `⬇️ Descargar TODAS (${totalPag} páginas)`;
+      if (btnZip) btnZip.style.display = 'block';
+    } else {
+      btnTodas.classList.remove('show');
+      if (btnZip) btnZip.style.display = 'none';
     }
   } else {
     picker.style.display = 'none';
     layoutBar.classList.remove('show');
     btnTodas.classList.remove('show');
+    if (btnZip) btnZip.style.display = 'none';
   }
   renderCollageMode();
 }
@@ -2078,8 +2209,8 @@ function fillPriceCentered(ctx, precio, cx, y, fontPx, color, psico) {
     ctx.fillText(full, cx, y);
     return;
   }
-  const head = full.slice(0, -2);
-  const tail = full.slice(-2);
+  const head = full;
+  const tail = '99';
   const smallPx = Math.round(fontPx * 0.56);
   ctx.font = `bold ${fontPx}px Segoe UI`;
   const headW = ctx.measureText(head).width;
@@ -2442,15 +2573,39 @@ async function drawHistoria(prodsAll) {
     const desde = start + 1, hasta = Math.min(start + HISTORIA_PER_PAGE, _collageProds.length);
     if (lbl) lbl.textContent = `Pág ${_historiaPage+1}/${total}  (${desde}–${hasta})`;
     const btns = nav.querySelectorAll('button');
-    if (btns[0]) { btns[0].style.opacity = _historiaPage > 0 ? '1' : '.3'; btns[0].onclick = () => { if(_historiaPage>0){_historiaPage--;drawHistoria(_collageProds);} }; }
-    if (btns[1]) { btns[1].style.opacity = _historiaPage < total-1 ? '1' : '.3'; btns[1].onclick = () => { if(_historiaPage<total-1){_historiaPage++;drawHistoria(_collageProds);} }; }
+    if (btns[0]) btns[0].style.opacity = _historiaPage > 0 ? '1' : '.3';
+    if (btns[1]) btns[1].style.opacity = _historiaPage < total-1 ? '1' : '.3';
   }
   const info = document.getElementById('collage-sel-info');
   if (info) info.textContent = `📷 ${_collageProds.length} fotos · ${total} pág${total>1?'s':''}`;
 }
 
-// Descargar TODAS: itera cada producto con el layout actual
+// Descargar TODAS:
+//  - Modo "1 Foto": una imagen por producto (como antes)
+//  - Modo "Collage": una imagen por PÁGINA de la grilla paginada
 on('btn-dl-todas', async () => {
+  if (_collageMode === 'collage') {
+    const totalPag = Math.max(1, Math.ceil(_collageProds.length / _collagePerPage));
+    if (totalPag <= 1) { toast('Solo hay 1 página'); return; }
+    toast(`⬇️ Descargando ${totalPag} páginas…`, totalPag*700+1000);
+    const savedPage = _collagePage;
+    for (let pg = 0; pg < totalPag; pg++) {
+      _collagePage = pg;
+      await renderCollagePage();
+      const cvs = document.getElementById('collage-canvas');
+      const a = document.createElement('a');
+      a.href = cvs.toDataURL('image/jpeg', .92);
+      a.download = `copihue_collage_pag${pg+1}de${totalPag}.jpg`;
+      a.click();
+      await new Promise(r => setTimeout(r, 600));
+    }
+    _collagePage = savedPage;
+    await renderCollagePage();
+    toast(`✅ ${totalPag} páginas descargadas`);
+    return;
+  }
+
+  // Modo single — comportamiento original
   const prods = _collageProds;
   if (!prods.length) return;
   toast(`⬇️ Descargando ${prods.length} imágenes…`, prods.length*600+1000);
@@ -2466,9 +2621,50 @@ on('btn-dl-todas', async () => {
     await new Promise(r => setTimeout(r, 500));
   }
   _singleIdx = savedIdx;
-  // Restaurar canvas
   await drawSingleLayout(prods[savedIdx], _singleLayout);
   toast(`✅ ${prods.length} imágenes descargadas`);
+});
+
+on('btn-dl-zip', async () => {
+  if (typeof JSZip === 'undefined') { toast('❌ No se pudo cargar el empaquetador ZIP'); return; }
+  const zip = new JSZip();
+  toast('📦 Generando ZIP, un momento…', 4000);
+
+  if (_collageMode === 'collage') {
+    const totalPag = Math.max(1, Math.ceil(_collageProds.length / _collagePerPage));
+    const savedPage = _collagePage;
+    for (let pg = 0; pg < totalPag; pg++) {
+      _collagePage = pg;
+      await renderCollagePage();
+      const cvs = document.getElementById('collage-canvas');
+      const blob = await new Promise(res => cvs.toBlob(res, 'image/jpeg', .92));
+      zip.file(`copihue_collage_pag${pg+1}de${totalPag}.jpg`, blob);
+    }
+    _collagePage = savedPage;
+    await renderCollagePage();
+  } else {
+    // Modo single — un jpg por producto
+    const prods = _collageProds;
+    const savedIdx = _singleIdx;
+    for (let i = 0; i < prods.length; i++) {
+      _singleIdx = i;
+      await drawSingleLayout(prods[i], _singleLayout);
+      const cvs = document.getElementById('collage-canvas');
+      const blob = await new Promise(res => cvs.toBlob(res, 'image/jpeg', .92));
+      zip.file(`copihue_${norm(prods[i].nombre).slice(0,30)}.jpg`, blob);
+    }
+    _singleIdx = savedIdx;
+    await drawSingleLayout(prods[savedIdx], _singleLayout);
+  }
+
+  const zipBlob = await zip.generateAsync({ type: 'blob' });
+  const url = URL.createObjectURL(zipBlob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `copihue_${_collageMode}_${Date.now()}.zip`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  toast('✅ ZIP descargado');
 });
 
 on('btn-collage-dl', () => {
@@ -2487,70 +2683,196 @@ on('btn-collage-close', () => {
 });
 
 // ============================================================
-// OFERTA PERSONALIZADA — texto + % manual, badge propio
+// OFERTA PERSONALIZADA — texto + % por producto, badge propio
 // ============================================================
 // NOTA: la oferta personalizada ya no usa un mapa local — la fuente de verdad
 // es la planilla (columna oferta_personalizada), vía Code.gs. Ver _apiAction() arriba.
-let _personalPct = 10;
+// Cada producto seleccionado tiene SU PROPIO % (1-6 → 10-60%); el botón de
+// arriba es solo un atajo para setear el mismo % a todos de una.
+let _personalItemTipo = new Map(); // id (Number) -> tipo (1-6)
+let _personalProds     = [];       // productos elegibles del modal (ya filtrados por stock)
+let _personalBulkPct   = 20;
 const PERSONAL_PCTS = [10,20,30,40,50,60];
+// 'off' no es un % real — significa tipo:0, que el GAS interpreta como
+// "sin oferta" y descarta al aplicar (la columna ya se resetea a 0 antes de
+// escribir la tanda nueva). Lo modelamos como pct especial -1 solo para la UI.
+const PCT_OFF = -1;
 
-function buildPersonalPctRow() {
-  const row = document.getElementById('personal-pct-row');
+function buildPersonalBulkRow() {
+  const row = document.getElementById('personal-pct-bulk');
   if (!row) return;
   row.innerHTML = PERSONAL_PCTS.map(pct =>
-    `<button class="layout-btn personal-pct-btn${pct===_personalPct?' active':''}" data-pct="${pct}">≈${pct}%</button>`
-  ).join('');
+    `<button class="layout-btn" data-pct="${pct}">≈${pct}%</button>`
+  ).join('') + `<button class="layout-btn" data-pct="${PCT_OFF}" style="background:#7a7a7a;color:#fff;border-color:#5a5a5a;">⛔ off</button>`;
 }
-document.getElementById('personal-pct-row')?.addEventListener('click', e => {
+document.getElementById('personal-pct-bulk')?.addEventListener('click', e => {
+  const btn = e.target.closest('.layout-btn');
+  if (!btn) return;
+  _personalBulkPct = parseInt(btn.dataset.pct);
+  if (_personalBulkPct === PCT_OFF) {
+    // "off" para todos = tipo 0 (el GAS lo descarta, queda sin oferta)
+    for (const id of _personalItemTipo.keys()) _personalItemTipo.set(id, 0);
+  } else {
+    const tipo = PERSONAL_PCTS.indexOf(_personalBulkPct) + 1;
+    for (const id of _personalItemTipo.keys()) _personalItemTipo.set(id, tipo);
+  }
+  renderPersonalItemsList();
+});
+
+function updatePersonalInfo() {
+  const info = document.getElementById('personal-info');
+  if (!info) return;
+  const total = _personalProds.length;
+  const offCount = [..._personalItemTipo.values()].filter(t => t === 0).length;
+  const activos  = total - offCount;
+  let txt = `📌 ${activos} activo${activos !== 1 ? 's' : ''} de ${total}`;
+  if (offCount > 0) txt += ` · ⛔ ${offCount} en off`;
+  info.textContent = txt;
+}
+
+function renderPersonalItemsList() {
+  const list = document.getElementById('personal-items-list');
+  if (!list) return;
+  list.innerHTML = _personalProds.map(p => {
+    const id   = Number(p.id);
+    const tipo = _personalItemTipo.get(id) || 0;
+    const isOff = tipo === 0;
+    const pills = PERSONAL_PCTS.map((pct, i) => {
+      const active = (i + 1) === tipo;
+      return `<button class="layout-btn personal-pct-btn${active ? ' active' : ''}" data-id="${id}" data-pct="${pct}">≈${pct}%</button>`;
+    }).join('') + `<button class="layout-btn personal-pct-btn${isOff ? ' active' : ''}" data-id="${id}" data-pct="${PCT_OFF}"
+        style="background:${isOff ? '#7a7a7a' : 'var(--card-bg)'};color:${isOff ? '#fff' : '#7a7a7a'};border-color:#7a7a7a;">⛔ off</button>`;
+    return `<div class="personal-item${isOff ? ' personal-item-off' : ''}">
+      <img src="${getImgUrl(p)}" alt="" title="${p.nombre.replace(/"/g,'&quot;')}" loading="lazy" style="${isOff ? 'opacity:.4' : ''}">
+      <div class="personal-item-name" title="${p.nombre.replace(/"/g,'&quot;')}" style="${isOff ? 'opacity:.5;text-decoration:line-through' : ''}">${p.nombre}</div>
+      <div class="personal-item-pills">${pills}</div>
+    </div>`;
+  }).join('');
+  updatePersonalInfo();
+}
+document.getElementById('personal-items-list')?.addEventListener('click', e => {
   const btn = e.target.closest('.personal-pct-btn');
   if (!btn) return;
-  _personalPct = parseInt(btn.dataset.pct);
-  document.querySelectorAll('.personal-pct-btn').forEach(b => b.classList.toggle('active', b === btn));
+  const id  = Number(btn.dataset.id);
+  const pct = parseInt(btn.dataset.pct);
+  if (pct === PCT_OFF) {
+    _personalItemTipo.set(id, 0); // off = sin oferta, el GAS lo descarta al aplicar
+  } else {
+    _personalItemTipo.set(id, PERSONAL_PCTS.indexOf(pct) + 1);
+  }
+  renderPersonalItemsList();
 });
 
 on('btn-personalizada', () => {
   if (!selectedIds.size) { toast('⚠️ Seleccioná al menos un producto primero'); return; }
-  buildPersonalPctRow();
-  const info = document.getElementById('personal-info');
-  if (info) info.textContent = `📌 Se aplicará a ${selectedIds.size} producto${selectedIds.size>1?'s':''} seleccionado${selectedIds.size>1?'s':''}`;
+  const prods = getSelectedProducts();
+  // Sin stock no se ofrece — mismo criterio que usa Code.gs para activar la
+  // oferta (ver getProductos). Filtramos ACÁ también para no hacerle elegir un
+  // % a un producto que después ni va a aparecer con el descuento.
+  const sinStock = prods.filter(p => !(p.stock > 0));
+  _personalProds = prods.filter(p => p.stock > 0);
+  if (!_personalProds.length) {
+    toast('⚠️ Ninguno de los seleccionados tiene stock — no hay nada para aplicar');
+    return;
+  }
+  const tipoDefault = PERSONAL_PCTS.indexOf(_personalBulkPct) + 1;
+  _personalItemTipo = new Map(_personalProds.map(p => [Number(p.id), tipoDefault]));
+  buildPersonalBulkRow();
+  renderPersonalItemsList(); // ya llama a updatePersonalInfo() internamente
+  if (sinStock.length) {
+    const info = document.getElementById('personal-info');
+    if (info) info.textContent += ` · ⚠️ ${sinStock.length} sin stock excluido${sinStock.length > 1 ? 's' : ''}`;
+  }
   document.getElementById('personal-modal').classList.add('open');
 });
 
 on('btn-personal-aplicar', () => {
   const texto = (document.getElementById('personal-texto').value || '').trim();
   if (!texto) { toast('⚠️ Escribí un texto para la oferta'); return; }
-  const tipoCodigo = PERSONAL_PCTS.indexOf(_personalPct) + 1; // 10→1, 20→2 ... 60→6
-  const ids = [...selectedIds].map(id => Number(id));
-  const cantidad = ids.length;
-  document.getElementById('personal-modal').classList.remove('open');
-  toast(`⏳ Guardando "${texto}" -≈${_personalPct}% en ${cantidad} producto${cantidad>1?'s':''}...`);
-  _apiAction('ofertaPersonalizada', { productoIds: ids, tipo: tipoCodigo, texto })
+  // Todos los items (incluye tipo:0 = "off") van al GAS — el backend ya resetea
+  // la columna completa antes de escribir, así que los "off" simplemente quedan
+  // sin oferta (no hace falta filtrarlos, son inválidos para PCT_OFERTA_PERSONALIZADA
+  // y el backend los descarta solo).
+  const items = [..._personalItemTipo.entries()].map(([id, tipo]) => ({ id, tipo }));
+  if (!items.length) { toast('⚠️ Seleccioná al menos un producto primero'); return; }
+
+  // Para el resumen y el collage posterior, contamos solo los que SÍ llevan oferta real
+  const itemsConOferta = items.filter(it => it.tipo > 0);
+  const itemsOff       = items.filter(it => it.tipo === 0);
+  if (!itemsConOferta.length) {
+    toast('⚠️ Todos los productos están en "off" — no hay nada para aplicar. Tocá "Quitar" si querés sacarles la oferta.');
+    return;
+  }
+
+  const cantidad     = itemsConOferta.length;
+  const tiposUsados  = new Set(itemsConOferta.map(it => it.tipo));
+  const pctResumen   = tiposUsados.size === 1 ? `≈${PERSONAL_PCTS[[...tiposUsados][0] - 1]}%` : 'escalera variada';
+  const btnAplicar   = document.getElementById('btn-personal-aplicar');
+  btnAplicar.classList.add('is-busy');
+  btnAplicar.textContent = '⏳ Guardando...';
+  const offTxt = itemsOff.length ? ` (${itemsOff.length} en off, excluidos)` : '';
+  toast(`⏳ Guardando "${texto}" (${pctResumen}) en ${cantidad} producto${cantidad > 1 ? 's' : ''}${offTxt}...`);
+  _apiAction('ofertaPersonalizada', { items, texto })
     .then(res => {
+      btnAplicar.classList.remove('is-busy');
+      btnAplicar.textContent = '✅ Aplicar a selección';
       if (res && res.success) {
         toast(`🏷️ ${res.mensaje || 'Oferta aplicada'}`);
-        return fetchData().then(data => { allProducts = parseProducts(data); applyFilter(); });
+        document.getElementById('personal-modal').classList.remove('open');
+        return fetchData().then(data => {
+          allProducts = parseProducts(data);
+          applyFilter();
+          // Collage solo con los productos que SÍ quedaron con oferta real —
+          // los marcados "off" no entran al flyer porque no tienen descuento.
+          const idsSet = new Set(itemsConOferta.map(it => it.id));
+          const afectados = allProducts.filter(p => idsSet.has(Number(p.id)));
+          if (afectados.length) {
+            const prods = resolveOfertas(afectados, getModoResolucion());
+            _collageIsPersonal  = true;
+            _personalPctApplied = tiposUsados.size === 1 ? PERSONAL_PCTS[[...tiposUsados][0] - 1] : null;
+            _collageProds = prods;
+            _collagePage  = 0;
+            _singleIdx    = 0;
+            openCollageModal('collage');
+          }
+        });
       } else {
         toast(`❌ ${res && res.mensaje ? res.mensaje : 'No se pudo guardar'}`);
       }
     })
-    .catch(() => toast('❌ Error de conexión al guardar'));
+    .catch(() => {
+      btnAplicar.classList.remove('is-busy');
+      btnAplicar.textContent = '✅ Aplicar a selección';
+      toast('❌ Error de conexión al guardar');
+    });
 });
 
 on('btn-personal-quitar', () => {
   const ids = [...selectedIds].map(id => Number(id));
-  const cantidad = ids.length;
-  toast(`⏳ Quitando oferta de ${cantidad} producto${cantidad>1?'s':''}...`);
+  const cantidad   = ids.length;
+  const btnQuitar  = document.getElementById('btn-personal-quitar');
+  btnQuitar.classList.add('is-busy');
+  btnQuitar.textContent = '⏳ Quitando...';
+  toast(`⏳ Quitando oferta de ${cantidad} producto${cantidad > 1 ? 's' : ''}...`);
   _apiAction('quitarOfertaPersonalizada', { productoIds: ids })
     .then(res => {
+      btnQuitar.classList.remove('is-busy');
+      btnQuitar.textContent = '🗑️ Quitar';
       if (res && res.success) {
         toast(`🗑️ ${res.mensaje || 'Oferta quitada'}`);
+        document.getElementById('personal-modal').classList.remove('open');
         return fetchData().then(data => { allProducts = parseProducts(data); applyFilter(); });
       } else {
         toast(`❌ ${res && res.mensaje ? res.mensaje : 'No se pudo quitar'}`);
       }
     })
-    .catch(() => toast('❌ Error de conexión al quitar'));
+    .catch(() => {
+      btnQuitar.classList.remove('is-busy');
+      btnQuitar.textContent = '🗑️ Quitar';
+      toast('❌ Error de conexión al quitar');
+    });
 });
+
 
 // ============================================================
 // IA SUGGEST
@@ -2716,11 +3038,99 @@ document.getElementById('btn-sel-clear').onclick = () => {
   renderGrid();
 };
 // ─── TOOLS-FAB ──────────────────────────────────────────────
+// ── Helpers oferta personalizada ─────────────────────────────
+function contarOfertasPersonalizadasActivas() {
+  return allProducts.filter(p => p.ofertaPersonalizadaServer && p.ofertaPersonalizadaServer !== '0').length;
+}
+function verOfertasPersonalizadasActivas() {
+  document.getElementById('tools-panel').classList.remove('open');
+  document.getElementById('tools-toggle').classList.remove('open');
+  currentFilter = 'oferta';
+  document.querySelectorAll('.filter-chip').forEach(c =>
+    c.classList.toggle('active', c.dataset.filter === 'oferta'));
+  applyFilter();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  toast('📍 Mostrando productos con oferta activa');
+}
+function _ejecutarResetTotal() {
+  toast('🧹 Reseteando columna completa...');
+  _apiAction('resetOfertaPersonalizadaTotal', {})
+    .then(res => {
+      if (res && res.success) {
+        toast('✅ ' + (res.mensaje || 'Reseteado correctamente'));
+        return fetchData().then(data => { allProducts = parseProducts(data); applyFilter(); });
+      } else {
+        toast('❌ ' + (res && res.mensaje ? res.mensaje : 'No se pudo resetear'));
+      }
+    })
+    .catch(() => toast('❌ Error de conexión al resetear'));
+}
+function _overlayOfertas(html, onMounted) {
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+  const box = document.createElement('div');
+  box.style.cssText = 'background:var(--card-bg);border-radius:16px;padding:22px 20px;max-width:360px;width:100%;';
+  box.innerHTML = html;
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+  const close = () => document.body.removeChild(ov);
+  ov.addEventListener('click', e => { if (e.target === ov) close(); });
+  if (onMounted) onMounted(box, close);
+}
+
+on('btn-reset-total', () => {
+  document.getElementById('tools-panel').classList.remove('open');
+  document.getElementById('tools-toggle').classList.remove('open');
+  const n = contarOfertasPersonalizadasActivas();
+  if (n > 0) {
+    _overlayOfertas(`
+      <div style="font-size:17px;font-weight:800;margin-bottom:12px;color:var(--text);">🧹 Resetear ofertas personalizadas</div>
+      <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.5;">
+        Hay <b style="color:#E53935;">${n} producto${n>1?'s':''}</b> con oferta personalizada activa en la planilla.<br><br>
+        Al resetear se borran <b>todas</b> — incluyendo campañas viejas fuera de pantalla.<br>
+        POS y catálogo dejarán de mostrarlas en cuanto se actualicen.
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <button id="_rv" style="padding:11px;border-radius:10px;border:2px solid var(--primary);background:transparent;color:var(--primary);font-size:13px;font-weight:700;cursor:pointer;">🔍 Ver las ${n} activas primero</button>
+        <button id="_rc" style="padding:11px;border-radius:10px;border:none;background:#7b241c;color:#fff;font-size:13px;font-weight:700;cursor:pointer;">🗑️ Resetear todo de todas formas</button>
+        <button id="_rx" style="padding:11px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg);color:var(--text-muted);font-size:13px;cursor:pointer;">✕ Cancelar</button>
+      </div>`,
+    (box, close) => {
+      box.querySelector('#_rv').onclick = () => { close(); verOfertasPersonalizadasActivas(); };
+      box.querySelector('#_rc').onclick = () => { close(); _ejecutarResetTotal(); };
+      box.querySelector('#_rx').onclick = close;
+    });
+  } else {
+    if (confirm('No hay ofertas personalizadas activas.\n¿Resetear igual para asegurarse de que la columna esté limpia?')) _ejecutarResetTotal();
+  }
+});
+
+
 document.getElementById('tools-toggle').onclick = () => {
   document.getElementById('tools-panel').classList.toggle('open');
   document.getElementById('tools-toggle').classList.toggle('open');
 };
 on('btn-ia-suggest', async () => {
+  // Bloquear si hay ofertas personalizadas activas
+  const nP = contarOfertasPersonalizadasActivas();
+  if (nP > 0) {
+    _overlayOfertas(`
+      <div style="font-size:17px;font-weight:800;margin-bottom:12px;color:var(--text);">⚠️ IA bloqueada</div>
+      <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.5;">
+        Hay <b style="color:#E53935;">${nP} producto${nP>1?'s':''}</b> con oferta personalizada activa.<br><br>
+        Usar la IA ahora generaría una tanda que se <b>pisaría con la campaña actual</b>.<br>
+        Primero reseteá las ofertas y luego usá la IA con la selección limpia.
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <button id="_iv" style="padding:11px;border-radius:10px;border:2px solid var(--primary);background:transparent;color:var(--primary);font-size:13px;font-weight:700;cursor:pointer;">🔍 Ver las ${nP} activas</button>
+        <button id="_ix" style="padding:11px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg);color:var(--text-muted);font-size:13px;cursor:pointer;">✕ Cerrar</button>
+      </div>`,
+    (box, close) => {
+      box.querySelector('#_iv').onclick = () => { close(); verOfertasPersonalizadasActivas(); };
+      box.querySelector('#_ix').onclick = close;
+    });
+    return;
+  }
   const modo = await new Promise(resolve => {
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:flex-end;justify-content:center';
@@ -2947,8 +3357,8 @@ function buildCategoryFilters() {
 window.toggleSelect = toggleSelect; // expose to onclick
 
 // Botón atrás del celular — evitar salir de la app
-history.pushState({ sendwa: true }, '', location.href);
-window.addEventListener('popstate', (e) => {
+// (el pushState inicial ya se ejecutó arriba del todo, ver inicio del <script>)
+function _sendwaPopstateHandler(e) {
   // Si hay modal de collage abierto, cerrarlo
   if (document.getElementById('collage-modal').classList.contains('open')) {
     document.getElementById('collage-modal').classList.remove('open');
@@ -2975,9 +3385,20 @@ window.addEventListener('popstate', (e) => {
     history.pushState({ sendwa: true }, '', location.href);
     return;
   }
-  // Ya en estado neutro — quedarse en la página
-  history.pushState({ sendwa: true }, '', location.href);
-});
+  // Ya en estado neutro (sin modal, sin selección, sin filtro) — acá sí
+  // preguntamos si quiere salir de verdad, igual que el resto de las apps
+  // del ecosistema (s_fixed.html, etc.)
+  const confirmaSalir = confirm('¿Salir de SendWA?');
+  if (confirmaSalir) {
+    // Sacamos nuestro propio listener ANTES de navegar, para que el back
+    // real no quede atrapado en un loop disparando este mismo handler.
+    window.removeEventListener('popstate', _sendwaPopstateHandler);
+    history.go(-1);
+  } else {
+    history.pushState({ sendwa: true }, '', location.href);
+  }
+}
+window.addEventListener('popstate', _sendwaPopstateHandler);
 
 async function init() {
   // Cargar productos Y pools en paralelo — igual que seba21
@@ -3035,3 +3456,4 @@ init();
 </script>
 </body>
 </html>
+
