@@ -36,6 +36,16 @@
 
 ================================================================================
 
+  v412 — 10/07/2026 (d)
+  ---------------------
+  • MEJORA — agregarProducto(): al seleccionar un producto (no por peso), la
+    búsqueda ahora se limpia sola 900ms después de la última selección —
+    antes había que tocar la ✕ a mano para arrancar la próxima búsqueda.
+    No reabre el teclado solo. Usa debounce: si se siguen tocando productos
+    del mismo resultado, el timer se reinicia y no corta la lista mientras
+    se está eligiendo varios. Pensado para ganar velocidad al cargar
+    productos seguidos.
+
   v411 — 10/07/2026 (c)
   ---------------------
   • FIX real del Enter en tragMontoInput: el intento anterior (onkeydown)
@@ -910,7 +920,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v411</title>
+    <title>Copihue — POS v412</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3840,6 +3850,7 @@ function agregarProducto(id) {
     renderVenta(true); // ligero: solo panel y totales
     _guardarCarritoDiferido(); // async — no bloquea el hilo en Android
     _refreshResultadosBadges(id); // quirúrgico: solo el card tocado
+    _autoLimpiarBusquedaTrasAgregar(); // v412 — limpia la búsqueda sola tras una pausa
 }
 
 // ===== SELECTOR DE CANTIDAD ANTES DE AGREGAR =====
@@ -4300,6 +4311,30 @@ function limpiarBusqueda() {
     if (btnX) btnX.style.display = 'none';
     if (busOculto) busOculto.dispatchEvent(new Event('input', {bubbles:true}));
     if (busInput) busInput.focus();
+}
+
+// v412 — Auto-limpieza de búsqueda tras agregar un producto al carrito.
+// Antes había que tocar la ✕ a mano para volver a buscar el próximo producto.
+// Ahora, 900ms después de la última selección, se limpia sola (como si se
+// hubiese tocado la ✕) — pero SIN reabrir el teclado, para no taparte la
+// pantalla si seguís mirando el carrito. Usa debounce: si seguís tocando
+// productos del mismo resultado, el temporizador se reinicia y no te corta
+// la lista mientras estás eligiendo varios.
+let _autoLimpiarBusquedaTimer = null;
+function _autoLimpiarBusquedaTrasAgregar() {
+    if (_autoLimpiarBusquedaTimer) clearTimeout(_autoLimpiarBusquedaTimer);
+    _autoLimpiarBusquedaTimer = setTimeout(() => {
+        const busInput = document.getElementById('pos-barra-input');
+        const busOculto = document.getElementById('buscador');
+        const btnX = document.getElementById('btnCerrarBusq');
+        // No limpiar si el usuario está tipeando activamente (input enfocado)
+        if (busInput && document.activeElement === busInput) return;
+        if (busInput) busInput.value = '';
+        if (busOculto) busOculto.value = '';
+        if (btnX) btnX.style.display = 'none';
+        if (busOculto) busOculto.dispatchEvent(new Event('input', {bubbles:true}));
+        // Sin .focus() — no reabrir el teclado solo
+    }, 900);
 }
 
 // ===== MODAL CONFIRMAR: helpers para editar desde el modal =====
