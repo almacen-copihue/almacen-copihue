@@ -138,6 +138,26 @@ body {
 .state-sub { font-size: 0.85rem; color: rgba(255,255,255,0.6); line-height: 1.6; }
 #errMsg { color: var(--rojo-br) !important; font-weight: 700; }
 
+/* Ingreso manual de código (nuevo — para cuando no llega el link ni el QR) */
+.codigo-manual { margin-top: 16px; width: 100%; max-width: 280px; }
+.codigo-manual input {
+  width: 100%; text-align: center; padding: 12px 10px; margin-bottom: 8px;
+  border-radius: 10px; border: 2px solid rgba(212,160,23,0.4);
+  background: rgba(0,0,0,0.35); color: var(--dorado-pl);
+  font-family: 'Playfair Display', serif; font-size: 1rem; font-weight: 700;
+  letter-spacing: 3px; text-transform: uppercase;
+}
+.codigo-manual input::placeholder { color: rgba(255,255,255,0.25); letter-spacing: 1px; font-family: 'Lato', sans-serif; font-weight: 400; }
+.codigo-manual input:focus { outline: none; border-color: var(--dorado-cl); box-shadow: 0 0 10px rgba(245,197,24,0.35); }
+.codigo-manual button {
+  width: 100%; padding: 11px 0; border: none; border-radius: 10px;
+  background: linear-gradient(160deg, var(--verde-br), var(--verde));
+  color: #06280f; font-weight: 900; font-size: 0.85rem; cursor: pointer;
+  box-shadow: 0 3px 0 var(--verde-dark);
+}
+.codigo-manual button:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--verde-dark); }
+.codigo-manual-o { font-size: 0.65rem; color: rgba(255,255,255,0.3); text-transform: uppercase; letter-spacing: 2px; margin: 10px 0; }
+
 /* ═══════════════ ESCENARIO DE RODILLOS ═══════════════ */
 .reels-stage {
   flex: 1; min-height: 0;
@@ -152,11 +172,12 @@ body {
   background:
     linear-gradient(180deg, #2b2b30, #101013 8%, #101013 92%, #2b2b30);
   border-radius: 16px;
-  border: 3px solid var(--dorado);
+  border: 3px solid #1c1c1e;
   padding: 5px;
   box-shadow:
     inset 0 6px 20px rgba(0,0,0,0.75),
     inset 0 -6px 20px rgba(0,0,0,0.75),
+    0 0 0 2px rgba(212,160,23,0.35),
     0 0 0 5px var(--negro),
     0 10px 26px rgba(0,0,0,0.55);
   position: relative;
@@ -426,12 +447,17 @@ body {
       </div>
     </div>
 
-    <!-- Error -->
+    <!-- Error / sin código -->
     <div class="screen" id="scrError">
       <div class="state-center">
-        <span class="state-icon">⚠️</span>
-        <div class="state-titulo">Código inválido</div>
-        <p id="errMsg">Pedile al cajero un nuevo código.</p>
+        <span class="state-icon">🎰</span>
+        <div class="state-titulo">Ingresá tu código</div>
+        <p id="errMsg">Pedile al cajero el código que te generó.</p>
+        <div class="codigo-manual-o">— o escribilo acá —</div>
+        <div class="codigo-manual">
+          <input type="text" id="inputCodigoManual" placeholder="Ej: TRG-K9VUE" autocapitalize="characters" autocomplete="off" maxlength="24">
+          <button type="button" id="btnCodigoManual">🎰 Jugar con este código</button>
+        </div>
       </div>
     </div>
 
@@ -1158,6 +1184,98 @@ function lanzarConfetti() {
       if (!muted) getCtx(); // desbloquea el audio con el gesto del usuario
     });
   }
+})();
+</script>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  CÓDIGO MANUAL + MODO PRUEBA (módulo NUEVO e independiente).
+//  No modifica el script del juego de arriba, solo reutiliza sus
+//  funciones y variables globales (fetchGAS, mostrarScreen, cfg,
+//  codigoJuego, girosTotal, etc. — son "let/function" de nivel
+//  superior, así que se comparten entre <script> de la misma página).
+//
+//  - Deja escribir el código a mano cuando no llegó el link/QR.
+//  - Si lo escrito coincide con la fila "test_tragamonedas" de
+//    config_sistema, arranca una partida de PRUEBA local (3 giros)
+//    sin gastar códigos reales ni escribir nada en la planilla de
+//    premios (no llama a registrarPremioTragamonedas).
+//  Requisito: que la función getConfigRaspadita del Apps Script
+//  devuelva ese valor (p.ej. como config.test_tragamonedas). Si no
+//  lo devuelve todavía, esta parte queda inactiva sola —el ingreso
+//  manual de códigos reales funciona igual.
+// ═══════════════════════════════════════════════════════════════
+(function () {
+  let testCode = null;
+
+  fetchGAS('getConfigRaspadita').then(r => {
+    if (r && r.ok && r.config) {
+      if (!cfg || Object.keys(cfg).length === 0) { cfg = r.config; aplicarConfig(cfg); }
+      testCode = String(r.config.test_tragamonedas || r.config.testTragamonedas || '').trim().toUpperCase();
+    }
+  }).catch(() => {});
+
+  async function iniciarModoPrueba() {
+    mostrarScreen('loading');
+    const loadMsg = document.getElementById('scrLoadingMsg');
+    if (loadMsg) loadMsg.textContent = 'Cargando modo prueba...';
+    try {
+      const [resCfg, resPremios] = await Promise.all([
+        fetchGAS('getConfigRaspadita'),
+        fetchGAS('premiosRaspadita')
+      ]);
+      if (resCfg.ok && resCfg.config) { cfg = resCfg.config; aplicarConfig(cfg); }
+      codigoJuego = 'PRUEBA-' + testCode;
+      girosTotal  = 3;
+      girosUsados = 0;
+      premiosGanadosSession = [];
+      construirSimbolos(resPremios.ok ? resPremios.premios : []);
+      inicializarCarretes();
+      mostrarScreen('juego');
+      renderFichas();
+      marcarBadgePrueba();
+    } catch (e) {
+      mostrarScreen('error', 'No se pudo cargar el modo prueba. Probá de nuevo.');
+    }
+  }
+
+  function marcarBadgePrueba() {
+    const bar = document.getElementById('fichasBar');
+    if (bar && !document.getElementById('badgePrueba')) {
+      const b = document.createElement('span');
+      b.id = 'badgePrueba';
+      b.textContent = '🧪 PRUEBA';
+      b.style.cssText = 'font-size:.55rem;font-weight:900;color:#06280f;background:var(--dorado-cl);padding:2px 7px;border-radius:8px;margin-left:6px;letter-spacing:0.5px;';
+      bar.appendChild(b);
+    }
+  }
+
+  async function intentarCodigo(valorCrudo) {
+    const codigo = String(valorCrudo || '').trim().toUpperCase();
+    if (!codigo) return;
+    if (testCode && codigo === testCode) { iniciarModoPrueba(); return; }
+    codigoJuego = codigo;
+    mostrarScreen('loading');
+    const loadMsg = document.getElementById('scrLoadingMsg');
+    if (loadMsg) loadMsg.textContent = 'Validando código...';
+    await _cargarJuego(3);
+  }
+
+  function montar() {
+    const input = document.getElementById('inputCodigoManual');
+    const btn   = document.getElementById('btnCodigoManual');
+    if (!input || !btn) return;
+    btn.addEventListener('click', () => intentarCodigo(input.value));
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') intentarCodigo(input.value); });
+    input.addEventListener('input', () => {
+      const pos = input.selectionStart;
+      input.value = input.value.toUpperCase();
+      input.setSelectionRange(pos, pos);
+    });
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', montar);
+  else montar();
 })();
 </script>
 </body>
