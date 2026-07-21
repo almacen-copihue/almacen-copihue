@@ -36,6 +36,25 @@
 
 ================================================================================
 
+  v417 — 10/07/2026 (i)
+  ---------------------
+  • FIX — Doble área de scroll anidada en "Caja — Egresos": el wrapper del
+    modal y la sección de historial tenían cada uno su propio
+    overflow-y:auto. En el celular esto trababa el gesto de arrastrar (se
+    "atrapaba" en una de las dos áreas y no dejaba desplazar nada). Se
+    sacó el scroll interno duplicado — ahora todo el modal (formulario +
+    resumen + historial) scrollea junto, con una sola área de scroll.
+  • FIX — Resumen dinámico: antes decía siempre "HOY" sin importar el
+    filtro aplicado.
+      - Al elegir una fecha puntual: antes se refiltraba buscando "hoy"
+        sobre datos que el backend YA había acotado a esa fecha elegida
+        — daba "sin egresos" casi siempre salvo que la fecha elegida
+        fuera hoy. Ahora muestra correctamente el resumen de la fecha
+        consultada.
+      - Sin filtro (vista por defecto o tras tocar "Todo"): ahora
+        muestra el resumen del MES ACTUAL en vez de "hoy", más acorde a
+        que en esa vista se está mirando el historial completo.
+
   v416 — 10/07/2026 (h)
   ---------------------
   • MEJORA — Modal "Caja — Egresos": la grilla de 13 botones de Categoría
@@ -972,7 +991,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Copihue — POS v416</title>
+    <title>Copihue — POS v417</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -12493,11 +12512,15 @@ async function cargarHistorialRetiros() {
                 </div>
             </div>
 
-            <!-- Historial de egresos — v415: ahora completo por defecto, sin
-                 recorte a 3 días (ese recorte hacía que la pantalla se viera
-                 vacía/"como si no anduviera" cuando no hubo retiros recientes) -->
-            <div style="padding:14px 16px 8px;flex:1;display:flex;flex-direction:column;min-height:0;">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-shrink:0;">
+            <!-- Historial de egresos — v417: se sacó el scroll interno
+                 duplicado (flex:1;overflow-y:auto) que tenía este bloque y
+                 su contenido. Con DOS áreas de scroll anidadas, en el
+                 celular el gesto de arrastrar quedaba "atrapado" en una de
+                 las dos y no se podía desplazar nada. Ahora todo el modal
+                 (formulario + resumen + historial) scrollea como una sola
+                 lista larga, con el scroll del wrapper externo. -->
+            <div style="padding:14px 16px 8px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
                     <div style="font-size:0.82rem;font-weight:900;color:#555;text-transform:uppercase;letter-spacing:0.5px;">📋 Historial completo</div>
                     <div style="display:flex;align-items:center;gap:6px;">
                         <input type="date" id="filtroFechaSalidas"
@@ -12509,7 +12532,7 @@ async function cargarHistorialRetiros() {
                         </button>
                     </div>
                 </div>
-                <div id="historialSalidasContent" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:0;padding-bottom:16px;">
+                <div id="historialSalidasContent" style="display:flex;flex-direction:column;gap:0;padding-bottom:16px;">
                     <div style="text-align:center;color:#aaa;padding:20px;font-size:0.85rem;">Cargando...</div>
                 </div>
             </div>
@@ -12530,36 +12553,50 @@ async function cargarHistorialRetiros() {
 // llegaba a pedir el historial — se eliminó.
 function switchTabSalidas() {} // deprecated — mantenido por compatibilidad
 
-// v415 — ya no recorta a 3 días por defecto (eso hacía que la pantalla se
-// viera vacía cuando no hubo retiros recientes). Ahora siempre muestra el
-// historial completo (o filtrado por fecha si se elige una), y por separado
-// arma un resumen de HOY que se ve de entrada, sin tocar ningún filtro.
+// v417 — Resumen dinámico según el filtro activo:
+//  - Con una fecha puntual elegida → resumen de ESE día (antes se
+//    refiltraba buscando "hoy" sobre datos que el backend YA había
+//    acotado a la fecha elegida, así que casi siempre daba vacío salvo
+//    que la fecha elegida fuera justo hoy — ese era el bug).
+//  - Sin fecha (vista por defecto o tras tocar "Todo") → resumen del
+//    MES ACTUAL en vez de "hoy", ya que en esta vista se está mirando
+//    el historial completo, no solo el día de hoy.
 async function cargarHistorialSalidas() {
     const el = document.getElementById('historialSalidasContent');
     const resumenEl = document.getElementById('resumenHoyEgresos');
     el.innerHTML = '<div style="text-align:center;color:#aaa;padding:20px;font-size:0.85rem;">⏳ Cargando...</div>';
-    if (resumenEl) resumenEl.innerHTML = '<div style="text-align:center;color:#aaa;font-size:0.82rem;">⏳ Cargando resumen de hoy...</div>';
     const fecha = document.getElementById('filtroFechaSalidas').value || null;
+    if (resumenEl) resumenEl.innerHTML = '<div style="text-align:center;color:#aaa;font-size:0.82rem;">⏳ Cargando resumen ' + (fecha ? 'del día' : 'del mes') + '...</div>';
     const datos = { limite: 500 };
     if (fecha) datos.fecha = fecha;
     try {
         const url = API_URL + '?action=getCajaEgresos&data=' + encodeURIComponent(JSON.stringify(datos)) + '&t=' + Date.now();
         const d = await _apiFetchUrl('getCajaEgresos', url);
+        const fmtFechaCorta = iso => { const p = (iso||'').split('-'); return p.length===3 ? p[2]+'/'+p[1]+'/'+p[0] : iso; };
 
-        // ── Resumen de HOY — siempre en base a TODOS los registros (sin
-        //    importar el filtro de fecha que esté aplicado en el historial
-        //    de abajo), para que siempre refleje el día actual.
+        // ── Resumen dinámico ──────────────────────────────────────
         if (resumenEl) {
-            const hoyStr = new Date().toISOString().split('T')[0];
-            const deHoy = (d.ok && d.registros) ? d.registros.filter(r => r.fecha === hoyStr) : [];
-            if (!deHoy.length) {
-                resumenEl.innerHTML = `<div style="text-align:center;color:#888;font-size:0.85rem;">
-                    📅 <strong>HOY:</strong> sin egresos registrados</div>`;
+            let itemsResumen, etiquetaResumen;
+            if (fecha) {
+                // El backend ya devolvió solo los registros de esta fecha
+                itemsResumen = (d.ok && d.registros) ? d.registros : [];
+                etiquetaResumen = '📅 ' + fmtFechaCorta(fecha);
             } else {
-                const totalHoy = deHoy.reduce((s, r) => s + r.monto, 0);
+                // Sin filtro: acotar al mes actual sobre el total devuelto
+                const hoy = new Date();
+                const prefijoMes = hoy.getFullYear() + '-' + String(hoy.getMonth()+1).padStart(2,'0');
+                itemsResumen = (d.ok && d.registros) ? d.registros.filter(r => (r.fecha || '').startsWith(prefijoMes)) : [];
+                const nombreMes = hoy.toLocaleDateString('es-AR', {month:'long', year:'numeric'});
+                etiquetaResumen = '📅 ' + nombreMes.charAt(0).toUpperCase() + nombreMes.slice(1);
+            }
+            if (!itemsResumen.length) {
+                resumenEl.innerHTML = `<div style="text-align:center;color:#888;font-size:0.85rem;">
+                    ${etiquetaResumen}: sin egresos registrados</div>`;
+            } else {
+                const totalResumen = itemsResumen.reduce((s, r) => s + r.monto, 0);
                 resumenEl.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;">
-                    <span style="font-size:0.85rem;color:#555;">📅 <strong>HOY</strong> · ${deHoy.length} retiro${deHoy.length===1?'':'s'}</span>
-                    <span style="font-size:1.1rem;font-weight:900;color:#c62828;">−$${totalHoy.toLocaleString('es-AR')}</span>
+                    <span style="font-size:0.85rem;color:#555;">${etiquetaResumen} · ${itemsResumen.length} retiro${itemsResumen.length===1?'':'s'}</span>
+                    <span style="font-size:1.1rem;font-weight:900;color:#c62828;">−$${totalResumen.toLocaleString('es-AR')}</span>
                 </div>`;
             }
         }
@@ -12571,7 +12608,7 @@ async function cargarHistorialSalidas() {
         const registros = d.registros;
         const porFecha = {};
         registros.forEach(r => { (porFecha[r.fecha] = porFecha[r.fecha] || []).push(r); });
-        const fmtFecha = iso => { const p = (iso||'').split('-'); return p.length===3 ? p[2]+'/'+p[1]+'/'+p[0] : iso; };
+        const fmtFecha = fmtFechaCorta;
         el.innerHTML = Object.keys(porFecha).sort().reverse().map(f => {
             const items = porFecha[f];
             const total = items.reduce((s, r) => s + r.monto, 0);
