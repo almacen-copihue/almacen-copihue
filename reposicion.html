@@ -241,7 +241,7 @@
   <div class="header-inner">
     <div class="eyebrow"><span class="dot"></span>ALMACÉN COPIHUE · REPOSICIÓN</div>
     <h1>Sin stock, en orden de urgencia</h1>
-    <p class="sub">Prioriza lo que más se vende y lo que hace más de una semana que no se repone. Desactivá manualmente lo que no querés comprar por ahora.</p>
+    <p class="sub">Por defecto muestra los agotados. Activá "ver también bajo stock" para sumar los que quedan por debajo del mínimo. Prioriza lo que más se vende y lo que hace más de una semana que no se repone.</p>
     <div class="stats" id="stats"></div>
   </div>
 </header>
@@ -267,6 +267,9 @@
       </select>
     </div>
     <label class="toggle-chip">
+      <input type="checkbox" id="verBajoStock"> Ver también bajo stock
+    </label>
+    <label class="toggle-chip">
       <input type="checkbox" id="verPausados"> Ver desactivados
     </label>
     <div class="spacer"></div>
@@ -283,6 +286,7 @@
     <span><i style="background:#8A5A16"></i> Alto — se vende esta semana</span>
     <span><i style="background:#7A7040"></i> Medio — hace +7 días sin reponer</span>
     <span><i style="background:#48583C"></i> Bajo — sin ventas recientes</span>
+    <span style="margin-left:auto">⬤ Agotado &nbsp; ◐ Bajo stock (con "ver también bajo stock")</span>
   </div>
   <div id="listContainer"></div>
 </main>
@@ -303,6 +307,7 @@ const proveedorSel = $('#proveedor');
 const buscarInput = $('#buscar');
 const ordenSel = $('#orden');
 const verPausadosChk = $('#verPausados');
+const verBajoStockChk = $('#verBajoStock');
 const btnRefresh = $('#btnRefresh');
 
 function fmtMoney(n){
@@ -353,9 +358,11 @@ function render(){
   const orden = ordenSel.value;
   const verPausados = verPausadosChk.checked;
 
+  const verBajoStock = verBajoStockChk.checked;
+
   let items = allItems.filter(it => {
     if (!verPausados && it.pausado) return false;
-    if (verPausados === false && it.pausado) return false;
+    if (!verBajoStock && !it.agotado) return false; // por defecto: solo agotados
     if (prov && it.proveedor !== prov) return false;
     if (q && it.nombre.toUpperCase().indexOf(q) === -1) return false;
     return true;
@@ -400,6 +407,7 @@ function cardHTML(it, rank){
       <p class="prod-name">${escapeHtml(it.nombre)}</p>
       <div class="meta-row">
         <span>Proveedor: <b>${it.proveedor ? escapeHtml(it.proveedor) : 'Sin asignar'}</b></span>
+        <span>${it.agotado ? '⬤ Agotado' : `◐ Stock: <b>${it.stock}</b> / mín. ${it.stockMinimo}`}</span>
         <span>Venta 7d: <b>${it.ventas7}</b></span>
         <span>Venta 30d: <b>${it.ventas30}</b></span>
         <span class="badge ${it.prioridad}"><i></i>${it.prioridad}</span>
@@ -427,11 +435,14 @@ function escapeHtml(s){
 }
 
 function renderStats(){
-  const visibles = allItems.filter(it => !it.pausado);
-  const criticos = visibles.filter(it => it.prioridad === 'CRITICO').length;
+  const activos = allItems.filter(it => !it.pausado);
+  const agotados = activos.filter(it => it.agotado).length;
+  const bajoStock = activos.filter(it => !it.agotado).length;
+  const criticos = activos.filter(it => it.prioridad === 'CRITICO').length;
   const pausados = allItems.filter(it => it.pausado).length;
   statsEl.innerHTML = `
-    <div class="stat"><div class="n">${visibles.length}</div><div class="l">Sin stock</div></div>
+    <div class="stat"><div class="n">${agotados}</div><div class="l">Agotados</div></div>
+    <div class="stat"><div class="n">${bajoStock}</div><div class="l">Bajo stock</div></div>
     <div class="stat"><div class="n">${criticos}</div><div class="l">Críticos</div></div>
     <div class="stat"><div class="n">${pausados}</div><div class="l">Pausados</div></div>
   `;
@@ -462,6 +473,7 @@ buscarInput.addEventListener('input', render);
 proveedorSel.addEventListener('change', render);
 ordenSel.addEventListener('change', render);
 verPausadosChk.addEventListener('change', render);
+verBajoStockChk.addEventListener('change', render);
 btnRefresh.addEventListener('click', () => cargar(true));
 
 cargar(true);
