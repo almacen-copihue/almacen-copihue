@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Copihue · Finanzas v17</title>
+<title>Copihue · Finanzas v18</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -191,7 +191,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
 
 <div class="hdr">
   <div class="hdr-icon">💰</div>
-  <div><div class="hdr-t">Copihue · Finanzas <span id="ver-badge" style="font-size:.6rem;background:rgba(255,255,255,.25);padding:2px 7px;border-radius:10px;font-weight:900;letter-spacing:.5px">v17</span></div><div class="hdr-s" id="hdr-sub">Panel financiero</div></div>
+  <div><div class="hdr-t">Copihue · Finanzas <span id="ver-badge" style="font-size:.6rem;background:rgba(255,255,255,.25);padding:2px 7px;border-radius:10px;font-weight:900;letter-spacing:.5px">v18</span></div><div class="hdr-s" id="hdr-sub">Panel financiero</div></div>
   <button class="btn-back" onclick="location.href='./copihue-herramientas.html'">← Volver</button>
 </div>
 
@@ -822,6 +822,38 @@ function buildCategorias(){
   // ── Suscripciones: tabla servicio × mes (siempre visible) ──
   const todosSusc = egresosData.filter(e=>(e.categoria||'').toUpperCase()==='SUSCRIPCIONES');
   {
+    // Mapa de normalización — variantes → nombre canónico
+    const SUSC_NORM = {
+      // Netflix
+      'netflix':         'Netflix', 'netflix servicio': 'Netflix',
+      // HBO
+      'hbo':             'HBO Max', 'hbo max': 'HBO Max', 'hbo premium': 'HBO Max',
+      'hbo servicio':    'HBO Max',
+      // Amazon
+      'amazon prime':    'Amazon Prime', 'amazon prime video': 'Amazon Prime',
+      'prime video':     'Amazon Prime',
+      // Spotify
+      'spotify':         'Spotify',
+      // YouTube
+      'youtube':         'YouTube Premium', 'youtube premium': 'YouTube Premium',
+      // Paramount
+      'paramount':       'Paramount+', 'paramount plus': 'Paramount+',
+      'paramount+':      'Paramount+',
+      // Starlink
+      'starlink':        'Starlink', 'starlink servicio': 'Starlink',
+      // IPTV
+      'iptv':            'IPTV',
+      // Tuenti
+      'tuenti':          'Tuenti', 'tuenti teléfono': 'Tuenti', 'tuenti telefono': 'Tuenti',
+      'carga frecuente se cobró solo tuenti prepago': 'Tuenti',
+      // Emprentienda
+      'empretienda':     'Empretienda', 'emprentienda': 'Empretienda',
+    };
+    function normalizarSusc(nombre) {
+      const key = (nombre||'').trim().toLowerCase();
+      return SUSC_NORM[key] || nombre.split(' ').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
+    }
+
     // Últimos 6 meses desde el mes activo hacia atrás
     const mesesTab = [];
     for(let i=5; i>=0; i--){
@@ -831,19 +863,28 @@ function buildCategorias(){
     }
 
     // Todos los servicios únicos (por obs o motivo)
-    const todosServ = [...new Set(todosSusc.map(e=>(e.obs||e.motivo||'').trim().toLowerCase()).filter(Boolean))];
-    // Normalizar nombres: capitalizar
-    const servNorm = todosServ.map(s=>s.split(' ').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' '));
+    // Agrupar usando nombre normalizado como clave
+    const mapaNorm = {}; // normKey → nombre canónico
+    todosSusc.forEach(e=>{
+      const raw = (e.obs||e.motivo||'').trim();
+      if(!raw) return;
+      const norm = normalizarSusc(raw);
+      const key = norm.toLowerCase();
+      if(!mapaNorm[key]) mapaNorm[key] = norm;
+    });
+    const todosServ = Object.keys(mapaNorm); // keys en minúscula
+    const servNorm = todosServ.map(k=>mapaNorm[k]); // nombre canónico
 
     // Mapa: servicio → mes → {pagado, monto}
     const mapaServMes = {};
     todosServ.forEach(s=>{ mapaServMes[s]={}; mesesTab.forEach(({k})=>{ mapaServMes[s][k]={pagado:false,monto:0}; }); });
     todosSusc.forEach(e=>{
       const k = e.fecha.getFullYear()+'-'+String(e.fecha.getMonth()+1).padStart(2,'0');
-      const s = (e.obs||e.motivo||'').trim().toLowerCase();
-      if(mapaServMes[s] && mapaServMes[s][k] !== undefined){
-        mapaServMes[s][k].pagado = true;
-        mapaServMes[s][k].monto += e.monto;
+      const raw = (e.obs||e.motivo||'').trim();
+      const normKey = normalizarSusc(raw).toLowerCase();
+      if(mapaServMes[normKey] && mapaServMes[normKey][k] !== undefined){
+        mapaServMes[normKey][k].pagado = true;
+        mapaServMes[normKey][k].monto += e.monto;
       }
     });
 
