@@ -348,7 +348,17 @@ async function recargar() {
 
 async function cargarLista() {
     try {
-        var data = await _api('getListaCompra');
+        // Cargar lista Y catálogo completo con IDs en paralelo (igual que seba21)
+        var resultados = await Promise.all([
+            _api('getListaCompra'),
+            _prodCache.length ? Promise.resolve(null) : _api('getProductosListaCompra').catch(function(){ return null; })
+        ]);
+        var data = resultados[0];
+        var dataProd = resultados[1];
+        if (dataProd) {
+            var arrProd = dataProd.productos || (Array.isArray(dataProd) ? dataProd : []);
+            if (arrProd.length) _prodCache = arrProd;
+        }
         if (!data.ok || !data.items) {
             document.getElementById('lcCuerpo').innerHTML =
                 '<div class="estado-carga" style="color:#e53935;">❌ ' + (data.error || 'Error al cargar') +
@@ -366,7 +376,18 @@ async function cargarLista() {
             else if (s <= 5)  { if (it.urgencia > 3) it.urgencia = 3; }
         });
         _provActivo = null;
-        if (data.productos) _prodCache = data.productos;
+        if (data.productos && data.productos.length) {
+            // Merge: si ya tenemos cache del catálogo, completar IDs faltantes
+            if (_prodCache.length) {
+                data.productos.forEach(function(dp) {
+                    var existing = _prodCache.find(function(p){ return p.name === dp.name; });
+                    if (!existing) _prodCache.push(dp);
+                    else if (!existing.id && dp.id) existing.id = dp.id;
+                });
+            } else {
+                _prodCache = data.productos;
+            }
+        }
 
         // Resumen
         document.getElementById('lcTotalProd').textContent  = data.items.length;
@@ -641,44 +662,48 @@ function renderLista() {
 }
 
 // ── Pausar / reactivar ────────────────────────────
-async function lcTogglePausado(id) { await pausarItem(id, null, null); }
+async function lcTogglePausado(id, nombre) {
+    var lcIt = nombre ? _items.find(function(i){ return i.nombre === nombre; }) : null;
+    var prCache = _prodCache.find(function(p){ return (id && p.id == id) || (nombre && p.name === nombre); });
+    var realId = id || (prCache && prCache.id) || (lcIt && lcIt.id);
 
-async function pausarItem(id, nombre, pausar) {
-    // Actualizar cache local optimistamente
-    var lcIt = _items.find(function(i) {
-        return (nombre && i.nombre === nombre) || (id && _prodCache.find(function(p){ return p.id===id && p.name===i.nombre; }));
-    });
-    if (!lcIt && nombre) lcIt = _items.find(function(i){ return i.nombre === nombre; });
-    var eraEstado = lcIt ? !!lcIt.pausado : false;
-    var nuevoPausado = (pausar !== null && pausar !== undefined) ? !!pausar : !eraEstado;
+    if (!realId) {
+        toast('⏳ Obteniendo ID...', '');
+        try {
+            var cat = await _api('getProductosListaCompra');
+            var arr = (cat && cat.productos) || (Array.isArray(cat) ? cat : []);
+            if (arr.length) _prodCache = arr;
+            var found = arr.find(function(p){ return p.name === nombre || (p.name||'').toLowerCase() === (nombre||'').toLowerCase(); });
+            if (found) realId = found.id;
+        } catch(e) { console.warn('cat error', e); }
+    }
+    if (!realId) { toast('❌ No se encontró ID. Recargá la página.', 'rojo'); return; }
 
+    var pausado = lcIt ? !!lcIt.pausado : (prCache ? (prCache.pausadoListaCompra === 'SI' || prCache.pausadoListaCompra === true) : false);
+    var nuevoPausado = !pausado;
+
+    if (prCache) prCache.pausadoListaCompra = nuevoPausado ? 'SI' : '';
     if (lcIt) { lcIt.pausado = nuevoPausado; lcIt.urgencia = nuevoPausado ? 99 : 7; }
-    var prCache = _prodCache.find(function(p){ return (id && p.id===id) || (nombre && p.name===nombre); });
-    if (prCache) { prCache.pausadoListaCompra = nuevoPausado ? 'SI' : ''; if(id) prCache.id = id; }
     renderLista();
 
-    try {
-        var payload = { pausado: nuevoPausado ? 'SI' : '' };
-        if (id)     payload.id     = id;
-        if (nombre) payload.nombre = nombre;
-        console.log('[pausar] payload enviado al GAS:', JSON.stringify(payload));
-        var resp = await _api('setPausadoListaCompra', payload);
-        console.log('[pausar] respuesta GAS:', JSON.stringify(resp));
+    _api('setPausadoListaCompra', { id: realId, pausado: nuevoPausado ? 'SI' : '' })
+    .then(function(resp) {
         if (!resp || !resp.success) {
-            // Mostrar respuesta real del GAS para diagnóstico
-            var detalle = resp ? (resp.error || resp.message || JSON.stringify(resp).slice(0,80)) : 'sin respuesta';
-            throw new Error(detalle);
+            if (prCache) prCache.pausadoListaCompra = pausado ? 'SI' : '';
+            if (lcIt) { lcIt.pausado = pausado; lcIt.urgencia = pausado ? 99 : 7; }
+            renderLista();
+            var det = resp ? (resp.error || resp.mensaje || resp.message || JSON.stringify(resp).slice(0,80)) : 'sin respuesta';
+            toast('❌ ' + det, 'rojo');
+        } else {
+            toast(nuevoPausado ? '⛔ Desactivado de lista' : '▶️ Reactivado', nuevoPausado ? '' : 'verde');
         }
-        toast(nuevoPausado ? '⛔ Desactivado de lista' : '▶️ Reactivado en lista', nuevoPausado ? 'rojo' : 'verde');
-    } catch(e) {
-        // Revertir
-        if (lcIt) { lcIt.pausado = eraEstado; lcIt.urgencia = eraEstado ? 99 : 7; }
-        if (prCache) prCache.pausadoListaCompra = eraEstado ? 'SI' : '';
+    }).catch(function(e) {
+        if (prCache) prCache.pausadoListaCompra = pausado ? 'SI' : '';
+        if (lcIt) { lcIt.pausado = pausado; lcIt.urgencia = pausado ? 99 : 7; }
         renderLista();
-        toast('❌ Error: ' + e.message, 'rojo');
-    }
+        toast('❌ Sin conexión', 'rojo');
+    });
 }
-
 
 
 // ── BUSCADOR ─────────────────────────────────────────────────────
