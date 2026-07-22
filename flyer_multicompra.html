@@ -357,6 +357,19 @@ const buscarInput = $('#buscar');
 const countEl = $('#countOfertas');
 
 function keyOf(it){ return it.id || it.nombre; }
+
+// Misma convención que ya usa copihue-flyer.html para las fotos reales
+// guardadas en el servidor: /imagenes-productos/<nombre-normalizado>.jpg
+function simplificarNombre(nombre){
+  return String(nombre)
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9 ]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .trim();
+}
+function fotoServidor(nombre){ return 'imagenes-productos/' + simplificarNombre(nombre) + '.jpg'; }
 function fmtMoney(n){ if (!n) return '—'; return '$' + Math.round(n).toLocaleString('es-AR'); }
 
 async function cargar(){
@@ -478,13 +491,22 @@ function ghostBagIcon(){
     <path d="M6 8h12l-1 12a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L6 8Z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg>`;
 }
 
-function flyerTileHTML(it, idx, extraClass){
+function fotoBoxHTML(it, idx){
   const k = keyOf(it);
-  const foto = photoStore[k];
+  const manual = photoStore[k]; // subida a mano por el usuario, tiene prioridad
+  if (manual){
+    return `<img src="${manual}">`;
+  }
+  // Si no hay una subida manual, intenta con la foto real guardada en el
+  // servidor (imagenes-productos/…). Si no existe (404), cae al ícono.
+  return `<img class="auto-photo" src="${fotoServidor(it.nombre)}" data-idx="${idx}">`;
+}
+
+function flyerTileHTML(it, idx, extraClass){
   return `
   <div class="flyer-tile ${extraClass || ''}">
     <div class="flyer-photo" data-idx="${idx}">
-      ${foto ? `<img src="${foto}">` : ghostBagIcon()}
+      ${fotoBoxHTML(it, idx)}
       <span class="edit-hint">📷 cambiar foto</span>
     </div>
     <div class="flyer-tile-info">
@@ -501,12 +523,10 @@ function flyerTileHTML(it, idx, extraClass){
 }
 
 function flyerHeroHTML(it, idx){
-  const k = keyOf(it);
-  const foto = photoStore[k];
   return `
   <div class="flyer-hero">
     <div class="flyer-photo" data-idx="${idx}">
-      ${foto ? `<img src="${foto}">` : ghostBagIcon()}
+      ${fotoBoxHTML(it, idx)}
       <span class="edit-hint">📷 cambiar foto</span>
     </div>
     <div class="flyer-hero-info">
@@ -520,6 +540,18 @@ function flyerHeroHTML(it, idx){
       </div>
     </div>
   </div>`;
+}
+
+// Si la foto automática del servidor no existe, la reemplaza por el ícono
+// placeholder (manteniendo el recuadro clickeable para subir una a mano).
+function engancharFallbackFotos(){
+  document.querySelectorAll('.flyer-photo img.auto-photo').forEach(img => {
+    img.addEventListener('error', () => {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = ghostBagIcon().trim();
+      img.replaceWith(tmp.firstChild);
+    }, { once: true });
+  });
 }
 
 let currentFlyerItems = [];
@@ -548,6 +580,7 @@ $('#btnGenerar').addEventListener('click', () => {
   document.querySelectorAll('.flyer-photo').forEach(box => {
     box.addEventListener('click', () => cambiarFoto(parseInt(box.dataset.idx, 10)));
   });
+  engancharFallbackFotos();
 
   $('#flyerWrap').classList.add('show');
   document.getElementById('flyerWrap').scrollIntoView({ behavior:'smooth', block:'start' });
