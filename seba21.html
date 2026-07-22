@@ -36,6 +36,18 @@
 
 ================================================================================
 
+  v418 — 21/07/2026
+  -----------------
+  • MEJORA — Calendario propio en el filtro de fecha del historial de
+    egresos: el <input type="date"> nativo no permite marcar días con
+    actividad (eso lo dibuja el sistema operativo, no la página). Se
+    agregó un botón "📆 Calendario" que abre un mini calendario propio
+    (con navegación de mes ◀▶) que marca con un puntito rojo los días
+    con al menos un retiro registrado, y deja limpios los que no
+    tienen ninguno. Al tocar un día marca el filtro y recarga el
+    historial. Las marcas se invalidan solas al registrar un retiro
+    nuevo, para reflejarlo sin recargar el modal.
+
   v417 — 10/07/2026 (i)
   ---------------------
   • FIX — Doble área de scroll anidada en "Caja — Egresos": el wrapper del
@@ -991,7 +1003,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>🛒 POS · Copihue v417</title>
+    <title>🛒 POS · Copihue v418</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -12131,12 +12143,13 @@ function abrirRetiroCaja() {
     if (rcCatResumenTexto) rcCatResumenTexto.innerHTML = 'Tocá para elegir una categoría ▾';
     const rcCatGrid = document.getElementById('rcCatGrid');
     if (rcCatGrid) rcCatGrid.style.display = 'none';
-    // Antes forzaba el filtro a "solo hoy", por eso el historial parecía vacío
-    // apenas no había un retiro registrado en el día. Ahora se deja sin filtro
-    // de fecha y cargarHistorialSalidas() muestra los últimos 3 días por
-    // defecto (mismo criterio que "Sacar del local"), con botón "Todo" para
-    // ver el historial completo.
+    // El filtro de fecha arranca vacío (historial completo por defecto,
+    // sin recorte de días — ver v417). El botón "Todo" limpia el filtro.
     document.getElementById('filtroFechaSalidas').value = '';
+    // v418 — Resetear el calendario propio: arranca en el mes actual y cerrado
+    _rcCalendarioMes = null;
+    const rcCalPop = document.getElementById('rcCalendarioPopover');
+    if (rcCalPop) rcCalPop.style.display = 'none';
     document.getElementById('modalRetiroCaja').classList.add('open');
     setTimeout(() => document.getElementById('rcMonto').focus(), 300);
     cargarHistorialSalidas();
@@ -12259,6 +12272,7 @@ async function confirmarRetiroCaja() {
         if (resp.success) {
             mostrarToast('✅ Retiro registrado — $' + Math.round(monto).toLocaleString('es-AR'), 'naranja');
             _cacheHistorialRetiros = null; // invalidar cache para refetch con el nuevo dato
+            _rcFechasConRetiros = null; // v418 — invalidar marcas del calendario propio
             // Limpiar formulario y recargar historial sin cerrar el modal
             document.getElementById('rcMonto').value = '';
             document.getElementById('rcMotivo').value = '';
@@ -12520,16 +12534,41 @@ async function cargarHistorialRetiros() {
                  (formulario + resumen + historial) scrollea como una sola
                  lista larga, con el scroll del wrapper externo. -->
             <div style="padding:14px 16px 8px;">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;position:relative;">
                     <div style="font-size:0.82rem;font-weight:900;color:#555;text-transform:uppercase;letter-spacing:0.5px;">📋 Historial completo</div>
                     <div style="display:flex;align-items:center;gap:6px;">
-                        <input type="date" id="filtroFechaSalidas"
-                               style="border:1px solid #ddd;border-radius:8px;padding:4px 8px;font-size:0.75rem;"
-                               onchange="cargarHistorialSalidas()">
+                        <!-- v418 — Calendario propio: el <input type="date"> nativo
+                             no permite marcar días con actividad (eso lo dibuja el
+                             sistema operativo, no la página). Este botón abre un
+                             mini calendario propio que sí marca los días con
+                             retiros y deja limpios los que no tienen. -->
+                        <button onclick="rcToggleCalendario()" id="rcBtnCalendario"
+                                style="background:#eee;border:none;border-radius:8px;padding:4px 10px;font-size:0.75rem;cursor:pointer;white-space:nowrap;font-weight:600;">
+                            📆 Calendario
+                        </button>
                         <button onclick="document.getElementById('filtroFechaSalidas').value='';cargarHistorialSalidas()"
                                 style="background:#eee;border:none;border-radius:8px;padding:4px 8px;font-size:0.72rem;cursor:pointer;white-space:nowrap;">
                             Todo
                         </button>
+                        <input type="date" id="filtroFechaSalidas" style="display:none" onchange="cargarHistorialSalidas()">
+                    </div>
+                    <!-- Popover del calendario propio -->
+                    <div id="rcCalendarioPopover" style="display:none;position:absolute;top:32px;right:0;z-index:80;
+                                background:white;border:1.5px solid #ddd;border-radius:12px;padding:10px;
+                                box-shadow:0 6px 22px rgba(0,0,0,0.22);width:250px;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                            <button onclick="rcCambiarMesCalendario(-1)" style="background:none;border:none;font-size:1rem;cursor:pointer;padding:2px 8px;">◀</button>
+                            <span id="rcCalendarioTitulo" style="font-size:0.82rem;font-weight:800;color:#333;"></span>
+                            <button onclick="rcCambiarMesCalendario(1)" style="background:none;border:none;font-size:1rem;cursor:pointer;padding:2px 8px;">▶</button>
+                        </div>
+                        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;font-size:0.62rem;color:#999;text-align:center;margin-bottom:2px;">
+                            <span>D</span><span>L</span><span>M</span><span>M</span><span>J</span><span>V</span><span>S</span>
+                        </div>
+                        <div id="rcCalendarioGrid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;"></div>
+                        <div style="display:flex;align-items:center;gap:5px;margin-top:8px;font-size:0.62rem;color:#888;">
+                            <span style="width:8px;height:8px;border-radius:50%;background:#c62828;display:inline-block;"></span>
+                            Con retiros
+                        </div>
                     </div>
                 </div>
                 <div id="historialSalidasContent" style="display:flex;flex-direction:column;gap:0;padding-bottom:16px;">
@@ -12552,6 +12591,96 @@ async function cargarHistorialRetiros() {
 // última declaración gana) y tiraba error apenas se llamaba, así que nunca
 // llegaba a pedir el historial — se eliminó.
 function switchTabSalidas() {} // deprecated — mantenido por compatibilidad
+
+// ═══════════════════════════════════════════════════════════════
+//  v418 — CALENDARIO PROPIO para el filtro de fecha del historial de
+//  egresos. El <input type="date"> nativo no permite marcar días con
+//  actividad (eso lo dibuja el sistema operativo), así que se armó un
+//  mini calendario propio que sí marca los días con retiros registrados
+//  y deja limpios los que no tienen ninguno.
+// ═══════════════════════════════════════════════════════════════
+let _rcFechasConRetiros = null; // Set de 'YYYY-MM-DD' con al menos 1 retiro
+let _rcCalendarioMes = null;    // Date (día 1) del mes que se está mostrando
+
+async function _rcCargarFechasConRetiros() {
+    if (_rcFechasConRetiros) return _rcFechasConRetiros;
+    try {
+        const url = API_URL + '?action=getCajaEgresos&data=' + encodeURIComponent(JSON.stringify({limite:500})) + '&t=' + Date.now();
+        const d = await _apiFetchUrl('getCajaEgresos', url);
+        _rcFechasConRetiros = new Set((d.ok && d.registros) ? d.registros.map(r => r.fecha) : []);
+    } catch(e) {
+        _rcFechasConRetiros = new Set();
+    }
+    return _rcFechasConRetiros;
+}
+
+async function rcToggleCalendario() {
+    const pop = document.getElementById('rcCalendarioPopover');
+    if (!pop) return;
+    const abrir = pop.style.display === 'none' || !pop.style.display;
+    pop.style.display = abrir ? 'block' : 'none';
+    if (abrir) {
+        if (!_rcCalendarioMes) {
+            const fechaActual = document.getElementById('filtroFechaSalidas').value;
+            _rcCalendarioMes = fechaActual ? new Date(fechaActual + 'T12:00:00') : new Date();
+            _rcCalendarioMes.setDate(1);
+        }
+        await _rcCargarFechasConRetiros();
+        rcRenderCalendarioMes();
+    }
+}
+
+function rcCambiarMesCalendario(delta) {
+    _rcCalendarioMes.setMonth(_rcCalendarioMes.getMonth() + delta);
+    rcRenderCalendarioMes();
+}
+
+function rcRenderCalendarioMes() {
+    const grid = document.getElementById('rcCalendarioGrid');
+    const titulo = document.getElementById('rcCalendarioTitulo');
+    if (!grid || !_rcCalendarioMes) return;
+
+    const nombreMes = _rcCalendarioMes.toLocaleDateString('es-AR', {month:'long', year:'numeric'});
+    titulo.textContent = nombreMes.charAt(0).toUpperCase() + nombreMes.slice(1);
+
+    const year = _rcCalendarioMes.getFullYear();
+    const month = _rcCalendarioMes.getMonth();
+    const primerDiaSemana = new Date(year, month, 1).getDay();
+    const diasEnMes = new Date(year, month + 1, 0).getDate();
+    const hoyStr = new Date().toISOString().split('T')[0];
+    const fechaFiltroActual = document.getElementById('filtroFechaSalidas').value;
+
+    let html = '';
+    for (let i = 0; i < primerDiaSemana; i++) html += '<span></span>';
+    for (let dia = 1; dia <= diasEnMes; dia++) {
+        const fechaStr = year + '-' + String(month+1).padStart(2,'0') + '-' + String(dia).padStart(2,'0');
+        const conRetiros = _rcFechasConRetiros && _rcFechasConRetiros.has(fechaStr);
+        const esHoy = fechaStr === hoyStr;
+        const esSeleccionado = fechaStr === fechaFiltroActual;
+        let estilo = 'position:relative;text-align:center;padding:5px 0;border-radius:6px;cursor:pointer;font-size:0.75rem;';
+        if (esSeleccionado)      estilo += 'background:#1565c0;color:white;font-weight:800;';
+        else if (esHoy)          estilo += 'background:#e3f2fd;color:#1565c0;font-weight:800;';
+        else                     estilo += 'color:#444;';
+        html += '<span onclick="rcSeleccionarDiaCalendario(\'' + fechaStr + '\')" style="' + estilo + '">' + dia
+            + (conRetiros ? '<span style="position:absolute;bottom:1px;left:50%;transform:translateX(-50%);width:4px;height:4px;border-radius:50%;background:' + (esSeleccionado ? 'white' : '#c62828') + ';"></span>' : '')
+            + '</span>';
+    }
+    grid.innerHTML = html;
+}
+
+function rcSeleccionarDiaCalendario(fechaStr) {
+    document.getElementById('filtroFechaSalidas').value = fechaStr;
+    document.getElementById('rcCalendarioPopover').style.display = 'none';
+    cargarHistorialSalidas();
+}
+
+document.addEventListener('click', function(ev) {
+    const pop = document.getElementById('rcCalendarioPopover');
+    const btn = document.getElementById('rcBtnCalendario');
+    if (!pop || pop.style.display === 'none') return;
+    if (pop.contains(ev.target) || (btn && btn.contains(ev.target))) return;
+    pop.style.display = 'none';
+});
 
 // v417 — Resumen dinámico según el filtro activo:
 //  - Con una fecha puntual elegida → resumen de ESE día (antes se
