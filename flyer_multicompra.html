@@ -162,6 +162,32 @@
   .flyer-grid{
     display:grid; grid-template-columns:repeat(3, 1fr); gap:20px;
   }
+  .flyer-grid.count-2{ grid-template-columns:repeat(2, minmax(0,280px)); justify-content:center; gap:28px; }
+  .flyer-grid.count-2 .flyer-tile-name{ font-size:15px; }
+
+  /* Layout especial cuando hay una sola oferta: la protagonista de la página */
+  .flyer-hero{
+    display:flex; align-items:center; gap:40px; max-width:640px; margin:0 auto;
+  }
+  .flyer-hero .flyer-photo{
+    width:260px; height:260px; flex-shrink:0; border-radius:20px;
+    box-shadow:0 10px 26px -10px rgba(0,0,0,.3);
+  }
+  .flyer-hero .flyer-hero-info{ text-align:left; flex:1; }
+  .flyer-hero .flyer-tile-name{
+    font-size:24px; min-height:0; text-align:left; margin-bottom:10px; line-height:1.2;
+  }
+  .flyer-hero .flyer-tile-old{ text-align:left; font-size:15px; margin-bottom:14px; }
+  .flyer-hero .flyer-burst-wrap{ justify-content:flex-start; margin-top:6px; }
+  .flyer-hero .flyer-burst{ width:150px; height:150px; }
+  .flyer-hero .flyer-burst .qty{ font-size:28px; }
+  .flyer-hero .flyer-burst .price{ font-size:36px; }
+  @media (max-width:560px){
+    .flyer-hero{ flex-direction:column; text-align:center; gap:20px; }
+    .flyer-hero .flyer-hero-info{ text-align:center; }
+    .flyer-hero .flyer-tile-name, .flyer-hero .flyer-tile-old{ text-align:center; }
+    .flyer-hero .flyer-burst-wrap{ justify-content:center; }
+  }
   .flyer-tile{
     background:#fff; border-radius:14px; overflow:hidden; position:relative;
     box-shadow:0 6px 18px -8px rgba(0,0,0,.22);
@@ -452,12 +478,12 @@ function ghostBagIcon(){
     <path d="M6 8h12l-1 12a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L6 8Z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg>`;
 }
 
-function flyerTileHTML(it){
+function flyerTileHTML(it, idx, extraClass){
   const k = keyOf(it);
   const foto = photoStore[k];
   return `
-  <div class="flyer-tile">
-    <div class="flyer-photo" data-key="${cssSafe(k)}">
+  <div class="flyer-tile ${extraClass || ''}">
+    <div class="flyer-photo" data-idx="${idx}">
       ${foto ? `<img src="${foto}">` : ghostBagIcon()}
       <span class="edit-hint">📷 cambiar foto</span>
     </div>
@@ -474,43 +500,86 @@ function flyerTileHTML(it){
   </div>`;
 }
 
+function flyerHeroHTML(it, idx){
+  const k = keyOf(it);
+  const foto = photoStore[k];
+  return `
+  <div class="flyer-hero">
+    <div class="flyer-photo" data-idx="${idx}">
+      ${foto ? `<img src="${foto}">` : ghostBagIcon()}
+      <span class="edit-hint">📷 cambiar foto</span>
+    </div>
+    <div class="flyer-hero-info">
+      <div class="flyer-tile-name">${escapeHtml(it.nombre)}</div>
+      <span class="flyer-tile-old">Antes ${fmtMoney(it.precioActual)}</span>
+      <div class="flyer-burst-wrap">
+        <div class="flyer-burst">
+          ${starburstSVG('var(--fl-primary)')}
+          <div class="txt"><span class="qty">${it.cantidad}x</span><span class="price">${fmtMoney(it.precioPack)}</span></div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+let currentFlyerItems = [];
+
 $('#btnGenerar').addEventListener('click', () => {
   const items = allItems.filter(it => seleccionados.has(keyOf(it)));
   if (items.length === 0){ alert('Elegí al menos una oferta para el flyer.'); return; }
+  currentFlyerItems = items;
 
   $('#flyerStore').textContent = ($('#nombreTienda').value || 'Almacén Copihue').toUpperCase();
   $('#flyerTitle').textContent = $('#tituloFlyer').value || 'Ofertas de la Semana';
   $('#flyerSubtitle').textContent = $('#subtituloFlyer').value || '';
   $('#flyerFecha').textContent = new Date().toLocaleDateString('es-AR', { day:'numeric', month:'long', year:'numeric' });
-  $('#flyerGrid').innerHTML = items.map(flyerTileHTML).join('');
+
+  const grid = $('#flyerGrid');
+  grid.className = 'flyer-grid';
+  if (items.length === 1){
+    grid.innerHTML = flyerHeroHTML(items[0], 0);
+  } else if (items.length === 2){
+    grid.classList.add('count-2');
+    grid.innerHTML = items.map((it, idx) => flyerTileHTML(it, idx)).join('');
+  } else {
+    grid.innerHTML = items.map((it, idx) => flyerTileHTML(it, idx)).join('');
+  }
 
   document.querySelectorAll('.flyer-photo').forEach(box => {
-    box.addEventListener('click', () => cambiarFoto(box.dataset.key));
+    box.addEventListener('click', () => cambiarFoto(parseInt(box.dataset.idx, 10)));
   });
 
   $('#flyerWrap').classList.add('show');
   document.getElementById('flyerWrap').scrollIntoView({ behavior:'smooth', block:'start' });
 });
 
-function cambiarFoto(safeKey){
+function cambiarFoto(idx){
+  const it = currentFlyerItems[idx];
+  if (!it) return;
+  const k = keyOf(it);
+
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = 'image/*';
-  input.onchange = () => {
-    const file = input.files[0];
+  input.style.position = 'fixed';
+  input.style.left = '-9999px';
+  document.body.appendChild(input);
+
+  input.addEventListener('change', () => {
+    const file = input.files && input.files[0];
+    document.body.removeChild(input);
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      // encontrar la key real a partir de la versión "css safe"
-      const real = Object.keys(Object.fromEntries(allItems.map(it => [keyOf(it), true])))
-        .find(k => cssSafe(k) === safeKey) || safeKey;
-      photoStore[real] = reader.result;
+      photoStore[k] = reader.result;
       try { localStorage.setItem(PHOTO_STORE_KEY, JSON.stringify(photoStore)); } catch(e){}
-      const box = document.querySelector(`.flyer-photo[data-key="${safeKey}"]`);
+      const box = document.querySelector(`.flyer-photo[data-idx="${idx}"]`);
       if (box) box.innerHTML = `<img src="${reader.result}"><span class="edit-hint">📷 cambiar foto</span>`;
     };
+    reader.onerror = () => alert('No se pudo leer la imagen. Probá con otra foto.');
     reader.readAsDataURL(file);
-  };
+  });
+
   input.click();
 }
 
