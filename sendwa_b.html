@@ -369,32 +369,39 @@ function calcPrecioRelampago(precio, cod) {
   return { final: Math.round(precio * factor), orig: precio };
 }
 
+// Devuelve true si el tipo está realmente activo según horariosOferta del GAS
+function tipoActivo(tipo) {
+  const MAP = { relampago:'relampago', especiales:'especiales', destacadas:'destacadas' };
+  const k = MAP[tipo];
+  if (!k) return true; // promos/combos/ultimas/nuevos no tienen horario propio
+  const h = horarios[k];
+  if (!h) return true; // sin dato de horario → no restringir
+  return h.activo === true;
+}
+
 function norm(p, tipo) {
   const pf = parseInt(p.price || p.precio || p.precioFinal || 0) || 0;
   let pOrig = parseInt(p.normal || p.precioAntes || p.antes || 0) || 0;
 
   let precioFinal = pf;
   let precioOriginal = 0;
+  const activo = tipoActivo(tipo);
 
   if (tipo === 'promos' || tipo === 'combos') {
-    // col B = precio venta, col L = precio promo (en campo 'normal')
     if (pOrig > 0) { precioFinal = pOrig; precioOriginal = pf; }
   } else if (tipo === 'relampago') {
-    // Calcular precio con descuento según código col G
     const cod = parseInt(p.relampago) || 0;
-    if (cod > 0) {
+    if (cod > 0 && activo) {
       const calc = calcPrecioRelampago(pf, cod);
       precioFinal = calc.final;
       precioOriginal = calc.orig;
     }
+    // si inactivo → precio normal sin tachado
   } else if (tipo === 'especiales') {
-    // Especiales = 10% OFF siempre
-    precioFinal = Math.round(pf * 0.90);
-    precioOriginal = pf;
+    if (activo) { precioFinal = Math.round(pf * 0.90); precioOriginal = pf; }
   } else if (tipo === 'destacadas') {
-    // Destacadas: el pct viene en campo destacada (col H)
     const pctDesc = parseInt(p.destacada) || 0;
-    if (pctDesc > 0) { precioFinal = Math.round(pf * (1 - pctDesc/100)); precioOriginal = pf; }
+    if (pctDesc > 0 && activo) { precioFinal = Math.round(pf * (1 - pctDesc/100)); precioOriginal = pf; }
   } else {
     precioOriginal = pOrig;
   }
@@ -612,9 +619,16 @@ function buildCard(p) {
     precioHtml = `<span class="card-price-new">${fmt(p.precioFinal)}</span>`;
   }
 
-  // Urgencia strip
+  // Urgencia strip — prioridad: horario inactivo > stock > vencimiento
   let urgStr = '';
-  if (p.tipo === 'ultimas') {
+  const MAP_HORARIO = { relampago:'relampago', especiales:'especiales', destacadas:'destacadas' };
+  const hKey = MAP_HORARIO[p.tipo];
+  const hInfo = hKey ? horarios[hKey] : null;
+  const estaInactivo = hInfo && hInfo.activo === false;
+
+  if (estaInactivo && hInfo.inicio !== null && hInfo.inicio !== undefined) {
+    urgStr = `<div class="urgencia-strip" style="background:rgba(21,101,192,.9)">🕐 SE ACTIVA ${fmtHora(hInfo.inicio)}–${fmtHora(hInfo.cierre)} · PRECIO NORMAL</div>`;
+  } else if (p.tipo === 'ultimas') {
     urgStr = `<div class="urgencia-strip critica">⚠️ SOLO ${p.stock} UNI.</div>`;
   } else if (p.stock <= 3) {
     urgStr = `<div class="urgencia-strip">⚠️ ${p.stock} restantes</div>`;
