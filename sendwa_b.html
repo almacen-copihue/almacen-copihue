@@ -303,9 +303,13 @@ async function init() {
 
     if (rOfertas && rOfertas.success) {
       horarios = rOfertas.horariosOferta || {};
-      pools.relampago  = (rOfertas.relampagoActivo  || []).filter(p => p.stock > 0);
-      pools.destacadas = (rOfertas.destacadasActivas || []).filter(p => p.stock > 0);
-      pools.especiales = (rOfertas.especialesActivas || []).filter(p => p.stock > 0);
+      // Si el GAS dice inactivo → pool vacío aunque mande productos (race condition de horario)
+      const rActivo = horarios.relampago  ? horarios.relampago.activo  : true;
+      const dActivo = horarios.destacadas ? horarios.destacadas.activo : true;
+      const eActivo = horarios.especiales ? horarios.especiales.activo : true;
+      pools.relampago  = rActivo ? (rOfertas.relampagoActivo  || []).filter(p => p.stock > 0) : [];
+      pools.destacadas = dActivo ? (rOfertas.destacadasActivas || []).filter(p => p.stock > 0) : [];
+      pools.especiales = eActivo ? (rOfertas.especialesActivas || []).filter(p => p.stock > 0) : [];
       pools.ultimas    = (rOfertas.ultimasSeleccionadas || []).filter(p => (p.stock||0) > 0);
       pools.nuevos     = (rOfertas.poolRecienLlegados  || []).filter(p => p.stock > 0);
     }
@@ -352,22 +356,46 @@ function getImgSrc(p) {
   return `imagenes-productos/${slug(p.name)}.jpg`;
 }
 
+// Tabla de equivalencia relámpago: cuánto cobra Copihue en % del precio normal
+const RELAMPAGO_FACTOR = {
+  1:0.50, 2:0.6667, 3:0.75, 4:0.80, 5:0.8333,
+  6:0.8571, 7:0.875, 8:0.8889, 9:0.90,
+  10:0.75,  // 2da al 50% → prom. 2 unidades = 75%
+  11:0.90, 12:0.85, 13:0.80, 14:0.75, 15:0.70
+};
+function calcPrecioRelampago(precio, cod) {
+  const factor = RELAMPAGO_FACTOR[cod];
+  if (!factor) return { final: precio, orig: 0 };
+  return { final: Math.round(precio * factor), orig: precio };
+}
+
 function norm(p, tipo) {
-  // precio final = price || precio
   const pf = parseInt(p.price || p.precio || p.precioFinal || 0) || 0;
-  // precio original (para PROMOS/COMBOS viene de col B = pf, y col L = normal)
-  // para el resto, normal = precio antes del descuento
   let pOrig = parseInt(p.normal || p.precioAntes || p.antes || 0) || 0;
 
-  // Según spec: para PROMOS/COMBOS, col B = precio normal, col L = precio promo
-  // En getProductos: price = col B (precio venta), normal = col L (precio promo combo)
-  // Entonces el precio final es normal (col L) y el original es price (col B)
   let precioFinal = pf;
   let precioOriginal = 0;
-  if ((tipo === 'promos' || tipo === 'combos') && pOrig > 0) {
-    precioFinal  = pOrig;  // col L = precio promo/combo
-    precioOriginal = pf;   // col B = precio venta original
-  } else if (tipo !== 'promos' && tipo !== 'combos') {
+
+  if (tipo === 'promos' || tipo === 'combos') {
+    // col B = precio venta, col L = precio promo (en campo 'normal')
+    if (pOrig > 0) { precioFinal = pOrig; precioOriginal = pf; }
+  } else if (tipo === 'relampago') {
+    // Calcular precio con descuento según código col G
+    const cod = parseInt(p.relampago) || 0;
+    if (cod > 0) {
+      const calc = calcPrecioRelampago(pf, cod);
+      precioFinal = calc.final;
+      precioOriginal = calc.orig;
+    }
+  } else if (tipo === 'especiales') {
+    // Especiales = 10% OFF siempre
+    precioFinal = Math.round(pf * 0.90);
+    precioOriginal = pf;
+  } else if (tipo === 'destacadas') {
+    // Destacadas: el pct viene en campo destacada (col H)
+    const pctDesc = parseInt(p.destacada) || 0;
+    if (pctDesc > 0) { precioFinal = Math.round(pf * (1 - pctDesc/100)); precioOriginal = pf; }
+  } else {
     precioOriginal = pOrig;
   }
 
@@ -468,6 +496,11 @@ function setTab(t) {
 // ═══════════════════════════════════════════════════
 // ESTADO BAR (horarios del GAS)
 // ═══════════════════════════════════════════════════
+function fmtHora(h) {
+  if (h === null || h === undefined) return '';
+  const hh = Math.floor(h), mm = Math.round((h - hh) * 60);
+  return `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+}
 function buildEstadoBar() {
   const el = document.getElementById('estado-bar');
   const items = [];
@@ -479,9 +512,17 @@ function buildEstadoBar() {
   for (const d of defs) {
     const h = horarios[d.k];
     if (!h) continue;
-    const color = h.activo ? '#27a045' : '#E53935';
-    const txt   = h.activo ? 'ACTIVO' : 'INACTIVO';
-    items.push(`<span class="e-tag"><span class="e-dot" style="background:${color}"></span>${d.ico} ${d.lbl} — <b>${txt}</b></span>`);
+    // activo=true pero pool vacío → todavía no arrancó o ya terminó
+    const tieneProductos = (pools[d.k]||[]).length > 0;
+    const real = h.activo && tieneProductos;
+    const proximo = h.activo && !tieneProductos;
+    const color = real ? '#27a045' : proximo ? '#FF8F00' : '#E53935';
+    let txt = real ? 'ACTIVO' : proximo ? 'PRÓXIMO' : 'INACTIVO';
+    let horaTxt = '';
+    if (h.inicio !== null && h.inicio !== undefined) {
+      horaTxt = ` ${fmtHora(h.inicio)}–${fmtHora(h.cierre)}`;
+    }
+    items.push(`<span class="e-tag"><span class="e-dot" style="background:${color}"></span>${d.ico} ${d.lbl}<span style="opacity:.6;font-size:9px">${horaTxt}</span> — <b style="color:${color}">${txt}</b></span>`);
   }
   el.innerHTML = items.length ? items.join(' &nbsp;|&nbsp; ') : '<span>Datos del día cargados ✓</span>';
 }
