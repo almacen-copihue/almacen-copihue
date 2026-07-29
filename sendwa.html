@@ -6,9 +6,31 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>SendWA — Almacén Copihue ver.75</title>
+<title>SendWA — Almacén Copihue ver.76</title>
 <!--
   CHANGELOG sendwa.html
+  v76: - NUEVO — Multicompra: sendwa mostraba el color de badge pero no tenía
+         nada conectado (se había perdido en algún punto entre v73 y v75).
+         Reconstruida con el mismo patrón que Relámpago/Últimas: pool
+         _poolMulticompra cargado desde data.multicompraActiva (getOfertas,
+         igual que seba21), resolveOfertas() nueva rama 'multicompra' (sin
+         horario propio — activa siempre que esté en el pool), calcularOferta()
+         arma la etiqueta (grupal → "Pack grupal", individual 2X/3X/NX/
+         LLEVÁ-PAGÁ → "NxM", 2DA_UNIDAD → "2da unidad a $X"), chip nuevo en
+         el panel de Ofertas, entra en la vista flyer y en PRIORITY_ORDER,
+         y generateText() ya arma el texto de WhatsApp con su propia etiqueta.
+         Los packs grupales no traen precio unitario para catálogo (se arman
+         en el carrito de seba21) — acá se muestra el pack de referencia.
+       - IA sugerencia (criterio "Mejores ofertas activas") ahora también
+         encuentra productos en multicompra, al quedar sumada a PRIORITY_ORDER.
+       - FIX — Botón atrás: el modal de Oferta Personalizada (personal-modal)
+         y los overlays flotantes (aviso "IA bloqueada", selector de criterio/
+         categorías de IA, aviso de reset total) no estaban contemplados en
+         el handler de popstate — atrás los saltaba de largo y caía directo
+         en "limpiar selección" o incluso en el cartel de "¿Salir?", dando la
+         sensación de que la app se reiniciaba sola. Ahora atrás cierra primero
+         cualquier overlay/modal abierto (tocando "afuera" del overlay, que ya
+         tenía su propio cierre limpio) antes de tocar selección/filtro/salida.
   v59: - Oferta Personalizada: filtra productos sin stock ANTES de mostrarlos en
          la lista del modal (no tenía sentido asignarles un % si después no
          iban a aparecer con el descuento — Code.gs ya los excluye al armar el
@@ -656,7 +678,7 @@
           style="width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.2);
                  border:none;color:#fff;font-size:12px;font-weight:800;cursor:pointer;
                  flex-shrink:0;display:flex;align-items:center;justify-content:center;">?</button>
-  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.75</div>
+  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.76</div>
   <button id="btn-dark" title="Modo oscuro">🌙</button>
 </div>
 
@@ -679,6 +701,7 @@
     <button class="filter-chip oferta-chip" data-filter="destacado">🔥 Destacado</button>
     <button class="filter-chip oferta-chip" data-filter="especial">💜 Especial</button>
     <button class="filter-chip oferta-chip" data-filter="ultimas">🏷️ Últimas</button>
+    <button class="filter-chip oferta-chip" data-filter="multicompra">📦 Multicompra</button>
     <button class="filter-chip oferta-chip" data-filter="promo">🏷️ Promos</button>
     <button class="filter-chip oferta-chip" data-filter="combo">🎯 Combos</button>
     <button class="filter-chip oferta-chip" data-filter="sinoferta">✅ Sin oferta</button>
@@ -882,8 +905,8 @@ const WA_LIMIT_ESTADO = 30;
 const IMG_SIZE_MB = 0.15;
 
 // Priority map
-// Orden flyer: Promos → Combos → Especial → Destacada → Relámpago → Últimas
-const PRIORITY_ORDER = { personalizada: 0, promo: 1, combo: 2, especial: 3, destacado: 4, relampago: 5, ultimas: 6, '': 7 };
+// Orden flyer: Promos → Combos → Multicompra → Especial → Destacada → Relámpago → Últimas
+const PRIORITY_ORDER = { personalizada: 0, promo: 1, combo: 2, multicompra: 3, especial: 4, destacado: 5, relampago: 6, ultimas: 7, '': 8 };
 const BADGE_COLORS = {
   relampago: '#F9A825', destacado: '#FF9800', especial: '#00BCD4',
   multicompra: '#9C27B0', ultimas: '#E53935', promo: '#43A047',
@@ -967,6 +990,24 @@ function calcularOferta(p) {
   // ESPECIALES — siempre 10%
   if (cat === 'especial' && p.especial > 0) {
     return { precio: Math.round(precio * 0.9), etiqueta: '💜 -10% OFF' };
+  }
+  // MULTICOMPRA — pool desde getOfertas (igual patrón que Últimas: precio/tipo
+  // vienen de Code.gs, sendwa solo arma la etiqueta). No hay cantidad real acá
+  // (no es un carrito), así que se muestra el precio del pack como referencia,
+  // sin precio unitario fijo — igual criterio que Relámpago NxM.
+  if (cat === 'multicompra') {
+    const mc = _poolMulticompra.get(Number(p.id));
+    if (!mc) return null;
+    if (mc.grupo) {
+      // Grupal: el ahorro se calcula recién en el carrito de seba21 (reparto
+      // proporcional entre líneas del mismo grupo) — acá solo mostramos el pack.
+      return { precio: null, etiqueta: `📦 Pack grupal ${mc.cantidad}x ${fmt(mc.precio)}` };
+    }
+    if (mc.tipo === '2DA_UNIDAD') {
+      return { precio: null, etiqueta: `📦 2da unidad a ${fmt(mc.precio)}` };
+    }
+    // 2X / 3X / NX / LLEVÁ-PAGÁ
+    return { precio: null, etiqueta: `📦 ${mc.cantidad}x ${fmt(mc.precio)}` };
   }
   // PROMO ACTIVA / COMBO ACTIVO — precio en col L (campo normal de la API)
   if ((cat === 'promo' || cat === 'combo') && p.normal > 0 && p.normal < precio) {
@@ -1128,6 +1169,7 @@ const _poolDestacadas = new Set();
 const _poolEspeciales = new Set();
 const _poolUltimas    = new Set();
 const _poolUltimasData = new Map(); // id → { precioOferta, pct, diasParaVencer }
+const _poolMulticompra = new Map(); // id → { tipo, cantidad, precio, grupo } — igual patrón que seba21
 
 async function _apiFetch(action) {
   const r = await fetch(API_URL + '?action=' + action + '&t=' + Date.now(),
@@ -1165,8 +1207,18 @@ async function cargarPools() {
 
     _poolRelampago.clear(); _poolDestacadas.clear();
     _poolEspeciales.clear(); _poolUltimas.clear(); _poolUltimasData.clear();
+    _poolMulticompra.clear();
 
     (data.relampagoActivo   || []).forEach(p => _poolRelampago.add(Number(p.id)));
+    (data.multicompraActiva || []).forEach(p => {
+      const id = Number(p.id);
+      _poolMulticompra.set(id, {
+        tipo:     p.MULTICOMPRA_TIPO     || '',
+        cantidad: p.MULTICOMPRA_CANTIDAD || 0,
+        precio:   p.MULTICOMPRA_PRECIO   || 0,
+        grupo:    p.GRUPO_MULTICOMPRA    || ''
+      });
+    });
     (data.destacadasActivas || []).filter(p => p.categoria !== 'CERVEZAS')
                                   .forEach(p => _poolDestacadas.add(Number(p.id)));
     (data.especialesActivas || []).filter(p => p.categoria !== 'CERVEZAS')
@@ -1184,7 +1236,7 @@ async function cargarPools() {
 
     // Guardar horarios para mensaje fuera de horario
     window._horariosOferta = data.horariosOferta || {};
-    console.log(`📊 Pools SendWA — ⚡${_poolRelampago.size} 🔥${_poolDestacadas.size} 🌙${_poolEspeciales.size} 🏷️${_poolUltimas.size}`);
+    console.log(`📊 Pools SendWA — ⚡${_poolRelampago.size} 🔥${_poolDestacadas.size} 🌙${_poolEspeciales.size} 🏷️${_poolUltimas.size} 📦${_poolMulticompra.size}`);
   } catch(e) {
     console.warn('No se pudieron cargar pools de ofertas:', e.message);
   }
@@ -1255,6 +1307,9 @@ function resolveOfertas(products, modo = 'pool') {
       const enPoolD = p.destacada > 0 && _poolDestacadas.has(pid);
       const enPoolE = p.especial  > 0 && _poolEspeciales.has(pid);
       const enPoolU = _poolUltimas.has(pid);
+      // Multicompra: no tiene horario en Code.gs (a diferencia de relámpago/destacadas/
+      // especiales/últimas) — si está en el pool, se muestra siempre, en ambos modos.
+      const enPoolM = _poolMulticompra.has(pid);
 
       if (modo === 'activo') {
         // Solo los activos según horario/forzado — igual que seba21
@@ -1262,12 +1317,14 @@ function resolveOfertas(products, modo = 'pool') {
         else if (enPoolU && _tipoActivoAhora('ultimas'))     catOferta = 'ultimas';
         else if (enPoolD && _tipoActivoAhora('destacadas'))  catOferta = 'destacado';
         else if (enPoolE && _tipoActivoAhora('especiales'))  catOferta = 'especial';
+        else if (enPoolM) catOferta = 'multicompra';
       } else {
         // modo 'pool' o 'collage': en el pool = tiene oferta, sin importar horario
         if      (enPoolR) catOferta = 'relampago';
         else if (enPoolU) catOferta = 'ultimas';
         else if (enPoolD) catOferta = 'destacado';
         else if (enPoolE) catOferta = 'especial';
+        else if (enPoolM) catOferta = 'multicompra';
       }
     }
     return { ...p, catOferta };
@@ -1289,7 +1346,7 @@ function sortProducts(products, mode) {
   const sorted = [...products];
 
   const esVistaCategoria = !['oferta','activo','relampago','destacado','especial',
-    'promo','combo','ultimas','sinoferta'].includes(currentFilter);
+    'promo','combo','ultimas','multicompra','sinoferta'].includes(currentFilter);
 
   if (esVistaCategoria) {
     const esCategoriaUnica = currentFilter !== 'todos' && currentFilter !== '';
@@ -1371,6 +1428,7 @@ function applyFilter() {
       case 'destacado': return p.catOferta === 'destacado';
       case 'especial':  return p.catOferta === 'especial';
       case 'ultimas':   return p.catOferta === 'ultimas';
+      case 'multicompra': return p.catOferta === 'multicompra';
       case 'promo':     return p.catOferta === 'promo';
       case 'combo':     return p.catOferta === 'combo';
       default:
@@ -1407,7 +1465,7 @@ function getCatEmoji(cat) {
 function insertSeparators(products) {
   // Vista Ofertas estilo FLYER — sin separadores de categoría, un único header
   const esVistaOfertaFlyer = ['oferta','activo','relampago','destacado','especial',
-    'promo','combo','ultimas'].includes(currentFilter);
+    'promo','combo','ultimas','multicompra'].includes(currentFilter);
   if (esVistaOfertaFlyer) {
     if (!products.length) return products;
     return [{ _sep: true, label: '🛒 ALMACÉN COPIHUE — OFERTAS 🔥', cat: '__flyer__', _flyer: true }, ...products];
@@ -1630,7 +1688,7 @@ function generateText(mode) {
   const tituloOferta = {
     relampago:'⚡ OFERTAS RELÁMPAGO', ultimas:'🏷️ ÚLTIMAS UNIDADES',
     destacado:'🔥 OFERTAS DESTACADAS', especial:'💜 PRECIOS ESPECIALES',
-    promo:'🏷️ PROMOS DEL DÍA', combo:'🎯 COMBOS'
+    promo:'🏷️ PROMOS DEL DÍA', combo:'🎯 COMBOS', multicompra:'📦 MULTICOMPRA'
   };
 
   // Encabezado dinámico
@@ -1669,6 +1727,7 @@ ${tituloOferta[tiposPresentes[0]]}
     if (cat === 'ultimas')   return of.etiqueta ? ` _${of.etiqueta}_` : ' _(últimas unidades)_';
     if (cat === 'promo')     return of.etiqueta ? ` _${of.etiqueta}_` : ' _(promo)_';
     if (cat === 'combo')     return of.etiqueta ? ` _${of.etiqueta}_` : ' _(combo)_';
+    if (cat === 'multicompra') return of.etiqueta ? ` _${of.etiqueta}_` : ' _(multicompra)_';
     return '';
   }
 
@@ -3130,6 +3189,7 @@ function _ejecutarResetTotal() {
 }
 function _overlayOfertas(html, onMounted) {
   const ov = document.createElement('div');
+  ov.className = 'sendwa-adhoc-overlay';
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
   const box = document.createElement('div');
   box.style.cssText = 'background:var(--card-bg);border-radius:16px;padding:22px 20px;max-width:360px;width:100%;';
@@ -3196,6 +3256,7 @@ on('btn-ia-suggest', async () => {
   }
   const modo = await new Promise(resolve => {
     const overlay = document.createElement('div');
+    overlay.className = 'sendwa-adhoc-overlay';
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:flex-end;justify-content:center';
     const sheet = document.createElement('div');
     sheet.style.cssText = 'background:white;border-radius:20px 20px 0 0;width:100%;max-width:500px;padding:20px 16px 30px';
@@ -3247,6 +3308,7 @@ on('btn-ia-suggest', async () => {
     ]));
 
     const ov = document.createElement('div');
+    ov.className = 'sendwa-adhoc-overlay';
     ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9999;display:flex;align-items:flex-end;justify-content:center';
 
     function buildSheet() {
@@ -3506,9 +3568,26 @@ window.toggleSelect = toggleSelect; // expose to onclick
 // Botón atrás del celular — evitar salir de la app
 // (el pushState inicial ya se ejecutó arriba del todo, ver inicio del <script>)
 function _sendwaPopstateHandler(e) {
+  // Si hay algún overlay flotante ad-hoc abierto (aviso "IA bloqueada", selector
+  // de criterio/categorías de IA, aviso de reset total), cerrar el de más arriba
+  // primero — simulamos un tap "afuera" del overlay, que ya tiene su propio
+  // cierre limpio (resuelve la Promise en null / ejecuta el close() correcto).
+  const overlays = document.querySelectorAll('.sendwa-adhoc-overlay');
+  if (overlays.length) {
+    const top = overlays[overlays.length - 1];
+    top.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    history.pushState({ sendwa: true }, '', location.href);
+    return;
+  }
   // Si hay modal de collage abierto, cerrarlo
   if (document.getElementById('collage-modal').classList.contains('open')) {
     document.getElementById('collage-modal').classList.remove('open');
+    history.pushState({ sendwa: true }, '', location.href);
+    return;
+  }
+  // Si hay modal de Oferta Personalizada abierto, cerrarlo
+  if (document.getElementById('personal-modal').classList.contains('open')) {
+    document.getElementById('personal-modal').classList.remove('open');
     history.pushState({ sendwa: true }, '', location.href);
     return;
   }
