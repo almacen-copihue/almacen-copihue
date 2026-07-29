@@ -6,9 +6,17 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>SendWA — Almacén Copihue ver.76</title>
+<title>SendWA — Almacén Copihue ver.77</title>
 <!--
   CHANGELOG sendwa.html
+  v77: - FIX — Volver desde el collage al listado de revisión: al generar un
+         flyer, la pantalla "Revisión del flyer" (incluir/excluir productos)
+         pasaba directo al collage y se perdía — cerrar el collage (X, botón
+         Cerrar, o atrás) te tiraba siempre al listado principal. Ahora esa
+         pantalla se oculta (no se destruye) al abrir el collage, y "atrás"/X/
+         Cerrar la traen de vuelta en vez de saltearla. Cancelarla ahí sí la
+         cierra del todo. Afecta solo al flujo de flyer normal (botón Collage);
+         "1 Foto" para oferta personalizada no pasa por esta pantalla y no cambia.
   v76: - NUEVO — Multicompra: sendwa mostraba el color de badge pero no tenía
          nada conectado (se había perdido en algún punto entre v73 y v75).
          Reconstruida con el mismo patrón que Relámpago/Últimas: pool
@@ -678,7 +686,7 @@
           style="width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.2);
                  border:none;color:#fff;font-size:12px;font-weight:800;cursor:pointer;
                  flex-shrink:0;display:flex;align-items:center;justify-content:center;">?</button>
-  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.76</div>
+  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.77</div>
   <button id="btn-dark" title="Modo oscuro">🌙</button>
 </div>
 
@@ -790,7 +798,7 @@
 
 <!-- COLLAGE MODAL -->
 <div id="collage-modal">
-  <button id="btn-modal-close-x" onclick="document.getElementById('collage-modal').classList.remove('open')">✕</button>
+  <button id="btn-modal-close-x" onclick="_cerrarCollageModal()">✕</button>
   <div id="collage-sheet">
     <!-- Banner exclusivo de oferta personalizada -->
     <div id="collage-personal-banner" style="display:none;background:linear-gradient(135deg,#880e4f,#e91e63);color:#fff;font-weight:800;font-size:13px;padding:8px 12px;border-radius:10px;margin-bottom:8px;text-align:center;"></div>
@@ -1841,6 +1849,10 @@ on('btn-dl', async () => {
 let _collageMode = 'collage';
 let _singleIdx   = 0;
 let _collageProds     = [];
+// Referencia al overlay "Revisión del flyer" mientras queda oculto detrás del
+// collage-modal — permite que "atrás" vuelva ahí en vez de cerrar todo de un
+// tirón. null = no venimos de esa pantalla (ej: "1 Foto" de oferta personalizada).
+let _flyerRevisionOverlay = null;
 let _collagePage      = 0;
 let _collagePerPage   = 6;
 let _collageExcluidos = new Set(); // IDs excluidos del flyer en el paso previo
@@ -1892,6 +1904,15 @@ async function renderCollagePage() {
 window.collagePrevPage = function() { if (_collagePage > 0) { _collagePage--; renderCollagePage(); } };
 window.collageNextPage = function() { if (_collagePage < collageTotalPages()-1) { _collagePage++; renderCollagePage(); } };
 
+function _cerrarCollageModal() {
+  document.getElementById('collage-modal').classList.remove('open');
+  document.getElementById('historia-canvas').style.display = 'none';
+  if (_flyerRevisionOverlay) {
+    _flyerRevisionOverlay.style.display = 'flex'; // volver a la Revisión del flyer, no al listado
+    _flyerRevisionOverlay = null;
+  }
+}
+
 on('btn-collage', () => {
   const base = getSelectedProducts();
   if (!base.length) { toast('⚠️ Seleccioná al menos un producto primero'); return; }
@@ -1903,6 +1924,7 @@ on('btn-collage', () => {
 
   // ── Paso previo: revisar y excluir productos del flyer ──────
   const ov = document.createElement('div');
+  ov.className = 'sendwa-adhoc-overlay';
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9999;display:flex;align-items:flex-end;justify-content:center';
 
   function buildRevision() {
@@ -1959,21 +1981,22 @@ on('btn-collage', () => {
     ov.innerHTML = buildRevision();
     // Botón generar
     ov.querySelector('#_rev-ok').onclick = () => {
-      document.body.removeChild(ov);
       const final = prods.filter(p => !_collageExcluidos.has(String(p.id)));
       if (!final.length) { toast('⚠️ Excluiste todos los productos'); return; }
+      ov.style.display = 'none'; // ocultar (no destruir) — así "atrás" puede volver acá
+      _flyerRevisionOverlay = ov;
       _collageProds = final;
       _collagePage  = 0;
       _singleIdx    = 0;
       openCollageModal('collage');
     };
     // Botón cancelar
-    ov.querySelector('#_rev-cx').onclick = () => document.body.removeChild(ov);
+    ov.querySelector('#_rev-cx').onclick = () => { document.body.removeChild(ov); _flyerRevisionOverlay = null; };
     // Incluir todos / Excluir todos
     ov.querySelector('#_rev-all').onclick = () => { _collageExcluidos.clear(); renderOv(); };
     ov.querySelector('#_rev-none').onclick = () => { prods.forEach(p => _collageExcluidos.add(String(p.id))); renderOv(); };
     // Cerrar tocando el fondo
-    ov.onclick = e => { if (e.target === ov) document.body.removeChild(ov); };
+    ov.onclick = e => { if (e.target === ov) { document.body.removeChild(ov); _flyerRevisionOverlay = null; } };
     // Botones de exclusión — onclick directo en cada uno (evita problemas de delegación tras re-render)
     ov.querySelectorAll('[data-excl-id]').forEach(btn => {
       btn.onclick = e => {
@@ -2798,8 +2821,7 @@ on('btn-collage-dl', () => {
   a.click();
 });
 on('btn-collage-close', () => {
-  document.getElementById('collage-modal').classList.remove('open');
-  document.getElementById('historia-canvas').style.display = 'none';
+  _cerrarCollageModal();
 });
 
 // ============================================================
@@ -3568,20 +3590,24 @@ window.toggleSelect = toggleSelect; // expose to onclick
 // Botón atrás del celular — evitar salir de la app
 // (el pushState inicial ya se ejecutó arriba del todo, ver inicio del <script>)
 function _sendwaPopstateHandler(e) {
-  // Si hay algún overlay flotante ad-hoc abierto (aviso "IA bloqueada", selector
-  // de criterio/categorías de IA, aviso de reset total), cerrar el de más arriba
-  // primero — simulamos un tap "afuera" del overlay, que ya tiene su propio
-  // cierre limpio (resuelve la Promise en null / ejecuta el close() correcto).
-  const overlays = document.querySelectorAll('.sendwa-adhoc-overlay');
+  // Si hay algún overlay flotante ad-hoc abierto y VISIBLE (aviso "IA bloqueada",
+  // selector de criterio/categorías de IA, aviso de reset total, revisión del
+  // flyer), cerrar el de más arriba primero — simulamos un tap "afuera" del
+  // overlay, que ya tiene su propio cierre limpio (resuelve la Promise en
+  // null / ejecuta el close() correcto). Los ocultos (ej: revisión del flyer
+  // esperando detrás del collage-modal) se saltan — a esos se vuelve, no se cierran.
+  const overlays = [...document.querySelectorAll('.sendwa-adhoc-overlay')]
+    .filter(el => el.style.display !== 'none');
   if (overlays.length) {
     const top = overlays[overlays.length - 1];
     top.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     history.pushState({ sendwa: true }, '', location.href);
     return;
   }
-  // Si hay modal de collage abierto, cerrarlo
+  // Si hay modal de collage abierto, cerrarlo — vuelve a la Revisión del
+  // flyer si veníamos de ahí (ver _cerrarCollageModal), o al listado si no.
   if (document.getElementById('collage-modal').classList.contains('open')) {
-    document.getElementById('collage-modal').classList.remove('open');
+    _cerrarCollageModal();
     history.pushState({ sendwa: true }, '', location.href);
     return;
   }
