@@ -2789,30 +2789,30 @@
              calcular el precio, así que no puede comparar contra el umbral
              de la oferta. Se activa solo cuando el producto tiene una
              multicompra individual cargada (no aplica a multicompra grupal). -->
-        <div id="pesoOfertaBadge" style="display:none;margin:0 16px 8px;padding:8px 12px;background:#ede7f6;
-                    border:1.5px solid #7C3AED;border-radius:10px;font-size:0.8rem;color:#5b21b6;font-weight:700;text-align:center;">
-        </div>
-        <div id="pesoModoToggle" style="display:none;margin:0 16px 10px;background:#f0f0f0;border-radius:10px;padding:3px;gap:3px;">
-            <button onclick="pesoCambiarModo('monto')" id="pesoBtnModoMonto"
-                    style="flex:1;border:none;border-radius:8px;padding:7px 4px;font-size:0.78rem;font-weight:700;cursor:pointer;">
-                💰 Por monto
-            </button>
-            <button onclick="pesoCambiarModo('peso')" id="pesoBtnModoPeso"
-                    style="flex:1;border:none;border-radius:8px;padding:7px 4px;font-size:0.78rem;font-weight:700;cursor:pointer;">
-                ⚖️ Por peso
-            </button>
+        <!-- v421 — El badge ahora es tocable: un toque carga directo la cantidad
+             de la oferta (ej: 2kg) en modo "Por peso", sin tipear nada. Si el
+             cliente lleva más que la promo, se puede seguir ajustando con los
+             chips rápidos o el teclado normalmente. -->
+        <div id="pesoOfertaBadge" onclick="pesoCargarOfertaRapida()"
+             style="display:none;margin:0 16px 8px;padding:8px 12px;background:#ede7f6;
+                    border:1.5px solid #7C3AED;border-radius:10px;font-size:0.8rem;color:#5b21b6;font-weight:700;
+                    text-align:center;cursor:pointer;user-select:none;transition:transform 0.1s;">
         </div>
         <div class="peso-display">
             <div class="peso-gramos" id="pesoGramos">$0</div>
             <div class="peso-unit" id="pesoUnitLabel">pesos</div>
             <div class="peso-precio-calculado" id="pesoPrecio">0 gr</div>
         </div>
-        <!-- v420 — Cartel grande de instrucción: el toggle chico era fácil de
-             pasar por alto (costumbre de tipear plata), y terminaba tipeando
+        <!-- v420/v421 — Cartel grande de instrucción: el toggle chico era fácil
+             de pasar por alto (costumbre de tipear plata), y terminaba tipeando
              gramos como si fueran pesos por error. Este cartel es imposible
-             de no ver, cambia de color/texto según el modo activo. -->
-        <div id="pesoInstruccion" style="margin:0 16px 10px;padding:9px 12px;border-radius:10px;
-                    text-align:center;font-size:0.85rem;font-weight:800;"></div>
+             de no ver, cambia de color/texto según el modo activo. Ahora
+             también ES el selector: un toque alterna entre "Por pesos" y
+             "Por gramos" — reemplaza a los 2 botones chicos de antes, es más
+             rápido e intuitivo (aplica siempre, tenga o no oferta detectada). -->
+        <div id="pesoInstruccion" onclick="pesoToggleModo()"
+             style="margin:0 16px 10px;padding:9px 12px;border-radius:10px;cursor:pointer;user-select:none;
+                    text-align:center;font-size:0.85rem;font-weight:800;transition:transform 0.1s;"></div>
         <!-- v420 — Chips de peso rápido: solo visibles en modo "Por peso".
              Evitan tipear números a mano (y la confusión de si son gramos o
              pesos) para los pesos más comunes — un toque y listo. -->
@@ -5745,18 +5745,15 @@ function abrirModalPeso(producto) {
     // multicompra grupal no aplica acá (se calcula distinto, por panel).
     const mc = _poolMulticompra.get(producto.id);
     const badge = document.getElementById('pesoOfertaBadge');
-    const toggle = document.getElementById('pesoModoToggle');
     if (mc && !mc.grupo && mc.cantidad > 0 && mc.precio > 0) {
         pesoModo = 'peso';
         if (badge) {
             badge.style.display = 'block';
-            badge.textContent = `📦 Oferta detectada: ${mc.cantidad}kg x $${mc.precio.toLocaleString('es-AR')}`;
+            badge.innerHTML = `📦 Oferta detectada: ${mc.cantidad}kg x $${mc.precio.toLocaleString('es-AR')}<br><span style="font-size:0.7rem;font-weight:600;opacity:0.85;">👉 Tocá acá para cargarla</span>`;
         }
-        if (toggle) toggle.style.display = 'flex';
     } else {
         pesoModo = 'monto';
         if (badge) badge.style.display = 'none';
-        if (toggle) toggle.style.display = 'none';
     }
     pesoCambiarModo(pesoModo, true);
 
@@ -5769,14 +5766,6 @@ function abrirModalPeso(producto) {
 function pesoCambiarModo(modo, silencioso) {
     pesoModo = modo;
     pesoValor = '';
-    const btnMonto = document.getElementById('pesoBtnModoMonto');
-    const btnPeso  = document.getElementById('pesoBtnModoPeso');
-    if (btnMonto && btnPeso) {
-        btnMonto.style.background = modo === 'monto' ? 'white' : 'transparent';
-        btnMonto.style.boxShadow  = modo === 'monto' ? '0 1px 3px rgba(0,0,0,0.15)' : 'none';
-        btnPeso.style.background  = modo === 'peso'  ? 'white' : 'transparent';
-        btnPeso.style.boxShadow   = modo === 'peso'  ? '0 1px 3px rgba(0,0,0,0.15)' : 'none';
-    }
     const unitLabel = document.getElementById('pesoUnitLabel');
     if (unitLabel) unitLabel.textContent = modo === 'peso' ? 'gramos' : 'pesos';
 
@@ -5789,16 +5778,45 @@ function pesoCambiarModo(modo, silencioso) {
             instr.style.background = '#fff3e0';
             instr.style.color = '#e65100';
             instr.style.border = '2px solid #e65100';
-            instr.textContent = '⚖️ ESTÁS TIPEANDO GRAMOS (no pesos)';
+            instr.innerHTML = '⚖️ ESTÁS TIPEANDO GRAMOS (no pesos)<br><span style="font-size:0.72rem;font-weight:600;opacity:0.85;">👆 Tocá para cambiar a $</span>';
         } else {
             instr.style.background = '#e8f5e9';
             instr.style.color = '#2e7d32';
             instr.style.border = '2px solid #2e7d32';
-            instr.textContent = '💰 Estás tipeando PESOS ($)';
+            instr.innerHTML = '💰 Estás tipeando PESOS ($)<br><span style="font-size:0.72rem;font-weight:600;opacity:0.85;">👆 Tocá para cambiar a gramos</span>';
         }
     }
     if (chips) chips.style.display = modo === 'peso' ? 'flex' : 'none';
 
+    actualizarDisplayPeso();
+}
+
+// v421 — Tocar el cartel grande alterna entre "Por monto" y "Por peso".
+// Reemplaza a los 2 botones chicos: un solo toque, sin apuntarle a un botón
+// pequeño. Funciona siempre, tenga o no oferta detectada el producto.
+function pesoToggleModo() {
+    const instr = document.getElementById('pesoInstruccion');
+    if (instr) {
+        instr.style.transform = 'scale(0.97)';
+        setTimeout(() => { instr.style.transform = 'scale(1)'; }, 100);
+    }
+    pesoCambiarModo(pesoModo === 'peso' ? 'monto' : 'peso');
+}
+
+// v421 — Tocar el badge de oferta detectada carga directo la cantidad de la
+// promo (ej: 2kg → 2000g) en modo "Por peso", sin tipear nada. Si el cliente
+// lleva más, se puede seguir ajustando con los chips rápidos o el teclado.
+function pesoCargarOfertaRapida() {
+    if (!pesoProductoActual) return;
+    const mc = _poolMulticompra.get(pesoProductoActual.id);
+    if (!mc || mc.grupo || !(mc.cantidad > 0) || !(mc.precio > 0)) return;
+    const badge = document.getElementById('pesoOfertaBadge');
+    if (badge) {
+        badge.style.transform = 'scale(0.97)';
+        setTimeout(() => { badge.style.transform = 'scale(1)'; }, 100);
+    }
+    if (pesoModo !== 'peso') pesoCambiarModo('peso', true);
+    pesoValor = String(Math.round(mc.cantidad * 1000));
     actualizarDisplayPeso();
 }
 
