@@ -1035,7 +1035,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>🛒 POS · Copihue v421</title>
+    <title>🛒 POS · Copihue v423</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -12389,6 +12389,16 @@ function selRcCategoria(cat) {
     };
     const hint = document.getElementById('rcObsHint');
     if (hint) hint.textContent = hints[cat] ? '— ' + hints[cat] : '';
+    // Si es SUSCRIPCIONES, agregar datalist con nombres canónicos
+    const obsInput = document.getElementById('rcObservacion');
+    let dl = document.getElementById('rcSuscList');
+    if(cat === 'SUSCRIPCIONES'){
+        if(!dl){ dl=document.createElement('datalist'); dl.id='rcSuscList'; document.body.appendChild(dl); }
+        dl.innerHTML = ['Netflix', 'HBO Max', 'Amazon Prime', 'YouTube Premium', 'Paramount+', 'Starlink', 'Spotify', 'Tuenti', 'IPTV', 'Empretienda', 'Disney+', 'Apple TV+', 'Amazon Music', 'Prime Video'].map(s=>`<option value="${s}">`).join('');
+        if(obsInput) obsInput.setAttribute('list','rcSuscList');
+    } else {
+        if(obsInput) obsInput.removeAttribute('list');
+    }
     // Si selecciona FAMILIA CHILE y el monto está vacío, sugerir $85K
     if (cat === 'FAMILIA CHILE') {
         const m = document.getElementById('rcMonto');
@@ -13372,7 +13382,10 @@ function tragCerrarJuego() {
             <div id="prestPanelNuevo" style="padding:16px 20px;display:flex;flex-direction:column;gap:12px;">
                 <div class="form-grupo">
                     <label class="form-label">Acreedor (a quién le debés) *</label>
-                    <input type="text" class="form-input" id="prestAcreedor" placeholder="Ej: Juan, Banco, Familiar..." autocomplete="off">
+                    <input type="text" class="form-input" id="prestAcreedor" placeholder="Ej: Juan, Banco, Familiar..." autocomplete="off"
+                        oninput="prestSugerirAcreedor(this.value)" list="prestAcreedoresList">
+                    <datalist id="prestAcreedoresList"></datalist>
+                    <div id="prestSugerencias" style="display:none;background:#fff;border:1.5px solid #e0d7f7;border-radius:10px;margin-top:4px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,.1)"></div>
                 </div>
                 <div class="form-grupo">
                     <label class="form-label">Monto total *</label>
@@ -13440,6 +13453,49 @@ function abrirPrestamos(){
     prestShowTab('lista');
     const d=new Date();d.setMonth(d.getMonth()+1);
     document.getElementById('prestVencimiento').value=d.toISOString().split('T')[0];
+    // Precargar acreedores en el datalist
+    prestCargarSugerencias();
+}
+function prestCargarSugerencias(){
+    const lista=prestCargar();
+    // Acreedores predefinidos + los del historial
+    const PREST_BASE = ['Mercado Pago - Dinero Plus','Mercado Pago - Cuotas Fijas','Naranja - Préstamos'];
+    const freq={};
+    PREST_BASE.forEach(a=>freq[a]=0); // base con frecuencia 0
+    lista.forEach(p=>{if(p.acreedor)freq[p.acreedor]=(freq[p.acreedor]||0)+1;});
+    const acreedores=Object.keys(freq).sort((a,b)=>freq[b]-freq[a]);
+    // Poblar datalist
+    const dl=document.getElementById('prestAcreedoresList');
+    if(dl) dl.innerHTML=acreedores.map(a=>`<option value="${a}">`).join('');
+    // Mostrar chips de sugerencia rápida si hay acreedores frecuentes
+    const sugs=document.getElementById('prestSugerencias');
+    if(sugs && acreedores.length>0){
+        sugs.innerHTML=acreedores.slice(0,4).map(a=>
+            `<button type="button" onclick="prestSelAcreedor('${a.replace(/'/g,"\'")}")"
+                style="display:block;width:100%;padding:10px 14px;border:none;background:transparent;text-align:left;cursor:pointer;font-family:inherit;font-size:.82rem;font-weight:600;border-bottom:1px solid #f5f5f5"
+                onmouseover="this.style.background='#f3eeff'" onmouseout="this.style.background='transparent'">
+                🤝 ${a} <span style="font-size:.68rem;color:#888">(${freq[a]} vez${freq[a]>1?'es':''})</span>
+            </button>`
+        ).join('');
+        sugs.style.display='block';
+    }
+}
+function prestSelAcreedor(nombre){
+    document.getElementById('prestAcreedor').value=nombre;
+    document.getElementById('prestSugerencias').style.display='none';
+    // Si tiene préstamos anteriores con ese acreedor, precargar el motivo
+    const lista=prestCargar();
+    const ultimo=lista.filter(p=>p.acreedor===nombre).slice(-1)[0];
+    if(ultimo){
+        if(ultimo.motivo) document.getElementById('prestMotivo').value=ultimo.motivo;
+        if(ultimo.cuotas) { document.getElementById('prestCuotas').value=ultimo.cuotas; prestCalcCuota(); }
+    }
+    document.getElementById('prestMonto').focus();
+}
+function prestSugerirAcreedor(val){
+    const sugs=document.getElementById('prestSugerencias');
+    if(val.trim()) sugs.style.display='none';
+    else prestCargarSugerencias();
 }
 function cerrarPrestamos(){document.getElementById('modalPrestamos').style.display='none';}
 function prestShowTab(tab){
