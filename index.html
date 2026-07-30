@@ -4,9 +4,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🏪 Catálogo · Copihue v168</title>
+    <title>🏪 Catálogo · Copihue v169</title>
     <!--
     CHANGELOG
+    v169 · 2026-07-30
+      - FIX confusión de precio en tarjetas de Multicompra (v168): el precio
+        grande mostraba el TOTAL (ej: "$6.000") al lado del precio tachado
+        "x kg" — fácil de leer como si $6.000 fuera el precio por kg. Ahora:
+        · El precio grande es el precio POR UNIDAD de la promo (ej: "$3.000
+          x kg"), directamente comparable contra el tachado.
+        · El total pasó a su propia línea, con fondo de color para que no
+          se pierda: "📦 Llevando 2kg → $6.000 TOTAL · ahorrás $1.998".
+        · Se agregó aclaración de qué pasa llevando menos de la cantidad
+          mínima: "Menos de 2kg: precio normal $3.999 x kg".
     v168 · 2026-07-30
       - NUEVO — Sección "📦 LLEVANDO MÁS, PAGÁS MENOS" (Multicompra): el catálogo
         ahora lee _poolMulticompra (mismo pool que ya usaba addToCart para calcular
@@ -2669,7 +2679,7 @@
 
 <script>
 // ========== VERSIÓN Y CONFIGURACIÓN ==========
-const APP_VERSION = 'copihue-index-v168';
+const APP_VERSION = 'copihue-index-v169';
 // Tag versión automático con fecha
 // versionTag se actualiza desde config_sistema (campo 'version')
 
@@ -3605,20 +3615,32 @@ function renderizarContenedorOfertas(tipo, productos) {
 
         /* ================= MULTICOMPRA ================= */
         else if (tipo === 'multicompra' && product.mcCantidad > 0 && product.mcPrecio > 0) {
-            const cant    = product.mcCantidad;
-            const prec    = product.mcPrecio;
-            const esKg    = _esPorPesoIndex(product.name);
-            const unidad  = esKg ? 'kg' : 'u.';
-            const ahorro  = Math.max(0, Math.round(product.price * cant - prec));
+            const cant       = product.mcCantidad;
+            const prec       = product.mcPrecio;
+            const esKg       = _esPorPesoIndex(product.name);
+            const unidad     = esKg ? 'kg' : 'u.';
+            const cantLabel  = esKg ? `${cant}kg` : `${cant} ${unidad}`;
+            const precioUnitPromo = Math.round(prec / cant);
+            const ahorro     = Math.max(0, Math.round(product.price * cant - prec));
             badgeTexto = `📦 ${cant}x $${prec.toLocaleString('es-AR')}`;
 
+            // v168b — El precio grande pasa a ser el precio POR UNIDAD de la promo
+            // (comparable directo contra el tachado, que también es "x kg"/"x u.")
+            // en vez del total — mostrar el total ahí confundía ("¿$6.000 es por kg
+            // o por llevar 2kg?"). El total ahora tiene su propia línea bien visible
+            // en vez de texto chico, y se aclara aparte que llevando menos de la
+            // cantidad mínima se cobra el precio normal.
             precioHTML = `
-                <div style="margin:6px 0 4px;display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;">
+                <div style="margin:6px 0 2px;display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;">
                     <span style="text-decoration:line-through;color:#aaa;font-size:0.8rem;">$${product.price.toLocaleString('es-AR')} x ${unidad}</span>
-                    <span style="font-size:1.15rem;font-weight:800;color:#4527a0;">$${prec.toLocaleString('es-AR')}</span>
+                    <span style="font-size:1.15rem;font-weight:800;color:#4527a0;">$${precioUnitPromo.toLocaleString('es-AR')} x ${unidad}</span>
                 </div>
-                <div style="font-size:0.72rem;color:#4527a0;font-weight:700;margin-bottom:4px;">
-                    📦 Llevando ${cant}${esKg ? 'kg' : ' ' + unidad}${ahorro > 0 ? ` · ahorrás $${ahorro.toLocaleString('es-AR')}` : ''}
+                <div style="font-size:0.74rem;color:#fff;font-weight:800;background:#4527a0;
+                            display:inline-block;padding:2px 8px;border-radius:6px;margin-bottom:3px;">
+                    📦 Llevando ${cantLabel} → $${prec.toLocaleString('es-AR')} TOTAL${ahorro > 0 ? ` · ahorrás $${ahorro.toLocaleString('es-AR')}` : ''}
+                </div>
+                <div style="font-size:0.66rem;color:#999;margin-bottom:4px;">
+                    Menos de ${cantLabel}: precio normal $${product.price.toLocaleString('es-AR')} x ${unidad}
                 </div>
             `;
         }
