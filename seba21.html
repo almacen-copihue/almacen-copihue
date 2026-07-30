@@ -36,6 +36,21 @@
 
 ================================================================================
 
+  v425 — 30/07/2026
+  ---------------------
+  • MEJORA — Productos con multicompra individual o grupal (ej: "2kg x
+    $6.000") ahora se tratan igual que el resto de las ofertas en el
+    scroll principal:
+      - Suben arriba del listado en su propia sección "📦 Multicompra"
+        (antes quedaban mezclados con productos normales, sin distinción).
+      - Llevan una etiqueta violeta junto al nombre, igual que "🏷️ PROMO"
+        o "🔥 -20%": "📦 2x $6.000" para multicompra individual, o
+        "📦 cuenta para pack 2x $6.000" para la grupal (el precio ahí es
+        combinado entre varios productos, no por unidad — se aclara para
+        no confundir).
+      - _tieneOfertaActiva() ahora también las cuenta como oferta para el
+        orden del listado y del buscador (_sortProductos).
+
   v424 — 30/07/2026
   ---------------------
   • MEJORA — Modal "Venta por peso", rediseño del flujo de oferta detectada:
@@ -1054,7 +1069,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>🛒 POS · Copihue v424</title>
+    <title>🛒 POS · Copihue v425</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3762,13 +3777,15 @@ function renderResultados(results, term = '') {
         const grCervecero      = conStock.filter(p => _poolCervecero && _poolCervecero.has(p.id) && _esCerveceroActivo() && !grRelampago.includes(p) && !grDestacadas.includes(p) && !grEspeciales.includes(p) && !grUltimas.includes(p));
         const grPromos         = conStock.filter(p => String(p.catOferta||'').toUpperCase()==='PROMO ACTIVA' && (p.normal||0)>0 && (p.normal||0)<(p.price||0) && !grRelampago.includes(p) && !grDestacadas.includes(p) && !grEspeciales.includes(p) && !grUltimas.includes(p) && !grCervecero.includes(p));
         const grCombos         = conStock.filter(p => String(p.catOferta||'').toUpperCase()==='COMBO ACTIVO' && !grRelampago.includes(p) && !grPromos.includes(p));
-        const grRecien         = conStock.filter(p => p.recienLlegado && !grRelampago.includes(p) && !grDestacadas.includes(p) && !grEspeciales.includes(p) && !grUltimas.includes(p) && !grCervecero.includes(p) && !grPromos.includes(p) && !grCombos.includes(p));
-        const idsOferta        = new Set([...grRelampago,...grDestacadas,...grEspeciales,...grUltimas,...grCervecero,...grPromos,...grCombos,...grRecien].map(p=>p.id));
+        const grMulticompra    = conStock.filter(p => _poolMulticompra.has(p.id) && !grRelampago.includes(p) && !grDestacadas.includes(p) && !grEspeciales.includes(p) && !grUltimas.includes(p) && !grCervecero.includes(p) && !grPromos.includes(p) && !grCombos.includes(p));
+        const grRecien         = conStock.filter(p => p.recienLlegado && !grRelampago.includes(p) && !grDestacadas.includes(p) && !grEspeciales.includes(p) && !grUltimas.includes(p) && !grCervecero.includes(p) && !grPromos.includes(p) && !grCombos.includes(p) && !grMulticompra.includes(p));
+        const idsOferta        = new Set([...grRelampago,...grDestacadas,...grEspeciales,...grUltimas,...grCervecero,...grPromos,...grCombos,...grMulticompra,...grRecien].map(p=>p.id));
         const grNormal         = conStock.filter(p => !idsOferta.has(p.id));
 
         if (enCarrito.length) html += seccion('🛒', 'En carrito', '#2e7d32', enCarrito);
         html += seccion('🏷️', 'Promos Activas', '#6a1b9a', grPromos);
         html += seccion('🎯', 'Combos', '#00838f', grCombos);
+        html += seccion('📦', 'Multicompra', '#5b21b6', grMulticompra);
         html += seccion('🍺', 'Jueves Cervecero', '#1565c0', grCervecero);
         html += seccion('⚡', 'Relámpago', '#f9a825', grRelampago);
         html += seccion('🔥', 'Destacadas', '#e65100', grDestacadas);
@@ -5188,6 +5205,7 @@ function _tieneOfertaActiva(p) {
     if (_tipoActivo('ultimas') && _poolIdsUltimas.has(p.id)) return true;
     if (p.destacada > 0 && _tipoActivo('destacadas') && _destacadasFiltradas.has(p.id)) return true;
     if (p.especial  > 0 && _tipoActivo('especiales') && _poolIdsEspeciales.has(p.id)) return true;
+    if (_poolMulticompra && _poolMulticompra.has(p.id)) return true;
     if (p.normal > p.price && p.category === 'PROMOS') return true;
     return false;
 }
@@ -8384,6 +8402,15 @@ function badgeOfertaPOS(producto) {
         return `<span style="background:#ff6f00;color:#fff;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">🔥 -${producto.destacada}%</span>`;
     if (producto.especial > 0 && _tipoActivo('especiales') && _poolIdsEspeciales.has(producto.id))
         return `<span style="background:#00bcd4;color:#fff;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">⭐ -10%</span>`;
+    if (_poolMulticompra && _poolMulticompra.has(producto.id)) {
+        const mc = _poolMulticompra.get(producto.id);
+        if (mc && mc.cantidad > 0 && mc.precio > 0) {
+            const texto = mc.grupo
+                ? `📦 cuenta para pack ${mc.cantidad}x $${mc.precio.toLocaleString('es-AR')}`
+                : `📦 ${mc.cantidad}x $${mc.precio.toLocaleString('es-AR')}`;
+            return `<span style="background:linear-gradient(135deg,#4527a0,#7c4dff);color:#fff;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">${texto}</span>`;
+        }
+    }
     if (
         String(producto.catOferta || '').toUpperCase() === 'PROMO ACTIVA' &&
         (producto.normal || 0) > 0 &&
