@@ -36,6 +36,14 @@
 
 ================================================================================
 
+  v427 — 30/07/2026 (g)
+  ---------------------
+  • FIX — sugerencia de pedido de pan ("Hoy no" / aceptar pedirlo) ahora
+    también avisa al servidor (getPanSugeridoHoy / marcarPanSugeridoHoy en
+    Code.gs v9.9), no solo localStorage. Antes el flag era por celular, así
+    que descartarlo o pedirlo en un teléfono no frenaba la sugerencia en
+    otro. Requiere Code.gs v9.9 o superior.
+
   v426 — 30/07/2026 (f)
   ---------------------
   • FIX — auto-limpieza de búsqueda (v412) cortaba selecciones múltiples: el
@@ -1081,7 +1089,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>🛒 POS · Copihue v426</title>
+    <title>🛒 POS · Copihue v427</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3196,13 +3204,26 @@ function calcularStockTotalPan() {
 }
 
 // Sugerencia pedido panadero
-function sugerirPedidoPanadero() {
+async function sugerirPedidoPanadero() {
     const cfg = getProveedorPanadero(); if (!cfg) return;
     const stockPan = calcularStockTotalPan();
     if (stockPan > (cfg.stockMinimo || 1)) return;
     const hoyKey = fechaArgentina();
     if (localStorage.getItem('pedido_panadero_sugerido_' + hoyKey)) return;
     if (document.getElementById('sugerenciaPanadero')) return;
+    // v427 — chequeo compartido entre celulares: antes esto era solo
+    // localStorage (por dispositivo), así que descartar o pedir el pan
+    // desde un teléfono no frenaba la sugerencia en otro. Si falla la red,
+    // seguimos con el chequeo local nomás (no bloquea la sugerencia).
+    try {
+        const url = API_URL + '?action=getPanSugeridoHoy&t=' + Date.now();
+        const resp = await _apiFetchUrl('getPanSugeridoHoy', url);
+        if (resp && resp.yaSugerido) {
+            localStorage.setItem('pedido_panadero_sugerido_' + hoyKey, '1');
+            return;
+        }
+    } catch(e) { /* sin red — seguimos solo con el chequeo local */ }
+    if (document.getElementById('sugerenciaPanadero')) return; // por si se agregó mientras esperábamos la red
     const notif = document.createElement('div');
     notif.id = 'sugerenciaPanadero';
     notif.innerHTML = `<div style="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);
@@ -3224,8 +3245,16 @@ function sugerirPedidoPanadero() {
     document.body.appendChild(notif);
 }
 
+function _marcarPanSugeridoCompartido() {
+    try {
+        const url = API_URL + '?action=marcarPanSugeridoHoy&t=' + Date.now();
+        _apiFetchUrl('marcarPanSugeridoHoy', url).catch(() => {});
+    } catch(e) { /* best-effort, no bloquea la UI */ }
+}
+
 function posponerPedidoPanadero() {
     localStorage.setItem('pedido_panadero_sugerido_' + fechaArgentina(), '1');
+    _marcarPanSugeridoCompartido();
     const n = document.getElementById('sugerenciaPanadero'); if (n) n.remove();
 }
 
@@ -3237,6 +3266,7 @@ function enviarPedidoPanadero() {
         .replace('{nombre}', cfg.nombre).replace('{cantidad}', cant).replace('{productos}', '- Pan: ' + cant + ' kg');
     const tel = _normNumWA(cfg.telefono || '');
     localStorage.setItem('pedido_panadero_sugerido_' + fechaArgentina(), '1');
+    _marcarPanSugeridoCompartido();
     const n = document.getElementById('sugerenciaPanadero'); if (n) n.remove();
     if (tel) {
         abrirWABusiness(msg, tel);
