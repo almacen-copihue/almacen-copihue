@@ -36,6 +36,18 @@
 
 ================================================================================
 
+  v426 — 30/07/2026 (f)
+  ---------------------
+  • FIX — auto-limpieza de búsqueda (v412) cortaba selecciones múltiples: el
+    freno "no cerrar si el input está enfocado" casi nunca se cumplía porque
+    tocar un producto le saca el foco al buscador en el celular. Se sube el
+    tiempo de 900ms a 2500ms para dar margen real al elegir varios productos
+    del mismo resultado (ej. buscar "toro" con muchas coincidencias).
+  • FIX — botón flotante de cobrar quedaba con el total de la venta anterior
+    después de cerrar el modal de "Cobro confirmado". cerrarConfirm() solo
+    mostraba el FAB si había items en el carrito, pero nunca lo ocultaba si
+    quedaba vacío — ahora sincroniza los dos casos.
+
   v425 — 30/07/2026
   ---------------------
   • MEJORA — Productos con multicompra individual o grupal (ej: "2kg x
@@ -1069,7 +1081,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>🛒 POS · Copihue v425</title>
+    <title>🛒 POS · Copihue v426</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -4502,6 +4514,12 @@ function limpiarBusqueda() {
 // pantalla si seguís mirando el carrito. Usa debounce: si seguís tocando
 // productos del mismo resultado, el temporizador se reinicia y no te corta
 // la lista mientras estás eligiendo varios.
+// v426 — el freno "no cerrar si está tipeando" no servía en la práctica:
+// tocar un producto le saca el foco al buscador en el celular, así que
+// casi nunca se cumplía esa condición y terminaba cerrándose igual con
+// varios resultados en pantalla (ej. buscar "toro" y querer agregar más
+// de uno). Se sube el tiempo de 900ms a 2500ms para dar más margen real
+// mientras se sigue eligiendo entre varios productos del mismo resultado.
 let _autoLimpiarBusquedaTimer = null;
 function _autoLimpiarBusquedaTrasAgregar() {
     if (_autoLimpiarBusquedaTimer) clearTimeout(_autoLimpiarBusquedaTimer);
@@ -4516,7 +4534,7 @@ function _autoLimpiarBusquedaTrasAgregar() {
         if (btnX) btnX.style.display = 'none';
         if (busOculto) busOculto.dispatchEvent(new Event('input', {bubbles:true}));
         // Sin .focus() — no reabrir el teclado solo
-    }, 900);
+    }, 2500);
 }
 
 // ===== MODAL CONFIRMAR: helpers para editar desde el modal =====
@@ -5059,8 +5077,11 @@ function cerrarConfirm() {
     // modal (incluye cierre por botón atrás del navegador vía popstate), por si
     // se borró/editó algo adentro y el refresh puntual no llegó a dispararse.
     _refreshResultadosBadges();
-    // Restaurar FABs si hay items en el carrito
-    if (MOBILE && ventaActual.length > 0) document.getElementById('fabStack').style.display = 'flex';
+    // Restaurar FABs si hay items en el carrito — v426: FIX, antes solo se
+    // mostraba cuando había items pero nunca se ocultaba si el carrito
+    // quedaba vacío (ej. después de confirmar un cobro), así que el botón
+    // flotante se quedaba pegado con el total de la venta anterior.
+    if (MOBILE) document.getElementById('fabStack').style.display = ventaActual.length > 0 ? 'flex' : 'none';
     // Safety: liberar cualquier guard de venta colgado
     // No resetear guard si el modal fiado está procesando activamente
     const _mfActivo = document.getElementById('modalFiado') &&
