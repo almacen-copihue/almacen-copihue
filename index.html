@@ -4,9 +4,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🏪 Catálogo · Copihue v167</title>
+    <title>🏪 Catálogo · Copihue v168</title>
     <!--
     CHANGELOG
+    v168 · 2026-07-30
+      - NUEVO — Sección "📦 LLEVANDO MÁS, PAGÁS MENOS" (Multicompra): el catálogo
+        ahora lee _poolMulticompra (mismo pool que ya usaba addToCart para calcular
+        el precio al agregar) y genera un contenedor propio, igual que Relámpago/
+        Destacadas/Últimas/Recién Llegados — antes ese pool solo se usaba puertas
+        adentro (al agregar al carrito), sin ningún contenedor visible en el scroll.
+        - Solo se genera/muestra cuando hay multicompra activa con stock (si el
+          pool viene vacío, el contenedor se oculta solo — mismo patrón que el
+          resto de las secciones de oferta).
+        - Cada tarjeta muestra el precio normal tachado ("x kg" o "x u." según el
+          nombre del producto, mismo criterio que esPorPeso en seba21.html) junto
+          al precio multicompra ("📦 2x $6.000") y el ahorro total.
+        - renderizarMulticompra() sigue el mismo patrón que renderizarUltimasUnidades()/
+          renderizarRecienLlegados(); se llama en actualizarTodasLasVistas() (carga
+          inicial) y en actualizarSoloOfertas() (refresco periódico cada 60s, donde
+          antes _poolMulticompra NO se refrescaba — solo se cargaba una vez al inicio).
+        - Excluida de "Recién Llegados" para no duplicar productos entre ambas
+          secciones (mismo criterio que Últimas Unidades).
     v157 · 2026-06-21
       - AUDITORÍA CSS aplicada (prioridad alta, basada en revisión externa de indexV153):
         · C3 CRÍTICO: .product-card.promo-card tenía transform:scale(1.2)+margin:1.5rem
@@ -548,6 +566,30 @@
             background: #ffcdd2;
             color: #7f0000;
             border-left-color: #c62828;
+        }
+
+        /* 📦 MULTICOMPRA — violeta (mismo color que el badge de multicompra en el POS) */
+        .ofertas-container.multicompra {
+            border-color: #4527a0;
+            background: linear-gradient(135deg, #ede7f6, #d1c4e9);
+        }
+        .ofertas-container.multicompra .ofertas-header {
+            background: linear-gradient(135deg, #311b92, #4527a0);
+        }
+        .ofertas-container.multicompra .ofertas-badge {
+            background: #b39ddb;
+            color: #311b92;
+        }
+        .ofertas-container.multicompra .ofertas-product-card {
+            border-color: #b39ddb;
+        }
+        .ofertas-container.multicompra .ofertas-exclusive-badge {
+            background: linear-gradient(135deg, #4527a0, #7c4dff);
+        }
+        .ofertas-container.multicompra .ofertas-stock-warning {
+            background: #d1c4e9;
+            color: #311b92;
+            border-left-color: #4527a0;
         }
 
         /* 🍺 JUEVES CERVECERO */
@@ -2431,6 +2473,23 @@
         </div>
     </div>
 
+    <!-- ========== MULTICOMPRA ========== -->
+    <div class="ofertas-container multicompra cls-oculto" id="ofertasMulticompra">
+        <div class="ofertas-header">
+            <h2>
+                📦 LLEVANDO MÁS, PAGÁS MENOS
+                <span class="ofertas-badge">MULTICOMPRA</span>
+            </h2>
+        </div>
+        <div class="ofertas-stock-warning" id="msg-multicompra">
+            📦 Precio especial llevando la cantidad indicada en cada producto.
+        </div>
+        <div class="ofertas-products-grid" id="multicompra-grid">
+            <!-- Productos con multicompra -->
+        </div>
+    </div>
+
+
 <script>if(window.innerWidth>=768){document.write('<style>#desktopSearch{display:block!important}</style>')}</script>
     <div class="search-container" id="desktopSearch" style="display:none;">
         <div class="search-wrapper">
@@ -2610,7 +2669,7 @@
 
 <script>
 // ========== VERSIÓN Y CONFIGURACIÓN ==========
-const APP_VERSION = 'copihue-index-v167';
+const APP_VERSION = 'copihue-index-v168';
 // Tag versión automático con fecha
 // versionTag se actualiza desde config_sistema (campo 'version')
 
@@ -3302,6 +3361,15 @@ function esVencimientoCritico(prod) {
     return dias <= 3;
 }
 
+// Detecta si un producto se vende por peso (mismo criterio que seba21.html)
+// SÍ por peso: "BANANA X KG", "PAPA KG" — termina en KG suelto
+// NO por peso: "HARINA 1KG", "AZUCAR 500GR" — número pegado a la unidad
+function _esPorPesoIndex(nombre) {
+    const n = (nombre || '').toUpperCase().trim();
+    if (/\d\s*KG|\d\s*GR|\d\s*G\b/.test(n)) return false;
+    return /\bKG\b/.test(n);
+}
+
 function construirPools() {
     if (!products || products.length === 0) return;
     
@@ -3430,6 +3498,7 @@ function renderizarContenedorOfertas(tipo, productos) {
                        tipo === 'especiales' ? 'ofertasEspeciales' :
                        tipo === 'ultimas'    ? 'ofertasUltimas' :
                        tipo === 'recien'     ? 'ofertasRecienLlegados' :
+                       tipo === 'multicompra' ? 'ofertasMulticompra' :
                        'ofertasEspeciales';
     
     const gridId = `${tipo}-grid`;
@@ -3531,6 +3600,26 @@ function renderizarContenedorOfertas(tipo, productos) {
             precioHTML = `
                 <div style="margin:6px 0 4px;font-size:1.05rem;font-weight:800;color:#00695c;">$${product.price}</div>
                 ${product.fechaIngreso ? `<div style="font-size:0.68rem;color:#888;margin-bottom:4px;">📅 ${product.fechaIngreso}</div>` : ''}
+            `;
+        }
+
+        /* ================= MULTICOMPRA ================= */
+        else if (tipo === 'multicompra' && product.mcCantidad > 0 && product.mcPrecio > 0) {
+            const cant    = product.mcCantidad;
+            const prec    = product.mcPrecio;
+            const esKg    = _esPorPesoIndex(product.name);
+            const unidad  = esKg ? 'kg' : 'u.';
+            const ahorro  = Math.max(0, Math.round(product.price * cant - prec));
+            badgeTexto = `📦 ${cant}x $${prec.toLocaleString('es-AR')}`;
+
+            precioHTML = `
+                <div style="margin:6px 0 4px;display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;">
+                    <span style="text-decoration:line-through;color:#aaa;font-size:0.8rem;">$${product.price.toLocaleString('es-AR')} x ${unidad}</span>
+                    <span style="font-size:1.15rem;font-weight:800;color:#4527a0;">$${prec.toLocaleString('es-AR')}</span>
+                </div>
+                <div style="font-size:0.72rem;color:#4527a0;font-weight:700;margin-bottom:4px;">
+                    📦 Llevando ${cant}${esKg ? 'kg' : ' ' + unidad}${ahorro > 0 ? ` · ahorrás $${ahorro.toLocaleString('es-AR')}` : ''}
+                </div>
             `;
         }
         
@@ -4309,6 +4398,7 @@ function actualizarTodasLasVistas() {
     renderizarPromos();
     renderizarUltimasUnidades();
     renderizarRecienLlegados();
+    renderizarMulticompra();
     renderizarContenedorOfertas('especiales', productosEspeciales);
     renderizarCervecero();
     
@@ -4509,6 +4599,7 @@ function actualizarSoloOfertas() {
             if (d.poolRecienLlegados) _poolRecienLlegados = d.poolRecienLlegados;
             if (d.limiteRecienLlegados) _limiteRecienLlegados = d.limiteRecienLlegados;
             if (d.ultimasSeleccionadas) _poolUltimasSeleccion = d.ultimasSeleccionadas;
+            if (d.multicompraActiva) _poolMulticompra = d.multicompraActiva;
             if (d.horariosOferta) { _horariosOferta = d.horariosOferta; _actualizarMensajesOfertas_(); iniciarCountdown('relampago'); iniciarCountdown('destacadas'); iniciarCountdown('especiales'); }
             // Re-seleccionar y re-renderizar sin tocar los pools base
             seleccionarProductosOfertas();
@@ -4518,6 +4609,7 @@ function actualizarSoloOfertas() {
             renderizarPromos();
             renderizarUltimasUnidades();
             renderizarRecienLlegados();
+            renderizarMulticompra();
         })
         .catch(() => {}); // silencioso — siguiente ciclo lo reintenta
 }
@@ -4618,6 +4710,7 @@ function renderizarRecienLlegados() {
         ...productosDestacadas.map(p => p.id),
         ...productosEspeciales.map(p => p.id),
         ...(_poolUltimasSeleccion || []).map(u => Number(u.id)),
+        ...(_poolMulticompra || []).map(m => Number(m.id)),
         ...products.filter(p => esPromoActiva(p) || esComboActivo(p)).map(p => p.id)
     ]);
 
@@ -4633,6 +4726,24 @@ function renderizarRecienLlegados() {
         .slice(0, _limiteRecienLlegados);
 
     renderizarContenedorOfertas('recien', lista);
+}
+
+// Contenedor de ofertas MULTICOMPRA (ej: "2kg x $6.000") — mismo criterio que
+// el resto: solo se genera/muestra cuando el pool trae datos activos desde
+// la planilla (_poolMulticompra, cargado en getOfertas → multicompraActiva).
+function renderizarMulticompra() {
+    const lista = (_poolMulticompra || [])
+        .map(m => {
+            const cantidad = Number(m.MULTICOMPRA_CANTIDAD);
+            const precio   = Number(m.MULTICOMPRA_PRECIO);
+            if (!(cantidad > 0 && precio > 0)) return null;
+            const prod = products.find(p => p.id === Number(m.id));
+            if (!prod || prod.stockNumber <= 0) return null;
+            return { ...prod, mcTipo: m.MULTICOMPRA_TIPO, mcCantidad: cantidad, mcPrecio: precio };
+        })
+        .filter(Boolean);
+
+    renderizarContenedorOfertas('multicompra', lista);
 }
 
 function simplificarNombre(nombre) {
