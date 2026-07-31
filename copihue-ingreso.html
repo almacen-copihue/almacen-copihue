@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>📥 Ingreso · Copihue v17</title>
+  <title>📥 Ingreso · Copihue v18</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -567,6 +567,17 @@
 //        pisaba la pantalla. Ahora cada búsqueda tiene un ID de secuencia y se
 //        descartan las respuestas obsoletas. Además: aparece "🔎 Buscando..."
 //        de inmediato en vez de dejar el panel vacío durante el debounce.
+// v18 — Idempotencia real contra duplicados por mala conexión (no por
+//        producto+cantidad — eso da falsos positivos con compras legítimas
+//        iguales). idOperacion ahora persiste entre reintentos (se genera
+//        una sola vez, se reutiliza hasta que el servidor confirma éxito,
+//        recién ahí se limpia). Ante timeout, ya no invita a "revisar el
+//        Historial a mano": consulta sola el endpoint nuevo
+//        action=buscarOperacion y le dice al usuario si el ingreso SÍ se
+//        guardó (con hora exacta) o si NO se guardó y puede reintentar
+//        tranquilo. REQUIERE Code.gs actualizado: buscarPorIdOperacion() /
+//        buscarOperacion() nuevas, ingresarMercaderia() ahora rechaza
+//        idOperacion repetidos sin volver a sumar stock.
 // v15 — Reemplaza el panel "deshacer último ingreso" (1 solo) por un panel
 //        plegable "🕘 Últimos ingresos" con los últimos 8 movimientos, cada uno
 //        con su propio botón Deshacer. Cubre el caso de detectar el error 2-3
@@ -1176,6 +1187,7 @@ async function deshacerItem(idx, fila, producto, cantidad) {
 // ── GUARDAR ────────────────────────────────────────────────────────────────────
 let _guardando = false; // lock duro contra doble-submit
 let _ultimoIngreso = null; // referencia al último ingreso guardado (informativo)
+let _idOperacionActual = null; // persiste entre reintentos — recién se limpia al confirmar éxito
 
 // Límites razonables — más allá de esto, casi seguro es un error de tipeo
 // (ej: 10000000000 en vez de 10, o un cero de más por apoyar el dedo)
@@ -1261,9 +1273,14 @@ async function guardar() {
   btn.disabled    = true;
   btn.textContent = '⏳ Guardando...';
 
-  // ID único de esta operación — el GAS lo puede usar para detectar
-  // si esta misma request ya fue procesada (evita duplicados por reintento)
-  const idOperacion = 'ing_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  // ID único de esta operación — se genera UNA sola vez y se reutiliza en
+  // cada reintento hasta que el servidor confirme éxito. Recién ahí se limpia
+  // (en limpiar()) y el próximo guardado genera uno nuevo. Así el servidor
+  // puede detectar si ya procesó esta misma operación.
+  if (!_idOperacionActual) {
+    _idOperacionActual = 'ing_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  }
+  const idOperacion = _idOperacionActual;
 
   try {
     const datos = { producto: nombre, cantidad, categoria, precioCosto, precioVenta, proveedor, fechaVencimiento, idOperacion };
@@ -1278,7 +1295,11 @@ async function guardar() {
     setConnStatus('online');
 
     if (res.success) {
-      toast('✅ ' + res.mensaje);
+      if (res.yaExistia) {
+        toast(`✅ Ese ingreso ya estaba registrado a las ${res.fecha}. No se volvió a sumar stock.`);
+      } else {
+        toast('✅ ' + res.mensaje);
+      }
       // Guardar referencia informativa del último ingreso
       _ultimoIngreso = { idOperacion, producto: nombre, cantidad };
       // Abrir (o refrescar) el panel de historial para que el botón de
@@ -1293,15 +1314,42 @@ async function guardar() {
     btn.textContent = '✅ Guardar Ingreso';
     _guardando = false;
     setConnStatus('offline');
-    // Aviso explícito: si fue timeout, puede que el GAS SÍ haya guardado.
-    // No reintentar a ciegas — revisar el historial antes de volver a tocar "Guardar".
     if (e.name === 'TimeoutError' || e.name === 'AbortError') {
-      toast('⚠️ Sin respuesta del servidor. Revisá el Historial antes de reintentar — puede que sí se haya guardado.', true);
+      // No sabemos si el guardado llegó al servidor — lo consultamos solos
+      // en vez de hacer que el usuario abra el Historial a mano.
+      toast('⏳ Sin respuesta — verificando si se guardó...', true);
+      const yaEstaba = await verificarSiSeGuardo(idOperacion);
+      if (yaEstaba && yaEstaba.existe) {
+        toast(`✅ Ese ingreso ya estaba registrado a las ${yaEstaba.fecha}. No se volvió a sumar stock.`);
+        _ultimoIngreso = { idOperacion, producto: nombre, cantidad };
+        if (!_historialAbierto) toggleHistorial(); else cargarHistorial();
+        limpiar();
+      } else if (yaEstaba === false) {
+        toast('❌ Confirmado: NO se guardó. Podés tocar "Guardar" de nuevo tranquilo.', true);
+      } else {
+        toast('⚠️ No pude confirmar si se guardó. Revisá el Historial antes de reintentar.', true);
+      }
     } else {
       toast('❌ Error de conexión — revisá el Historial antes de reintentar', true);
     }
     console.error(e);
   }
+}
+
+// Consulta si un idOperacion ya quedó registrado en el Historial — endpoint
+// dedicado y puntual (no depende de cuántos movimientos más se hayan
+// cargado mientras tanto). Devuelve el objeto {existe, fecha, fila, ...} si
+// existe, false si no, o null si tampoco se pudo consultar (sin conexión
+// también para esto).
+async function verificarSiSeGuardo(idOp) {
+  try {
+    const r = await fetch(API_URL + '?action=buscarOperacion&id=' + encodeURIComponent(idOp) + '&t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(15000) });
+    const data = await r.json();
+    if (data && typeof data.existe === 'boolean') {
+      return data.existe ? data : false;
+    }
+  } catch (e) { /* no se pudo consultar — se informa como indeterminado */ }
+  return null;
 }
 
 function limpiar() {
@@ -1326,6 +1374,7 @@ function limpiar() {
   document.getElementById('btnGuardar').classList.remove('alerta-valor');
   document.getElementById('avisoValorRaro').classList.remove('visible');
   document.getElementById('avisoValorRaro').innerHTML = '';
+  _idOperacionActual = null; // esta operación ya se confirmó guardada — la próxima es nueva
   document.getElementById('producto').focus();
 }
 
