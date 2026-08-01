@@ -312,7 +312,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
   <div class="h-brand">
     <div class="h-icon">🖼</div>
     <div>
-      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v5.16</span></div>
+      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v5.17</span></div>
       <div class="h-sub">Generador para redes sociales</div>
     </div>
   </div>
@@ -355,6 +355,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
         <button class="mb full" data-modo="combinado" onclick="setModo('combinado',this)"><span class="em">🗂️</span>3 Categorías combinadas<span class="cnt" id="cnt-combinado"></span></button>
         <button class="mb full" data-modo="manual"  onclick="setModo('manual',this)"><span class="em">✏️</span>Selección manual (todas las ofertas)<span class="cnt" id="cnt-manual"></span></button>
         <button class="mb full" data-modo="sinoferta" onclick="setModo('sinoferta',this)" style="background:#fdf3e7;border-color:#f0c896;"><span class="em">🏷️</span>Sin oferta — crear manual<span class="cnt" id="cnt-sinoferta"></span></button>
+        <button class="mb full" data-modo="normal" onclick="setModo('normal',this)" style="background:#eef3fb;border-color:#a9c4e8;"><span class="em">🧾</span>Grilla Normal (catálogo)<span class="cnt" id="cnt-normal"></span></button>
       </div>
     </div>
 
@@ -379,6 +380,42 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
       </div>
       <div class="cr"><label>Máx. productos</label>
         <input type="number" id="cfgMax" value="50" min="1" max="50" style="max-width:56px;">
+      </div>
+    </div>
+
+    <!-- FILTROS — GRILLA NORMAL -->
+    <div id="secNormal" style="display:none;">
+      <div class="slbl">Grilla Normal — filtros</div>
+      <div class="cr"><label>Origen</label>
+        <select id="nrmOrigen" onchange="actualizarPoolNormal()">
+          <option value="con">Con ofertas (respeta prioridad)</option>
+          <option value="sin">Sin ofertas</option>
+        </select>
+      </div>
+      <div class="cr"><label>Ordenar por</label>
+        <select id="nrmOrden" onchange="actualizarPoolNormal()">
+          <option value="vendidos">Más vendidos</option>
+          <option value="stock">Más stock</option>
+          <option value="ganancia">Más ganancia</option>
+          <option value="categoria">Categoría (A-Z)</option>
+        </select>
+      </div>
+      <div class="cr"><label>Categoría</label>
+        <select id="nrmCategoria" onchange="actualizarPoolNormal()">
+          <option value="">(Todas)</option>
+        </select>
+      </div>
+      <div class="cr" style="align-items:flex-start;">
+        <label style="display:flex;align-items:center;gap:6px;flex:1;cursor:pointer;font-weight:400;">
+          <input type="checkbox" id="nrmExclMin" onchange="actualizarPoolNormal()" style="width:14px;height:14px;flex:0;">
+          Excluir menores a $1.500
+        </label>
+      </div>
+      <div class="cr" style="align-items:flex-start;">
+        <label style="display:flex;align-items:center;gap:6px;flex:1;cursor:pointer;font-weight:400;">
+          <input type="checkbox" id="nrmInclElectro" onchange="actualizarPoolNormal()" style="width:14px;height:14px;flex:0;">
+          Incluir Electrónica y Tecnología
+        </label>
       </div>
     </div>
 
@@ -465,7 +502,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-const VERSION = 'v5.16';
+const VERSION = 'v5.17';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -815,18 +852,26 @@ function extraerLimites(cfg){
 }
 
 function normProds(arr){
-  return arr.map((p,i)=>({
-    id:     Number(p.id||i+1),
-    name:   String(p.name||p.nombre||'Producto '+i).trim(),
-    price:  parseInt(p.price)||0,
-    normal: parseInt(p.normal)||parseInt(p.price)||0,
-    cat:    String(p.category||p.categoria||'').trim().toUpperCase(),
-    stock:  parseInt(p.stock)||parseInt(p.stockNumber)||0,
-    rel:    parseInt(p.relampago)||0,
-    des:    parseInt(p.destacada)||0,
-    esp:    parseInt(p.especial)||0,
-    op:     p.ofertaPersonalizada||null, // {activa,precioFinal,etiqueta,texto} — fuente de verdad: planilla
-  }));
+  return arr.map((p,i)=>{
+    const price=parseInt(p.price)||0;
+    const costo=parseInt(p.costo||p.cost||p.precioCosto)||0;
+    return {
+      id:     Number(p.id||i+1),
+      name:   String(p.name||p.nombre||'Producto '+i).trim(),
+      price,
+      normal: parseInt(p.normal)||price||0,
+      cat:    String(p.category||p.categoria||'').trim().toUpperCase(),
+      stock:  parseInt(p.stock)||parseInt(p.stockNumber)||0,
+      rel:    parseInt(p.relampago)||0,
+      des:    parseInt(p.destacada)||0,
+      esp:    parseInt(p.especial)||0,
+      op:     p.ofertaPersonalizada||null, // {activa,precioFinal,etiqueta,texto} — fuente de verdad: planilla
+      // Grilla Normal (catálogo) — usados para ordenar por más vendidos / más ganancia
+      ventas:   parseInt(p.ventas||p.ventasUltimoMes||p.vendidos||p.unidadesVendidas)||0,
+      costo,
+      ganancia: costo>0 ? (price-costo) : (parseInt(p.ganancia||p.margen||p.utilidad)||0),
+    };
+  });
 }
 
 function construirPools(){
@@ -968,6 +1013,76 @@ function construirPools(){
     .filter(p=>p.stock>0 && !idsConOferta.has(p.id))
     .map(p=>({id:p.id, name:p.name, price:p.price, normal:p.normal||p.price, stock:p.stock,
       po:p.price, et:'', pct:0}));
+
+  poblarCategoriasNormal();
+  actualizarPoolNormal();
+}
+
+// ── GRILLA NORMAL (catálogo) — helpers ──────────────────────────────────────────
+function quitarAcentos(s){
+  return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+}
+
+function poblarCategoriasNormal(){
+  const sel=$('nrmCategoria');
+  if(!sel) return;
+  const actual=sel.value;
+  const cats=[...new Set(_prods.map(p=>p.cat).filter(Boolean))].sort();
+  sel.innerHTML='<option value="">(Todas)</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');
+  if(cats.includes(actual)) sel.value=actual;
+}
+
+// Recalcula _pools.normal según los filtros elegidos (origen, orden, categoría, exclusiones).
+function actualizarPoolNormal(){
+  const elOrigen=$('nrmOrigen'), elOrden=$('nrmOrden'), elCat=$('nrmCategoria');
+  const elExclMin=$('nrmExclMin'), elInclElectro=$('nrmInclElectro');
+  if(!elOrigen) return; // el panel todavía no está en el DOM en la primera carga
+
+  const origen = elOrigen.value||'con';
+  const orden  = elOrden.value||'vendidos';
+  const catSel = elCat.value||'';
+  const exclMin      = elExclMin && elExclMin.checked;
+  const inclElectro  = elInclElectro && elInclElectro.checked;
+
+  // "Con ofertas" respeta el mismo orden/prioridad de contenedores que ya usa Selección
+  // manual (Relámpago→Destacadas→Especiales→Promos→Últimas→Cervecero, sin duplicados).
+  // "Sin ofertas" = productos sin ninguna oferta activa (automática ni personalizada).
+  const base = origen==='sin' ? (_pools.sinoferta||[]) : (_pools.manual||[]);
+
+  // Enriquecer con datos crudos de _prods (ventas, ganancia, categoría) por si el pool
+  // transformado no los trae ya.
+  let lista = base.map(p=>{
+    const raw=_prods.find(x=>x.id===p.id);
+    return {...p,
+      cat:      p.cat || (raw?raw.cat:''),
+      ventas:   raw?raw.ventas:0,
+      ganancia: raw?raw.ganancia:0,
+      stock:    (p.stock!=null?p.stock:(raw?raw.stock:0))};
+  });
+
+  // Excluir Electrónica y Tecnología por defecto (reactivable con el toggle)
+  if(!inclElectro){
+    lista = lista.filter(p=>{
+      const c=quitarAcentos(p.cat).toUpperCase();
+      return !(c.includes('ELECTRONICA') || c.includes('TECNOLOGIA'));
+    });
+  }
+
+  // Excluir menores a $1.500
+  if(exclMin) lista = lista.filter(p=>p.price>=1500);
+
+  // Filtro por categoría específica
+  if(catSel) lista = lista.filter(p=>p.cat===catSel);
+
+  // Orden
+  if(orden==='vendidos')       lista.sort((a,b)=>b.ventas-a.ventas);
+  else if(orden==='stock')     lista.sort((a,b)=>b.stock-a.stock);
+  else if(orden==='ganancia')  lista.sort((a,b)=>b.ganancia-a.ganancia);
+  else if(orden==='categoria') lista.sort((a,b)=>(a.cat||'').localeCompare(b.cat||''));
+
+  _pools.normal = lista;
+  actualizarBadges();
+  if(_modo==='normal') poblarCandidatos();
 }
 
 // Normaliza un producto que viene del GAS (tiene .nombre/.precio) al formato del flyer
@@ -1221,8 +1336,8 @@ function actualizarBadges(){
 // ── MODO ──────────────────────────────────────────────────────────────────────
 // Modos seleccionados (multi-select) — declarado en línea 519
 function setModo(modo,btn){
-  // manual, combinado y sinoferta son exclusivos — limpian los demás
-  const exclusivos = new Set(['manual','combinado','sinoferta']);
+  // manual, combinado, sinoferta y normal son exclusivos — limpian los demás
+  const exclusivos = new Set(['manual','combinado','sinoferta','normal']);
 
   if(exclusivos.has(modo)){
     _modos.clear();
@@ -1250,6 +1365,11 @@ function setModo(modo,btn){
   const esSinOferta = _modo==='sinoferta';
   $('btnGen').style.display = esSinOferta?'none':'block';
   $('btnOfertaManual').style.display = esSinOferta?'block':'none';
+
+  // En modo "normal" (grilla de catálogo) se muestra el panel de filtros propio
+  const esNormal = _modo==='normal';
+  $('secNormal').style.display = esNormal?'block':'none';
+  if(esNormal) actualizarPoolNormal();
 
   _sel.clear(); _filtroActivo=new Set();
   $('cv').style.display='none'; $('ph').style.display='flex';
@@ -1706,8 +1826,10 @@ async function drawCard(ctx,p,cx,cy,CW,CH,FH,P,pk){
   const _badgeLbl = getBadgeLabel(p);
   const _tipo2    = getOfertaTipo(p);
   const _is2daBdg = _tipo2==='relampago_2da50' && !_overrides[p.id];
+  const _isNxMBdg = _tipo2==='relampago_nxm'   && !_overrides[p.id];
+  const _hasDiscBdg = po<price || _is2daBdg || _isNxMBdg;
 
-  if(_badgeLbl){
+  if(_badgeLbl && _hasDiscBdg){
     if(_is2daBdg){
       // Badge 2 líneas: "2DA" arriba, "50%" grande abajo
       const bw=36, bh=30, bx=cx+CW-bw-4, by=cy+5;
