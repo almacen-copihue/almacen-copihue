@@ -313,7 +313,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
   <div class="h-brand">
     <div class="h-icon">🖼</div>
     <div>
-      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v5.19</span></div>
+      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v5.20</span></div>
       <div class="h-sub">Generador para redes sociales</div>
     </div>
   </div>
@@ -381,6 +381,13 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
       </div>
       <div class="cr"><label>Máx. productos</label>
         <input type="number" id="cfgMax" value="50" min="1" max="50" style="max-width:56px;">
+      </div>
+      <div class="cr"><label>Grilla por página</label>
+        <select id="cfgGrilla" onchange="actualizarSubRevision()">
+          <option value="4">2x2 (4 productos)</option>
+          <option value="9">3x3 (9 productos)</option>
+          <option value="12" selected>3x4 (12 productos)</option>
+        </select>
       </div>
     </div>
 
@@ -503,7 +510,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-const VERSION = 'v5.19';
+const VERSION = 'v5.20';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -646,16 +653,20 @@ let _cvPaginas = [];  // todas las páginas generadas (canvases)
 let _pagActual = 0;   // índice de la página mostrada
 let _revSel = new Set(); // ids elegidos en el paso de "último filtro"
 let _revProds = []; // lista completa mostrada en el modal (para re-render tras ajustar huecos)
-const PROD_MAX_POR_PAGINA = 12; // tope por página (el Grid soporta 3x4 cómodo); el reparto real se balancea
+const PROD_MAX_POR_PAGINA = 12; // valor por defecto (3x4) si el selector de grilla no está disponible
 
-// Calcula cuántas páginas hacen falta y reparte los productos lo más parejo posible
-// entre ellas, en vez de llenar de a PROD_MAX_POR_PAGINA y dejar el resto suelto.
-// Ej: 10 productos → 1 sola página (10). 13 productos → 7 + 6 (no 12 + 1).
+// Tamaño de página elegido en "Grilla por página" (2x2=4, 3x3=9, 3x4=12)
+function tamGrilla(){
+  return parseInt(($('cfgGrilla')||{}).value)||PROD_MAX_POR_PAGINA;
+}
+
+// Reparte los productos en páginas de tamaño FIJO según la grilla elegida.
+// La última página puede quedar incompleta — para eso está calcularHuecosGrid(),
+// que sugiere sacar el sobrante para dejar todas las páginas completas.
 function calcularPaginas(prods){
   const total=prods.length;
   if(!total) return [];
-  const paginas=Math.ceil(total/PROD_MAX_POR_PAGINA);
-  const porPagina=Math.ceil(total/paginas);
+  const porPagina=tamGrilla();
   const bloques=[];
   for(let i=0;i<total;i+=porPagina) bloques.push(prods.slice(i,i+porPagina));
   return bloques;
@@ -2240,47 +2251,35 @@ function toggleRevision(id,el){
   actualizarSubRevision();
 }
 function actualizarSubRevision(){
-  const n=_revSel.size, paginas=Math.max(1,Math.ceil(n/PROD_MAX_POR_PAGINA));
-  const porPagina=n?Math.ceil(n/paginas):0;
+  const n=_revSel.size, tam=tamGrilla(), paginas=n?Math.ceil(n/tam):0;
   $('revSub').textContent = n
-    ? `${n} producto${n!==1?'s':''} seleccionado${n!==1?'s':''} → ${paginas} página${paginas!==1?'s':''}${paginas>1?` (≈${porPagina} c/u)`:''}`
+    ? `${n} producto${n!==1?'s':''} seleccionado${n!==1?'s':''} → ${paginas} página${paginas!==1?'s':''} de ${tam}`
     : 'No queda ningún producto seleccionado';
   $('revBtnOk').disabled = n===0;
 
-  // Sugerencia: si el Grid deja huecos en la última fila de alguna página, ofrecer sacar el sobrante
+  // Sugerencia: si el total no es múltiplo del tamaño de grilla elegido, la última
+  // página queda incompleta — ofrecer sacar el sobrante para dejarlas todas completas.
   const cont=$('revHuecos');
   const prodsRev=_cand.filter(p=>_revSel.has(p.id));
-  const {detalle,sobrantesIds}=calcularHuecosGrid(prodsRev);
-  if(detalle.length && sobrantesIds.length){
-    const txt=detalle.map(d=>`pág. ${d.pagina}: ${d.vacios} hueco${d.vacios!==1?'s':''}`).join(' · ');
-    cont.innerHTML = `⚠️ La grilla queda con espacios vacíos (${txt}). `+
+  const {sobran}=calcularHuecosGrid(prodsRev);
+  if(sobran>0){
+    cont.innerHTML = `Sobran ${sobran} producto${sobran!==1?'s':''} para completar la grilla. `+
       `<a href="javascript:void(0)" onclick="ajustarHuecosGrid()" style="color:#a02020;font-weight:800;text-decoration:underline;">`+
-      `Sacar ${sobrantesIds.length} sobrante${sobrantesIds.length!==1?'s':''} y completar la grilla</a>`;
+      `Volver a la lista y sacarlos</a>`;
     cont.style.display='block';
   } else {
     cont.style.display='none';
   }
 }
 
-// Calcula, para el formato Grid (3 columnas si hay más de 4 productos por página),
-// cuántos huecos vacíos quedarían en la última fila de cada página y qué productos
-// convendría sacar (los últimos de la fila incompleta) para que quede completa.
+// Si el total elegido no es múltiplo del tamaño de grilla (2x2/3x3/3x4), sobra un
+// resto que dejaría la última página incompleta. Devuelve cuántos sobran y cuáles son
+// (los últimos de la lista) para poder sacarlos y que todas las páginas queden completas.
 function calcularHuecosGrid(prods){
-  if(($('cfgFormato')||{}).value!=='grid' || !prods.length) return {detalle:[],sobrantesIds:[]};
-  const bloques=calcularPaginas(prods);
-  const detalle=[], sobrantesIds=[];
-  bloques.forEach((b,i)=>{
-    const n=b.length;
-    const cols = n<=1?1:n<=4?2:3;
-    if(n>cols){
-      const rem=n%cols;
-      if(rem>0){
-        detalle.push({pagina:i+1, sobran:rem, vacios:cols-rem});
-        b.slice(n-rem).forEach(p=>sobrantesIds.push(p.id));
-      }
-    }
-  });
-  return {detalle, sobrantesIds};
+  if((($('cfgFormato')||{}).value)!=='grid' || !prods.length) return {sobran:0, sobrantesIds:[]};
+  const tam=tamGrilla(), total=prods.length, sobran=total%tam;
+  if(sobran===0 || total<=tam) return {sobran:0, sobrantesIds:[]};
+  return {sobran, sobrantesIds:prods.slice(total-sobran).map(p=>p.id)};
 }
 
 function ajustarHuecosGrid(){
