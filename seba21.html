@@ -36,6 +36,18 @@
 
 ================================================================================
 
+  v430 — 31/7/2026 (j)
+  ---------------------
+  • MEJORA — "Sacar del local" (🏠): historial ahora agrupado por día con
+    encabezado + cantidad de salidas de ese día (mismo patrón visual que ya
+    tenía Caja-Egresos), en vez de una lista plana. Se sacó el recorte
+    artificial a "últimos 3 días" que traía por defecto.
+  • MEJORA — "Sacar del local": la lista de productos para elegir (y el
+    producto ya seleccionado) ahora muestra la foto, no solo el nombre —
+    más rápido de encontrar a simple vista. Requiere Code.gs v9.10 para el
+    historial ordenado correctamente (getSalidasInternas tenía el mismo bug
+    de orden que se le arregló a Caja-Egresos en v9.8).
+
   v429 — 31/7/2026 (i)
   ---------------------
   • El resumen de multicompra en "Confirmar venta" (y en el panel lateral)
@@ -1107,7 +1119,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>🛒 POS · Copihue v429</title>
+    <title>🛒 POS · Copihue v430</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -10425,12 +10437,19 @@ abrirNuevoProducto = function() {
 
       <!-- Producto seleccionado -->
       <div id="salidaProductoSelWrap" style="display:none;padding:12px 16px;border-bottom:1px solid #f0f0f0;">
-        <div style="background:#f5f5f5;border-radius:10px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;">
-          <div>
-            <div id="salidaNombreProd" style="font-weight:700;font-size:0.9rem;color:#1a1a1a;"></div>
-            <div id="salidaInfoProd" style="font-size:0.72rem;color:#888;margin-top:2px;"></div>
+        <div style="background:#f5f5f5;border-radius:10px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px;">
+          <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+            <div style="position:relative;flex-shrink:0;width:42px;height:42px;">
+              <img id="salidaFotoProd" src="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"
+                   alt="" style="width:42px;height:42px;border-radius:8px;object-fit:cover;display:block;">
+              <div style="display:none;width:42px;height:42px;border-radius:8px;background:#e0e0e0;align-items:center;justify-content:center;font-size:1.1rem;">🛒</div>
+            </div>
+            <div style="min-width:0;">
+              <div id="salidaNombreProd" style="font-weight:700;font-size:0.9rem;color:#1a1a1a;"></div>
+              <div id="salidaInfoProd" style="font-size:0.72rem;color:#888;margin-top:2px;"></div>
+            </div>
           </div>
-          <button onclick="salidaDeseleccionar()" style="background:none;border:none;color:#aaa;font-size:1.2rem;cursor:pointer;">✕</button>
+          <button onclick="salidaDeseleccionar()" style="background:none;border:none;color:#aaa;font-size:1.2rem;cursor:pointer;flex-shrink:0;">✕</button>
         </div>
 
         <!-- Cantidad -->
@@ -11736,21 +11755,23 @@ function _guardarSalidaLocal(entrada) {
     } catch(e) {}
 }
 
+// v430 — agrupado por día con encabezado + total (mismo patrón visual que
+// ya usa Caja-Egresos), en vez de una lista plana con la fecha repetida
+// en cada renglón.
 function _renderSalidaHistorial(registros) {
     const el = document.getElementById('salidaHistorial');
     if (!el) return;
     const motivoColor = { CONSUMO:'#1565c0', MERMA:'#e65100', VENCIDO:'#b71c1c', REGALO:'#6a1b9a', ROTURA:'#bf360c', USO_INTERNO:'#2e7d32' };
     const motivoIcon  = { CONSUMO:'🍽️', MERMA:'📉', VENCIDO:'⏰', REGALO:'🎁', ROTURA:'💥', USO_INTERNO:'🏪' };
     if (!registros || !registros.length) {
-        el.innerHTML = '<div style="color:#aaa;font-size:0.8rem;text-align:center;padding:12px 0;">Sin salidas en los últimos 3 días</div>';
+        el.innerHTML = '<div style="color:#aaa;font-size:0.8rem;text-align:center;padding:12px 0;">Sin salidas registradas</div>';
         return;
     }
     const hoy   = new Date(); hoy.setHours(0,0,0,0);
     const ayer  = new Date(hoy - 86400000);
-    const hace2 = new Date(hoy - 2*86400000);
-    el.innerHTML = registros.map(e => {
-        const fecha = e.ts ? new Date(e.ts) : new Date(e.fecha + 'T12:00:00');
-        // hora: puede venir como "18:01" o como string de Date completo — extraer solo HH:MM
+
+    const conFecha = registros.map(e => {
+        const fecha = e.ts ? new Date(e.ts) : new Date((e.fecha || '') + 'T12:00:00');
         const horaDisplay = (() => {
             const h = e.hora || '';
             if (/^\d{1,2}:\d{2}/.test(h)) return h.substring(0, 5);
@@ -11758,27 +11779,49 @@ function _renderSalidaHistorial(registros) {
             if (!isNaN(d)) return d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
             return h;
         })();
+        return { ...e, _fecha: fecha, _horaDisplay: horaDisplay,
+            _diaKey: isNaN(fecha) ? '—' : fecha.toDateString() };
+    });
+
+    // Agrupar por día conservando el orden (más reciente primero, ya viene ordenado así)
+    const porDia = new Map();
+    conFecha.forEach(e => {
+        if (!porDia.has(e._diaKey)) porDia.set(e._diaKey, []);
+        porDia.get(e._diaKey).push(e);
+    });
+
+    el.innerHTML = Array.from(porDia.entries()).map(([diaKey, items]) => {
+        const fecha = items[0]._fecha;
         let diaLabel;
-        if (fecha >= hoy)        diaLabel = 'Hoy';
-        else if (fecha >= ayer)  diaLabel = 'Ayer';
-        else if (fecha >= hace2) diaLabel = 'Hace 2 días';
-        else                     diaLabel = 'Hace 3 días';
-        const color = motivoColor[e.motivo] || '#546e7a';
-        const icon  = motivoIcon[e.motivo]  || '📦';
-        const nombre = e.nombre || e.producto || '—';
-        const hora   = horaDisplay;
-        const obs    = e.obs    || '';
-        const cant   = e.cantidad !== undefined ? e.cantidad : (e.qty || '');
-        return `<div style="background:#fdeeee;border-radius:10px;padding:9px 12px;border-left:3px solid ${color};">
-            <div style="display:flex;align-items:center;justify-content:space-between;">
-                <div style="font-weight:700;font-size:0.85rem;color:#1a1a1a;">${nombre}</div>
-                <div style="font-size:0.72rem;color:#888;white-space:nowrap;margin-left:8px;">${diaLabel} ${hora}</div>
+        if (isNaN(fecha))       diaLabel = 'Fecha desconocida';
+        else if (fecha >= hoy)  diaLabel = 'Hoy';
+        else if (fecha >= ayer) diaLabel = 'Ayer';
+        else                    diaLabel = fecha.toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
+        return `<div style="margin-bottom:14px;">
+            <div style="font-size:0.72rem;font-weight:700;color:#37474f;text-transform:uppercase;
+                        letter-spacing:0.5px;padding:4px 0;border-bottom:2px solid #37474f;margin-bottom:8px;
+                        display:flex;justify-content:space-between;">
+                <span>📅 ${diaLabel}</span>
+                <span>${items.length} salida${items.length===1?'':'s'}</span>
             </div>
-            <div style="margin-top:3px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                <span style="font-size:0.75rem;font-weight:700;color:${color};">${icon} ${e.motivo}</span>
-                <span style="font-size:0.75rem;color:#555;">×${cant}</span>
-                ${obs ? `<span style="font-size:0.72rem;color:#888;font-style:italic;">${obs}</span>` : ''}
-            </div>
+            ${items.map(e => {
+                const color = motivoColor[e.motivo] || '#546e7a';
+                const icon  = motivoIcon[e.motivo]  || '📦';
+                const nombre = e.nombre || e.producto || '—';
+                const obs    = e.obs    || '';
+                const cant   = e.cantidad !== undefined ? e.cantidad : (e.qty || '');
+                return `<div style="background:#fdeeee;border-radius:10px;padding:9px 12px;border-left:3px solid ${color};margin-bottom:6px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                        <div style="font-weight:700;font-size:0.85rem;color:#1a1a1a;">${nombre}</div>
+                        <div style="font-size:0.72rem;color:#888;white-space:nowrap;margin-left:8px;">${e._horaDisplay}</div>
+                    </div>
+                    <div style="margin-top:3px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                        <span style="font-size:0.75rem;font-weight:700;color:${color};">${icon} ${e.motivo}</span>
+                        <span style="font-size:0.75rem;color:#555;">×${cant}</span>
+                        ${obs ? `<span style="font-size:0.72rem;color:#888;font-style:italic;">${obs}</span>` : ''}
+                    </div>
+                </div>`;
+            }).join('')}
         </div>`;
     }).join('');
 }
@@ -11786,24 +11829,25 @@ function _renderSalidaHistorial(registros) {
 async function _cargarYRenderSalidaHistorial() {
     const el = document.getElementById('salidaHistorial');
     if (el) el.innerHTML = '<div style="color:#aaa;font-size:0.8rem;text-align:center;padding:12px 0;">⏳ Cargando...</div>';
-    const hace3ts = Date.now() - 3 * 86400000;
+
+    // v430 — antes se recortaba a "últimos 3 días" (local y del GAS), lo que
+    // daba la misma sensación de "no anda"/vacío que tenía Retiro de Caja
+    // antes de sacarle el mismo recorte. Ahora se pide un lote más grande y
+    // no se filtra por antigüedad — el agrupado por día de abajo ya lo hace
+    // legible igual.
 
     // 1. Locales (guardadas desde esta versión)
     let locales = [];
     try {
-        locales = JSON.parse(localStorage.getItem('salidas_historial') || '[]')
-            .filter(e => e.ts > hace3ts);
+        locales = JSON.parse(localStorage.getItem('salidas_historial') || '[]');
     } catch(e) {}
 
-    // 2. Del GAS — últimas 50 de los 3 días
+    // 2. Del GAS
     let gasRegistros = [];
     try {
-        const url = API_URL + '?action=getSalidasInternas&data=' + encodeURIComponent(JSON.stringify({ limite: 50 }));
+        const url = API_URL + '?action=getSalidasInternas&data=' + encodeURIComponent(JSON.stringify({ limite: 300 }));
         const resp = await _apiFetchUrl('getSalidasInternas', url);
-        if (resp.ok && resp.registros) {
-            const hace3fecha = new Date(hace3ts);
-            gasRegistros = resp.registros.filter(r => new Date(r.fecha) >= hace3fecha);
-        }
+        if (resp.ok && resp.registros) gasRegistros = resp.registros;
     } catch(e) { console.warn('No se pudieron cargar salidas del GAS:', e); }
 
     // 3. Combinar: GAS es la fuente principal, locales solo agregan las que no están
@@ -11856,15 +11900,27 @@ function salidaMostrarTodos() {
     const todos = productos.filter(p => p.stock > 0)
         .sort((a,b) => a.name.localeCompare(b.name, 'es'));
     if (!todos.length) { div.innerHTML = '<div style="padding:10px;color:#aaa;font-size:0.85rem;">Sin productos con stock</div>'; return; }
-    div.innerHTML = todos.map(p => `
+    div.innerHTML = todos.map(p => _salidaFilaProducto(p)).join('');
+}
+
+// v430 — fila con miniatura de foto, para elegir de un vistazo en vez de
+// tener que leer nombres uno por uno (pedido: "fotos de producto para
+// facilitar la búsqueda visual").
+function _salidaFilaProducto(p) {
+    return `
         <div onclick="salidaSeleccionar(${p.id})"
-          style="padding:10px 14px;border-bottom:1px solid #f0f0f0;cursor:pointer;display:flex;justify-content:space-between;align-items:center;background:#f1f9f2;">
-          <div>
+          style="padding:8px 14px;border-bottom:1px solid #f0f0f0;cursor:pointer;display:flex;align-items:center;gap:10px;background:#f1f9f2;">
+          <div style="position:relative;flex-shrink:0;width:38px;height:38px;">
+            <img src="${p.image}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"
+                 alt="${p.name}" style="width:38px;height:38px;border-radius:8px;object-fit:cover;display:block;">
+            <div style="display:none;width:38px;height:38px;border-radius:8px;background:#e0e0e0;align-items:center;justify-content:center;font-size:1rem;">🛒</div>
+          </div>
+          <div style="flex:1;min-width:0;">
             <div style="font-size:0.88rem;font-weight:600;">${p.name}</div>
             <div style="font-size:0.7rem;color:#888;">Stock: ${p.stock}</div>
           </div>
-          <div style="font-size:0.85rem;color:#555;">$${p.price.toLocaleString('es-AR')}</div>
-        </div>`).join('');
+          <div style="font-size:0.85rem;color:#555;flex-shrink:0;">$${p.price.toLocaleString('es-AR')}</div>
+        </div>`;
 }
 
 function salidaBuscar() {
@@ -11881,15 +11937,7 @@ function salidaBuscar() {
         div.innerHTML = '<div style="padding:10px;color:#aaa;font-size:0.85rem;">Sin resultados</div>';
         return;
     }
-    div.innerHTML = matches.map(p => `
-        <div onclick="salidaSeleccionar(${p.id})"
-          style="padding:10px 14px;border-bottom:1px solid #f0f0f0;cursor:pointer;display:flex;justify-content:space-between;align-items:center;background:#f1f9f2;">
-          <div>
-            <div style="font-size:0.88rem;font-weight:600;">${p.name}</div>
-            <div style="font-size:0.7rem;color:#888;">Stock: ${p.stock}</div>
-          </div>
-          <div style="font-size:0.85rem;color:#555;">$${p.price.toLocaleString('es-AR')}</div>
-        </div>`).join('');
+    div.innerHTML = matches.map(p => _salidaFilaProducto(p)).join('');
 }
 
 function salidaSeleccionar(id) {
@@ -11899,6 +11947,11 @@ function salidaSeleccionar(id) {
     document.getElementById('salidaBuscador').value = _salidaProducto.name;
     document.getElementById('salidaResultados').innerHTML = '';
     document.getElementById('salidaNombreProd').textContent = _salidaProducto.name;
+    const fotoEl = document.getElementById('salidaFotoProd');
+    fotoEl.style.display = '';
+    fotoEl.nextElementSibling.style.display = 'none';
+    fotoEl.src = _salidaProducto.image || '';
+    fotoEl.alt = _salidaProducto.name;
     document.getElementById('salidaInfoProd').textContent =
         'Stock: ' + _salidaProducto.stock + '  ·  $' + _salidaProducto.price.toLocaleString('es-AR');
     document.getElementById('salidaCantidad').value = 1;
