@@ -299,6 +299,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
     <div class="rev-hdr">
       <div class="rev-title">🔍 Último filtro antes de generar</div>
       <div class="rev-sub" id="revSub">—</div>
+      <div class="warn" id="revHuecos" style="display:none;margin-top:6px;font-size:.65rem;"></div>
     </div>
     <div class="rev-list" id="revList"></div>
     <div class="rev-actions">
@@ -312,7 +313,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
   <div class="h-brand">
     <div class="h-icon">🖼</div>
     <div>
-      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v5.17</span></div>
+      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v5.18</span></div>
       <div class="h-sub">Generador para redes sociales</div>
     </div>
   </div>
@@ -502,7 +503,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-const VERSION = 'v5.17';
+const VERSION = 'v5.18';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -644,6 +645,7 @@ let _cvFin = null;   // canvas final (SCALE_OUT×) — página actualmente mostr
 let _cvPaginas = [];  // todas las páginas generadas (canvases)
 let _pagActual = 0;   // índice de la página mostrada
 let _revSel = new Set(); // ids elegidos en el paso de "último filtro"
+let _revProds = []; // lista completa mostrada en el modal (para re-render tras ajustar huecos)
 const PROD_MAX_POR_PAGINA = 12; // tope por página (el Grid soporta 3x4 cómodo); el reparto real se balancea
 
 // Calcula cuántas páginas hacen falta y reparte los productos lo más parejo posible
@@ -2212,6 +2214,7 @@ function abrirRevision(){
   const prods=_cand.filter(p=>_sel.has(p.id));
   if(!prods.length){alert('Seleccioná al menos un producto');return;}
   _revSel = new Set(prods.map(p=>p.id));
+  _revProds = prods;
   renderRevision(prods);
   $('revOv').classList.add('on');
 }
@@ -2243,6 +2246,48 @@ function actualizarSubRevision(){
     ? `${n} producto${n!==1?'s':''} seleccionado${n!==1?'s':''} → ${paginas} página${paginas!==1?'s':''}${paginas>1?` (≈${porPagina} c/u)`:''}`
     : 'No queda ningún producto seleccionado';
   $('revBtnOk').disabled = n===0;
+
+  // Sugerencia: si el Grid deja huecos en la última fila de alguna página, ofrecer sacar el sobrante
+  const cont=$('revHuecos');
+  const prodsRev=_cand.filter(p=>_revSel.has(p.id));
+  const {detalle,sobrantesIds}=calcularHuecosGrid(prodsRev);
+  if(detalle.length && sobrantesIds.length){
+    const txt=detalle.map(d=>`pág. ${d.pagina}: ${d.vacios} hueco${d.vacios!==1?'s':''}`).join(' · ');
+    cont.innerHTML = `⚠️ La grilla queda con espacios vacíos (${txt}). `+
+      `<a href="javascript:void(0)" onclick="ajustarHuecosGrid()" style="color:#a02020;font-weight:800;text-decoration:underline;">`+
+      `Sacar ${sobrantesIds.length} sobrante${sobrantesIds.length!==1?'s':''} y completar la grilla</a>`;
+    cont.style.display='block';
+  } else {
+    cont.style.display='none';
+  }
+}
+
+// Calcula, para el formato Grid (3 columnas si hay más de 4 productos por página),
+// cuántos huecos vacíos quedarían en la última fila de cada página y qué productos
+// convendría sacar (los últimos de la fila incompleta) para que quede completa.
+function calcularHuecosGrid(prods){
+  if(($('cfgFormato')||{}).value!=='grid' || !prods.length) return {detalle:[],sobrantesIds:[]};
+  const bloques=calcularPaginas(prods);
+  const detalle=[], sobrantesIds=[];
+  bloques.forEach((b,i)=>{
+    const n=b.length;
+    const cols = n<=1?1:n<=4?2:3;
+    if(n>cols){
+      const rem=n%cols;
+      if(rem>0){
+        detalle.push({pagina:i+1, sobran:rem, vacios:cols-rem});
+        b.slice(n-rem).forEach(p=>sobrantesIds.push(p.id));
+      }
+    }
+  });
+  return {detalle, sobrantesIds};
+}
+
+function ajustarHuecosGrid(){
+  const prodsRev=_cand.filter(p=>_revSel.has(p.id));
+  const {sobrantesIds}=calcularHuecosGrid(prodsRev);
+  sobrantesIds.forEach(id=>_revSel.delete(id));
+  renderRevision(_revProds);
 }
 function cerrarRevision(){ $('revOv').classList.remove('on'); }
 function confirmarRevision(){
