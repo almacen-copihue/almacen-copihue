@@ -6,9 +6,18 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>SendWA — Almacén Copihue ver.79</title>
+<title>SendWA — Almacén Copihue ver.80</title>
 <!--
   CHANGELOG sendwa.html
+  v80: - NUEVO — Autocompletado del título grande: 15 frases hardcodeadas
+         (🔥 OFERTAS, 💥 OFERTAS RELÁMPAGO, 🛒 RECIÉN LLEGADOS, 📦 MULTICOMPRA,
+         etc). Al tipear se filtran por palabra desde la primera letra (ej:
+         "mu" → MULTICOMPRA, "fr" → FRUTAS Y VERDURAS), muestra hasta 5
+         sugerencias en un dropdown debajo del campo, sin acentos ni
+         mayúsculas de por medio para el matching. Tocar una sugerencia
+         completa el campo pero lo deja editable. Todo local (sin llamadas
+         al server) — filtrado instantáneo. El límite de 40 caracteres y el
+         auto-ajuste de tamaño de letra del banner ya estaban desde v78.
   v79: - NUEVO — Estrella tipo index.html para ofertas "por cantidad" (Multicompra,
          Relámpago NxM): en vez de la franja arriba de la foto, ahora es una
          estrella/cartelito superpuesta sobre la esquina inferior derecha de la
@@ -708,7 +717,7 @@
           style="width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.2);
                  border:none;color:#fff;font-size:12px;font-weight:800;cursor:pointer;
                  flex-shrink:0;display:flex;align-items:center;justify-content:center;">?</button>
-  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.79</div>
+  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.80</div>
   <button id="btn-dark" title="Modo oscuro">🌙</button>
 </div>
 
@@ -834,9 +843,12 @@
     <!-- Controles collage: selector grilla + paginación + info -->
     <div id="collage-collage-controls" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;">
       <div id="collage-titulo-block" style="display:flex;flex-direction:column;gap:4px;background:var(--bg);border:1.5px dashed var(--border);border-radius:10px;padding:8px 10px;">
-        <span style="font-size:11px;font-weight:700;color:var(--text-muted);">📢 Título grande (opcional) — ej: "¡Volvieron las ofertas 2x!"</span>
-        <input id="collage-titulo-input" maxlength="40" placeholder="Escribí un título para el flyer..."
-          style="height:34px;border-radius:8px;border:1.5px solid var(--border);padding:0 10px;font-size:13px;font-weight:700;color:var(--text);background:var(--card-bg);">
+        <span style="font-size:11px;font-weight:700;color:var(--text-muted);">📢 Título grande (opcional) — escribí o probá "of", "re", "mu"...</span>
+        <div style="position:relative;">
+          <input id="collage-titulo-input" maxlength="40" placeholder="Escribí un título para el flyer..." autocomplete="off"
+            style="width:100%;box-sizing:border-box;height:34px;border-radius:8px;border:1.5px solid var(--border);padding:0 10px;font-size:13px;font-weight:700;color:var(--text);background:var(--card-bg);">
+          <div id="collage-titulo-sugerencias" style="display:none;position:absolute;top:38px;left:0;right:0;z-index:20;background:var(--card-bg);border:1.5px solid var(--border);border-radius:8px;box-shadow:0 6px 16px rgba(0,0,0,.18);overflow:hidden;max-height:220px;overflow-y:auto;"></div>
+        </div>
         <div style="display:flex;gap:6px;align-items:center;">
           <span style="font-size:10px;font-weight:700;color:var(--text-muted);">Color:</span>
           <button class="titulo-color-btn active" data-color="#c0392b" style="width:22px;height:22px;border-radius:50%;background:#c0392b;border:2px solid #fff;box-shadow:0 0 0 1.5px #c0392b;cursor:pointer;"></button>
@@ -2050,11 +2062,65 @@ on('btn-collage', () => {
   document.body.appendChild(ov);
 });
 
+// Frases sugeridas para el título grande — autocompletado local, sin llamadas al server
+const TITULO_SUGERENCIAS = [
+  '🔥 OFERTAS',
+  '💥 OFERTAS RELÁMPAGO',
+  '🎁 OFERTAS ESPECIALES',
+  '📦 PACKS',
+  '🛒 RECIÉN LLEGADOS',
+  '🥬 FRUTAS Y VERDURAS',
+  '🥤 BEBIDAS',
+  '🥩 CARNICERÍA',
+  '🍞 PANIFICADOS',
+  '🧀 LÁCTEOS',
+  '❄️ CONGELADOS',
+  '💲 BAJAMOS LOS PRECIOS',
+  '⭐ IMPERDIBLES',
+  '🔥 VOLVIERON LAS OFERTAS 2X',
+  '📦 MULTICOMPRA'
+];
+function _normTxt(s) {
+  return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+}
+function _filtrarSugerenciasTitulo(q) {
+  const nq = _normTxt(q);
+  if (!nq) return [];
+  return TITULO_SUGERENCIAS
+    .filter(f => _normTxt(f).split(/\s+/).some(w => w.startsWith(nq)))
+    .slice(0, 5);
+}
+function _renderSugerenciasTitulo(list) {
+  const box = document.getElementById('collage-titulo-sugerencias');
+  if (!box) return;
+  if (!list.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  box.innerHTML = list.map(f => `<div class="titulo-sug-item" data-val="${f.replace(/"/g,'&quot;')}" style="padding:9px 10px;font-size:13px;font-weight:700;color:var(--text);cursor:pointer;border-bottom:1px solid var(--border);">${f}</div>`).join('');
+  box.style.display = 'block';
+}
+
 let _tituloDebounce = null;
 document.getElementById('collage-titulo-input')?.addEventListener('input', e => {
   _collageTitulo = e.target.value;
+  _renderSugerenciasTitulo(_filtrarSugerenciasTitulo(e.target.value));
   clearTimeout(_tituloDebounce);
   _tituloDebounce = setTimeout(() => renderCollagePage(), 350);
+});
+document.getElementById('collage-titulo-input')?.addEventListener('focus', e => {
+  _renderSugerenciasTitulo(_filtrarSugerenciasTitulo(e.target.value));
+});
+document.getElementById('collage-titulo-input')?.addEventListener('blur', () => {
+  // Delay para que el click en una sugerencia llegue a dispararse antes de ocultar
+  setTimeout(() => { const box = document.getElementById('collage-titulo-sugerencias'); if (box) box.style.display = 'none'; }, 150);
+});
+document.getElementById('collage-titulo-sugerencias')?.addEventListener('click', e => {
+  const item = e.target.closest('.titulo-sug-item');
+  if (!item) return;
+  const val = item.dataset.val;
+  const input = document.getElementById('collage-titulo-input');
+  if (input) input.value = val;
+  _collageTitulo = val;
+  document.getElementById('collage-titulo-sugerencias').style.display = 'none';
+  renderCollagePage();
 });
 
 // Selector grilla + color del título
