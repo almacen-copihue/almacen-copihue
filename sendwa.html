@@ -6,9 +6,18 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>SendWA — Almacén Copihue ver.78</title>
+<title>SendWA — Almacén Copihue ver.79</title>
 <!--
   CHANGELOG sendwa.html
+  v79: - NUEVO — Estrella tipo index.html para ofertas "por cantidad" (Multicompra,
+         Relámpago NxM): en vez de la franja arriba de la foto, ahora es una
+         estrella/cartelito superpuesta sobre la esquina inferior derecha de la
+         imagen — mismo lenguaje visual que la web (index.html), 2 líneas
+         auto-ajustadas (ej: "3X" / "$5.000"). El marco de color alrededor de
+         la tarjeta ya usaba el mismo violeta de multicompra — sin cambios ahí.
+         Las ofertas con precio unitario fijo (destacada/especial/promo/combo)
+         siguen con la franja arriba de la foto + precio tachado/en color abajo,
+         que ya cumplía ese rol.
   v78: - NUEVO — Título grande del flyer: campo opcional arriba de la grilla
          ("📢 Título grande") con 6 colores para elegir. Se dibuja como banner
          ancho debajo del header verde, letra grande auto-ajustada si el texto
@@ -699,7 +708,7 @@
           style="width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.2);
                  border:none;color:#fff;font-size:12px;font-weight:800;cursor:pointer;
                  flex-shrink:0;display:flex;align-items:center;justify-content:center;">?</button>
-  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.78</div>
+  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.79</div>
   <button id="btn-dark" title="Modo oscuro">🌙</button>
 </div>
 
@@ -2361,6 +2370,38 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.lineTo(x,y+r); ctx.arcTo(x,y,x+r,y,r);
   ctx.closePath();
 }
+
+// Estrella tipo "cartelito" de index.html — para ofertas por cantidad (NxM,
+// multicompra) que no tienen un precio unitario fijo que mostrar abajo.
+function drawStarburst(ctx, cx, cy, rOuter, rInner, points, color) {
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,.4)'; ctx.shadowBlur = 8; ctx.shadowOffsetY = 3;
+  ctx.beginPath();
+  const step = Math.PI / points;
+  for (let i = 0; i < points * 2; i++) {
+    const r = i % 2 === 0 ? rOuter : rInner;
+    const a = i * step - Math.PI / 2;
+    const px = cx + r * Math.cos(a);
+    const py = cy + r * Math.sin(a);
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.restore();
+}
+
+// Parte la etiqueta en 2 líneas cortas para que entren en la estrella,
+// priorizando cortar antes del "$" (ej: "3x $5.000" → "3x" / "$5.000")
+function splitEtiquetaEstrella(etiqueta) {
+  const t = etiqueta.replace(/^[^\wÁÉÍÓÚÑáéíóúñ0-9]+/, '').trim();
+  const dIdx = t.indexOf('$');
+  if (dIdx > 0) return [t.slice(0, dIdx).trim(), t.slice(dIdx).trim()];
+  const words = t.split(' ');
+  if (words.length <= 1) return [t, ''];
+  const mid = Math.ceil(words.length / 2);
+  return [words.slice(0, mid).join(' '), words.slice(mid).join(' ')];
+}
 function wrapText(ctx, text, x, y, maxW, lineH, maxLines) {
   const words = text.split(' ');
   let line = '';
@@ -2484,18 +2525,38 @@ async function drawProductCard(ctx, p, x, y, W, H, preloadedImg) {
     ctx.fillText(getCatEmoji(p.categoria), x + W/2, y + IMGH/2 + W*0.08);
   }
 
-  // ── Badge encima de la imagen — grande y llamativo ──
-  if (oferta && badgeColor && !_esSinOferta) {
+  // ── Badge encima de la imagen ──
+  if (oferta && badgeColor && !_esSinOferta && oferta.precio == null) {
+    // Ofertas "por cantidad" (multicompra, relámpago NxM) — estrella tipo cartelito,
+    // como en index.html, superpuesta sobre la esquina inferior derecha de la foto.
+    const rOuter = W * 0.30, rInner = rOuter * 0.60;
+    const cx = x + W * 0.72, cy = y + IMGH * 0.74;
+    drawStarburst(ctx, cx, cy, rOuter, rInner, 10, badgeColor);
+    const [l1, l2] = splitEtiquetaEstrella(oferta.etiqueta);
+    ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
+    let fs1 = Math.max(rOuter * 0.30, 12);
+    ctx.font = `900 ${fs1}px Segoe UI`;
+    while (ctx.measureText(l1.toUpperCase()).width > rOuter * 1.3 && fs1 > 9) { fs1--; ctx.font = `900 ${fs1}px Segoe UI`; }
+    if (l2) {
+      ctx.fillText(l1.toUpperCase(), cx, cy - 2);
+      let fs2 = Math.max(rOuter * 0.27, 11);
+      ctx.font = `900 ${fs2}px Segoe UI`;
+      while (ctx.measureText(l2).width > rOuter * 1.3 && fs2 > 9) { fs2--; ctx.font = `900 ${fs2}px Segoe UI`; }
+      ctx.fillText(l2, cx, cy - 2 + fs1 * 0.85 + fs2 * 0.55);
+    } else {
+      ctx.fillText(l1.toUpperCase(), cx, cy + fs1 * 0.32);
+    }
+  } else if (oferta && badgeColor && !_esSinOferta) {
+    // Ofertas con precio unitario fijo (destacada/especial/promo/combo) — franja
+    // arriba de la foto; el precio en sí ya se destaca abajo, en color, tachando el normal.
     const BH = 36;
     ctx.save();
     ctx.shadowColor = 'rgba(0,0,0,.35)'; ctx.shadowBlur = 6; ctx.shadowOffsetY = 2;
     ctx.fillStyle = badgeColor;
     ctx.fillRect(x, y, W, BH);
     ctx.restore();
-    // Filo inferior blanco fino, separa el badge de la foto con más fuerza
     ctx.fillStyle = 'rgba(255,255,255,.85)';
     ctx.fillRect(x, y + BH - 2, W, 2);
-    // Texto: autoajuste si la etiqueta es larga (ej: "PACK GRUPAL 3X $6.000")
     const label = oferta.etiqueta.toUpperCase();
     let fs = Math.max(W * 0.072, 13);
     ctx.font = `900 ${fs}px Segoe UI`;
@@ -2506,7 +2567,7 @@ async function drawProductCard(ctx, p, x, y, W, H, preloadedImg) {
     }
     ctx.textAlign = 'center';
     ctx.fillStyle = 'rgba(0,0,0,.28)';
-    ctx.fillText(label, x + W/2 + 0.6, y + BH/2 + fs*0.34 + 0.6); // sombra sutil detrás del texto
+    ctx.fillText(label, x + W/2 + 0.6, y + BH/2 + fs*0.34 + 0.6);
     ctx.fillStyle = '#fff';
     ctx.fillText(label, x + W/2, y + BH/2 + fs*0.34);
   }
