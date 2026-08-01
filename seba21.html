@@ -36,6 +36,15 @@
 
 ================================================================================
 
+  v429 — 31/7/2026 (i)
+  ---------------------
+  • El resumen de multicompra en "Confirmar venta" (y en el panel lateral)
+    decía "2 unidades combinadas" incluso cuando eran 2 unidades del MISMO
+    producto (ej. 2x Manaos Granadina). Ahora dice "2 unidades iguales"
+    cuando el grupo es un solo producto, y reserva "combinadas" para cuando
+    de verdad son sabores/variantes distintas (ej. 1 Granadina + 1 Lima
+    Limón).
+
   v428 — 31/7/2026 (h)
   ---------------------
   • Campo "Proveedor" (Ingresar mercadería y Nuevo producto) ahora tiene un
@@ -1098,7 +1107,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>🛒 POS · Copihue v428</title>
+    <title>🛒 POS · Copihue v429</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -8380,11 +8389,12 @@ function _resumenGruposMulticompra(items) {
         const prodLocal = (typeof productos !== 'undefined') ? productos.find(p => p.id === item.id) : null;
         const pnormal = prodLocal ? prodLocal.price : (item.price || 0);
         if (!porGrupo.has(mc.grupo)) {
-            porGrupo.set(mc.grupo, { qtyTotal: 0, totalNormal: 0, AT: mc.cantidad, AU: mc.precio, tipo: mc.tipo });
+            porGrupo.set(mc.grupo, { qtyTotal: 0, totalNormal: 0, AT: mc.cantidad, AU: mc.precio, tipo: mc.tipo, idsDistintos: new Set() });
         }
         const g = porGrupo.get(mc.grupo);
         g.qtyTotal    += item.qty;
         g.totalNormal += pnormal * item.qty;
+        g.idsDistintos.add(item.id);
     });
     const resumen = [];
     porGrupo.forEach((g, grupo) => {
@@ -8406,7 +8416,10 @@ function _resumenGruposMulticompra(items) {
         resumen.push({ grupo, qtyTotal: qty,
             totalNormal: Math.round(g.totalNormal),
             totalConPack: Math.round(totalConPack),
-            ahorro, etiquetaPack: `📦 ${AT}x $${AU.toLocaleString('es-AR')}` });
+            ahorro, etiquetaPack: `📦 ${AT}x $${AU.toLocaleString('es-AR')}`,
+            // v429 — para diferenciar "2 iguales" (mismo producto) de
+            // "2 combinadas" (sabores/variantes distintos) en el texto
+            sonIguales: g.idsDistintos.size <= 1 });
     });
     return resumen;
 }
@@ -8425,7 +8438,7 @@ function _resumenGrupalHTML() {
         <div style="display:flex;justify-content:space-between;align-items:center;
              padding:6px 12px;background:#F5F0FF;border-radius:6px;margin:4px 0;
              font-size:0.78rem;color:#5B2A9E;">
-            <span>${g.etiquetaPack} · ${g.qtyTotal} unidades combinadas</span>
+            <span>${g.etiquetaPack} · ${g.qtyTotal} ${g.sonIguales ? 'unidades iguales' : 'unidades combinadas'}</span>
             <span style="font-weight:800;">−$${g.ahorro.toLocaleString('es-AR')}</span>
         </div>`).join('');
 }
