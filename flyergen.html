@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Generador de Folletos — v1</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --bg:#0f1115; --card:#171a21; --card2:#1e222b; --border:#2a2f3a;
+    --text:#eef0f3; --text-muted:#8b93a3;
+    --primary:#5b7fff; --primary-dark:#4763d1;
+    --danger:#e5484d; --ok:#2fbf71;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+  .wrap{max-width:1000px;margin:0 auto;padding:20px 16px 60px}
+  .hide{display:none !important}
+
+  /* ── HEADER ── */
+  header{display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid var(--border);margin-bottom:22px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:17px}
+  .brand-mark{width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,var(--primary),#8b5bff);display:flex;align-items:center;justify-content:center;font-size:15px}
+  #btn-logout{background:none;border:1px solid var(--border);color:var(--text-muted);padding:7px 14px;border-radius:8px;font-size:12px;cursor:pointer}
+  #btn-logout:hover{border-color:var(--danger);color:var(--danger)}
+  #user-email{font-size:12px;color:var(--text-muted);margin-right:10px}
+
+  /* ── AUTH ── */
+  #auth-screen{max-width:380px;margin:60px auto 0}
+  #auth-screen h1{font-size:22px;font-weight:800;text-align:center;margin-bottom:6px}
+  #auth-screen p.sub{text-align:center;color:var(--text-muted);font-size:13px;margin-bottom:26px}
+  .field{margin-bottom:14px}
+  .field label{display:block;font-size:12px;font-weight:700;color:var(--text-muted);margin-bottom:5px}
+  .field input, .field select, .field textarea{
+    width:100%;background:var(--card2);border:1.5px solid var(--border);border-radius:9px;
+    color:var(--text);padding:11px 12px;font-size:14px;font-family:inherit;
+  }
+  .field input:focus, .field select:focus, .field textarea:focus{outline:none;border-color:var(--primary)}
+  .btn-primary{width:100%;background:var(--primary);color:#fff;border:none;border-radius:9px;padding:12px;font-size:14px;font-weight:800;cursor:pointer;margin-top:4px}
+  .btn-primary:hover{background:var(--primary-dark)}
+  .btn-primary:disabled{opacity:.5;cursor:default}
+  #auth-toggle{text-align:center;margin-top:18px;font-size:13px;color:var(--text-muted)}
+  #auth-toggle a{color:var(--primary);text-decoration:none;font-weight:700;cursor:pointer}
+  #auth-msg{font-size:13px;text-align:center;padding:10px;border-radius:8px;margin-bottom:14px}
+  #auth-msg.err{background:rgba(229,72,77,.12);color:#ff8b8e}
+  #auth-msg.ok{background:rgba(47,191,113,.12);color:#5fe0a0}
+
+  /* ── CATÁLOGO ── */
+  .toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:10px;flex-wrap:wrap}
+  .toolbar h2{font-size:18px;font-weight:800}
+  .toolbar .count{font-size:12px;color:var(--text-muted)}
+  #btn-add{background:var(--primary);color:#fff;border:none;border-radius:9px;padding:10px 16px;font-size:13px;font-weight:700;cursor:pointer}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px}
+  .prod-card{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
+  .prod-img{width:100%;aspect-ratio:1;background:var(--card2);object-fit:cover}
+  .prod-body{padding:10px 12px;display:flex;flex-direction:column;gap:4px}
+  .prod-nombre{font-size:13px;font-weight:700;line-height:1.3;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .prod-precio{font-size:14px;font-weight:800;color:var(--ok)}
+  .prod-badge{font-size:10px;font-weight:800;color:#fff;padding:3px 7px;border-radius:6px;display:inline-block;width:fit-content}
+  .prod-actions{display:flex;gap:6px;margin-top:6px}
+  .prod-actions button{flex:1;background:var(--card2);border:1px solid var(--border);color:var(--text-muted);
+    border-radius:7px;padding:6px;font-size:11px;cursor:pointer}
+  .prod-actions button:hover{color:var(--text);border-color:var(--primary)}
+  .prod-actions button.del:hover{color:var(--danger);border-color:var(--danger)}
+
+  #empty-state{text-align:center;padding:60px 20px;color:var(--text-muted)}
+  #empty-state .ico{font-size:40px;margin-bottom:10px}
+
+  /* ── MODAL PRODUCTO ── */
+  #modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:100;padding:16px}
+  #modal-box{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:22px;width:100%;max-width:420px;max-height:88vh;overflow-y:auto}
+  #modal-box h3{font-size:16px;font-weight:800;margin-bottom:16px}
+  #foto-preview{width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;background:var(--card2);margin-bottom:10px;display:none}
+  .modal-actions{display:flex;gap:8px;margin-top:16px}
+  .modal-actions button{flex:1;padding:11px;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer}
+  #btn-cancelar{background:var(--card2);border:1px solid var(--border);color:var(--text-muted)}
+  #btn-guardar{background:var(--primary);border:none;color:#fff}
+  #btn-guardar:disabled{opacity:.5}
+
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--card);border:1px solid var(--border);
+    color:var(--text);padding:11px 18px;border-radius:9px;font-size:13px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+</style>
+</head>
+<body>
+
+<!-- ══════════ PANTALLA DE LOGIN / REGISTRO ══════════ -->
+<div id="auth-screen">
+  <h1>📋 Generador de Folletos</h1>
+  <p class="sub" id="auth-sub">Iniciá sesión para armar tu catálogo</p>
+  <div id="auth-msg" class="hide"></div>
+  <div class="field">
+    <label>Email</label>
+    <input id="auth-email" type="email" placeholder="tu@negocio.com" autocomplete="email">
+  </div>
+  <div class="field">
+    <label>Contraseña</label>
+    <input id="auth-pass" type="password" placeholder="Mínimo 6 caracteres" autocomplete="current-password">
+  </div>
+  <button class="btn-primary" id="btn-auth-submit">Iniciar sesión</button>
+  <div id="auth-toggle">¿No tenés cuenta? <a id="auth-switch">Registrate</a></div>
+</div>
+
+<!-- ══════════ APP (CATÁLOGO) ══════════ -->
+<div class="wrap hide" id="app-screen">
+  <header>
+    <div class="brand"><div class="brand-mark">📋</div> Generador de Folletos</div>
+    <div style="display:flex;align-items:center">
+      <span id="user-email"></span>
+      <button id="btn-logout">Salir</button>
+    </div>
+  </header>
+
+  <div class="toolbar">
+    <div>
+      <h2>Tu catálogo</h2>
+      <div class="count" id="prod-count">0 productos</div>
+    </div>
+    <button id="btn-add">+ Agregar producto</button>
+  </div>
+
+  <div id="empty-state" class="hide">
+    <div class="ico">🗂️</div>
+    <div>Todavía no cargaste ningún producto.</div>
+    <div style="font-size:12px;margin-top:4px">Tocá "+ Agregar producto" para empezar.</div>
+  </div>
+
+  <div class="grid" id="grid"></div>
+</div>
+
+<!-- ══════════ MODAL: AGREGAR / EDITAR PRODUCTO ══════════ -->
+<div id="modal-overlay" class="hide">
+  <div id="modal-box">
+    <h3 id="modal-title">Agregar producto</h3>
+    <input type="hidden" id="prod-id">
+    <div class="field">
+      <label>Foto</label>
+      <img id="foto-preview">
+      <input type="file" id="prod-foto" accept="image/*">
+    </div>
+    <div class="field">
+      <label>Nombre</label>
+      <input id="prod-nombre" placeholder="Ej: Papa lavada x kg">
+    </div>
+    <div class="field">
+      <label>Precio</label>
+      <input id="prod-precio" type="number" min="0" step="1" placeholder="0">
+    </div>
+    <div class="field">
+      <label>Tipo de oferta (opcional)</label>
+      <select id="prod-tipo">
+        <option value="">Sin oferta</option>
+        <option value="relampago">⚡ Relámpago</option>
+        <option value="destacado">🔥 Destacada</option>
+        <option value="multicompra">📦 Multicompra</option>
+        <option value="personalizada">🎯 Personalizada</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Texto de la oferta (lo que se ve en el badge)</label>
+      <input id="prod-textooferta" placeholder='Ej: 2X $5.000'>
+    </div>
+    <div class="modal-actions">
+      <button id="btn-cancelar">Cancelar</button>
+      <button id="btn-guardar">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://sqmbyhjugqryoiieskfv.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_OnXhk5z5QAGhtHQUWYxVpA__StOar9g';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const BADGE_COLORS = { relampago:'#FF5722', destacado:'#FFC107', multicompra:'#9C27B0', personalizada:'#E91E63' };
+let _user = null;
+let _productos = [];
+let _fotoFile = null;
+
+function $(id){ return document.getElementById(id); }
+function toast(msg){
+  const t = document.createElement('div');
+  t.className = 'toast'; t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2600);
+}
+function fmt(n){ return '$' + Number(n||0).toLocaleString('es-AR'); }
+
+/* ═════════ AUTH ═════════ */
+let _modoRegistro = false;
+
+function actualizarAuthUI() {
+  $('auth-sub').textContent = _modoRegistro ? 'Creá tu cuenta para empezar' : 'Iniciá sesión para armar tu catálogo';
+  $('btn-auth-submit').textContent = _modoRegistro ? 'Crear cuenta' : 'Iniciar sesión';
+  $('auth-toggle').innerHTML = _modoRegistro
+    ? '¿Ya tenés cuenta? <a id="auth-switch">Iniciá sesión</a>'
+    : '¿No tenés cuenta? <a id="auth-switch">Registrate</a>';
+}
+// Delegado en el contenedor (que nunca se destruye) en vez de en el link
+// (que sí se recrea cada vez) — así el toggle funciona las veces que sea.
+$('auth-toggle').addEventListener('click', e => {
+  if (!e.target.closest('#auth-switch')) return;
+  _modoRegistro = !_modoRegistro;
+  actualizarAuthUI();
+  $('auth-msg').classList.add('hide');
+});
+
+function mostrarAuthMsg(msg, tipo) {
+  const el = $('auth-msg');
+  el.textContent = msg;
+  el.className = tipo === 'err' ? 'err' : 'ok';
+}
+
+$('btn-auth-submit').addEventListener('click', async () => {
+  const email = $('auth-email').value.trim();
+  const pass  = $('auth-pass').value;
+  if (!email || !pass) { mostrarAuthMsg('Completá email y contraseña', 'err'); return; }
+  if (pass.length < 6) { mostrarAuthMsg('La contraseña necesita al menos 6 caracteres', 'err'); return; }
+
+  $('btn-auth-submit').disabled = true;
+  try {
+    if (_modoRegistro) {
+      const { error } = await sb.auth.signUp({ email, password: pass });
+      if (error) throw error;
+      mostrarAuthMsg('Cuenta creada. Iniciando sesión...', 'ok');
+    } else {
+      const { error } = await sb.auth.signInWithPassword({ email, password: pass });
+      if (error) throw error;
+    }
+  } catch (e) {
+    mostrarAuthMsg(e.message === 'Invalid login credentials' ? 'Email o contraseña incorrectos' : e.message, 'err');
+  }
+  $('btn-auth-submit').disabled = false;
+});
+
+$('btn-logout').addEventListener('click', async () => {
+  await sb.auth.signOut();
+});
+
+sb.auth.onAuthStateChange((_event, session) => {
+  _user = session?.user || null;
+  if (_user) {
+    $('auth-screen').classList.add('hide');
+    $('app-screen').classList.remove('hide');
+    $('user-email').textContent = _user.email;
+    cargarProductos();
+  } else {
+    $('app-screen').classList.add('hide');
+    $('auth-screen').classList.remove('hide');
+  }
+});
+
+/* ═════════ CATÁLOGO ═════════ */
+async function cargarProductos() {
+  const { data, error } = await sb.from('productos').select('*').order('creado_en', { ascending: false });
+  if (error) { toast('⚠️ Error cargando productos: ' + error.message); return; }
+  _productos = data || [];
+  renderGrid();
+}
+
+function renderGrid() {
+  $('prod-count').textContent = `${_productos.length} producto${_productos.length !== 1 ? 's' : ''}`;
+  $('empty-state').classList.toggle('hide', _productos.length > 0);
+  $('grid').innerHTML = _productos.map(p => `
+    <div class="prod-card">
+      <img class="prod-img" src="${p.foto_url || ''}" onerror="this.style.opacity=0.2">
+      <div class="prod-body">
+        <div class="prod-nombre">${escHtml(p.nombre)}</div>
+        <div class="prod-precio">${fmt(p.precio)}</div>
+        ${p.tipo_oferta ? `<span class="prod-badge" style="background:${BADGE_COLORS[p.tipo_oferta] || '#666'}">${escHtml(p.texto_oferta || p.tipo_oferta)}</span>` : ''}
+        <div class="prod-actions">
+          <button data-edit="${p.id}">✏️ Editar</button>
+          <button class="del" data-del="${p.id}">🗑️ Borrar</button>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+function escHtml(s){ return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+$('grid').addEventListener('click', e => {
+  const editId = e.target.closest('[data-edit]')?.dataset.edit;
+  const delId  = e.target.closest('[data-del]')?.dataset.del;
+  if (editId) abrirModal(_productos.find(p => p.id === editId));
+  if (delId) borrarProducto(delId);
+});
+
+async function borrarProducto(id) {
+  if (!confirm('¿Borrar este producto?')) return;
+  const { error } = await sb.from('productos').delete().eq('id', id);
+  if (error) { toast('⚠️ ' + error.message); return; }
+  toast('Producto borrado');
+  cargarProductos();
+}
+
+/* ═════════ MODAL AGREGAR/EDITAR ═════════ */
+$('btn-add').addEventListener('click', () => abrirModal(null));
+$('btn-cancelar').addEventListener('click', cerrarModal);
+$('modal-overlay').addEventListener('click', e => { if (e.target.id === 'modal-overlay') cerrarModal(); });
+
+function abrirModal(prod) {
+  _fotoFile = null;
+  $('modal-title').textContent = prod ? 'Editar producto' : 'Agregar producto';
+  $('prod-id').value = prod?.id || '';
+  $('prod-nombre').value = prod?.nombre || '';
+  $('prod-precio').value = prod?.precio || '';
+  $('prod-tipo').value = prod?.tipo_oferta || '';
+  $('prod-textooferta').value = prod?.texto_oferta || '';
+  if (prod?.foto_url) { $('foto-preview').src = prod.foto_url; $('foto-preview').style.display = 'block'; }
+  else { $('foto-preview').style.display = 'none'; }
+  $('prod-foto').value = '';
+  $('modal-overlay').classList.remove('hide');
+}
+function cerrarModal() { $('modal-overlay').classList.add('hide'); }
+
+$('prod-foto').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  _fotoFile = file;
+  const reader = new FileReader();
+  reader.onload = ev => { $('foto-preview').src = ev.target.result; $('foto-preview').style.display = 'block'; };
+  reader.readAsDataURL(file);
+});
+
+$('btn-guardar').addEventListener('click', async () => {
+  const nombre = $('prod-nombre').value.trim();
+  const precio = parseFloat($('prod-precio').value) || 0;
+  if (!nombre) { toast('⚠️ Ponele un nombre al producto'); return; }
+
+  $('btn-guardar').disabled = true;
+  $('btn-guardar').textContent = 'Guardando...';
+  try {
+    let foto_url = $('foto-preview').style.display === 'block' && !_fotoFile ? $('foto-preview').src : null;
+
+    if (_fotoFile) {
+      const path = `${_user.id}/${Date.now()}_${_fotoFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+      const { error: upErr } = await sb.storage.from('fotos-productos').upload(path, _fotoFile);
+      if (upErr) throw upErr;
+      const { data: pub } = sb.storage.from('fotos-productos').getPublicUrl(path);
+      foto_url = pub.publicUrl;
+    }
+
+    const id = $('prod-id').value;
+    const payload = {
+      nombre, precio, foto_url,
+      tipo_oferta: $('prod-tipo').value,
+      texto_oferta: $('prod-textooferta').value.trim()
+    };
+
+    if (id) {
+      const { error } = await sb.from('productos').update(payload).eq('id', id);
+      if (error) throw error;
+      toast('Producto actualizado');
+    } else {
+      const { error } = await sb.from('productos').insert({ ...payload, user_id: _user.id });
+      if (error) throw error;
+      toast('Producto agregado');
+    }
+    cerrarModal();
+    cargarProductos();
+  } catch (e) {
+    toast('⚠️ ' + e.message);
+  }
+  $('btn-guardar').disabled = false;
+  $('btn-guardar').textContent = 'Guardar';
+});
+</script>
+</body>
+</html>
