@@ -6,9 +6,18 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>SendWA — Almacén Copihue ver.83</title>
+<title>SendWA — Almacén Copihue ver.84</title>
 <!--
   CHANGELOG sendwa.html
+  v84: - FIX — Se perdía el scroll al tocar ✓/✕ en las listas de "Revisión del
+         flyer" y de "Oferta Personalizada": cada toque reconstruía la lista
+         entera desde cero, y al reconstruirse el scroll volvía siempre a 0 —
+         en listas largas perdías el avance cada vez. Ahora se guarda la
+         posición antes de reconstruir y se restaura después, tanto al tocar
+         un producto individual como al usar "Incluir/Excluir todos" o
+         aplicar un % en bloque a todos. El selector de categorías de IA
+         sugerencia no tenía este problema (ya actualizaba solo el contador,
+         sin reconstruir la lista en cada click).
   v83: - NUEVO — Combinar sabores de multicompra grupal en una sola tarjeta del
          flyer (ej: Gaseosa Manaos Cola/Lima Limón/Naranja/Pomelo → 1 tarjeta
          "GASEOSA MANAOS 3L" con "Cola · Lima Limón · Naranja · Pomelo" chiquito
@@ -742,7 +751,7 @@
           style="width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.2);
                  border:none;color:#fff;font-size:12px;font-weight:800;cursor:pointer;
                  flex-shrink:0;display:flex;align-items:center;justify-content:center;">?</button>
-  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.83</div>
+  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.84</div>
   <button id="btn-dark" title="Modo oscuro">🌙</button>
 </div>
 
@@ -2052,7 +2061,7 @@ on('btn-collage', () => {
         <button id="_rev-all" style="flex:1;padding:7px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:12px;cursor:pointer;">✅ Incluir todos</button>
         <button id="_rev-none" style="flex:1;padding:7px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:12px;cursor:pointer;">⬜ Excluir todos</button>
       </div>
-      <div style="flex:1;overflow-y:auto;">${items}</div>
+      <div id="_rev-scroll" style="flex:1;overflow-y:auto;">${items}</div>
       <div style="display:flex;gap:8px;margin-top:12px;flex-shrink:0;">
         <button id="_rev-ok" style="flex:2;padding:12px;border-radius:10px;border:none;
                 background:var(--primary);color:#fff;font-size:13px;font-weight:700;cursor:pointer;">
@@ -2066,8 +2075,17 @@ on('btn-collage', () => {
     </div>`;
   }
 
-  function renderOv() {
+  function renderOv(preservarScroll) {
+    // Guardar dónde estaba el scroll antes de reconstruir la lista, para no
+    // perder el avance cada vez que se toca ✓/✕ en un producto.
+    const scrollPrevio = preservarScroll
+      ? (ov.querySelector('#_rev-scroll')?.scrollTop || 0)
+      : 0;
     ov.innerHTML = buildRevision();
+    if (scrollPrevio) {
+      const nuevoScroll = ov.querySelector('#_rev-scroll');
+      if (nuevoScroll) nuevoScroll.scrollTop = scrollPrevio;
+    }
     // Botón generar
     ov.querySelector('#_rev-ok').onclick = () => {
       const final = prods.filter(p => !_collageExcluidos.has(String(p.id)));
@@ -2083,9 +2101,9 @@ on('btn-collage', () => {
     };
     // Botón cancelar
     ov.querySelector('#_rev-cx').onclick = () => { document.body.removeChild(ov); _flyerRevisionOverlay = null; };
-    // Incluir todos / Excluir todos
-    ov.querySelector('#_rev-all').onclick = () => { _collageExcluidos.clear(); renderOv(); };
-    ov.querySelector('#_rev-none').onclick = () => { prods.forEach(p => _collageExcluidos.add(String(p.id))); renderOv(); };
+    // Incluir todos / Excluir todos — acción global, no hace falta mantener el scroll
+    ov.querySelector('#_rev-all').onclick = () => { _collageExcluidos.clear(); renderOv(false); };
+    ov.querySelector('#_rev-none').onclick = () => { prods.forEach(p => _collageExcluidos.add(String(p.id))); renderOv(false); };
     // Cerrar tocando el fondo
     ov.onclick = e => { if (e.target === ov) { document.body.removeChild(ov); _flyerRevisionOverlay = null; } };
     // Botones de exclusión — onclick directo en cada uno (evita problemas de delegación tras re-render)
@@ -2095,7 +2113,7 @@ on('btn-collage', () => {
         const id = btn.dataset.exclId;
         if (_collageExcluidos.has(id)) _collageExcluidos.delete(id);
         else _collageExcluidos.add(id);
-        renderOv(); // re-renderiza con el nuevo estado
+        renderOv(true); // re-renderiza manteniendo el scroll donde estabas
       };
     });
   }
@@ -3226,7 +3244,7 @@ document.getElementById('personal-pct-bulk')?.addEventListener('click', e => {
     const tipo = PERSONAL_PCTS.indexOf(_personalBulkPct) + 1;
     for (const id of _personalItemTipo.keys()) _personalItemTipo.set(id, tipo);
   }
-  renderPersonalItemsList();
+  renderPersonalItemsList(true);
 });
 
 function updatePersonalInfo() {
@@ -3240,9 +3258,12 @@ function updatePersonalInfo() {
   info.textContent = txt;
 }
 
-function renderPersonalItemsList() {
+function renderPersonalItemsList(preservarScroll) {
   const list = document.getElementById('personal-items-list');
   if (!list) return;
+  // Guardar dónde estaba el scroll antes de reconstruir — al tocar un % en un
+  // producto no hace falta perder el avance en una lista larga.
+  const scrollPrevio = preservarScroll ? list.scrollTop : 0;
   list.innerHTML = _personalProds.map(p => {
     const id   = Number(p.id);
     const tipo = _personalItemTipo.get(id) || 0;
@@ -3260,6 +3281,7 @@ function renderPersonalItemsList() {
       <div class="personal-item-pills">${pills}</div>
     </div>`;
   }).join('');
+  if (scrollPrevio) list.scrollTop = scrollPrevio;
   updatePersonalInfo();
 }
 document.getElementById('personal-items-list')?.addEventListener('click', e => {
@@ -3272,7 +3294,7 @@ document.getElementById('personal-items-list')?.addEventListener('click', e => {
   } else {
     _personalItemTipo.set(id, PERSONAL_PCTS.indexOf(pct) + 1);
   }
-  renderPersonalItemsList();
+  renderPersonalItemsList(true);
 });
 
 on('btn-personalizada', () => {
