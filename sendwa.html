@@ -6,9 +6,19 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>SendWA — Almacén Copihue ver.82</title>
+<title>SendWA — Almacén Copihue ver.83</title>
 <!--
   CHANGELOG sendwa.html
+  v83: - NUEVO — Combinar sabores de multicompra grupal en una sola tarjeta del
+         flyer (ej: Gaseosa Manaos Cola/Lima Limón/Naranja/Pomelo → 1 tarjeta
+         "GASEOSA MANAOS 3L" con "Cola · Lima Limón · Naranja · Pomelo" chiquito
+         debajo del nombre, foto y oferta del primer sabor). Se agrupa por
+         GRUPO_MULTICOMPRA — si hoy solo Manaos tiene ese campo cargado, hoy
+         solo pasa con Manaos, pero funciona para cualquier grupo que cargues
+         a futuro sin tocar código. Pasa SOLO en el flyer de WhatsApp — el
+         catálogo web, el precio y el stock por sabor no se tocan, siguen
+         siendo productos separados ahí. Si excluís sabores en "Revisión del
+         flyer" hasta dejar solo 1 del grupo, no se combina — se muestra normal.
   v82: - FIX — Relámpago y Destacada eran casi el mismo color naranja
          (#F9A825 vs #FF9800, imposibles de distinguir a simple vista).
          Relámpago ahora #FF5722 (rojo-naranja), Destacada #FFC107 (ámbar/
@@ -732,7 +742,7 @@
           style="width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.2);
                  border:none;color:#fff;font-size:12px;font-weight:800;cursor:pointer;
                  flex-shrink:0;display:flex;align-items:center;justify-content:center;">?</button>
-  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.82</div>
+  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.83</div>
   <button id="btn-dark" title="Modo oscuro">🌙</button>
 </div>
 
@@ -2064,7 +2074,9 @@ on('btn-collage', () => {
       if (!final.length) { toast('⚠️ Excluiste todos los productos'); return; }
       ov.style.display = 'none'; // ocultar (no destruir) — así "atrás" puede volver acá
       _flyerRevisionOverlay = ov;
-      _collageProds = final;
+      // Combinar sabores del mismo GRUPO_MULTICOMPRA (ej: gaseosas Manaos) en una
+      // sola tarjeta — solo en el flyer, no afecta catálogo web ni carrito.
+      _collageProds = _agruparMulticompraParaFlyer(final);
       _collagePage  = 0;
       _singleIdx    = 0;
       openCollageModal('collage');
@@ -2543,6 +2555,55 @@ function splitEtiquetaEstrella(etiqueta) {
   const mid = Math.ceil(words.length / 2);
   return [words.slice(0, mid).join(' '), words.slice(mid).join(' ')];
 }
+
+// Prefijo común de una lista de nombres (para sacar el nombre base del grupo)
+function _prefijoComun(strs) {
+  if (!strs.length) return '';
+  let pre = strs[0];
+  for (let i = 1; i < strs.length; i++) {
+    let j = 0;
+    while (j < pre.length && j < strs[i].length && pre[j] === strs[i][j]) j++;
+    pre = pre.slice(0, j);
+    if (!pre) break;
+  }
+  return pre;
+}
+
+// Combina en una sola tarjeta los productos de multicompra grupal que comparten
+// GRUPO_MULTICOMPRA (ej: Gaseosa Manaos Cola/Lima Limón/Naranja/Pomelo) — SOLO
+// para el flyer de WhatsApp. El catálogo web y el precio por producto no se tocan,
+// cada sabor sigue siendo su propio producto con su propio stock ahí.
+function _agruparMulticompraParaFlyer(prods) {
+  const porGrupo = new Map();
+  prods.forEach(p => {
+    const mc = p.catOferta === 'multicompra' ? _poolMulticompra.get(Number(p.id)) : null;
+    if (mc && mc.grupo) {
+      if (!porGrupo.has(mc.grupo)) porGrupo.set(mc.grupo, []);
+      porGrupo.get(mc.grupo).push(p);
+    }
+  });
+  const yaCombinados = new Set();
+  const salida = [];
+  prods.forEach(p => {
+    const mc = p.catOferta === 'multicompra' ? _poolMulticompra.get(Number(p.id)) : null;
+    if (mc && mc.grupo) {
+      const miembros = porGrupo.get(mc.grupo);
+      if (miembros.length < 2) { salida.push(p); return; } // grupo de 1 — no combinar
+      if (yaCombinados.has(mc.grupo)) return; // ya se agregó la tarjeta combinada de este grupo
+      yaCombinados.add(mc.grupo);
+      let nombreBase = _prefijoComun(miembros.map(m => m.nombre)).trim();
+      nombreBase = nombreBase.replace(/[-–,(]+$/, '').trim();
+      const sabores = miembros
+        .map(m => m.nombre.slice(nombreBase.length).trim().replace(/^[-–,(]+/, '').replace(/[)]+$/, '').trim())
+        .filter(Boolean);
+      salida.push({ ...miembros[0], nombre: nombreBase || miembros[0].nombre, _saboresGrupo: sabores });
+    } else {
+      salida.push(p);
+    }
+  });
+  return salida;
+}
+
 function wrapText(ctx, text, x, y, maxW, lineH, maxLines) {
   const words = text.split(' ');
   let line = '';
@@ -2612,6 +2673,10 @@ async function drawProductCard(ctx, p, x, y, W, H, preloadedImg) {
 
   // Zonas fijas según contenido
   const NOMBRE_H  = LH_NOMBRE * nLinesNombre + 6;
+  // Línea de sabores — solo en tarjetas combinadas de multicompra grupal (ej: Manaos)
+  const tieneSabores = Array.isArray(p._saboresGrupo) && p._saboresGrupo.length > 0;
+  const FS_SABORES = Math.max(W * 0.038, 9);
+  const SABORES_H = tieneSabores ? FS_SABORES + 6 : 0;
   const FS_ANTES  = Math.max(W * 0.044, 9);
   const FS_OFERTA = Math.max(W * 0.068, 12);
   const FS_PRECIO = Math.max(W * 0.070, 12);
@@ -2619,7 +2684,7 @@ async function drawProductCard(ctx, p, x, y, W, H, preloadedImg) {
     ? FS_ANTES + 4 + FS_OFERTA + 6   // tachado + oferta
     : FS_PRECIO + 6;                  // precio normal
   const PAD_V    = 8;
-  const TEXTH    = PAD_V + NOMBRE_H + PRECIO_H + PAD_V;
+  const TEXTH    = PAD_V + NOMBRE_H + SABORES_H + PRECIO_H + PAD_V;
   const IMGH     = H - TEXTH;
 
   // ── Fondo blanco ──
@@ -2722,7 +2787,24 @@ async function drawProductCard(ctx, p, x, y, W, H, preloadedImg) {
   ctx.font = `bold ${FS_NOMBRE}px Segoe UI`;
   ctx.textAlign = 'center';
   wrapText(ctx, p.nombre, mx, txtY + LH_NOMBRE * 0.85, W - 14, LH_NOMBRE, 2);
-  const afterName = txtY + NOMBRE_H;
+  let afterName = txtY + NOMBRE_H;
+
+  // Sabores/variantes — solo en tarjetas combinadas (multicompra grupal, ej: Manaos)
+  if (tieneSabores) {
+    ctx.fillStyle = '#666';
+    ctx.font = `italic ${FS_SABORES}px Segoe UI`;
+    ctx.textAlign = 'center';
+    let saboresTxt = p._saboresGrupo.join(' · ');
+    // Recortar si no entra, con "…" al final, en vez de desbordar la tarjeta
+    if (ctx.measureText(saboresTxt).width > W - 14) {
+      while (saboresTxt.length > 3 && ctx.measureText(saboresTxt + '…').width > W - 14) {
+        saboresTxt = saboresTxt.slice(0, -1);
+      }
+      saboresTxt += '…';
+    }
+    ctx.fillText(saboresTxt, mx, afterName + FS_SABORES * 0.85);
+    afterName += SABORES_H;
+  }
 
   // Precio
   if (tieneOfertaPrecio) {
