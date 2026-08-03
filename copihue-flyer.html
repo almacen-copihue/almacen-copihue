@@ -314,7 +314,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
   <div class="h-brand">
     <div class="h-icon">🖼</div>
     <div>
-      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v5.24</span></div>
+      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v5.25</span></div>
       <div class="h-sub">Generador para redes sociales</div>
     </div>
   </div>
@@ -348,7 +348,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
     <div>
       <div class="slbl">Tipo de oferta</div>
       <div class="mg">
-        <button class="mb act" data-modo="relampago" onclick="setModo('relampago',this)"><span class="em">⚡</span>Relámpago<span class="cnt" id="cnt-relampago"></span></button>
+        <button class="mb" data-modo="relampago" onclick="setModo('relampago',this)"><span class="em">⚡</span>Relámpago<span class="cnt" id="cnt-relampago"></span></button>
         <button class="mb" data-modo="destacadas"   onclick="setModo('destacadas',this)"><span class="em">🔥</span>Destacadas<span class="cnt" id="cnt-destacadas"></span></button>
         <button class="mb" data-modo="especiales"   onclick="setModo('especiales',this)"><span class="em">⭐</span>Especiales<span class="cnt" id="cnt-especiales"></span></button>
         <button class="mb" data-modo="ultimas"      onclick="setModo('ultimas',this)"><span class="em">🎯</span>Últimas<span class="cnt" id="cnt-ultimas"></span></button>
@@ -527,7 +527,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-const VERSION = 'v5.24';
+const VERSION = 'v5.25';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -669,8 +669,8 @@ let _of    = {};
 let _cerv  = {};
 let _pools = {};
 let _poolMulticompra = new Map(); // id → {tipo,cantidad,precio,grupo} — desde _of.multicompraActiva (mismo GAS que sendwa.html)
-let _modo  = 'relampago';
-let _modos = new Set(['relampago']); // multi-selección de modos
+let _modo  = null;
+let _modos = new Set(); // multi-selección de modos — arranca vacío, elegís vos
 let _cand  = [];
 let _sel   = new Set();
 let _cvFin = null;   // canvas final (SCALE_OUT×) — página actualmente mostrada
@@ -751,17 +751,28 @@ async function recargar(){
     try{ const ro=await gasGet('getOfertas'); _of=ro.success?ro:{}; }
     catch(e){ _of={}; }
 
-    // 3b. Multicompra (2x1, 3x2, etc.) — mismo campo que usa sendwa.html
+    // 3b. Multicompra (2x1, 3x2, etc.) — mismo campo que usa sendwa.html.
+    // Probamos varios nombres posibles por si el campo real se llama distinto.
     _poolMulticompra=new Map();
-    (_of.multicompraActiva||[]).forEach(p=>{
+    const _mcArr = _of.multicompraActiva || _of.multicompraActivas || _of.multicompra || _of.multiCompraActiva || [];
+    _mcArr.forEach(p=>{
       const id=Number(p.id);
       _poolMulticompra.set(id,{
-        tipo:     p.MULTICOMPRA_TIPO     || '',
-        cantidad: p.MULTICOMPRA_CANTIDAD || 0,
-        precio:   p.MULTICOMPRA_PRECIO   || 0,
-        grupo:    p.GRUPO_MULTICOMPRA    || ''
+        tipo:     p.MULTICOMPRA_TIPO     ?? p.tipo     ?? '',
+        cantidad: p.MULTICOMPRA_CANTIDAD ?? p.cantidad ?? 0,
+        precio:   p.MULTICOMPRA_PRECIO   ?? p.precio   ?? 0,
+        grupo:    p.GRUPO_MULTICOMPRA    ?? p.grupo    ?? ''
       });
     });
+    // Diagnóstico: si no se detectó nada, mostrar en consola las claves de _of
+    // para encontrar el nombre real del campo (F12 → Console).
+    if(_poolMulticompra.size===0){
+      const clavesConMulti = Object.keys(_of).filter(k=>/multi|combo|pack/i.test(k));
+      console.warn('⚠️ Multicompra: no se detectó ningún producto.',
+        '\nClaves de _of que llegaron:', Object.keys(_of),
+        '\nClaves que podrían ser multicompra:', clavesConMulti.length?clavesConMulti:'(ninguna coincide con "multi/combo/pack")',
+        '\nSi alguna de esas es la correcta, pasámela y ajusto el nombre del campo.');
+    }
 
     // 4. Cervecero
     try{ const rc=await gasGet('getJuevesCervecero'); _cerv=rc||{}; }
@@ -770,7 +781,7 @@ async function recargar(){
     construirPools();
     actualizarDiag();
     actualizarBadges();
-    poblarCandidatos();
+    if(_modos.size>0) poblarCandidatos(); else { _cand=[]; renderCandidatos(); }
     $('btnGen').disabled = false;
   }catch(e){
     diagSet([{cls:'off',lbl:'Error cargando: '+e.message}]);
