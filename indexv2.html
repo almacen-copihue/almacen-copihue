@@ -4,9 +4,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🏪 Catálogo · Copihue v171-beta</title>
+    <title>🏪 Catálogo · Copihue v172-beta</title>
     <!--
     CHANGELOG
+    v172-beta · 2026-07-30 (RAMA DE PRUEBA — indexv2.html, NO reemplaza index.html)
+      - CAMBIO Jueves Cervecero: antes quedaba "siempre visible, teaser el
+        resto de la semana". Ahora se oculta directamente si hoy no es
+        jueves — arranca con cls-oculto y un script inline síncrono (no
+        espera al fetch de productos) lo muestra solo si corresponde, para
+        que no llegue ni a parpadear en el resto de la semana.
+        renderizarCervecero() también respeta el chequeo por si la sesión
+        sigue abierta al cruzar la medianoche.
+      - NUEVO divisor "🔍 ¿Qué andás buscando?" entre las ofertas activas
+        (arriba) y el catálogo general — buscador, categorías y todos los
+        productos (abajo). Antes pasaba directo de las ofertas al buscador
+        sin ningún corte visual; ahora la transición queda clara. No oculta
+        ni bloquea nada, es solo un divisor — el buscador y las categorías
+        siguen igual de accesibles, un scroll más abajo.
     v171-beta · 2026-07-30 (RAMA DE PRUEBA — indexv2.html, NO reemplaza index.html)
       - FIX confusión Jueves Cervecero: el título/badge/mensaje decían
         "¡JUEVES CERVECERO! Cargando horario..." apenas se abría la página,
@@ -2344,8 +2358,13 @@
       <div class="rasp-condiciones">🎁 1 por día · 🏪 Solo retiro presencial · ⏰ Válido hasta el cierre · 📦 Sujeto a stock · 🚫 No acumulable</div>
     </div>
     <!-- ══════════ FIN RASPADITA ══════════ -->
-    <!-- ========== JUEVES CERVECERO — siempre visible, teaser el resto de la semana ========== -->
-    <div class="ofertas-container cervecero cervecero-teaser" id="ofertasCervecero" style="margin-bottom:2rem;">
+    <!-- ========== JUEVES CERVECERO — v172 (rama indexv2): ahora oculto salvo los
+         jueves (antes era "siempre visible, teaser el resto de la semana"; el
+         dueño prefiere que directamente no aparezca fuera de jueves). Arranca
+         con cls-oculto y el script siguiente lo muestra en el momento, sin
+         esperar a que termine de cargar el resto de la página — así en días
+         que no son jueves no llega ni a parpadear. ========== -->
+    <div class="ofertas-container cervecero cervecero-teaser cls-oculto" id="ofertasCervecero" style="margin-bottom:2rem;">
         <div class="ofertas-header">
             <h2>🍺 JUEVES CERVECERO <span class="ofertas-badge skeleton-text-inline" id="cervecero-badge">Cargando…</span></h2>
             <div class="cervecero-timer" id="cervecero-timer" style="display:none;">
@@ -2370,6 +2389,18 @@
         </div>
         <div class="ofertas-products-grid" id="cervecero-grid"></div>
     </div>
+    <script>
+        // Chequeo síncrono, sin esperar al fetch de productos — evita cualquier
+        // parpadeo del contenedor en días que no son jueves.
+        (function() {
+            try {
+                var arg = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+                if (arg.getDay() === 4) {
+                    document.getElementById('ofertasCervecero').classList.remove('cls-oculto');
+                }
+            } catch (e) {}
+        })();
+    </script>
 
     <!-- ========== PROMOS ========== -->
     <div class="ofertas-container promos cls-oculto" id="ofertasPromos">
@@ -2545,6 +2576,15 @@
         </div>
     </div>
 
+    <!-- v172 (rama indexv2) — Divisor entre "ofertas activas" (arriba) y el
+         catálogo general (buscador + categorías + todos los productos, abajo).
+         Antes pasaba directo de las ofertas al buscador sin ningún corte
+         visual; ahora queda claro que de acá para abajo empieza otra cosa. -->
+    <section class="catalogo-divisor" style="margin:1.8rem 0 1.2rem;text-align:center;padding:0 12px;">
+        <div style="border-top:2px dashed #c8e6c9;margin-bottom:14px;"></div>
+        <h2 style="color:var(--primary-dark);font-size:1.15rem;margin:0 0 4px;">🔍 ¿Qué andás buscando?</h2>
+        <p style="color:var(--gray);font-size:0.85rem;margin:0;">Buscá por nombre o elegí una categoría</p>
+    </section>
 
 <script>if(window.innerWidth>=768){document.write('<style>#desktopSearch{display:block!important}</style>')}</script>
     <div class="search-container" id="desktopSearch" style="display:none;">
@@ -2725,7 +2765,7 @@
 
 <script>
 // ========== VERSIÓN Y CONFIGURACIÓN ==========
-const APP_VERSION = 'copihue-index-v171-beta';
+const APP_VERSION = 'copihue-index-v172-beta';
 // Tag versión automático con fecha
 // versionTag se actualiza desde config_sistema (campo 'version')
 
@@ -4052,6 +4092,14 @@ function _esCerveceroActivo() {
     return dia === 4 && hora >= 18 && hora < _cerveceroHoraCierre;
 }
 
+// v172 (rama indexv2) — antes Cervecero era "siempre visible, teaser el resto
+// de la semana"; ahora se oculta directamente si hoy no es jueves.
+function _esJuevesHoy() {
+    if (_cerveceroOverride !== null) return true; // override manual (pruebas) siempre lo muestra
+    const arg = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+    return arg.getDay() === 4;
+}
+
 async function cargarJuevesCervecero() {
     try {
         const r = await fetch(GAS_URL_CERVECERO + '?action=getJuevesCervecero&t=' + Date.now(),
@@ -4086,9 +4134,16 @@ function renderizarCervecero() {
     const grid      = document.getElementById('cervecero-grid');
     if (!container || !grid) return;
 
+    // v172 (rama indexv2) — si hoy no es jueves, directamente oculto (antes
+    // quedaba siempre visible como teaser toda la semana).
+    if (!_esJuevesHoy()) {
+        container.classList.add('cls-oculto');
+        grid.innerHTML = '';
+        return;
+    }
+
     const activo = _esCerveceroActivo();
 
-    // Siempre visible — nunca ocultar, sirve como teaser el resto de la semana
     container.classList.remove('cls-oculto');
     container.style.marginBottom = '2rem';
 
