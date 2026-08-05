@@ -4,9 +4,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🏪 Catálogo · Copihue v174</title>
+    <title>🏪 Catálogo · Copihue v175</title>
     <!--
     CHANGELOG
+    v175 · 2026-08-04
+      - FIX Raspadita lenta (causa real, no la mide Lighthouse porque no es
+        parte del documento principal): raspIniciar() disparaba 2 fetches
+        propios (getConfigRaspadita + premiosRaspadita) apenas cargaba el
+        DOM, EN PARALELO con el fetch principal del catálogo — compitiendo
+        por el mismo backend de Apps Script justo en el momento más cargado.
+        Ahora se difiere con IntersectionObserver: recién pide los premios
+        cuando el módulo está por entrar en pantalla. No se tocó nada de la
+        lógica del juego, solo cuándo arranca.
+      - REORDEN: Multicompra ahora se renderiza primero en la carga inicial
+        (antes iba después de Relámpago/Destacadas/Promos/Últimas/Recién
+        Llegados) — es siempre un contenedor de pocos productos, sale
+        rápido y da algo útil en pantalla antes de las secciones más
+        pesadas. Recién Llegados no tiene fetch propio (lee de un pool ya
+        cargado), así que si se seguía sintiendo lento después de este
+        cambio, el próximo paso es medir cuántos productos está renderizando
+        de una — no hace falta tocar su lógica todavía.
     v174 · 2026-08-04
       - CAMBIO Jueves Cervecero: antes quedaba "siempre visible, teaser el
         resto de la semana". Ahora se oculta directamente si hoy no es
@@ -2802,7 +2819,7 @@
 
 <script>
 // ========== VERSIÓN Y CONFIGURACIÓN ==========
-const APP_VERSION = 'copihue-index-v174';
+const APP_VERSION = 'copihue-index-v175';
 // Tag versión automático con fecha
 // versionTag se actualiza desde config_sistema (campo 'version')
 
@@ -4551,12 +4568,15 @@ function actualizarTodasLasVistas() {
     console.log(`   🏷️ Últimas       — ${ultimasActivas.length} seleccionados desde planilla`);
     console.log('═══════════════════════════════════\n');
 
+    // v174 — Multicompra primero: es siempre un contenedor de pocos productos
+    // (liviano), sale rápido y da algo útil en pantalla antes de las secciones
+    // más pesadas.
+    renderizarMulticompra();
     renderizarContenedorOfertas('relampago', productosRelampago);
     renderizarContenedorOfertas('destacadas', productosDestacadas);
     renderizarPromos();
     renderizarUltimasUnidades();
     renderizarRecienLlegados();
-    renderizarMulticompra();
     renderizarContenedorOfertas('especiales', productosEspeciales);
     renderizarCervecero();
     
@@ -7392,11 +7412,32 @@ document.getElementById('raspBtnReveal').addEventListener('click',()=>{
   raspVerificar();
 });
 
-// Iniciar cuando el DOM esté listo
-if(document.readyState==='loading'){
-  document.addEventListener('DOMContentLoaded', raspIniciar);
+// v174 — FIX: antes esto disparaba raspIniciar() apenas cargaba el DOM,
+// haciendo sus 2 fetches propios (getConfigRaspadita + premiosRaspadita) EN
+// PARALELO con el fetch principal del catálogo — compitiendo por el mismo
+// backend de Apps Script justo en el momento más cargado de la página.
+// Ahora se difiere con IntersectionObserver: recién pide los premios cuando
+// el módulo está por entrar en pantalla (rootMargin da margen para que ya
+// esté listo cuando el usuario llega scrolleando). No se tocó nada de la
+// lógica del juego en sí, solo CUÁNDO arranca.
+const _raspModulo = document.getElementById('rasp-modulo');
+if (_raspModulo && 'IntersectionObserver' in window) {
+    const _raspObs = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                raspIniciar();
+                _raspObs.unobserve(_raspModulo);
+            }
+        });
+    }, { rootMargin: '400px 0px' });
+    _raspObs.observe(_raspModulo);
 } else {
-  setTimeout(raspIniciar, 100);
+    // Fallback sin IntersectionObserver: igual que antes
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', raspIniciar);
+    } else {
+        setTimeout(raspIniciar, 100);
+    }
 }
 })();
 
