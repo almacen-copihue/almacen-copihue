@@ -314,7 +314,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
   <div class="h-brand">
     <div class="h-icon">🖼</div>
     <div>
-      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v5.30</span></div>
+      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v5.31</span></div>
       <div class="h-sub">Generador para redes sociales</div>
     </div>
   </div>
@@ -529,7 +529,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-const VERSION = 'v5.30';
+const VERSION = 'v5.31';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -1046,15 +1046,27 @@ function construirPools(){
   }
 
   // ── CERVECERO ────────────────────────────────────────────────────────────
-  _pools.cervecero = (_cerv.productos||[]).map(p=>{
+  // OJO: si p.id viene vacío/repetido para varios productos, el deduplicado por id
+  // que hace poblarCandidatos() los colapsa a uno solo (aunque el badge cuente bien,
+  // porque el badge sí ve el array completo). Por eso acá garantizamos id único.
+  const _idsCervVistos = new Set();
+  _pools.cervecero = (_cerv.productos||[]).map((p,i)=>{
     const precio=parseInt(p.precio||p.price)||0;
     const promoP=parseInt(p.precioPromo)||0;
     const po=promoP>0?promoP:precio;
     const pct=precio>0&&promoP>0?Math.round((1-promoP/precio)*100):0;
-    return {id:Number(p.id||0), name:String(p.nombre||p.name||''),
+    let idReal=Number(p.id||p.productoId||p.idProducto||p.codigo||0);
+    if(!idReal || _idsCervVistos.has(idReal)) idReal = 9000000+i; // evita colisión
+    _idsCervVistos.add(idReal);
+    return {id:idReal, name:String(p.nombre||p.name||''),
       price:precio, normal:precio, stock:99, rel:0, des:0, esp:0, cat:'CERVEZAS',
       po, et:pct>0?'-'+pct+'%':'CERV.', pct, _activo:true};
   });
+  if((_cerv.productos||[]).length>1 && new Set((_cerv.productos||[]).map(p=>p.id)).size<=1){
+    console.warn('⚠️ Cervecero: los productos no traen un "id" único (todos vienen igual).',
+      '\nEjemplo del primer producto crudo:', (_cerv.productos||[])[0],
+      '\nUsé un id generado para que no se pisen entre sí, pero si tienen otro campo con el id real (ej. productoId, codigo), pasámelo y lo uso ese en vez del generado.');
+  }
 
   // ── MULTICOMPRA (2x1, 3x2, etc.) ────────────────────────────────────────────
   // _poolMulticompra viene de _of.multicompraActiva (mismo campo que sendwa.html).
