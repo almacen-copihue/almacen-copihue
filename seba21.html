@@ -36,6 +36,27 @@
 
 ================================================================================
 
+  v441 — 02/8/2026 (u)
+  ---------------------
+  • FIX de la v440 rota (venía de otra sesión, no de esta): en "Registrar
+    Cobro" → SUSCRIPCIONES, al cambiar el desplegable de nombres por chips
+    tocables (Netflix, HBO Max, etc.) se perdió el "}" que cerraba
+    selRcCategoria() — eso rompía el parseo de TODO el script, por eso
+    dejaban de responder botones sin relación aparente (Sacar del local,
+    Retiro de Caja). Nada que ver con nombres largos en el scroll.
+  • Se adopta esa mejora de los chips (mejor que el desplegable que había)
+    ya con la llave puesta donde corresponde, sin perder el auto-sugerido
+    de $85K para FAMILIA CHILE que ya estaba.
+
+  v440 — 02/8/2026 (t)
+  ---------------------
+  • MEJORA — badge de multicompra grupal (varias variantes que combinan
+    para el pack, ej. gaseosas Manaos): "cuenta para pack" no decía nada de
+    un vistazo → ahora dice "Combinable". Se aplicó en el badge de la lista
+    de productos, en la línea del carrito y en el resumen de grupo. Además
+    el badge ahora puede pasar a una segunda línea (white-space:normal) en
+    vez de quedar cortado con textos largos.
+
   v439 — 02/8/2026 (s)
   ---------------------
   • AJUSTE — el swipe para descartar notificaciones (panel de la campana)
@@ -1200,7 +1221,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>🛒 POS · Copihue v439</title>
+    <title>🛒 POS · Copihue v441</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -4516,7 +4537,7 @@ function _renderVentaCompleta(ligero) {
                 formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">${item.ofertaEtiqueta || '📦 Multicompra'}</div>`;
             } else if (tipo === 'multicompra-grupal') {
                 colOferta = '#7C3AED';
-                formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta};opacity:.85;">${item.ofertaEtiqueta || '📦 cuenta para pack'}</div>`;
+                formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta};opacity:.85;white-space:normal;">${item.ofertaEtiqueta || '📦 Combinable'}</div>`;
             } else if (tipo === 'ultimas') {
                 colOferta = '#b71c1c';
                 formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">${item.ofertaEtiqueta || '🏷️ ÚLTIMAS UNIDADES'}</div>`;
@@ -8410,7 +8431,7 @@ function calcularOfertaPOS(producto, qty) {
             r.precioTotal    = pnormal * qty;
             r.precioUnitario = pnormal;
             r.tieneOferta    = false;
-            r.etiqueta       = `📦 cuenta para pack ${AT}x $${AU.toLocaleString('es-AR')}`;
+            r.etiqueta       = `📦 Combinable ${AT}x $${AU.toLocaleString('es-AR')}`;
             r.tipoOferta     = 'multicompra-grupal';
         } else {
             // INDIVIDUAL: comportamiento original.
@@ -8598,10 +8619,15 @@ function badgeOfertaPOS(producto) {
     if (_poolMulticompra && _poolMulticompra.has(producto.id)) {
         const mc = _poolMulticompra.get(producto.id);
         if (mc && mc.cantidad > 0 && mc.precio > 0) {
+            // v440 — "cuenta para pack" no decía nada de un vistazo; ahora
+            // "Combinable" dice explícitamente que junta con otras variantes
+            // (ej. sabores de gaseosa) para llegar al pack. white-space:normal
+            // para que textos largos pasen a una segunda línea en vez de
+            // quedar cortados.
             const texto = mc.grupo
-                ? `📦 cuenta para pack ${mc.cantidad}x $${mc.precio.toLocaleString('es-AR')}`
+                ? `📦 Combinable ${mc.cantidad}x $${mc.precio.toLocaleString('es-AR')}`
                 : `📦 ${mc.cantidad}x $${mc.precio.toLocaleString('es-AR')}`;
-            return `<span style="background:linear-gradient(135deg,#4527a0,#7c4dff);color:#fff;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px">${texto}</span>`;
+            return `<span style="background:linear-gradient(135deg,#4527a0,#7c4dff);color:#fff;font-size:.6rem;font-weight:900;padding:1px 6px;border-radius:10px;margin-left:4px;white-space:normal;display:inline-block;line-height:1.3;">${texto}</span>`;
         }
     }
     if (
@@ -12708,15 +12734,27 @@ function selRcCategoria(cat) {
     };
     const hint = document.getElementById('rcObsHint');
     if (hint) hint.textContent = hints[cat] ? '— ' + hints[cat] : '';
-    // Si es SUSCRIPCIONES, agregar datalist con nombres canónicos
+    // v441 — Si es SUSCRIPCIONES, mostrar chips de nombres canónicos bajo
+    // el campo observación (más rápido de tocar que un desplegable).
     const obsInput = document.getElementById('rcObservacion');
-    let dl = document.getElementById('rcSuscList');
+    if(obsInput) obsInput.removeAttribute('list');
+    let suscChips = document.getElementById('rcSuscChips');
     if(cat === 'SUSCRIPCIONES'){
-        if(!dl){ dl=document.createElement('datalist'); dl.id='rcSuscList'; document.body.appendChild(dl); }
-        dl.innerHTML = ['Netflix', 'HBO Max', 'Amazon Prime', 'YouTube Premium', 'Paramount+', 'Starlink', 'Spotify', 'Tuenti', 'IPTV', 'Empretienda', 'Disney+', 'Apple TV+', 'Amazon Music', 'Prime Video'].map(s=>`<option value="${s}">`).join('');
-        if(obsInput) obsInput.setAttribute('list','rcSuscList');
+        if(!suscChips){
+            suscChips = document.createElement('div');
+            suscChips.id = 'rcSuscChips';
+            suscChips.style.cssText = 'display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;';
+            obsInput && obsInput.parentElement && obsInput.parentElement.appendChild(suscChips);
+        }
+        suscChips.innerHTML = ['Netflix', 'HBO Max', 'Amazon Prime', 'YouTube Premium', 'Paramount+', 'Starlink', 'Spotify', 'Tuenti', 'IPTV', 'Empretienda', 'Disney+', 'Apple TV+', 'Amazon Music', 'Prime Video'].map(s=>
+            `<button type="button" onclick="document.getElementById('rcObservacion').value='${s}';document.getElementById('rcSuscChips').style.display='none'"
+                style="padding:5px 10px;border:1.5px solid #ddd;border-radius:16px;background:#fff;font-size:0.72rem;font-weight:600;cursor:pointer;font-family:inherit;color:#444">
+                ${s}
+            </button>`
+        ).join('');
+        suscChips.style.display = 'flex';
     } else {
-        if(obsInput) obsInput.removeAttribute('list');
+        if(suscChips) suscChips.style.display = 'none';
     }
     // Si selecciona FAMILIA CHILE y el monto está vacío, sugerir $85K
     if (cat === 'FAMILIA CHILE') {
