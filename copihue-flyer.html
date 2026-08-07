@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>🖼️ Flyer · Copihue</title>
+<title id="pageTitle">🖼️ Flyer · Copihue</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -530,7 +530,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-const VERSION = 'v5.36';
+const APP_VERSION = 'v5.37';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -1074,20 +1074,28 @@ function construirPools(){
   // ── ÚLTIMAS UNIDADES ─────────────────────────────────────────────────────
   // ultimasSeleccionadasSiempre = siempre disponible para el flyer
   // ultimasSeleccionadas        = solo si horario activo
+  console.log('🔍 Últimas: _of.ultimasSeleccionadasSiempre =', _of.ultimasSeleccionadasSiempre);
+  console.log('🔍 Últimas: _of.ultimasSeleccionadas =', _of.ultimasSeleccionadas);
+
   const ultSrc = _of.ultimasSeleccionadasSiempre || _of.ultimasSeleccionadas || [];
-  if(ultSrc.length > 0){
+  if(ultSrc.length > 0 && _prods.length > 0){
     _pools.ultimas = ultSrc.map(u=>{
       const p = _prods.find(x=>x.id===Number(u.id));
-      if(!p||p.stock<=0) return null;
+      if(!p||p.stock<=0) {
+        console.warn('⚠️ Últimas: producto no encontrado o sin stock para id', u.id);
+        return null;
+      }
       const calc = calcUltimas(p, u.diasParaVencer, u);
       return {...p, ...calc};
     }).filter(Boolean);
   } else {
+    console.log('🔍 Últimas: usando fallback por stock bajo');
     // Fallback: productos con stock bajo
     _pools.ultimas = _prods
       .filter(p=>p.rel>0&&p.stock>0&&p.stock<5)
       .map(p=>({...p,...calcUltimas(p,null)}));
   }
+  console.log('✅ Últimas resultante:', _pools.ultimas.length, 'productos');
 
   // ── CERVECERO ────────────────────────────────────────────────────────────
   // OJO: si p.id viene vacío/repetido para varios productos, el deduplicado por id
@@ -1119,17 +1127,26 @@ function construirPools(){
   // GRUPAL (mc.grupo): combina entre productos distintos — misma lectura que
   // seba21.html/sendwa.html ("📦 Combinable AT x $AU"), NO es "llevá AT de este
   // mismo producto". INDIVIDUAL (sin grupo): "AT x $precio" o "2da unidad" según tipo.
-  _pools.multicompra = [..._poolMulticompra.keys()].map(id=>{
-    const p=_prods.find(x=>x.id===id);
-    if(!p||p.stock<=0) return null;
-    const mc=_poolMulticompra.get(id);
-    const etiqueta = mc.grupo
-      ? `📦 Combinable ${mc.cantidad}x $${fmt(mc.precio)}`
-      : mc.tipo==='2DA_UNIDAD'
-        ? `📦 2da unidad a $${fmt(mc.precio)}`
-        : `📦 ${mc.cantidad}x $${fmt(mc.precio)}`;
-    return {...p, po:p.price, et:etiqueta, pct:0, mc:{...mc, etiqueta}};
-  }).filter(Boolean);
+  console.log('🔍 Multicompra: _poolMulticompra.size =', _poolMulticompra.size);
+  console.log('🔍 Multicompra: _prods.length =', _prods.length);
+  _pools.multicompra = [];
+  if (_poolMulticompra.size > 0 && _prods.length > 0) {
+    _pools.multicompra = [..._poolMulticompra.keys()].map(id=>{
+      const p=_prods.find(x=>x.id===id);
+      if(!p||p.stock<=0) {
+        console.warn('⚠️ Multicompra: producto no encontrado o sin stock para id', id);
+        return null;
+      }
+      const mc=_poolMulticompra.get(id);
+      const etiqueta = mc.grupo
+        ? `📦 Combinable ${mc.cantidad}x $${fmt(mc.precio)}`
+        : mc.tipo==='2DA_UNIDAD'
+          ? `📦 2da unidad a $${fmt(mc.precio)}`
+          : `📦 ${mc.cantidad}x $${fmt(mc.precio)}`;
+      return {...p, po:p.price, et:etiqueta, pct:0, mc:{...mc, etiqueta}};
+    }).filter(Boolean);
+  }
+  console.log('✅ Multicompra resultante:', _pools.multicompra.length, 'productos');
 
   // ── COMBINADO — 3 categorías ──────────────────────────────────────────────
   const seen2=new Set(); _pools.combinado=[];
@@ -2746,7 +2763,9 @@ $('cfgMax').addEventListener('change',()=>{ if(_prods.length>0) poblarCandidatos
 $('cfgFormato').addEventListener('change',()=>{ /* solo afecta al generar */ });
 // Mostrar versión
 const _vEl=document.getElementById('badgeVer');
-if(_vEl)_vEl.textContent=VERSION;
+if(_vEl)_vEl.textContent=APP_VERSION;
+const _tEl=document.getElementById('pageTitle');
+if(_tEl)_tEl.textContent='🖼️ Flyer · Copihue '+APP_VERSION;
 recargar();
 </script>
 </body>
