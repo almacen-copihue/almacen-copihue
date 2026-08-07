@@ -314,7 +314,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
   <div class="h-brand">
     <div class="h-icon">🖼</div>
     <div>
-      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v5.33</span></div>
+      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v5.35</span></div>
       <div class="h-sub">Generador para redes sociales</div>
     </div>
   </div>
@@ -530,7 +530,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-const VERSION = 'v5.33';
+const VERSION = 'v5.35';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -760,37 +760,61 @@ async function recargar(){
     try{ const ro=await gasGet('getOfertas'); _of=ro.success?ro:{}; }
     catch(e){ _of={}; }
 
-    // 3b. Multicompra (2x1, 3x2, etc.) — endpoint dedicado del módulo
-    // flyer_multicompra.gs (acción "getMulticompraTodas"), NO viene dentro de "getOfertas".
+    // 3b. Multicompra (2x1, 3x2, etc.)
+    // Camino A: _of.multicompraActiva — así lo leen seba21.html/sendwa.html/index.html,
+    // viene incluido en la misma respuesta de "getOfertas" de arriba.
+    // Camino B (respaldo): action=getMulticompraTodas — endpoint aparte del módulo
+    // flyer_multicompra.gs, por si en este backend "getOfertas" no lo incluye todavía.
     _poolMulticompra=new Map();
-    _mcDiag = {ok:null, total:0, matcheados:0, sinMatch:[], error:''};
-    try{
-      const rm = await gasGet('getMulticompraTodas');
-      _mcDiag.ok = rm ? rm.ok : false;
-      _mcDiag.total = rm && rm.total || 0;
-      if(rm && rm.ok && Array.isArray(rm.items)){
-        rm.items.forEach(it=>{
-          let id = Number(it.id)||0;
-          if(!id){
-            // El id puede venir vacío en la fila — como respaldo, matcheamos por nombre exacto
-            const nombreQ = quitarAcentos(String(it.nombre||'').toLowerCase()).trim();
-            const match = _prods.find(p=>quitarAcentos(p.name.toLowerCase()).trim()===nombreQ);
-            if(match) id=match.id;
-          }
-          if(!id){ _mcDiag.sinMatch.push(it.nombre||'(sin nombre)'); return; }
-          _mcDiag.matcheados++;
-          _poolMulticompra.set(id,{
-            tipo:     String(it.tipo||'').toUpperCase(),
-            cantidad: it.cantidad||0,
-            precio:   it.precioPack||0, // precio TOTAL del pack (ej: 3 x $5.000 = $5.000 los 3)
-            grupo:    it.grupo||''
-          });
+    _mcDiag = {fuente:'', ok:null, total:0, matcheados:0, sinMatch:[], error:''};
+
+    const mcArrA = _of.multicompraActiva || [];
+    if(mcArrA.length>0){
+      _mcDiag.fuente = 'getOfertas (multicompraActiva)';
+      _mcDiag.ok = true;
+      _mcDiag.total = mcArrA.length;
+      mcArrA.forEach(p=>{
+        const local = _prods.find(x=>x.id===Number(p.id));
+        if(!local){ _mcDiag.sinMatch.push(p.name||p.nombre||('id '+p.id)); return; }
+        _mcDiag.matcheados++;
+        _poolMulticompra.set(local.id,{
+          tipo:     String(p.MULTICOMPRA_TIPO     || '').toUpperCase(),
+          cantidad: p.MULTICOMPRA_CANTIDAD || 0,
+          precio:   p.MULTICOMPRA_PRECIO   || 0, // igual que seba21/sendwa: puede ser unitario o total según cargue la planilla
+          grupo:    p.GRUPO_MULTICOMPRA    || ''
         });
-      } else if(rm && rm.ok===false){
-        _mcDiag.error = rm.error||'(sin detalle)';
-        console.warn('⚠️ getMulticompraTodas devolvió error:', rm.error);
-      }
-    }catch(e){ _mcDiag.error = String(e); console.warn('⚠️ Error cargando multicompra:', e); }
+      });
+    } else {
+      // Respaldo: endpoint dedicado del flyer
+      try{
+        const rm = await gasGet('getMulticompraTodas');
+        _mcDiag.fuente = 'getMulticompraTodas (respaldo)';
+        _mcDiag.ok = rm ? rm.ok : false;
+        _mcDiag.total = rm && rm.total || 0;
+        if(rm && rm.ok && Array.isArray(rm.items)){
+          rm.items.forEach(it=>{
+            let id = Number(it.id)||0;
+            if(!id){
+              // El id puede venir vacío en la fila — como respaldo, matcheamos por nombre exacto
+              const nombreQ = quitarAcentos(String(it.nombre||'').toLowerCase()).trim();
+              const match = _prods.find(p=>quitarAcentos(p.name.toLowerCase()).trim()===nombreQ);
+              if(match) id=match.id;
+            }
+            if(!id){ _mcDiag.sinMatch.push(it.nombre||'(sin nombre)'); return; }
+            _mcDiag.matcheados++;
+            _poolMulticompra.set(id,{
+              tipo:     String(it.tipo||'').toUpperCase(),
+              cantidad: it.cantidad||0,
+              precio:   it.precioPack||0, // precio TOTAL del pack (ej: 3 x $5.000 = $5.000 los 3)
+              grupo:    it.grupo||''
+            });
+          });
+        } else if(rm && rm.ok===false){
+          _mcDiag.error = rm.error||'(sin detalle)';
+          console.warn('⚠️ getMulticompraTodas devolvió error:', rm.error);
+        }
+      }catch(e){ _mcDiag.ok=false; _mcDiag.error = String(e); console.warn('⚠️ Error cargando multicompra:', e); }
+    }
 
     // 4. Cervecero
     try{ const rc=await gasGet('getJuevesCervecero'); _cerv=rc||{}; }
@@ -1479,12 +1503,22 @@ function aplicarExclusionesGenerales(arr){
   return out;
 }
 
+// Quita duplicados por id — un mismo producto puede aparecer repetido en el pool
+// crudo (ej. varias filas de "últimas unidades" para el mismo id); la lista real
+// ya los combina en uno solo vía poblarCandidatos(), así que el conteo del botón
+// tiene que hacer lo mismo para no mostrar un número más alto que lo que se ve.
+function dedupPorId(arr){
+  const vistos=new Set(), out=[];
+  arr.forEach(p=>{ if(p && !vistos.has(p.id)){ vistos.add(p.id); out.push(p); } });
+  return out;
+}
+
 function actualizarBadges(){
   Object.entries(_pools).forEach(([m,pool])=>{
     if(m.startsWith('_')) return; // ignorar pools internos _relTodos, _desTodas
     const el=$('cnt-'+m); const btn=document.querySelector(`[data-modo="${m}"]`);
     if(!el||!btn) return;
-    const n = aplicarExclusionesGenerales(pool).length;
+    const n = aplicarExclusionesGenerales(dedupPorId(pool)).length;
     el.textContent=n;
     btn.classList.toggle('hp',n>0);
   });
@@ -2435,20 +2469,21 @@ function contarOfertasPersonalizadasActivas(){ return (_pools.personalizada||[])
 
 // Diagnóstico de Multicompra directo en pantalla (sin necesitar la consola del navegador).
 function diagnosticoMulticompra(){
-  let msg = `📦 Diagnóstico Multicompra (getMulticompraTodas)\n\n`;
+  let msg = `📦 Diagnóstico Multicompra\n\n`;
+  msg += `Fuente probada: ${_mcDiag.fuente || '(ninguna todavía)'}\n\n`;
   if(_mcDiag.ok===null){
     msg += 'Todavía no se cargó — tocá "↺ Recargar datos" primero.';
   } else if(_mcDiag.ok===false){
-    msg += `❌ El endpoint devolvió error:\n${_mcDiag.error}\n\nRevisá que flyer_multicompra.gs esté agregado al proyecto y que el doGet tenga la línea de "getMulticompraTodas".`;
+    msg += `❌ Error:\n${_mcDiag.error}\n\nSi la fuente fue "getMulticompraTodas", revisá que flyer_multicompra.gs esté agregado al proyecto y que el doGet tenga esa línea.`;
   } else {
-    msg += `Total de filas activas en la planilla: ${_mcDiag.total}\n`;
+    msg += `Total de filas activas: ${_mcDiag.total}\n`;
     msg += `Matcheadas con un producto del catálogo: ${_mcDiag.matcheados}\n`;
     if(_mcDiag.sinMatch.length){
       msg += `\n⚠️ No se pudieron relacionar con ningún producto (id vacío y el nombre no coincide exacto):\n${_mcDiag.sinMatch.join('\n')}`;
     } else if(_mcDiag.total>0){
       msg += `\n✅ Todas matcheadas correctamente.`;
     } else {
-      msg += `\nNo hay ninguna fila con MULTICOMPRA_ACTIVA = "SI" en este momento en la planilla.`;
+      msg += `\nNi "getOfertas" ni "getMulticompraTodas" tienen ninguna fila activa (MULTICOMPRA_ACTIVA = "SI") en este momento.`;
     }
   }
   alert(msg);
