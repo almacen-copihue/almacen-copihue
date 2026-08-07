@@ -530,7 +530,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-const VERSION = 'v5.35';
+const VERSION = 'v5.36';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -914,17 +914,26 @@ function calcCombo(p){
   return {po:p.price, et:'🎯 COMBO -'+pct+'%', pct, eslogan:'Combo del día'};
 }
 
-// Últimas unidades — idéntico a calcularDescuentoUltimas del index.html
-// diasVenc<=3 → -25%, sino usa código relámpago del producto
-function calcUltimas(p, diasParaVencer){
-  let pct;
-  if(diasParaVencer!==null&&diasParaVencer!==undefined&&diasParaVencer<=3){
-    pct=25;
+// Últimas unidades — precio y % vienen de Code.gs (planilla manda, igual que
+// seba21.html/sendwa.html: u.precioOferta / u.precio / u.pct son la fuente de
+// verdad). Solo si no vienen (ej. fallback local por stock bajo, sin dato de
+// backend) se recalcula acá con la misma regla que index.html:
+// diasVenc<=3 → -25%, sino usa código relámpago del producto.
+function calcUltimas(p, diasParaVencer, ofertaData){
+  const u = ofertaData || {};
+  let po, pct;
+  if(u.precioOferta!=null || u.pct!=null){
+    pct = u.pct!=null ? u.pct : (p.price>0 ? Math.round((1-u.precioOferta/p.price)*100) : 0);
+    po  = u.precioOferta!=null ? u.precioOferta : Math.round(p.price*(1-pct/100));
   } else {
-    const cfg=ORS[String(p.rel)];
-    pct=(cfg&&cfg.tipo==='pct'&&cfg.descuento>0)?cfg.descuento:10;
+    if(diasParaVencer!==null&&diasParaVencer!==undefined&&diasParaVencer<=3){
+      pct=25;
+    } else {
+      const cfg=ORS[String(p.rel)];
+      pct=(cfg&&cfg.tipo==='pct'&&cfg.descuento>0)?cfg.descuento:10;
+    }
+    po=Math.round(p.price*(1-pct/100));
   }
-  const po=Math.round(p.price*(1-pct/100));
   const diasLabel=diasParaVencer!==null&&diasParaVencer!==undefined
     ?(diasParaVencer===0?'⚠️ Vence hoy':'Vence en '+diasParaVencer+'d'):'';
   return {po, et:'ÚLTIMAS -'+pct+'%', pct, diasLabel};
@@ -1070,7 +1079,7 @@ function construirPools(){
     _pools.ultimas = ultSrc.map(u=>{
       const p = _prods.find(x=>x.id===Number(u.id));
       if(!p||p.stock<=0) return null;
-      const calc = calcUltimas(p, u.diasParaVencer);
+      const calc = calcUltimas(p, u.diasParaVencer, u);
       return {...p, ...calc};
     }).filter(Boolean);
   } else {
@@ -1107,13 +1116,18 @@ function construirPools(){
   // _poolMulticompra viene de action=getMulticompraTodas (flyer_multicompra.gs).
   // mc.precio = precio TOTAL del pack (no unitario) — se muestra con la estrella
   // "estallido" en vez del badge normal (ver drawCard/drawStarburst).
+  // GRUPAL (mc.grupo): combina entre productos distintos — misma lectura que
+  // seba21.html/sendwa.html ("📦 Combinable AT x $AU"), NO es "llevá AT de este
+  // mismo producto". INDIVIDUAL (sin grupo): "AT x $precio" o "2da unidad" según tipo.
   _pools.multicompra = [..._poolMulticompra.keys()].map(id=>{
     const p=_prods.find(x=>x.id===id);
     if(!p||p.stock<=0) return null;
     const mc=_poolMulticompra.get(id);
-    const etiqueta = mc.tipo==='2DA_UNIDAD'
-      ? `📦 2da unidad a $${fmt(mc.precio)}`
-      : `📦 ${mc.cantidad}x $${fmt(mc.precio)}`;
+    const etiqueta = mc.grupo
+      ? `📦 Combinable ${mc.cantidad}x $${fmt(mc.precio)}`
+      : mc.tipo==='2DA_UNIDAD'
+        ? `📦 2da unidad a $${fmt(mc.precio)}`
+        : `📦 ${mc.cantidad}x $${fmt(mc.precio)}`;
     return {...p, po:p.price, et:etiqueta, pct:0, mc:{...mc, etiqueta}};
   }).filter(Boolean);
 
@@ -1134,7 +1148,7 @@ function construirPools(){
    ..._pools.promos,
    ...(_of.ultimasSeleccionadasSiempre||[]).map(u=>{
      const p=_prods.find(x=>x.id===Number(u.id));
-     return p?{...p,...calcUltimas(p,u.diasParaVencer)}:null;
+     return p?{...p,...calcUltimas(p,u.diasParaVencer,u)}:null;
    }).filter(Boolean),
    ..._pools.cervecero]
     .forEach(p=>{if(p&&!seen.has(p.id)){seen.add(p.id);_pools.manual.push(p);}});
