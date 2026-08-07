@@ -314,7 +314,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
   <div class="h-brand">
     <div class="h-icon">🖼</div>
     <div>
-      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v5.32</span></div>
+      <div class="h-title">Copihue Flyer <span style="font-family:var(--mono);font-size:.6rem;font-weight:400;opacity:.7;background:rgba(255,255,255,.15);border-radius:4px;padding:1px 6px;margin-left:4px;vertical-align:middle" id="badgeVer">v5.33</span></div>
       <div class="h-sub">Generador para redes sociales</div>
     </div>
   </div>
@@ -530,7 +530,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-const VERSION = 'v5.32';
+const VERSION = 'v5.33';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -676,7 +676,8 @@ let _prods = [];
 let _of    = {};
 let _cerv  = {};
 let _pools = {};
-let _poolMulticompra = new Map(); // id → {tipo,cantidad,precio,grupo} — desde _of.multicompraActiva (mismo GAS que sendwa.html)
+let _poolMulticompra = new Map(); // id → {tipo,cantidad,precio,grupo} — desde action=getMulticompraTodas (flyer_multicompra.gs)
+let _mcDiag = {}; // info de la última carga, para el botón de diagnóstico en pantalla
 let _modo  = null;
 let _modos = new Set(); // multi-selección de modos — arranca vacío, elegís vos
 let _cand  = [];
@@ -759,28 +760,37 @@ async function recargar(){
     try{ const ro=await gasGet('getOfertas'); _of=ro.success?ro:{}; }
     catch(e){ _of={}; }
 
-    // 3b. Multicompra (2x1, 3x2, etc.) — mismo campo que usa sendwa.html.
-    // Probamos varios nombres posibles por si el campo real se llama distinto.
+    // 3b. Multicompra (2x1, 3x2, etc.) — endpoint dedicado del módulo
+    // flyer_multicompra.gs (acción "getMulticompraTodas"), NO viene dentro de "getOfertas".
     _poolMulticompra=new Map();
-    const _mcArr = _of.multicompraActiva || _of.multicompraActivas || _of.multicompra || _of.multiCompraActiva || [];
-    _mcArr.forEach(p=>{
-      const id=Number(p.id);
-      _poolMulticompra.set(id,{
-        tipo:     p.MULTICOMPRA_TIPO     ?? p.tipo     ?? '',
-        cantidad: p.MULTICOMPRA_CANTIDAD ?? p.cantidad ?? 0,
-        precio:   p.MULTICOMPRA_PRECIO   ?? p.precio   ?? 0,
-        grupo:    p.GRUPO_MULTICOMPRA    ?? p.grupo    ?? ''
-      });
-    });
-    // Diagnóstico: si no se detectó nada, mostrar en consola las claves de _of
-    // para encontrar el nombre real del campo (F12 → Console).
-    if(_poolMulticompra.size===0){
-      const clavesConMulti = Object.keys(_of).filter(k=>/multi|combo|pack/i.test(k));
-      console.warn('⚠️ Multicompra: no se detectó ningún producto.',
-        '\nClaves de _of que llegaron:', Object.keys(_of),
-        '\nClaves que podrían ser multicompra:', clavesConMulti.length?clavesConMulti:'(ninguna coincide con "multi/combo/pack")',
-        '\nSi alguna de esas es la correcta, pasámela y ajusto el nombre del campo.');
-    }
+    _mcDiag = {ok:null, total:0, matcheados:0, sinMatch:[], error:''};
+    try{
+      const rm = await gasGet('getMulticompraTodas');
+      _mcDiag.ok = rm ? rm.ok : false;
+      _mcDiag.total = rm && rm.total || 0;
+      if(rm && rm.ok && Array.isArray(rm.items)){
+        rm.items.forEach(it=>{
+          let id = Number(it.id)||0;
+          if(!id){
+            // El id puede venir vacío en la fila — como respaldo, matcheamos por nombre exacto
+            const nombreQ = quitarAcentos(String(it.nombre||'').toLowerCase()).trim();
+            const match = _prods.find(p=>quitarAcentos(p.name.toLowerCase()).trim()===nombreQ);
+            if(match) id=match.id;
+          }
+          if(!id){ _mcDiag.sinMatch.push(it.nombre||'(sin nombre)'); return; }
+          _mcDiag.matcheados++;
+          _poolMulticompra.set(id,{
+            tipo:     String(it.tipo||'').toUpperCase(),
+            cantidad: it.cantidad||0,
+            precio:   it.precioPack||0, // precio TOTAL del pack (ej: 3 x $5.000 = $5.000 los 3)
+            grupo:    it.grupo||''
+          });
+        });
+      } else if(rm && rm.ok===false){
+        _mcDiag.error = rm.error||'(sin detalle)';
+        console.warn('⚠️ getMulticompraTodas devolvió error:', rm.error);
+      }
+    }catch(e){ _mcDiag.error = String(e); console.warn('⚠️ Error cargando multicompra:', e); }
 
     // 4. Cervecero
     try{ const rc=await gasGet('getJuevesCervecero'); _cerv=rc||{}; }
@@ -1070,9 +1080,9 @@ function construirPools(){
   }
 
   // ── MULTICOMPRA (2x1, 3x2, etc.) ────────────────────────────────────────────
-  // _poolMulticompra viene de _of.multicompraActiva (mismo campo que sendwa.html).
-  // No tiene precio unitario fijo — se muestra con la estrella "estallido" en vez
-  // del badge normal (ver drawCard/drawStarburst).
+  // _poolMulticompra viene de action=getMulticompraTodas (flyer_multicompra.gs).
+  // mc.precio = precio TOTAL del pack (no unitario) — se muestra con la estrella
+  // "estallido" en vez del badge normal (ver drawCard/drawStarburst).
   _pools.multicompra = [..._poolMulticompra.keys()].map(id=>{
     const p=_prods.find(x=>x.id===id);
     if(!p||p.stock<=0) return null;
@@ -2423,18 +2433,24 @@ function aplicarOfertaManual(){
 
 function contarOfertasPersonalizadasActivas(){ return (_pools.personalizada||[]).length; }
 
-// Diagnóstico de Multicompra directo en pantalla (sin necesitar la consola del navegador,
-// que en el celular es complicado de abrir).
+// Diagnóstico de Multicompra directo en pantalla (sin necesitar la consola del navegador).
 function diagnosticoMulticompra(){
-  const claves = Object.keys(_of||{});
-  const clavesSospechosas = claves.filter(k=>/multi|combo|pack|cantidad/i.test(k));
-  const n = _poolMulticompra.size;
-  let msg = `📦 Diagnóstico Multicompra\n\n`;
-  msg += `Productos detectados en multicompra: ${n}\n\n`;
-  msg += `Claves que llegaron de "getOfertas" (${claves.length} en total):\n${claves.length?claves.join(', '):'(ninguna — _of vino vacío)'}\n\n`;
-  msg += clavesSospechosas.length
-    ? `⚠️ Estas podrían ser la de multicompra:\n${clavesSospechosas.join(', ')}\n\nMandame este texto tal cual y ajusto el nombre del campo.`
-    : `No hay ninguna clave que suene a "multicompra/combo/pack" entre las que llegaron.\nEsto probablemente significa que ese dato no viene en esta respuesta del backend — puede que haya que agregarlo del lado del Apps Script, o que venga en otra acción distinta a "getOfertas".`;
+  let msg = `📦 Diagnóstico Multicompra (getMulticompraTodas)\n\n`;
+  if(_mcDiag.ok===null){
+    msg += 'Todavía no se cargó — tocá "↺ Recargar datos" primero.';
+  } else if(_mcDiag.ok===false){
+    msg += `❌ El endpoint devolvió error:\n${_mcDiag.error}\n\nRevisá que flyer_multicompra.gs esté agregado al proyecto y que el doGet tenga la línea de "getMulticompraTodas".`;
+  } else {
+    msg += `Total de filas activas en la planilla: ${_mcDiag.total}\n`;
+    msg += `Matcheadas con un producto del catálogo: ${_mcDiag.matcheados}\n`;
+    if(_mcDiag.sinMatch.length){
+      msg += `\n⚠️ No se pudieron relacionar con ningún producto (id vacío y el nombre no coincide exacto):\n${_mcDiag.sinMatch.join('\n')}`;
+    } else if(_mcDiag.total>0){
+      msg += `\n✅ Todas matcheadas correctamente.`;
+    } else {
+      msg += `\nNo hay ninguna fila con MULTICOMPRA_ACTIVA = "SI" en este momento en la planilla.`;
+    }
+  }
   alert(msg);
 }
 
