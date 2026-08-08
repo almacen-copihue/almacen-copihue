@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>📥 Ingreso · Copihue v18</title>
+  <title>📥 Ingreso · Copihue v17</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -567,17 +567,6 @@
 //        pisaba la pantalla. Ahora cada búsqueda tiene un ID de secuencia y se
 //        descartan las respuestas obsoletas. Además: aparece "🔎 Buscando..."
 //        de inmediato en vez de dejar el panel vacío durante el debounce.
-// v18 — Idempotencia real contra duplicados por mala conexión (no por
-//        producto+cantidad — eso da falsos positivos con compras legítimas
-//        iguales). idOperacion ahora persiste entre reintentos (se genera
-//        una sola vez, se reutiliza hasta que el servidor confirma éxito,
-//        recién ahí se limpia). Ante timeout, ya no invita a "revisar el
-//        Historial a mano": consulta sola el endpoint nuevo
-//        action=buscarOperacion y le dice al usuario si el ingreso SÍ se
-//        guardó (con hora exacta) o si NO se guardó y puede reintentar
-//        tranquilo. REQUIERE Code.gs actualizado: buscarPorIdOperacion() /
-//        buscarOperacion() nuevas, ingresarMercaderia() ahora rechaza
-//        idOperacion repetidos sin volver a sumar stock.
 // v15 — Reemplaza el panel "deshacer último ingreso" (1 solo) por un panel
 //        plegable "🕘 Últimos ingresos" con los últimos 8 movimientos, cada uno
 //        con su propio botón Deshacer. Cubre el caso de detectar el error 2-3
@@ -924,7 +913,7 @@ function mostrarBuscando() {
 function seleccionarProducto(nombre) {
   document.getElementById('producto').value = nombre;
   document.getElementById('autoList').classList.remove('open');
-  buscarInfo(nombre);
+  mostrarInfoLocal(nombre);
 }
 
 // Cerrar dropdowns al click fuera
@@ -938,107 +927,90 @@ document.addEventListener('click', function(e) {
   }
 });
 
-// ── BUSCAR INFO PRODUCTO ───────────────────────────────────────────────────────
-let _buscarInfoSeq = 0; // contador de búsquedas — evita que una respuesta vieja pise a una más nueva
-
-async function buscarInfo(nombre) {
-  if (!nombre || nombre.length < 2) return;
-
-  const miSeq = ++_buscarInfoSeq; // esta búsqueda es la más reciente al momento de salir
-
+// ── INFO PRODUCTO (LOCAL, SIN FETCH) ────────────────────────────────────────────
+// Antes esto hacía un fetch al GAS (action=getInfoProducto) por cada producto
+// elegido, lo que era una fuente extra de errores/lentitud de conexión.
+// _productosMap ya tiene toda esta info (categoría, costo, precio, proveedor,
+// stock) cargada una sola vez en init() — la misma fuente que usa la lista de
+// sugerencias — así que mostrarla es instantáneo y no depende de la red.
+function mostrarInfoLocal(nombre) {
   const infoDiv = document.getElementById('info');
-  const loading = document.getElementById('loadingInfo');
-  loading.classList.add('active');
-  mostrarBuscando();
+  const p = _productosMap[nombre];
 
-  try {
-    const r    = await fetch(API_URL + '?action=getInfoProducto&nombre=' + encodeURIComponent(nombre) + '&t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(15000) });
-    const data = await r.json();
-
-    // Si mientras esperábamos la respuesta el usuario ya disparó otra búsqueda
-    // más nueva, esta respuesta llegó tarde — la descartamos sin tocar la pantalla
-    if (miSeq !== _buscarInfoSeq) return;
-
-    loading.classList.remove('active');
-    setConnStatus('online');
-
-    if (!data.encontrado) {
-      _esNuevo = true;
-      document.getElementById('catInputBox').classList.add('nuevo-producto');
-      document.getElementById('avisoCategoria').classList.add('visible');
-      infoDiv.style.display = 'block';
-      infoDiv.innerHTML = `
-        <div class="info-foto-wrap">
-          <img class="info-foto" src="${urlFoto(nombre)}" onerror="this.style.display='none'" loading="lazy">
-          <div class="info-texto">
-            <span class="alerta">⚠️ Producto no encontrado</span><br>
-            <small>Se creará como nuevo — seleccioná la categoría antes de guardar</small>
-          </div>
-        </div>`;
-      return;
-    }
-
-    _esNuevo = false;
-    document.getElementById('catInputBox').classList.remove('nuevo-producto');
-    document.getElementById('avisoCategoria').classList.remove('visible');
-
-    // ── PRECARGA COMPLETA DEL ÚLTIMO INGRESO ──────────────────────────
-    let precargo = false;
-
-    // Categoría (siempre se setea)
-    if (data.categoria) {
-      setCategoriaByValue(data.categoria);
-      precargo = true;
-    }
-
-    // Costo (siempre se pisa, es el dato más crítico del ingreso)
-    if (data.precioCosto) {
-      document.getElementById('precioCosto').value = data.precioCosto;
-      toggleClear('precioCosto');
-      calcularSugerido();
-      precargo = true;
-    }
-
-    if (data.precioVenta) {
-      document.getElementById('precioVenta').value = data.precioVenta;
-      toggleClear('precioVenta');
-      precargo = true;
-    }
-
-    if (data.proveedor) {
-      document.getElementById('proveedor').value = data.proveedor;
-      toggleClear('proveedor');
-      precargo = true;
-    }
-
-    // Fecha vencimiento: no se precarga (cada remesa puede ser diferente)
-
-    // Cantidad: siempre resetear a 1 — el operador la ajusta según lo que llegó
-    document.getElementById('cantidad').value = 1;
-
-    if (precargo) mostrarBannerPrecargado();
-
-    // Panel info (stock actual)
+  if (!p) {
+    _esNuevo = true;
+    document.getElementById('catInputBox').classList.add('nuevo-producto');
+    document.getElementById('avisoCategoria').classList.add('visible');
     infoDiv.style.display = 'block';
     infoDiv.innerHTML = `
       <div class="info-foto-wrap">
         <img class="info-foto" src="${urlFoto(nombre)}" onerror="this.style.display='none'" loading="lazy">
         <div class="info-texto">
-          <strong>📊 Datos actuales en planilla:</strong><br>
-          Stock actual: <strong>${data.stockActual ?? '—'}</strong> unidades<br>
-          Precio venta: <span class="precio-grande">$${Number(data.precioVenta||0).toLocaleString('es-AR')}</span>
-          ${data.precioCosto ? '<br>Último costo: <strong>$' + Number(data.precioCosto).toLocaleString('es-AR') + '</strong>' : ''}
-          ${data.proveedor   ? '<br>Proveedor: <strong>' + data.proveedor + '</strong>' : ''}
+          <span class="alerta">⚠️ Producto no encontrado</span><br>
+          <small>Se creará como nuevo — seleccioná la categoría antes de guardar</small>
         </div>
-      </div>
-    `;
-
-  } catch(e) {
-    if (miSeq !== _buscarInfoSeq) return; // respuesta obsoleta, ignorar
-    loading.classList.remove('active');
-    setConnStatus('offline');
-    console.warn('Error buscando info:', e);
+      </div>`;
+    return;
   }
+
+  _esNuevo = false;
+  document.getElementById('catInputBox').classList.remove('nuevo-producto');
+  document.getElementById('avisoCategoria').classList.remove('visible');
+
+  const categoria   = p.category || p.categoria || '';
+  const precioCosto = Number(p.precioCosto) || 0;
+  const precioVenta = Number(p.price ?? p.precioVenta) || 0;
+  const proveedor   = (p.proveedor || '').trim();
+  const stockActual = (p.stock !== undefined && p.stock !== null && p.stock !== '') ? p.stock : '—';
+
+  // ── PRECARGA COMPLETA DEL ÚLTIMO INGRESO ──────────────────────────
+  let precargo = false;
+
+  if (categoria) {
+    setCategoriaByValue(categoria);
+    precargo = true;
+  }
+
+  if (precioCosto) {
+    document.getElementById('precioCosto').value = precioCosto;
+    toggleClear('precioCosto');
+    calcularSugerido();
+    precargo = true;
+  }
+
+  if (precioVenta) {
+    document.getElementById('precioVenta').value = precioVenta;
+    toggleClear('precioVenta');
+    precargo = true;
+  }
+
+  if (proveedor) {
+    document.getElementById('proveedor').value = proveedor;
+    toggleClear('proveedor');
+    precargo = true;
+  }
+
+  // Fecha vencimiento: no se precarga (cada remesa puede ser diferente)
+
+  // Cantidad: siempre resetear a 1 — el operador la ajusta según lo que llegó
+  document.getElementById('cantidad').value = 1;
+
+  if (precargo) mostrarBannerPrecargado();
+
+  // Panel info (stock actual)
+  infoDiv.style.display = 'block';
+  infoDiv.innerHTML = `
+    <div class="info-foto-wrap">
+      <img class="info-foto" src="${urlFoto(nombre)}" onerror="this.style.display='none'" loading="lazy">
+      <div class="info-texto">
+        <strong>📊 Datos actuales en planilla:</strong><br>
+        Stock actual: <strong>${stockActual}</strong> unidades<br>
+        Precio venta: <span class="precio-grande">$${precioVenta.toLocaleString('es-AR')}</span>
+        ${precioCosto ? '<br>Último costo: <strong>$' + precioCosto.toLocaleString('es-AR') + '</strong>' : ''}
+        ${proveedor   ? '<br>Proveedor: <strong>' + proveedor + '</strong>' : ''}
+      </div>
+    </div>
+  `;
 }
 
 function resetCategoria() {
@@ -1187,7 +1159,6 @@ async function deshacerItem(idx, fila, producto, cantidad) {
 // ── GUARDAR ────────────────────────────────────────────────────────────────────
 let _guardando = false; // lock duro contra doble-submit
 let _ultimoIngreso = null; // referencia al último ingreso guardado (informativo)
-let _idOperacionActual = null; // persiste entre reintentos — recién se limpia al confirmar éxito
 
 // Límites razonables — más allá de esto, casi seguro es un error de tipeo
 // (ej: 10000000000 en vez de 10, o un cero de más por apoyar el dedo)
@@ -1273,14 +1244,9 @@ async function guardar() {
   btn.disabled    = true;
   btn.textContent = '⏳ Guardando...';
 
-  // ID único de esta operación — se genera UNA sola vez y se reutiliza en
-  // cada reintento hasta que el servidor confirme éxito. Recién ahí se limpia
-  // (en limpiar()) y el próximo guardado genera uno nuevo. Así el servidor
-  // puede detectar si ya procesó esta misma operación.
-  if (!_idOperacionActual) {
-    _idOperacionActual = 'ing_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-  }
-  const idOperacion = _idOperacionActual;
+  // ID único de esta operación — el GAS lo puede usar para detectar
+  // si esta misma request ya fue procesada (evita duplicados por reintento)
+  const idOperacion = 'ing_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
 
   try {
     const datos = { producto: nombre, cantidad, categoria, precioCosto, precioVenta, proveedor, fechaVencimiento, idOperacion };
@@ -1295,11 +1261,7 @@ async function guardar() {
     setConnStatus('online');
 
     if (res.success) {
-      if (res.yaExistia) {
-        toast(`✅ Ese ingreso ya estaba registrado a las ${res.fecha}. No se volvió a sumar stock.`);
-      } else {
-        toast('✅ ' + res.mensaje);
-      }
+      toast('✅ ' + res.mensaje);
       // Guardar referencia informativa del último ingreso
       _ultimoIngreso = { idOperacion, producto: nombre, cantidad };
       // Abrir (o refrescar) el panel de historial para que el botón de
@@ -1314,42 +1276,15 @@ async function guardar() {
     btn.textContent = '✅ Guardar Ingreso';
     _guardando = false;
     setConnStatus('offline');
+    // Aviso explícito: si fue timeout, puede que el GAS SÍ haya guardado.
+    // No reintentar a ciegas — revisar el historial antes de volver a tocar "Guardar".
     if (e.name === 'TimeoutError' || e.name === 'AbortError') {
-      // No sabemos si el guardado llegó al servidor — lo consultamos solos
-      // en vez de hacer que el usuario abra el Historial a mano.
-      toast('⏳ Sin respuesta — verificando si se guardó...', true);
-      const yaEstaba = await verificarSiSeGuardo(idOperacion);
-      if (yaEstaba && yaEstaba.existe) {
-        toast(`✅ Ese ingreso ya estaba registrado a las ${yaEstaba.fecha}. No se volvió a sumar stock.`);
-        _ultimoIngreso = { idOperacion, producto: nombre, cantidad };
-        if (!_historialAbierto) toggleHistorial(); else cargarHistorial();
-        limpiar();
-      } else if (yaEstaba === false) {
-        toast('❌ Confirmado: NO se guardó. Podés tocar "Guardar" de nuevo tranquilo.', true);
-      } else {
-        toast('⚠️ No pude confirmar si se guardó. Revisá el Historial antes de reintentar.', true);
-      }
+      toast('⚠️ Sin respuesta del servidor. Revisá el Historial antes de reintentar — puede que sí se haya guardado.', true);
     } else {
       toast('❌ Error de conexión — revisá el Historial antes de reintentar', true);
     }
     console.error(e);
   }
-}
-
-// Consulta si un idOperacion ya quedó registrado en el Historial — endpoint
-// dedicado y puntual (no depende de cuántos movimientos más se hayan
-// cargado mientras tanto). Devuelve el objeto {existe, fecha, fila, ...} si
-// existe, false si no, o null si tampoco se pudo consultar (sin conexión
-// también para esto).
-async function verificarSiSeGuardo(idOp) {
-  try {
-    const r = await fetch(API_URL + '?action=buscarOperacion&id=' + encodeURIComponent(idOp) + '&t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(15000) });
-    const data = await r.json();
-    if (data && typeof data.existe === 'boolean') {
-      return data.existe ? data : false;
-    }
-  } catch (e) { /* no se pudo consultar — se informa como indeterminado */ }
-  return null;
 }
 
 function limpiar() {
@@ -1374,7 +1309,6 @@ function limpiar() {
   document.getElementById('btnGuardar').classList.remove('alerta-valor');
   document.getElementById('avisoValorRaro').classList.remove('visible');
   document.getElementById('avisoValorRaro').innerHTML = '';
-  _idOperacionActual = null; // esta operación ya se confirmó guardada — la próxima es nueva
   document.getElementById('producto').focus();
 }
 
