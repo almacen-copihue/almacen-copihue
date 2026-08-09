@@ -537,7 +537,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbzWZzDvdGfW8vd2-FpQolT852cdPMeHbfKugn9DBOlju75bE1D0SUNB5EKEDOsI2vP4lA/exec'; // v5.38: alineado con seba21/sendwa — el flyer apuntaba a otro deployment de Apps Script
-const APP_VERSION = 'v5.40'; // v5.40: botón "Vaciar" en Cotización rápida — resetea la lista armada de a un producto sin tener que destildar uno por uno
+const APP_VERSION = 'v5.43';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -1560,9 +1560,13 @@ function toggleLog(){
 // Exclusiones generales (mínimo $1.500 / Electrónica y Tecnología) — aplican a
 // TODOS los modos. Centralizada acá para que el conteo de cada botón (badge) y la
 // lista real de candidatos usen siempre el mismo criterio y no queden desincronizados.
-function aplicarExclusionesGenerales(arr){
+// opts.skipElectro=true: no aplica el filtro de Electrónica/Tecnología aunque el
+// checkbox esté destildado. Se usa en Destacadas (v5.43) — esa exclusión se pensó
+// para "Grilla Normal / productos más vendidos", no para Destacados.
+function aplicarExclusionesGenerales(arr, opts){
+  opts = opts || {};
   const exclMin     = $('cfgExclMin') && $('cfgExclMin').checked;
-  const inclElectro = $('cfgInclElectro') && $('cfgInclElectro').checked;
+  const inclElectro = opts.skipElectro || ($('cfgInclElectro') && $('cfgInclElectro').checked);
   let out = arr;
   if(exclMin) out = out.filter(p=>p.price>=1500);
   if(!inclElectro){
@@ -1590,7 +1594,10 @@ function actualizarBadges(){
     if(m.startsWith('_')) return; // ignorar pools internos _relTodos, _desTodas
     const el=$('cnt-'+m); const btn=document.querySelector(`[data-modo="${m}"]`);
     if(!el||!btn) return;
-    const n = aplicarExclusionesGenerales(dedupPorId(pool)).length;
+    const deduped = dedupPorId(pool);
+    // Destacadas no usa el filtro de Electrónica/Tecnología — ver nota en
+    // aplicarExclusionesGenerales (v5.43).
+    const n = aplicarExclusionesGenerales(deduped, {skipElectro: m==='destacadas'}).length;
     el.textContent=n;
     btn.classList.toggle('hp',n>0);
   });
@@ -1652,17 +1659,17 @@ function setModo(modo,btn){
 function poblarCandidatos(){
   const max=parseInt($('cfgMax').value)||50;
 
-  // Combinar pools de todos los modos activos (sin duplicados)
+  // Combinar pools de todos los modos activos (sin duplicados).
+  // Exclusiones por modo — Destacadas no filtra Electrónica/Tecnología (v5.43,
+  // ver nota en aplicarExclusionesGenerales), los demás sí.
   const visto = new Set();
   _cand = [];
   _modos.forEach(m=>{
-    (_pools[m]||[]).forEach(p=>{
+    const filtrado = aplicarExclusionesGenerales(_pools[m]||[], {skipElectro: m==='destacadas'});
+    filtrado.forEach(p=>{
       if(!visto.has(p.id)){ visto.add(p.id); _cand.push(p); }
     });
   });
-
-  // Exclusiones generales — aplican a TODOS los modos, no solo Grilla Normal
-  _cand = aplicarExclusionesGenerales(_cand);
 
   _sel.clear();
   _cand.slice(0,max).forEach(p=>_sel.add(p.id));
