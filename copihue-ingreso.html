@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>📥 Ingreso · Copihue v17</title>
+  <title>📥 Ingreso · Copihue</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -453,7 +453,7 @@
       <span class="conn-status" id="connStatus" title="Verificando conexión...">
         <span class="conn-dot"></span><span class="conn-text">Conectando...</span>
       </span>
-      <span class="version">v17</span>
+      <span class="version" id="versionBadge"></span>
     </span>
   </h3>
 
@@ -553,6 +553,21 @@
 
 <script>
 // ── Changelog ──────────────────────────────────────────────────────────────────
+// v18 — Se saca el fetch de red por cada producto elegido (buscarInfo/
+//        getInfoProducto), fuente de errores de conexión y lentitud. Ahora
+//        seleccionarProducto() lee directo de _productosMap, ya cargado en
+//        memoria desde init() — igual patrón que usa seba21.html, cero
+//        llamadas de red al elegir. Onput ya no dispara fetch por cada
+//        tecleo/pausa (antes: debounce de 600ms golpeando el GAS mientras
+//        el usuario todavía filtraba sugerencias). El chequeo de conexión
+//        cada 60s ahora además refresca en silencio _productosMap con el
+//        stock/precio/costo más reciente de la planilla (antes tiraba esos
+//        datos a la basura), y se dispara también justo después de guardar
+//        o deshacer un ingreso — así el stock que ves acá no queda
+//        desactualizado si otra caja vende el mismo producto mientras tenés
+//        esta pantalla abierta. Se agrega la constante APP_VERSION: de ahí
+//        salen solos el <title> y el badge del header, no se hardcodea más
+//        en dos lugares.
 // v17 — Fotos de producto. Reutiliza el mismo patrón de index.html (catálogo):
 //        URL = raw.githubusercontent.com/almacen-copihue/almacen-copihue/main/
 //        imagenes-productos/ + simplificarNombre(producto) + .jpg. Mismo
@@ -614,6 +629,10 @@
 //       La cantidad se resetea a 1 (lo más común es ingresar nueva remesa).
 // v2 — (base recibida)
 // ──────────────────────────────────────────────────────────────────────────────
+
+const APP_VERSION = 'v18';
+document.title = '📥 Ingreso · Copihue ' + APP_VERSION;
+document.getElementById('versionBadge').textContent = APP_VERSION;
 
 const API_URL = 'https://script.google.com/macros/s/AKfycbzWZzDvdGfW8vd2-FpQolT852cdPMeHbfKugn9DBOlju75bE1D0SUNB5EKEDOsI2vP4lA/exec';
 
@@ -750,15 +769,33 @@ function setConnStatus(estado) {
   el.title = titulos[estado];
 }
 
-// Re-chequeo periódico liviano (cada 60s) — detecta si se cae la conexión
-// mientras el operador sigue trabajando con el formulario ya cargado.
-// Reutiliza el mismo endpoint principal (ya sabemos que responde) en vez de
-// una acción 'ping' que no existe en el GAS.
+// Re-chequeo periódico (cada 60s) — detecta si se cae la conexión mientras
+// el operador sigue trabajando con el formulario ya cargado, Y de paso
+// refresca _productosMap/_productos en silencio con los datos más recientes
+// de la planilla (stock, precio, costo, proveedor). Esto es clave porque
+// desde que abriste esta pantalla esos datos quedan "congelados" en memoria
+// del navegador: si mientras tanto alguien vende el mismo producto en otra
+// caja, sin este refresco vos seguirías viendo el stock viejo al elegirlo acá
+// y podrías terminar cargando stock que en realidad ya no existe.
+// No toca ningún campo que el operador ya esté completando a mano — solo
+// actualiza los datos de base para la próxima vez que se elija un producto.
 async function chequearConexion() {
   try {
     const r = await fetch(API_URL + '?t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(8000) });
-    if (r.ok) { setConnStatus('online'); return; }
-    setConnStatus('offline');
+    if (!r.ok) { setConnStatus('offline'); return; }
+    setConnStatus('online');
+
+    const data = await r.json();
+    const rawProductos = data.productos || [];
+    rawProductos.forEach(p => {
+      if (!p) return;
+      const nombre = typeof p === 'string' ? p : (p.name || p.nombre || '');
+      if (!nombre) return;
+      if (!(nombre in _productosMap) && !_productos.includes(nombre)) {
+        _productos.push(nombre); // producto nuevo cargado por otra caja mientras tanto
+      }
+      if (typeof p === 'object') _productosMap[nombre] = p;
+    });
   } catch(e) {
     setConnStatus('offline');
   }
@@ -1142,6 +1179,7 @@ async function deshacerItem(idx, fila, producto, cantidad) {
       if (_ultimoIngreso && _ultimoIngreso.producto === producto && _ultimoIngreso.cantidad === cantidad) {
         _ultimoIngreso = null;
       }
+      chequearConexion(); // refrescar stock local con lo que quedó tras deshacer
     } else {
       toast('❌ ' + (res.mensaje || 'No se pudo deshacer'), true);
       btn.disabled    = false;
@@ -1267,6 +1305,12 @@ async function guardar() {
       // Abrir (o refrescar) el panel de historial para que el botón de
       // deshacer quede visible de inmediato si el operador se equivocó
       if (!_historialAbierto) toggleHistorial(); else cargarHistorial();
+      // Refrescar en segundo plano el stock/precio/costo de _productosMap
+      // con lo que quedó guardado en la planilla — así, si volvés a elegir
+      // este mismo producto (o cualquier otro) enseguida, ves el stock real
+      // y no el de antes de este ingreso. No bloquea la pantalla ni el
+      // "Guardando..." — se dispara y sigue en paralelo.
+      chequearConexion();
       limpiar();
     } else {
       toast('❌ ' + (res.mensaje || 'Error al guardar'), true);
