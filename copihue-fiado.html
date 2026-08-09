@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>📒 Fiados · Copihue v25</title>
+<title>📒 Fiados · Copihue v26</title>
 <meta name="theme-color" content="#1b5e20">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -631,8 +631,20 @@ async function abrirDet(ticket,idFiado){
 }
 
 // ── COBRAR / ABONAR ────────────────────────────────
+// v26 — Idempotencia real contra pagos/abonos duplicados por mala conexión.
+// abonarFiado() restaba el abono del total CADA VEZ que se llamaba — un
+// reintento tras un timeout descontaba dos veces la plata del cliente.
+// Ahora idOperacion persiste entre reintentos (se genera al abrir el modal
+// de cobro, se reutiliza hasta éxito confirmado) y el servidor lo chequea
+// contra las observaciones de ese fiado antes de restar de nuevo.
+// cobrarFiado() sumó la misma protección de forma defensiva (ya era
+// idempotente para pago total, pero ahora también queda cubierto).
+// REQUIERE Code.gs v10.6+.
+let _idOpCobro = null;
+
 function abrirCobrar(){
   if(_sel.size===0)return;
+  _idOpCobro = 'fia_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
   const selF=[..._sel].map(id=>_cliData.find(f=>f.idFiado===id)).filter(Boolean);
   _montoFull=selF.reduce((s,f)=>s+parseFloat(f.total||0),0);
 
@@ -679,9 +691,9 @@ async function confirmarCob(){
   try{
     if(esAbono&&selArr.length===1){
       // Abono parcial — un solo fiado
-      const r=await _api('abonarFiado',{idFiado:selArr[0],abono:montoIngresado,metodoPago:_met});
+      const r=await _api('abonarFiado',{idFiado:selArr[0],abono:montoIngresado,metodoPago:_met,idOperacion:_idOpCobro});
       if(!r.success)throw new Error(r.mensaje||'Error al abonar');
-      toast('✅ Abono registrado','v');
+      toast(r.yaExistia?'✅ Ese abono ya estaba registrado — no se descontó de nuevo':'✅ Abono registrado','v');
       // Recordatorio de abono
       const f=_cliData.find(x=>x.idFiado===selArr[0]);
       const ref=f?.ticket&&f.ticket.trim()!==''?'Ticket #'+f.ticket:selArr[0];
@@ -697,7 +709,7 @@ async function confirmarCob(){
       // Cobro total de todos los seleccionados
       let err=0;
       for(const id of selArr){
-        const r=await _api('cobrarFiado',{idFiado:id,metodoPago:_met});
+        const r=await _api('cobrarFiado',{idFiado:id,metodoPago:_met,idOperacion:_idOpCobro});
         if(!r.success){err++;toast('❌ '+(r.mensaje||'Error'),'r');}
       }
       if(err>0)throw new Error('Algunos cobros fallaron');
@@ -727,7 +739,7 @@ async function confirmarCob(){
       abrirRec();
     }
   }catch(e){
-    toast('❌ '+e.message,'r');
+    toast('❌ '+e.message+' — podés tocar Confirmar de nuevo, no se va a descontar dos veces','r');
   }finally{
     btn.disabled=false;btn.textContent='✅ Confirmar';
   }
