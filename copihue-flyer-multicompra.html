@@ -459,7 +459,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-const VERSION = 'v1.2';
+const VERSION = 'v1.3';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -695,7 +695,7 @@ async function recargar(){
     // Camino B (respaldo): action=getMulticompraTodas — endpoint aparte del módulo
     // flyer_multicompra.gs, por si en este backend "getOfertas" no lo incluye todavía.
     _poolMulticompra=new Map();
-    _mcDiag = {fuente:'', ok:null, total:0, matcheados:0, sinMatch:[], error:'', muestra:[], rawKeys:[]};
+    _mcDiag = {fuente:'', ok:null, total:0, matcheados:0, sinMatch:[], error:'', muestra:[], rawKeys:[], arrayField:null};
 
     const mcArrA = _of.multicompraActiva || [];
     if(mcArrA.length>0){
@@ -725,16 +725,20 @@ async function recargar(){
 
         // El array puede llamarse "items" (como dice el .gs) u otra cosa si algo
         // se transformó en el camino — probamos varios nombres posibles.
-        const itemsArr = Array.isArray(rm?.items) ? rm.items
-                        : Array.isArray(rm?.productos) ? rm.productos
-                        : Array.isArray(rm?.data) ? rm.data
-                        : null;
+        const arrayField = Array.isArray(rm?.items) ? 'items'
+                          : Array.isArray(rm?.productos) ? 'productos'
+                          : Array.isArray(rm?.data) ? 'data'
+                          : null;
+        const itemsArr = arrayField ? rm[arrayField] : null;
+        _mcDiag.arrayField = arrayField;
 
         _mcDiag.ok = rm ? (rm.ok!==undefined ? !!rm.ok : (itemsArr?true:false)) : false;
         _mcDiag.total = (rm && rm.total) || (itemsArr?itemsArr.length:0) || 0;
 
         if(itemsArr){
-          _mcDiag.muestra = itemsArr.slice(0,5).map(it=>({id:it.id, nombre:it.nombre, tipo:it.tipo, cant:it.cantidad, precio:it.precioPack}));
+          // Volcamos el objeto CRUDO completo (no solo los 4 campos que esperábamos)
+          // para ver la forma real, por si los nombres de propiedad son otros.
+          _mcDiag.muestra = itemsArr.slice(0,3).map(it=>JSON.stringify(it));
           itemsArr.forEach(it=>{
             let id = Number(it.id)||0;
             if(!id){
@@ -790,18 +794,21 @@ function actualizarMcDiagBox(){
     html += `<b>Filas activas recibidas:</b> ${_mcDiag.total||0}<br>`;
     html += `<b>Matcheadas con el catálogo:</b> ${_mcDiag.matcheados||0}<br>`;
     html += `<b>Productos en el flyer:</b> ${n}`;
-    if(_mcDiag.rawKeys && _mcDiag.rawKeys.length && !_mcDiag.muestra.length){
-      html += `<br><b style="color:#a02020">⚠️ Claves recibidas en la respuesta:</b> ${_mcDiag.rawKeys.join(', ')} <span style="color:#888">(no encontré ahí un array de productos con nombre items/productos/data)</span>`;
+    if(_mcDiag.rawKeys && _mcDiag.rawKeys.length){
+      html += `<br><b>Claves de la respuesta:</b> ${_mcDiag.rawKeys.join(', ')}`;
+    }
+    if(_mcDiag.arrayField){
+      html += `<br><b>Array usado:</b> "${_mcDiag.arrayField}"`;
     }
     if(_mcDiag.total>0 && _prods.length>0 && _mcDiag.total >= _prods.length*0.9){
-      html += `<br><b style="color:#a02020">⚠️ Sospechoso:</b> las filas recibidas (${_mcDiag.total}) son casi todo el catálogo (${_prods.length}). Probablemente el filtro MULTICOMPRA_ACTIVA="SI" no se está aplicando del lado del Apps Script — revisá esa columna en la planilla.`;
+      html += `<br><b style="color:#a02020">⚠️ Sospechoso:</b> las filas recibidas (${_mcDiag.total}) son casi todo el catálogo (${_prods.length}).`;
     }
     if(_mcDiag.sinMatch && _mcDiag.sinMatch.length){
       html += `<br><b style="color:#a02020">⚠️ Sin match (${_mcDiag.sinMatch.length}):</b> ${_mcDiag.sinMatch.slice(0,8).join(', ')}${_mcDiag.sinMatch.length>8?'...':''}`;
     }
     if(_mcDiag.muestra && _mcDiag.muestra.length){
-      html += `<br><br><b>Muestra de las primeras filas crudas (para depurar):</b><br>`;
-      html += _mcDiag.muestra.map(m=>`• id="${m.id}" · "${m.nombre}" · tipo="${m.tipo}" · cant=${m.cant} · precio=${m.precio}`).join('<br>');
+      html += `<br><br><b>Objeto CRUDO completo de las primeras 3 filas (para depurar):</b><br>`;
+      html += _mcDiag.muestra.map(m=>`<code style="font-size:.6rem;word-break:break-all;">${m}</code>`).join('<br><br>');
     }
   }
   box.innerHTML = html;
