@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>📒 Fiados · Copihue v26</title>
+<title>📒 Fiados · Copihue</title>
 <meta name="theme-color" content="#1b5e20">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -151,7 +151,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
 
 <div class="hdr" id="hdr">
   <span style="font-size:1.4rem">🌸</span>
-  <div style="flex:1"><div class="hdr-t">Copihue — Fiados</div><div class="hdr-s" id="hdrSub">cargando</div></div>
+  <div style="flex:1"><div class="hdr-t">Copihue — Fiados <span class="ver-badge" id="verBadgeInit" style="font-size:.62rem;font-weight:400;opacity:.75"></span></div><div class="hdr-s" id="hdrSub">cargando</div></div>
   <button class="btn-icon" onclick="cargar()">🔄</button>
 </div>
 
@@ -235,6 +235,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
 <div id="toast"></div>
 
 <script>
+const APP_VERSION=27;
 const API_URL='https://script.google.com/macros/s/AKfycbzWZzDvdGfW8vd2-FpQolT852cdPMeHbfKugn9DBOlju75bE1D0SUNB5EKEDOsI2vP4lA/exec';
 
 // ── Estado ─────────────────────────────────────────
@@ -243,6 +244,8 @@ let _sel=new Set(), _met='EFECTIVO', _recTxt='', _montoFull=0;
 let _todosClientes=[]; // todos los clientes de hoja Clientes
 let _showSinDeuda=false; // toggle sección sin deuda
 let _busqCliente=''; // búsqueda unificada
+let _ordenClientes='monto'; // 'monto' | 'vencidos' | 'reciente'
+let _ordenAsc=false; // tocar el mismo criterio de nuevo invierte el orden
 
 // ── Helpers ────────────────────────────────────────
 const fmt=n=>'$'+Math.round(n).toLocaleString('es-AR');
@@ -304,11 +307,47 @@ async function cargar(){
 }
 
 // ── RENDER CLIENTES ────────────────────────────────
+// Agrupa fiados pendientes por cliente y calcula los campos usados para
+// ordenar: tot (deuda total), venc (cantidad de vencidos), ultFecha (fecha
+// del fiado más reciente, para "último que compró fiado").
+function _agruparClientes(pend){
+  const map={};
+  pend.forEach(f=>{
+    if(!map[f.cliente])map[f.cliente]={nom:f.cliente,tel:f.telefono||'',fiados:[],tot:0};
+    map[f.cliente].fiados.push(f);
+    map[f.cliente].tot+=parseFloat(f.total||0);
+  });
+  return Object.values(map).map(c=>{
+    c.venc=c.fiados.filter(f=>f.estado==='VENCIDO').length;
+    c.ultFecha=c.fiados.reduce((mx,f)=>{const fs=String(f.fecha||'').substring(0,10);return fs>mx?fs:mx;},'');
+    return c;
+  });
+}
+
+// Aplica el criterio de orden elegido (_ordenClientes / _ordenAsc) sobre un
+// array ya agrupado. No muta el array recibido.
+function _ordenarClientes(clis){
+  const dir=_ordenAsc?1:-1;
+  const arr=[...clis];
+  if(_ordenClientes==='vencidos'){
+    arr.sort((a,b)=>dir*((a.venc-b.venc)||(a.tot-b.tot)));
+  } else if(_ordenClientes==='reciente'){
+    arr.sort((a,b)=>dir*(a.ultFecha||'').localeCompare(b.ultFecha||''));
+  } else {
+    arr.sort((a,b)=>dir*(a.tot-b.tot));
+  }
+  return arr;
+}
+
+function _cambiarOrden(criterio){
+  if(_ordenClientes===criterio){_ordenAsc=!_ordenAsc;}
+  else{_ordenClientes=criterio;_ordenAsc=false;}
+  renderClientesLista();
+}
+
 function renderClientes(){
   const pend=_todos.filter(f=>f.estado!=='PAGADO');
-  const map={};
-  pend.forEach(f=>{if(!map[f.cliente])map[f.cliente]={nom:f.cliente,tel:f.telefono||'',fiados:[],tot:0};map[f.cliente].fiados.push(f);map[f.cliente].tot+=parseFloat(f.total||0);});
-  let clis=Object.values(map).sort((a,b)=>b.tot-a.tot);
+  let clis=_ordenarClientes(_agruparClientes(pend));
   const totG=clis.reduce((s,c)=>s+c.tot,0);
 
   // Clientes sin deuda: están en _todosClientes pero no en map
@@ -333,6 +372,7 @@ function renderClientes(){
       `<div style="padding:10px 12px 4px">
         <input id="inpBusqCliente" type="text" placeholder="🔍 Buscar cliente..." value="${_busqCliente}"
           style="width:100%;padding:9px 13px;border:1.5px solid var(--borde);border-radius:12px;font-size:.85rem;font-family:inherit;box-sizing:border-box">
+        <div id="ordenClientesBar" style="display:flex;gap:6px;margin-top:8px"></div>
       </div>
       <div id="listaClientesBody"></div>`;
     busqInput=document.getElementById('inpBusqCliente');
@@ -353,11 +393,9 @@ function renderClientesLista(clis,sinDeuda,pend,totG,q){
   // Si se llama sin argumentos (desde el listener del input), recalculamos todo de nuevo
   if(clis===undefined){
     const pend2=_todos.filter(f=>f.estado!=='PAGADO');
-    const map2={};
-    pend2.forEach(f=>{if(!map2[f.cliente])map2[f.cliente]={nom:f.cliente,tel:f.telefono||'',fiados:[],tot:0};map2[f.cliente].fiados.push(f);map2[f.cliente].tot+=parseFloat(f.total||0);});
-    clis=Object.values(map2).sort((a,b)=>b.tot-a.tot);
+    clis=_ordenarClientes(_agruparClientes(pend2));
     totG=clis.reduce((s,c)=>s+c.tot,0);
-    const nomConDeuda2=new Set(Object.keys(map2).map(n=>n.toUpperCase()));
+    const nomConDeuda2=new Set(clis.map(c=>c.nom.toUpperCase()));
     sinDeuda=_todosClientes.filter(c=>!nomConDeuda2.has((c.nombre||'').toUpperCase()));
     q=_busqCliente.toLowerCase().trim();
     if(q){
@@ -370,6 +408,17 @@ function renderClientesLista(clis,sinDeuda,pend,totG,q){
 
   const hoy=new Date();hoy.setHours(0,0,0,0);
   let html='';
+
+  // Botones de orden — se repintan siempre (no guardan foco, a diferencia del buscador)
+  const ordenBar=document.getElementById('ordenClientesBar');
+  if(ordenBar){
+    const opciones=[['monto','💰 Monto'],['vencidos','🔴 Vencidos'],['reciente','🕓 Última compra']];
+    ordenBar.innerHTML=opciones.map(([crit,lbl])=>{
+      const activo=_ordenClientes===crit;
+      const flecha=activo?(_ordenAsc?' ↑':' ↓'):'';
+      return `<button onclick="_cambiarOrden('${crit}')" style="flex:1;padding:6px 4px;border-radius:9px;border:1.5px solid ${activo?'var(--verde)':'var(--borde)'};background:${activo?'var(--verde)':'#fff'};color:${activo?'#fff':'#555'};font-size:.72rem;font-weight:600;cursor:pointer">${lbl}${flecha}</button>`;
+    }).join('');
+  }
 
   // Resumen
   html+=`<div class="resumen"><div><div class="lbl">Total deuda general</div><div class="sub">${pend.length} fiado${pend.length!==1?'s':''} en ${clis.length} cliente${clis.length!==1?'s':''}</div></div><div class="monto">${fmt(totG)}</div></div>`;
@@ -783,7 +832,7 @@ function ir(vista,titulo){
   });
   const hdr=document.getElementById('hdr');
   if(vista==='clientes'){
-    hdr.innerHTML=`<div style="flex:1"><div class="hdr-t">Copihue — Fiados</div><div class="hdr-s" id="hdrSub">—</div></div><button class="btn-icon" onclick="cargar()">🔄</button><a href="seba21.html" class="btn-back" style="margin-left:8px">← Volver</a>`;
+    hdr.innerHTML=`<div style="flex:1"><div class="hdr-t">Copihue — Fiados <span class="ver-badge" style="font-size:.62rem;font-weight:400;opacity:.75">v${APP_VERSION}</span></div><div class="hdr-s" id="hdrSub">—</div></div><button class="btn-icon" onclick="cargar()">🔄</button><a href="seba21.html" class="btn-back" style="margin-left:8px">← Volver</a>`;
   }else if(vista==='fiados'){
     hdr.innerHTML=`<button class="btn-back" onclick="volverClis()">← Volver</button><div style="flex:1;margin-left:8px"><div class="hdr-t">${titulo||''}</div><div class="hdr-s" id="hdrSub">fiados</div></div><button class="btn-icon" onclick="recargarCli()">🔄</button>`;
     const pend=_cliData.filter(f=>f.estado!=='PAGADO').length;
@@ -849,6 +898,8 @@ async function recargarCli(){
   }catch(e){toast('❌ '+e.message,'r');}
 }
 
+document.title='📒 Fiados · Copihue v'+APP_VERSION;
+const _vbInit=document.getElementById('verBadgeInit');if(_vbInit)_vbInit.textContent='v'+APP_VERSION;
 cargar();
 </script>
 </body>
