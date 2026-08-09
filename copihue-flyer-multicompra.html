@@ -459,7 +459,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-const VERSION = 'v1.0';
+const VERSION = 'v1.1';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -646,7 +646,7 @@ function ld(on,txt=''){$('ov').classList.toggle('on',on);if(txt)$('ov-lbl').text
 
 function diagSet(rows){
   $('diagRows').innerHTML = rows.map(r=>
-    `<div class="dr"><div class="dd ${r.cls}"></div><span>${r.lbl}</span>${r.cnt!=null?`<span class="dcnt">${r.cnt}</span>`:''}</div>`
+    `<div class="dr"${r.onclick?` onclick="${r.onclick}" style="cursor:pointer;"`:''}><div class="dd ${r.cls}"></div><span>${r.lbl}</span>${r.cnt!=null?`<span class="dcnt">${r.cnt}</span>`:''}</div>`
   ).join('');
 }
 
@@ -695,13 +695,14 @@ async function recargar(){
     // Camino B (respaldo): action=getMulticompraTodas — endpoint aparte del módulo
     // flyer_multicompra.gs, por si en este backend "getOfertas" no lo incluye todavía.
     _poolMulticompra=new Map();
-    _mcDiag = {fuente:'', ok:null, total:0, matcheados:0, sinMatch:[], error:''};
+    _mcDiag = {fuente:'', ok:null, total:0, matcheados:0, sinMatch:[], error:'', muestra:[]};
 
     const mcArrA = _of.multicompraActiva || [];
     if(mcArrA.length>0){
       _mcDiag.fuente = 'getOfertas (multicompraActiva)';
       _mcDiag.ok = true;
       _mcDiag.total = mcArrA.length;
+      _mcDiag.muestra = mcArrA.slice(0,5).map(p=>({id:p.id, nombre:p.name||p.nombre, tipo:p.MULTICOMPRA_TIPO, cant:p.MULTICOMPRA_CANTIDAD, precio:p.MULTICOMPRA_PRECIO}));
       mcArrA.forEach(p=>{
         const local = _prods.find(x=>x.id===Number(p.id));
         if(!local){ _mcDiag.sinMatch.push(p.name||p.nombre||('id '+p.id)); return; }
@@ -721,6 +722,7 @@ async function recargar(){
         _mcDiag.ok = rm ? rm.ok : false;
         _mcDiag.total = rm && rm.total || 0;
         if(rm && rm.ok && Array.isArray(rm.items)){
+          _mcDiag.muestra = rm.items.slice(0,5).map(it=>({id:it.id, nombre:it.nombre, tipo:it.tipo, cant:it.cantidad, precio:it.precioPack}));
           rm.items.forEach(it=>{
             let id = Number(it.id)||0;
             if(!id){
@@ -774,8 +776,15 @@ function actualizarMcDiagBox(){
     html += `<b>Filas activas recibidas:</b> ${_mcDiag.total||0}<br>`;
     html += `<b>Matcheadas con el catálogo:</b> ${_mcDiag.matcheados||0}<br>`;
     html += `<b>Productos en el flyer:</b> ${n}`;
+    if(_mcDiag.total>0 && _prods.length>0 && _mcDiag.total >= _prods.length*0.9){
+      html += `<br><b style="color:#a02020">⚠️ Sospechoso:</b> las filas recibidas (${_mcDiag.total}) son casi todo el catálogo (${_prods.length}). Probablemente el filtro MULTICOMPRA_ACTIVA="SI" no se está aplicando del lado del Apps Script — revisá esa columna en la planilla.`;
+    }
     if(_mcDiag.sinMatch && _mcDiag.sinMatch.length){
       html += `<br><b style="color:#a02020">⚠️ Sin match (${_mcDiag.sinMatch.length}):</b> ${_mcDiag.sinMatch.slice(0,8).join(', ')}${_mcDiag.sinMatch.length>8?'...':''}`;
+    }
+    if(_mcDiag.muestra && _mcDiag.muestra.length){
+      html += `<br><br><b>Muestra de las primeras filas crudas (para depurar):</b><br>`;
+      html += _mcDiag.muestra.map(m=>`• id="${m.id}" · "${m.nombre}" · tipo="${m.tipo}" · cant=${m.cant} · precio=${m.precio}`).join('<br>');
     }
   }
   box.innerHTML = html;
@@ -1251,9 +1260,13 @@ function actualizarDiag(){
   const promosOn = _pools._promosOn!==false;
   const cervModo = _cerv.modoActivo||'A';
 
+  const nCats = new Set(_prods.map(p=>p.cat).filter(Boolean)).size;
+
   diagSet([
     {cls:_prods.length>0?'ok':'off',
       lbl:'Productos cargados', cnt:_prods.length},
+    {cls:nCats>0?'ok':'off',
+      lbl:'🗂️ Categorías', cnt:nCats},
     {cls:(relOn&&nRelAct>0)?'ok':nRelTot>0?'warn':'off',
       lbl:'⚡ Relámpago '+(relOn?'(ACTIVO)':'(fuera de horario)'),
       cnt:nRelAct+' activos / '+nRelTot+' en planilla'},
@@ -1276,6 +1289,9 @@ function actualizarDiag(){
       lbl:'🗂️ Combinado (3 categ.)', cnt:_pools.combinado.length},
     {cls:'ok',
       lbl:'✏️ Manual (todas)', cnt:_pools.manual.length},
+    {cls:(_pools.multicompra||[]).length>0?'ok':'warn',
+      lbl:'📦 Multicompra — tocá para ver el detalle', cnt:(_pools.multicompra||[]).length,
+      onclick:"document.getElementById('mcDiagBox').scrollIntoView({behavior:'smooth',block:'center'})"},
   ]);
   generarLog();
 }
