@@ -459,7 +459,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-const VERSION = 'v1.1';
+const VERSION = 'v1.2';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -695,7 +695,7 @@ async function recargar(){
     // Camino B (respaldo): action=getMulticompraTodas — endpoint aparte del módulo
     // flyer_multicompra.gs, por si en este backend "getOfertas" no lo incluye todavía.
     _poolMulticompra=new Map();
-    _mcDiag = {fuente:'', ok:null, total:0, matcheados:0, sinMatch:[], error:'', muestra:[]};
+    _mcDiag = {fuente:'', ok:null, total:0, matcheados:0, sinMatch:[], error:'', muestra:[], rawKeys:[]};
 
     const mcArrA = _of.multicompraActiva || [];
     if(mcArrA.length>0){
@@ -717,13 +717,25 @@ async function recargar(){
     } else {
       // Respaldo: endpoint dedicado del flyer
       try{
-        const rm = await gasGet('getMulticompraTodas');
+        let rm = await gasGet('getMulticompraTodas');
+        // Por si respuestaJSON() del lado del GAS devuelve un string en vez de objeto
+        if(typeof rm === 'string'){ try{ rm = JSON.parse(rm); }catch(e){ /* se queda como string */ } }
         _mcDiag.fuente = 'getMulticompraTodas (respaldo)';
-        _mcDiag.ok = rm ? rm.ok : false;
-        _mcDiag.total = rm && rm.total || 0;
-        if(rm && rm.ok && Array.isArray(rm.items)){
-          _mcDiag.muestra = rm.items.slice(0,5).map(it=>({id:it.id, nombre:it.nombre, tipo:it.tipo, cant:it.cantidad, precio:it.precioPack}));
-          rm.items.forEach(it=>{
+        _mcDiag.rawKeys = (rm && typeof rm==='object') ? Object.keys(rm) : [];
+
+        // El array puede llamarse "items" (como dice el .gs) u otra cosa si algo
+        // se transformó en el camino — probamos varios nombres posibles.
+        const itemsArr = Array.isArray(rm?.items) ? rm.items
+                        : Array.isArray(rm?.productos) ? rm.productos
+                        : Array.isArray(rm?.data) ? rm.data
+                        : null;
+
+        _mcDiag.ok = rm ? (rm.ok!==undefined ? !!rm.ok : (itemsArr?true:false)) : false;
+        _mcDiag.total = (rm && rm.total) || (itemsArr?itemsArr.length:0) || 0;
+
+        if(itemsArr){
+          _mcDiag.muestra = itemsArr.slice(0,5).map(it=>({id:it.id, nombre:it.nombre, tipo:it.tipo, cant:it.cantidad, precio:it.precioPack}));
+          itemsArr.forEach(it=>{
             let id = Number(it.id)||0;
             if(!id){
               // El id puede venir vacío en la fila — como respaldo, matcheamos por nombre exacto
@@ -743,6 +755,8 @@ async function recargar(){
         } else if(rm && rm.ok===false){
           _mcDiag.error = rm.error||'(sin detalle)';
           console.warn('⚠️ getMulticompraTodas devolvió error:', rm.error);
+        } else {
+          _mcDiag.error = 'La respuesta no trajo ningún array reconocible (items/productos/data).';
         }
       }catch(e){ _mcDiag.ok=false; _mcDiag.error = String(e); console.warn('⚠️ Error cargando multicompra:', e); }
     }
@@ -776,6 +790,9 @@ function actualizarMcDiagBox(){
     html += `<b>Filas activas recibidas:</b> ${_mcDiag.total||0}<br>`;
     html += `<b>Matcheadas con el catálogo:</b> ${_mcDiag.matcheados||0}<br>`;
     html += `<b>Productos en el flyer:</b> ${n}`;
+    if(_mcDiag.rawKeys && _mcDiag.rawKeys.length && !_mcDiag.muestra.length){
+      html += `<br><b style="color:#a02020">⚠️ Claves recibidas en la respuesta:</b> ${_mcDiag.rawKeys.join(', ')} <span style="color:#888">(no encontré ahí un array de productos con nombre items/productos/data)</span>`;
+    }
     if(_mcDiag.total>0 && _prods.length>0 && _mcDiag.total >= _prods.length*0.9){
       html += `<br><b style="color:#a02020">⚠️ Sospechoso:</b> las filas recibidas (${_mcDiag.total}) son casi todo el catálogo (${_prods.length}). Probablemente el filtro MULTICOMPRA_ACTIVA="SI" no se está aplicando del lado del Apps Script — revisá esa columna en la planilla.`;
     }
