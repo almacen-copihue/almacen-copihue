@@ -537,7 +537,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbzWZzDvdGfW8vd2-FpQolT852cdPMeHbfKugn9DBOlju75bE1D0SUNB5EKEDOsI2vP4lA/exec'; // v5.38: alineado con seba21/sendwa — el flyer apuntaba a otro deployment de Apps Script
-const APP_VERSION = 'v5.43';
+const APP_VERSION = 'v5.44';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -2115,6 +2115,65 @@ function drawFtr(ctx,W,H,P){
   ctx.fillStyle=P.ac;ctx.fillRect(0,H-5,W,5);
 }
 
+// ── PUBLICIDAD INTERNA (v5.44) ──────────────────────────────────────────────
+// Cuando una página de la grilla queda con menos productos que espacios
+// (ej. última página con 7 de 12), los espacios vacíos se llenan con una
+// pieza publicitaria de Copihue en vez de quedar en blanco. Solo aplica al
+// formato "grid" (dibujarGrid) — es el único formato con celdas de tamaño
+// fijo donde puede sobrar espacio; Lista/Story/Banner dibujan exactamente
+// la cantidad de productos que reciben, sin huecos que rellenar.
+const PUBLICIDAD_FLYER = {
+  activa: true,
+  modo: 'AUTO', // 'AUTO' o el nombre fijo de una pieza: ver claves de "piezas"
+  piezas: {
+    INSTITUCIONAL: { kicker:'ALMACÉN', frase:'Todo lo que necesitás, cerca tuyo.' },
+    PROMOCIONAL:   { kicker:'OFERTAS', frase:'¿Ya conocés nuestras ofertas? Todos los días tenemos algo especial para vos.' },
+    GRACIAS:       { kicker:'GRACIAS', frase:'Gracias por elegirnos. Tu compra ayuda a que nuestro almacén siga creciendo.' },
+    MINIMALISTA:   { kicker:'ALMACÉN', frase:'Lo bueno está cerca.' }
+  }
+};
+
+// AUTO: 1 hueco → Minimalista (discreta); 2 → Promocional + Minimalista;
+// 3+ → rotación completa. Modo fijo: siempre la misma pieza.
+function elegirPiezaPublicidad(faltan, indice){
+  const fijo = PUBLICIDAD_FLYER.modo!=='AUTO' ? PUBLICIDAD_FLYER.piezas[PUBLICIDAD_FLYER.modo] : null;
+  if(fijo) return fijo;
+  const orden = faltan<=1 ? ['MINIMALISTA']
+              : faltan===2 ? ['PROMOCIONAL','MINIMALISTA']
+              : ['INSTITUCIONAL','PROMOCIONAL','GRACIAS','MINIMALISTA'];
+  return PUBLICIDAD_FLYER.piezas[orden[indice % orden.length]];
+}
+
+// Tarjeta publicitaria — mismas dimensiones/radio/borde que drawCard para que
+// ocupe exactamente el lugar de una tarjeta de producto sin alterar el grid.
+function drawCardAd(ctx,cx,cy,CW,CH,FH,P,pieza){
+  // Shell igual a drawCard, borde en color acento para distinguirla a simple vista
+  ctx.fillStyle=P.card; rr(ctx,cx,cy,CW,CH,10); ctx.fill();
+  ctx.strokeStyle=P.ac; ctx.lineWidth=1.5; rr(ctx,cx,cy,CW,CH,10); ctx.stroke();
+
+  // Zona "foto" — fondo tenue + logo/nombre centrado
+  ctx.fillStyle=P.card2; rr(ctx,cx+5,cy+5,CW-10,FH-2,7); ctx.fill();
+  const sz = CW<85?'xs':CW<110?'sm':'md';
+  const logoFs = {xs:13,sm:15,md:18}[sz];
+  const kickFs = {xs:7, sm:8, md:9}[sz];
+  ctx.textAlign='center';
+  ctx.fillStyle=P.ac;
+  ctx.font=`900 ${logoFs}px "Syne",sans-serif`;
+  ctx.fillText((_emp.nombre||'COPIHUE').toUpperCase(), cx+CW/2, cy+FH/2+2);
+  ctx.strokeStyle=P.ac; ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(cx+CW*0.34,cy+FH/2+10);ctx.lineTo(cx+CW*0.66,cy+FH/2+10);ctx.stroke();
+  ctx.fillStyle=P.sub;
+  ctx.font=`bold ${kickFs}px "DM Sans",sans-serif`;
+  ctx.fillText(pieza.kicker, cx+CW/2, cy+FH/2+22);
+
+  // Zona de texto — misma estructura que drawCard (frase centrada abajo)
+  const tzY=cy+FH+3;
+  const fraseFs = {xs:8,sm:9,md:10}[sz];
+  ctx.fillStyle=P.txt; ctx.textAlign='center';
+  ctx.font=`bold ${fraseFs}px "DM Sans",sans-serif`;
+  wrap(ctx, pieza.frase, cx+CW/2, tzY+fraseFs+4, CW-10, fraseFs+3, 3);
+}
+
 async function drawCard(ctx,p,cx,cy,CW,CH,FH,P,pk,soloUno=false){
   // Aplicar override manual si existe
   const ov=_overrides[p.id];
@@ -2362,6 +2421,18 @@ async function dibujarGrid(prods,pk){
     const col=i%COLS,row=Math.floor(i/COLS);
     return drawCard(ctx,p,PAD+col*(CW+GAP),sy+row*(CH+GAP),CW,CH,FH,P,pk,soloUno);
   }));
+  // Publicidad interna Copihue — llena los espacios vacíos de la última fila
+  // en vez de dejarlos en blanco (v5.44). capacidad = COLS*ROWS ya reservado
+  // por el cálculo de H de arriba, así que rellenar acá no cambia el tamaño
+  // de página ni el de las demás tarjetas.
+  if(PUBLICIDAD_FLYER.activa && !soloUno){
+    const capacidad=COLS*ROWS, faltan=capacidad-prods.length;
+    for(let i=prods.length;i<capacidad;i++){
+      const col=i%COLS,row=Math.floor(i/COLS);
+      const pieza=elegirPiezaPublicidad(faltan, i-prods.length);
+      drawCardAd(ctx,PAD+col*(CW+GAP),sy+row*(CH+GAP),CW,CH,FH,P,pieza);
+    }
+  }
   drawFtr(ctx,W,H,P);return cv;
 }
 
