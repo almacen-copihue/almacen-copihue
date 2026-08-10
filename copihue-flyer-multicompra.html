@@ -459,7 +459,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-const VERSION = 'v1.3';
+const VERSION = 'v1.4';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -621,6 +621,55 @@ const PROD_MAX_POR_PAGINA = 12; // valor por defecto (3x4) si el selector de gri
 // Tamaño de página elegido en "Grilla por página" (2x2=4, 3x3=9, 3x4=12)
 function tamGrilla(){
   return parseInt(($('cfgGrilla')||{}).value)||PROD_MAX_POR_PAGINA;
+}
+
+// Encuentra el prefijo común de un conjunto de strings — usado para sacar el
+// "nombre base" de un grupo de sabores (ej: "Gaseosa Manaos" de "Gaseosa Manaos Cola",
+// "Gaseosa Manaos Naranja", "Gaseosa Manaos Limón").
+function prefijoComun(strs){
+  if(!strs.length) return '';
+  let pre=strs[0];
+  for(let i=1;i<strs.length;i++){
+    let j=0;
+    while(j<pre.length && j<strs[i].length && pre[j]===strs[i][j]) j++;
+    pre=pre.slice(0,j);
+    if(!pre) break;
+  }
+  return pre;
+}
+
+// Combina en una sola tarjeta los productos de multicompra que comparten "grupo"
+// (ej: Gaseosa Manaos Cola/Naranja/Limón, todos parte del mismo combo) — SOLO para
+// el flyer. El catálogo y el precio de cada producto no se tocan, cada sabor sigue
+// siendo su propio producto con su propio stock.
+function agruparMulticompraParaFlyer(prods){
+  const porGrupo=new Map();
+  prods.forEach(p=>{
+    const mc = p.mc || null;
+    if(mc && mc.grupo){
+      if(!porGrupo.has(mc.grupo)) porGrupo.set(mc.grupo,[]);
+      porGrupo.get(mc.grupo).push(p);
+    }
+  });
+  const yaCombinados=new Set(), salida=[];
+  prods.forEach(p=>{
+    const mc = p.mc || null;
+    if(mc && mc.grupo){
+      const miembros=porGrupo.get(mc.grupo);
+      if(miembros.length<2){ salida.push(p); return; } // grupo de 1 — no combinar
+      if(yaCombinados.has(mc.grupo)) return; // ya se agregó la tarjeta combinada de este grupo
+      yaCombinados.add(mc.grupo);
+      let nombreBase=prefijoComun(miembros.map(m=>m.name)).trim();
+      nombreBase=nombreBase.replace(/[-–,(]+$/,'').trim();
+      const sabores=miembros
+        .map(m=>m.name.slice(nombreBase.length).trim().replace(/^[-–,(]+/,'').replace(/[)]+$/,'').trim())
+        .filter(Boolean);
+      salida.push({...miembros[0], name:(nombreBase||miembros[0].name)+(sabores.length?' ('+sabores.join('/')+')':''), _saboresGrupo:sabores});
+    } else {
+      salida.push(p);
+    }
+  });
+  return salida;
 }
 
 // Reparte los productos en páginas de tamaño FIJO según la grilla elegida.
@@ -2602,7 +2651,8 @@ async function generarFlyer(prodsIn){
   try{
     const fns={lista:dibujarLista,story:dibujarStory,banner:dibujarBanner};
     const fn=fns[fmt]||dibujarGrid;
-    const bloques=calcularPaginas(prods);
+    const prodsAgrupados = agruparMulticompraParaFlyer(prods);
+    const bloques=calcularPaginas(prodsAgrupados);
 
     _cvPaginas=[];
     for(let i=0;i<bloques.length;i++){
