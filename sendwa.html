@@ -6,9 +6,31 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>SendWA — Almacén Copihue ver.84</title>
+<title>SendWA — Almacén Copihue ver.86</title>
 <!--
   CHANGELOG sendwa.html
+  v86: - NUEVO — Recién Llegados en sendwa, mismo patrón que el resto: pool
+         _poolRecienLlegados cargado desde data.poolRecienLlegados (ya viene
+         armado de Code.gs desde el Historial — últimos N días, precio mínimo,
+         excluidos los que ya están en otro pool). Chip nuevo "🆕 Recién
+         Llegados" en el panel de Ofertas, entra en la vista flyer y en
+         PRIORITY_ORDER (último, después de Últimas). No es un descuento —
+         se muestra el precio normal con una franja "🆕 RECIÉN LLEGADO" arriba
+         de la foto, sin tachar nada.
+       - REFACTOR — La elección estrella-vs-franja en las tarjetas ahora se basa
+         en un flag explícito (oferta.esCantidad = true en Relámpago NxM y
+         Multicompra) en vez de inferirlo de "oferta.precio == null" — así
+         Recién Llegados (que tampoco tiene precio unitario, pero no es una
+         oferta "por cantidad") usa la franja correcta y no termina con una
+         estrella que no tendría sentido ahí. Sin cambios visuales en las
+         ofertas que ya andaban bien.
+  v85: - FIX — Foto de la tarjeta combinada de multicompra grupal: antes heredaba
+         la URL de foto del primer sabor del grupo (si esa fila la tenía cargada
+         en la planilla), lo que impedía usar una foto propia del combo. Ahora
+         la tarjeta combinada siempre busca su propia foto local por nombre
+         (imagenes-productos/<nombre-base-sluggificado>.jpg) — subís una foto
+         con ese nombre exacto (ej: gaseosa-manaos-3l.jpg para "GASEOSA MANAOS
+         3L") y se usa automáticamente, sin tocar la planilla ni el código.
   v84: - FIX — Se perdía el scroll al tocar ✓/✕ en las listas de "Revisión del
          flyer" y de "Oferta Personalizada": cada toque reconstruía la lista
          entera desde cero, y al reconstruirse el scroll volvía siempre a 0 —
@@ -751,7 +773,7 @@
           style="width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.2);
                  border:none;color:#fff;font-size:12px;font-weight:800;cursor:pointer;
                  flex-shrink:0;display:flex;align-items:center;justify-content:center;">?</button>
-  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.84</div>
+  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.86</div>
   <button id="btn-dark" title="Modo oscuro">🌙</button>
 </div>
 
@@ -775,6 +797,7 @@
     <button class="filter-chip oferta-chip" data-filter="especial">💜 Especial</button>
     <button class="filter-chip oferta-chip" data-filter="ultimas">🏷️ Últimas</button>
     <button class="filter-chip oferta-chip" data-filter="multicompra">📦 Multicompra</button>
+    <button class="filter-chip oferta-chip" data-filter="recienllegado">🆕 Recién Llegados</button>
     <button class="filter-chip oferta-chip" data-filter="promo">🏷️ Promos</button>
     <button class="filter-chip oferta-chip" data-filter="combo">🎯 Combos</button>
     <button class="filter-chip oferta-chip" data-filter="sinoferta">✅ Sin oferta</button>
@@ -1007,11 +1030,13 @@ const IMG_SIZE_MB = 0.15;
 
 // Priority map
 // Orden flyer: Promos → Combos → Multicompra → Especial → Destacada → Relámpago → Últimas
-const PRIORITY_ORDER = { personalizada: 0, promo: 1, combo: 2, multicompra: 3, especial: 4, destacado: 5, relampago: 6, ultimas: 7, '': 8 };
+// Orden flyer: Promos → Combos → Multicompra → Especial → Destacada → Relámpago → Últimas → Recién llegado
+const PRIORITY_ORDER = { personalizada: 0, promo: 1, combo: 2, multicompra: 3, especial: 4, destacado: 5, relampago: 6, ultimas: 7, recienllegado: 8, '': 9 };
 const BADGE_COLORS = {
   relampago: '#FF5722', destacado: '#FFC107', especial: '#00BCD4',
   multicompra: '#9C27B0', ultimas: '#E53935', promo: '#43A047',
-  combo: '#6D4C41', jueves: '#1A237E', personalizada: '#E91E63'
+  combo: '#6D4C41', jueves: '#1A237E', personalizada: '#E91E63',
+  recienllegado: '#00E676'
 };
 
 // Separadores automáticos por categoría
@@ -1068,12 +1093,12 @@ function calcularOferta(p) {
     if (cfg && cfg.tipo === 'pct') {
       return { precio: Math.round(precio * (1 - cfg.descuento / 100)), etiqueta: `⚡ -${cfg.descuento}% OFF` };
     } else if (cfg && cfg.tipo === 'nxm') {
-      return { precio: null, etiqueta: `⚡ ${cfg.nombre.toUpperCase()}` }; // NxM: sin precio unitario fijo
+      return { precio: null, etiqueta: `⚡ ${cfg.nombre.toUpperCase()}`, esCantidad: true }; // NxM: sin precio unitario fijo
     }
     // fallback string
     const match = key.match(/(\d+)x(\d+)/i);
-    if (match) return { precio: null, etiqueta: `⚡ ${match[1]}X${match[2]}` };
-    return { precio: null, etiqueta: '⚡ RELÁMPAGO' };
+    if (match) return { precio: null, etiqueta: `⚡ ${match[1]}X${match[2]}`, esCantidad: true };
+    return { precio: null, etiqueta: '⚡ RELÁMPAGO', esCantidad: true };
   }
   // ÚLTIMAS UNIDADES — precio viene de getOfertas (poolUltimas tiene {pct,precioOferta})
   if (cat === 'ultimas') {
@@ -1104,13 +1129,21 @@ function calcularOferta(p) {
       // proporcional entre líneas del mismo grupo) — acá solo mostramos el pack.
       // Mismo formato compacto que la individual (sin "Pack grupal" — no entraba
       // bien en la estrella y no sumaba info que el cliente necesite).
-      return { precio: null, etiqueta: `📦 ${mc.cantidad}x ${fmt(mc.precio)}` };
+      return { precio: null, etiqueta: `📦 ${mc.cantidad}x ${fmt(mc.precio)}`, esCantidad: true };
     }
     if (mc.tipo === '2DA_UNIDAD') {
-      return { precio: null, etiqueta: `📦 2da unidad a ${fmt(mc.precio)}` };
+      return { precio: null, etiqueta: `📦 2da unidad a ${fmt(mc.precio)}`, esCantidad: true };
     }
     // 2X / 3X / NX / LLEVÁ-PAGÁ
-    return { precio: null, etiqueta: `📦 ${mc.cantidad}x ${fmt(mc.precio)}` };
+    return { precio: null, etiqueta: `📦 ${mc.cantidad}x ${fmt(mc.precio)}`, esCantidad: true };
+  }
+  // RECIÉN LLEGADO — pool armado en Code.gs a partir del Historial (últimos N
+  // días, con precio mínimo y ya excluidos los que están en otros pools). No
+  // es un descuento: el precio normal se muestra igual, solo se destaca con
+  // una franja (no estrella — la estrella es solo para ofertas "por cantidad").
+  if (cat === 'recienllegado') {
+    const rl = _poolRecienLlegados.get(Number(p.id));
+    return { precio: null, etiqueta: '🆕 RECIÉN LLEGADO' };
   }
   // PROMO ACTIVA / COMBO ACTIVO — precio en col L (campo normal de la API)
   if ((cat === 'promo' || cat === 'combo') && p.normal > 0 && p.normal < precio) {
@@ -1273,6 +1306,7 @@ const _poolEspeciales = new Set();
 const _poolUltimas    = new Set();
 const _poolUltimasData = new Map(); // id → { precioOferta, pct, diasParaVencer }
 const _poolMulticompra = new Map(); // id → { tipo, cantidad, precio, grupo } — igual patrón que seba21
+const _poolRecienLlegados = new Map(); // id → { fechaIngreso } — pool ya armado en Code.gs desde el Historial
 
 async function _apiFetch(action) {
   const r = await fetch(API_URL + '?action=' + action + '&t=' + Date.now(),
@@ -1310,9 +1344,12 @@ async function cargarPools() {
 
     _poolRelampago.clear(); _poolDestacadas.clear();
     _poolEspeciales.clear(); _poolUltimas.clear(); _poolUltimasData.clear();
-    _poolMulticompra.clear();
+    _poolMulticompra.clear(); _poolRecienLlegados.clear();
 
     (data.relampagoActivo   || []).forEach(p => _poolRelampago.add(Number(p.id)));
+    (data.poolRecienLlegados || []).forEach(p => {
+      _poolRecienLlegados.set(Number(p.id), { fechaIngreso: p.fechaIngreso || '' });
+    });
     (data.multicompraActiva || []).forEach(p => {
       const id = Number(p.id);
       _poolMulticompra.set(id, {
@@ -1339,7 +1376,7 @@ async function cargarPools() {
 
     // Guardar horarios para mensaje fuera de horario
     window._horariosOferta = data.horariosOferta || {};
-    console.log(`📊 Pools SendWA — ⚡${_poolRelampago.size} 🔥${_poolDestacadas.size} 🌙${_poolEspeciales.size} 🏷️${_poolUltimas.size} 📦${_poolMulticompra.size}`);
+    console.log(`📊 Pools SendWA — ⚡${_poolRelampago.size} 🔥${_poolDestacadas.size} 🌙${_poolEspeciales.size} 🏷️${_poolUltimas.size} 📦${_poolMulticompra.size} 🆕${_poolRecienLlegados.size}`);
   } catch(e) {
     console.warn('No se pudieron cargar pools de ofertas:', e.message);
   }
@@ -1413,6 +1450,9 @@ function resolveOfertas(products, modo = 'pool') {
       // Multicompra: no tiene horario en Code.gs (a diferencia de relámpago/destacadas/
       // especiales/últimas) — si está en el pool, se muestra siempre, en ambos modos.
       const enPoolM = _poolMulticompra.has(pid);
+      // Recién llegado: pool ya armado en Code.gs con los otros pools excluidos —
+      // última prioridad acá también, por las dudas.
+      const enPoolRL = _poolRecienLlegados.has(pid);
 
       if (modo === 'activo') {
         // Solo los activos según horario/forzado — igual que seba21
@@ -1421,6 +1461,7 @@ function resolveOfertas(products, modo = 'pool') {
         else if (enPoolD && _tipoActivoAhora('destacadas'))  catOferta = 'destacado';
         else if (enPoolE && _tipoActivoAhora('especiales'))  catOferta = 'especial';
         else if (enPoolM) catOferta = 'multicompra';
+        else if (enPoolRL) catOferta = 'recienllegado';
       } else {
         // modo 'pool' o 'collage': en el pool = tiene oferta, sin importar horario
         if      (enPoolR) catOferta = 'relampago';
@@ -1428,6 +1469,7 @@ function resolveOfertas(products, modo = 'pool') {
         else if (enPoolD) catOferta = 'destacado';
         else if (enPoolE) catOferta = 'especial';
         else if (enPoolM) catOferta = 'multicompra';
+        else if (enPoolRL) catOferta = 'recienllegado';
       }
     }
     return { ...p, catOferta };
@@ -1449,7 +1491,7 @@ function sortProducts(products, mode) {
   const sorted = [...products];
 
   const esVistaCategoria = !['oferta','activo','relampago','destacado','especial',
-    'promo','combo','ultimas','multicompra','sinoferta'].includes(currentFilter);
+    'promo','combo','ultimas','multicompra','recienllegado','sinoferta'].includes(currentFilter);
 
   if (esVistaCategoria) {
     const esCategoriaUnica = currentFilter !== 'todos' && currentFilter !== '';
@@ -1532,6 +1574,7 @@ function applyFilter() {
       case 'especial':  return p.catOferta === 'especial';
       case 'ultimas':   return p.catOferta === 'ultimas';
       case 'multicompra': return p.catOferta === 'multicompra';
+      case 'recienllegado': return p.catOferta === 'recienllegado';
       case 'promo':     return p.catOferta === 'promo';
       case 'combo':     return p.catOferta === 'combo';
       default:
@@ -1568,7 +1611,7 @@ function getCatEmoji(cat) {
 function insertSeparators(products) {
   // Vista Ofertas estilo FLYER — sin separadores de categoría, un único header
   const esVistaOfertaFlyer = ['oferta','activo','relampago','destacado','especial',
-    'promo','combo','ultimas','multicompra'].includes(currentFilter);
+    'promo','combo','ultimas','multicompra','recienllegado'].includes(currentFilter);
   if (esVistaOfertaFlyer) {
     if (!products.length) return products;
     return [{ _sep: true, label: '🛒 ALMACÉN COPIHUE — OFERTAS 🔥', cat: '__flyer__', _flyer: true }, ...products];
@@ -1791,7 +1834,8 @@ function generateText(mode) {
   const tituloOferta = {
     relampago:'⚡ OFERTAS RELÁMPAGO', ultimas:'🏷️ ÚLTIMAS UNIDADES',
     destacado:'🔥 OFERTAS DESTACADAS', especial:'💜 PRECIOS ESPECIALES',
-    promo:'🏷️ PROMOS DEL DÍA', combo:'🎯 COMBOS', multicompra:'📦 MULTICOMPRA'
+    promo:'🏷️ PROMOS DEL DÍA', combo:'🎯 COMBOS', multicompra:'📦 MULTICOMPRA',
+    recienllegado:'🆕 RECIÉN LLEGADOS'
   };
 
   // Encabezado dinámico
@@ -1831,6 +1875,7 @@ ${tituloOferta[tiposPresentes[0]]}
     if (cat === 'promo')     return of.etiqueta ? ` _${of.etiqueta}_` : ' _(promo)_';
     if (cat === 'combo')     return of.etiqueta ? ` _${of.etiqueta}_` : ' _(combo)_';
     if (cat === 'multicompra') return of.etiqueta ? ` _${of.etiqueta}_` : ' _(multicompra)_';
+    if (cat === 'recienllegado') return ' _(recién llegado)_';
     return '';
   }
 
@@ -2614,7 +2659,11 @@ function _agruparMulticompraParaFlyer(prods) {
       const sabores = miembros
         .map(m => m.nombre.slice(nombreBase.length).trim().replace(/^[-–,(]+/, '').replace(/[)]+$/, '').trim())
         .filter(Boolean);
-      salida.push({ ...miembros[0], nombre: nombreBase || miembros[0].nombre, _saboresGrupo: sabores });
+      // foto: null a propósito — así getImgUrl() NO hereda la foto del primer sabor
+      // (que puede tener su propia URL cargada en la planilla) y en cambio busca
+      // "imagenes-productos/<nombre-base-sluggificado>.jpg", una foto propia del
+      // combo que subís vos a mano (ej: gaseosa-manaos-3l.jpg).
+      salida.push({ ...miembros[0], nombre: nombreBase || miembros[0].nombre, foto: null, _saboresGrupo: sabores });
     } else {
       salida.push(p);
     }
@@ -2750,7 +2799,7 @@ async function drawProductCard(ctx, p, x, y, W, H, preloadedImg) {
   }
 
   // ── Badge encima de la imagen ──
-  if (oferta && badgeColor && !_esSinOferta && oferta.precio == null) {
+  if (oferta && badgeColor && !_esSinOferta && oferta.esCantidad) {
     // Ofertas "por cantidad" (multicompra, relámpago NxM) — estrella tipo cartelito,
     // como en index.html, superpuesta sobre la esquina inferior derecha de la foto.
     const rOuter = W * 0.30, rInner = rOuter * 0.60;
