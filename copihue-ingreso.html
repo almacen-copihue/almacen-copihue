@@ -553,6 +553,13 @@
 
 <script>
 // ── Changelog ──────────────────────────────────────────────────────────────────
+// v20 — Producto y proveedor ahora se fuerzan a MAYÚSCULAS SIN TILDES en el
+//       valor real del campo (antes era solo visual vía CSS), en tiempo real
+//       mientras se tipea y de nuevo al guardar. También se normalizan los
+//       nombres que llegan de la planilla (init/chequearConexion) para que
+//       el autocompletado siga encontrando productos/proveedores viejos que
+//       tengan tildes cargadas. Esto evita que "Café", "CAFE" y "café"
+//       terminen siendo 3 productos distintos por diferencias de tipeo.
 // v19 — Fix: cargarHistorial() (panel "últimos ingresos") ya no pisa el
 //       badge global de conexión. Si getUltimosIngresos tarda/falla, el
 //       error queda contenido en el panel local; el badge sigue reflejando
@@ -636,7 +643,7 @@
 // v2 — (base recibida)
 // ──────────────────────────────────────────────────────────────────────────────
 
-const APP_VERSION = 'v19';
+const APP_VERSION = 'v20';
 document.title = '📥 Ingreso · Copihue ' + APP_VERSION;
 document.getElementById('versionBadge').textContent = APP_VERSION;
 
@@ -653,6 +660,32 @@ function simplificarNombre(nombre) {
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-')
     .trim();
+}
+
+// v19 — Fuerza MAYÚSCULAS y sin tildes/acentos en el valor REAL de los campos
+// de texto libre (producto, proveedor). Antes esto era solo visual (CSS
+// text-transform:uppercase), así que el valor guardado en la planilla podía
+// quedar con minúsculas y/o acentos según cómo tipeó cada operador — eso
+// generaba variantes duplicadas del mismo producto/proveedor ("Café", "CAFE",
+// "café" tratados como 3 productos distintos). Se aplica en cada tecleo y
+// de nuevo como red de seguridad al guardar.
+function normalizarTexto(str) {
+  return (str || '')
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase();
+}
+
+// Normaliza el input in-place preservando la posición del cursor
+function normalizarInput(el) {
+  const pos = el.selectionStart;
+  const antes = el.value;
+  const despues = normalizarTexto(antes);
+  if (antes === despues) return despues;
+  el.value = despues;
+  // el largo no cambia (mayúsculas/quitar tildes no altera la cantidad de
+  // caracteres), así que el cursor puede quedar donde estaba
+  if (pos !== null) el.setSelectionRange(pos, pos);
+  return despues;
 }
 
 function urlFoto(nombreProducto) {
@@ -703,15 +736,16 @@ async function init() {
     const rawProductos = data.productos || [];
     rawProductos.forEach(p => {
       if (!p) return;
-      const nombre = typeof p === 'string' ? p : (p.name || p.nombre || '');
-      if (!nombre) return;
+      const nombreRaw = typeof p === 'string' ? p : (p.name || p.nombre || '');
+      if (!nombreRaw) return;
+      const nombre = normalizarTexto(nombreRaw);
       _productos.push(nombre);
       if (typeof p === 'object') _productosMap[nombre] = p;
     });
 
     // Proveedores únicos
     const provSet = new Set();
-    rawProductos.forEach(p => { if (p && p.proveedor) provSet.add(p.proveedor); });
+    rawProductos.forEach(p => { if (p && p.proveedor) provSet.add(normalizarTexto(p.proveedor)); });
     _proveedores = [...provSet].filter(Boolean).sort();
 
     // Categorías desde GAS
@@ -795,8 +829,9 @@ async function chequearConexion() {
     const rawProductos = data.productos || [];
     rawProductos.forEach(p => {
       if (!p) return;
-      const nombre = typeof p === 'string' ? p : (p.name || p.nombre || '');
-      if (!nombre) return;
+      const nombreRaw = typeof p === 'string' ? p : (p.name || p.nombre || '');
+      if (!nombreRaw) return;
+      const nombre = normalizarTexto(nombreRaw);
       if (!(nombre in _productosMap) && !_productos.includes(nombre)) {
         _productos.push(nombre); // producto nuevo cargado por otra caja mientras tanto
       }
@@ -901,7 +936,7 @@ function setCategoriaByValue(val) {
 
 // ── AUTOCOMPLETE PRODUCTO ──────────────────────────────────────────────────────
 function onProductoInput() {
-  const val  = document.getElementById('producto').value.trim();
+  const val  = normalizarInput(document.getElementById('producto')).trim();
   const list = document.getElementById('autoList');
   toggleClear('producto');
 
@@ -1084,7 +1119,7 @@ function calcularSugerido() {
 
 // ── AUTOCOMPLETE PROVEEDOR ─────────────────────────────────────────────────────
 function filtrarProveedores() {
-  const val  = document.getElementById('proveedor').value.trim().toUpperCase();
+  const val  = normalizarInput(document.getElementById('proveedor')).trim();
   const list = document.getElementById('autoListProv');
   if (val.length < 1) { list.classList.remove('open'); return; }
 
@@ -1246,12 +1281,12 @@ function verificarValoresRaros() {
 async function guardar() {
   if (_guardando) return; // ya hay un guardado en curso, ignorar clicks extra
 
-  const nombre          = document.getElementById('producto').value.trim();
+  const nombre          = normalizarTexto(document.getElementById('producto').value.trim());
   const cantidad        = Number(document.getElementById('cantidad').value);
   const categoria       = document.getElementById('categoria').value;
   const precioCosto     = parseFloat(document.getElementById('precioCosto').value) || null;
   const precioVenta     = parseFloat(document.getElementById('precioVenta').value) || null;
-  const proveedor       = document.getElementById('proveedor').value.trim() || null;
+  const proveedor       = normalizarTexto(document.getElementById('proveedor').value.trim()) || null;
   const fechaVencimiento = document.getElementById('fechaVencimiento').value || null;
 
   if (!nombre)              { toast('❌ Ingresá el nombre del producto', true); return; }
