@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Pedidos · Copihue</title>
+<script>var APP_VERSION = "2";</script>
 <style>
 /*
   copihue-pedidos.html v1
@@ -305,6 +306,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); font-family:
   color: #1565c0; cursor: pointer; display: block;
 }
 .btn-pausar-ped:active { background: #f0f0f0; }
+.btn-pausar-ped.reactivar { background: #e8f5e9; color: #2e7d32; border-color: #a5d6a7; }
 
 /* ── ESTADO VACÍO / CARGANDO ─────────────────────────────────── */
 #stateMsg {
@@ -564,32 +566,52 @@ let _provActual    = null; // proveedor seleccionado
 let _carrito       = {};   // { ID_PRODUCTO: { item, qty } }
 
 // ── Boot ─────────────────────────────────────────────────────────
-function pedPausarProducto(id, nombre) {
-    // id viene directo de p.id en _provActual.productos — igual que seba21
+function pedPausarProducto(id, nombre, pausadoActual) {
     if (!id) { showToast('❌ Sin ID de producto'); return; }
 
-    // Quitar de lista local inmediatamente
+    var nuevoPausado = !pausadoActual;
+
+    // Actualizar localmente optimista
     if (_provActual) {
-        _provActual.productos = _provActual.productos.filter(function(pr){ return pr.id != id; });
-        delete _carrito[id];
+        var prod = _provActual.productos.find(function(pr) { return pr.id == id; });
+        if (prod) prod.pausado = nuevoPausado;
         _renderProductos();
         _actualizarFAB();
     }
-    showToast('⛔ ' + nombre + ' desactivado');
+    showToast(nuevoPausado ? '⏸ ' + nombre + ' desactivado' : '▶️ ' + nombre + ' reactivado');
 
-    // Llamar GAS exactamente igual que seba21: solo { id, pausado }
-    _api('setPausadoListaCompra', { id: id, pausado: 'SI' })
-    .then(function(resp) {
-        if (!resp || !resp.success) {
-            var det = resp ? (resp.error || resp.mensaje || resp.message || JSON.stringify(resp).slice(0,80)) : 'sin respuesta';
-            showToast('❌ ' + det);
+    // setPausadoNombre — misma lógica que reposicion.html
+    var payload = encodeURIComponent(JSON.stringify({ nombre: nombre, pausado: nuevoPausado ? 'SI' : '' }));
+    var url = API_URL + '?action=setPausadoNombre&data=' + payload;
+    fetch(url)
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+        if (!data.success) {
+            // Revertir si falla
+            if (_provActual) {
+                var prod = _provActual.productos.find(function(pr) { return pr.id == id; });
+                if (prod) prod.pausado = pausadoActual;
+                _renderProductos();
+            }
+            showToast('❌ ' + (data.mensaje || 'Error al guardar'));
         }
-    }).catch(function(e) {
+    })
+    .catch(function(e) {
+        if (_provActual) {
+            var prod = _provActual.productos.find(function(pr) { return pr.id == id; });
+            if (prod) prod.pausado = pausadoActual;
+            _renderProductos();
+        }
         showToast('❌ Sin conexión: ' + e.message);
     });
 }
 
-document.addEventListener('DOMContentLoaded', cargarProveedores);
+document.addEventListener('DOMContentLoaded', function() {
+    var b = document.getElementById('pedVerBadge');
+    if (b) b.textContent = 'v' + APP_VERSION;
+    document.title = 'Pedidos v' + APP_VERSION + ' · Copihue';
+    cargarProveedores();
+});
 
 async function _api(action, data) {
     var url = data
@@ -716,7 +738,7 @@ function _crearCardProd(p) {
       <span class="qty-num" id="qty_${p.id}">${enCarrito ? enCarrito.qty : qty}</span>
       <button class="qty-btn" onclick="cambiarQty(event,'${p.id}',+1)">+</button>
     </div>
-    <button class="btn-pausar-ped" onclick="event.stopPropagation();pedPausarProducto('${p.id}','${p.nombre.replace(/'/g, String.fromCharCode(39)).replace(/"/g, '&quot;')}')">⏸ Desactivar de listas</button>`;
+    <button class="btn-pausar-ped ${p.pausado ? 'reactivar' : ''}" onclick="event.stopPropagation();pedPausarProducto('${p.id}','${p.nombre.replace(/\'/g, String.fromCharCode(39)).replace(/"/g, '&quot;')}',${p.pausado ? true : false})">${p.pausado ? '▶️ Reactivar en lista' : '⏸ Desactivar de listas'}</button>`;
 
   card.addEventListener('click', (e) => {
     if (e.target.classList.contains('qty-btn')) return;
