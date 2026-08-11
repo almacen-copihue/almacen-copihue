@@ -6,12 +6,14 @@
   <title>📥 Ingreso · Copihue</title>
   <style>
     * { box-sizing: border-box; }
+    html { overscroll-behavior-y: contain; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
       padding: 16px;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       margin: 0;
       min-height: 100vh;
+      overscroll-behavior-y: contain;
     }
     .card {
       background: #fff;
@@ -423,20 +425,22 @@
     /* Toast */
     #toast {
       position: fixed;
-      bottom: 24px; left: 50%;
-      transform: translateX(-50%) translateY(80px);
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%) scale(0.9);
+      opacity: 0;
       background: #2e7d32;
       color: white;
-      padding: 12px 24px;
+      padding: 14px 26px;
       border-radius: 12px;
       font-weight: 700;
       font-size: 15px;
-      transition: transform 0.3s;
+      transition: transform 0.25s, opacity 0.25s;
       z-index: 9999;
       pointer-events: none;
-      white-space: nowrap;
+      text-align: center;
+      max-width: 320px;
     }
-    #toast.show { transform: translateX(-50%) translateY(0); }
+    #toast.show { transform: translate(-50%, -50%) scale(1); opacity: 1; }
     #toast.error { background: #c62828; }
 
     @media (max-width: 480px) {
@@ -553,6 +557,13 @@
 
 <script>
 // ── Changelog ──────────────────────────────────────────────────────────────────
+// v21 — Alineación con el contrato de "Reglas de Oro": (1) protección de
+//       salida sin confirmar — beforeunload + interceptación del botón
+//       atrás/gesto/botón físico vía historial "guardia", solo pregunta si
+//       hay datos sin guardar en el formulario; (2) overscroll-behavior-y:
+//       contain en html/body para que el pull-to-refresh no dispare una
+//       recarga; (3) el toast de mensajes pasa de abajo-centrado a centrado
+//       en pantalla (prioridad 1 de la regla de mensajes).
 // v20 — Producto y proveedor ahora se fuerzan a MAYÚSCULAS SIN TILDES en el
 //       valor real del campo (antes era solo visual vía CSS), en tiempo real
 //       mientras se tipea y de nuevo al guardar. También se normalizan los
@@ -643,7 +654,7 @@
 // v2 — (base recibida)
 // ──────────────────────────────────────────────────────────────────────────────
 
-const APP_VERSION = 'v20';
+const APP_VERSION = 'v21';
 document.title = '📥 Ingreso · Copihue ' + APP_VERSION;
 document.getElementById('versionBadge').textContent = APP_VERSION;
 
@@ -842,6 +853,40 @@ async function chequearConexion() {
   }
 }
 setInterval(chequearConexion, 60000);
+
+// ── PROTECCIÓN DE SALIDA SIN CONFIRMAR (regla de oro 3) ─────────────────────
+// Cubre: cerrar/recargar la pestaña, navegar a otra URL (beforeunload) y el
+// botón "atrás" del navegador / gesto de deslizar / botón físico del celu
+// (popstate, vía una entrada de historial "guardia"). Solo pregunta si hay
+// datos cargados en el formulario que todavía no se guardaron.
+function hayDatosSinGuardar() {
+  const nombre    = document.getElementById('producto').value.trim();
+  const cantidad  = document.getElementById('cantidad').value;
+  const costo     = document.getElementById('precioCosto').value;
+  const venta     = document.getElementById('precioVenta').value;
+  const proveedor = document.getElementById('proveedor').value.trim();
+  return !!(nombre || costo || venta || proveedor || (cantidad && cantidad !== '1'));
+}
+
+window.addEventListener('beforeunload', function(e) {
+  if (!hayDatosSinGuardar()) return;
+  e.preventDefault();
+  e.returnValue = '';
+});
+
+let _permitirSalida = false;
+history.pushState({ copihueGuard: true }, '', location.href);
+window.addEventListener('popstate', function() {
+  if (_permitirSalida) return; // el usuario ya confirmó que quiere salir
+  if (hayDatosSinGuardar()) {
+    if (confirm('⚠️ Tenés datos sin guardar (producto, precio o proveedor).\n¿Seguro que querés salir sin guardar?')) {
+      _permitirSalida = true;
+      history.back();
+    } else {
+      history.pushState({ copihueGuard: true }, '', location.href);
+    }
+  }
+});
 
 init();
 // Construir el widget de categoría de inmediato con el fallback —
