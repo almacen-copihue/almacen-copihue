@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lista de Compras — Almacén Copihue</title>
-    <script>var APP_VERSION = "1.4.2";</script>
+    <script>var APP_VERSION = "2";</script>
     <meta name="theme-color" content="#2e7d32">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <style>
@@ -617,43 +617,31 @@ function renderLista() {
     document.getElementById('lcCuerpo').innerHTML = html;
 }
 
-// ── Pausar / reactivar ────────────────────────────
-async function lcTogglePausado(idONombre) {
-    // Buscar en caché por id (número) o por nombre (string)
-    var p = null;
-    if (_prodCache.length) {
-        p = typeof idONombre === 'number'
-            ? _prodCache.find(function(pr) { return pr.id === idONombre; })
-            : _prodCache.find(function(pr) { return pr.name === idONombre; });
-    }
-    var esPausado = p
-        ? (p.pausadoListaCompra === true || p.pausadoListaCompra === 'SI')
-        : (_items.find(function(i) { return i.nombre === idONombre; }) || {}).pausado === true;
-
-    var nuevo = !esPausado;
-    if (p) p.pausadoListaCompra = nuevo ? 'SI' : '';
-
-    // Actualizar _items localmente
-    var nombre = p ? p.name : idONombre;
+// ── Pausar / reactivar — misma lógica que reposicion.html ──
+async function lcTogglePausado(nombre) {
     var lcIt = _items.find(function(i) { return i.nombre === nombre; });
-    if (lcIt) { lcIt.pausado = nuevo; lcIt.urgencia = nuevo ? 99 : 7; }
+    if (!lcIt) return;
+
+    var nuevoPausado = !lcIt.pausado;
+    lcIt.pausado = nuevoPausado; // optimista
     renderLista();
 
     try {
-        // Mandar id si lo tenemos, sino nombre
-        var payload = p
-            ? { id: p.id, pausado: nuevo ? 'SI' : '' }
-            : { nombre: nombre, pausado: nuevo ? 'SI' : '' };
-        var action = p ? 'setPausadoListaCompra' : 'setPausadoNombre';
-        var resp = await _api(action, payload);
-        if (!resp.success) throw new Error('sin ok');
-        toast(nuevo ? '⏸ Quitado de lista' : '▶️ Reactivado', nuevo ? '' : 'verde');
-    } catch(e) {
-        // Revertir
-        if (p) p.pausadoListaCompra = esPausado ? 'SI' : '';
-        if (lcIt) { lcIt.pausado = esPausado; lcIt.urgencia = esPausado ? 99 : 7; }
+        var payload = encodeURIComponent(JSON.stringify({ nombre: nombre, pausado: nuevoPausado ? 'SI' : '' }));
+        var url = API_URL + '?action=setPausadoNombre&data=' + payload;
+        var res = await fetch(url);
+        var data = await res.json();
+        if (!data.success) {
+            lcIt.pausado = !nuevoPausado; // revertir
+            renderLista();
+            toast('❌ ' + (data.mensaje || 'Error al guardar'), 'rojo');
+        } else {
+            toast(nuevoPausado ? '⏸ Quitado de lista' : '▶️ Reactivado', nuevoPausado ? '' : 'verde');
+        }
+    } catch(err) {
+        lcIt.pausado = !nuevoPausado;
         renderLista();
-        toast('❌ Error al guardar', 'rojo');
+        toast('❌ Error de conexión', 'rojo');
     }
 }
 
