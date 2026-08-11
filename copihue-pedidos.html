@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Pedidos · Copihue</title>
-<script>var APP_VERSION = "2";</script>
+<script>var APP_VERSION = "4";</script>
 <style>
 /*
   copihue-pedidos.html v1
@@ -631,7 +631,7 @@ async function _api(action, data) {
 
 async function cargarProveedores() {
   try {
-    const r = await fetch(API_URL + '?action=getProductosParaPedir&t=' + Date.now(), { cache: 'no-store' });
+    const r = await fetch(API_URL + '?action=getProductosParaPedir&incluirPausados=1&t=' + Date.now(), { cache: 'no-store' });
     const d = await r.json();
 
     if (!d.ok || !d.proveedores || !d.proveedores.length) {
@@ -642,7 +642,7 @@ async function cargarProveedores() {
       return;
     }
 
-    _proveedores = d.proveedores;
+    _proveedores = d.proveedores; // guardamos todos, incluidos pausados
     _renderTabs();
     seleccionarProveedor(_proveedores[0].proveedor);
 
@@ -703,10 +703,18 @@ function _renderProductos() {
     return;
   }
 
-  const prods = [..._provActual.productos].sort((a, b) => {
-    const ord = { CRITICO: 0, ALTO: 1, NORMAL: 2 };
-    return ord[a.urgencia] - ord[b.urgencia];
-  });
+  // Filtrar pausados en render (igual que reposicion.html)
+  const prods = [..._provActual.productos]
+    .filter(function(p) { return !p.pausado; })
+    .sort((a, b) => {
+      const ord = { CRITICO: 0, ALTO: 1, NORMAL: 2 };
+      return ord[a.urgencia] - ord[b.urgencia];
+    });
+
+  if (!prods.length) {
+    wrap.innerHTML = '<div id="stateMsg"><div class="icon">✅</div><p>Sin productos a reponer</p></div>';
+    return;
+  }
 
   wrap.innerHTML = '';
   for (const p of prods) {
