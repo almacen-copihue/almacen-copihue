@@ -176,6 +176,10 @@
   <div class="app-version" id="appVersion"></div>
 </div>
 
+<div id="testBanner" style="display:none; max-width:420px; margin:0 auto 10px; padding:8px 12px; border-radius:8px; background:#222; color:#ffd54a; text-align:center; font-size:0.78rem; font-weight:700; letter-spacing:0.5px;">
+  🧪 MODO PRUEBA — esta jugada NO cuenta como real, ni genera premio real
+</div>
+
 <div class="ticket">
   <div class="ticket-inner">
     <div class="ticket-title">🎰 Raspadita</div>
@@ -241,7 +245,7 @@
 //  VERSIÓN — bumpear +1 en cada salida al servidor (se refleja
 //  solo en el <title> de la pestaña y en el badge del header)
 // ═══════════════════════════════════════════════════════════════
-const APP_VERSION = 'v6';
+const APP_VERSION = 'v7';
 document.title = 'Raspadita 🌺 ' + APP_VERSION;
 document.getElementById('appVersion').textContent = APP_VERSION;
 
@@ -250,6 +254,19 @@ const IMG_BASE    = 'https://raw.githubusercontent.com/almacen-copihue/almacen-c
 const WIN_CHANCE  = 0.20;   // 20%
 const MAX_DIA     = 1;      // raspaditas por día
 const LS_KEY      = 'rasp_';
+
+// ═══════════════════════════════════════════════════════════════
+//  MODO PRUEBA — se activa SOLO agregando ?test=1 a la URL.
+//  Nunca se activa solo, así nadie confunde una jugada de prueba
+//  con una real. Efectos mientras está activo:
+//   · Ignora el límite de 1 raspadita por día (podés jugar sin fin)
+//   · NO escribe el contador real en localStorage
+//   · NO registra la jugada perdedora en el GAS
+//   · NO genera un código de premio real en el GAS (usa uno falso
+//     con prefijo TEST- para que nadie lo confunda ni lo canjee)
+//   · Muestra un aviso fijo "🧪 MODO PRUEBA" arriba de la tarjeta
+// ═══════════════════════════════════════════════════════════════
+const TEST_MODE = new URLSearchParams(location.search).get('test') === '1';
 
 // ═══════════════════════════════════════════════════════════════
 //  ESTADO
@@ -281,6 +298,7 @@ window.addEventListener('load', iniciar);
 async function iniciar() {
   mostrarEstado('loading');
   codigoGanador = null;
+  if (TEST_MODE) document.getElementById('testBanner').style.display = '';
   try {
     const [resCfg, resPremios] = await Promise.all([
       fetchGAS('getConfigRaspadita'),
@@ -347,8 +365,9 @@ function claveHoy() {
   const d = new Date();
   return LS_KEY + d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 }
-function yaJugoHoy() { return parseInt(localStorage.getItem(claveHoy())||'0') >= MAX_DIA; }
+function yaJugoHoy() { return !TEST_MODE && parseInt(localStorage.getItem(claveHoy())||'0') >= MAX_DIA; }
 function registrarJugadaLocal() {
+  if (TEST_MODE) return; // no tocar el contador real
   const k = claveHoy();
   localStorage.setItem(k, String((parseInt(localStorage.getItem(k)||'0')+1)));
   Object.keys(localStorage).filter(k2=>k2.startsWith(LS_KEY)&&k2!==k).forEach(k2=>localStorage.removeItem(k2));
@@ -569,8 +588,8 @@ function verificarResultado() {
     document.getElementById('resultText').textContent = '😔 Sin suerte esta vez';
     document.getElementById('resultSub').textContent  = 'Volvé mañana · Mirá las ofertas';
     actualizarBtnGroup(false);
-    // Registrar jugada perdedora en GAS (fire & forget)
-    fetchGAS('registrarJugada', { dispositivo }).catch(()=>{});
+    // Registrar jugada perdedora en GAS (fire & forget) — no en modo prueba
+    if (!TEST_MODE) fetchGAS('registrarJugada', { dispositivo }).catch(()=>{});
   }
 }
 
@@ -588,13 +607,19 @@ function actualizarBtnGroup(ganador) {
 //  CÓDIGO + WA
 // ═══════════════════════════════════════════════════════════════
 async function mostrarCodigoYWA(premio) {
-  try {
-    const dispositivo = (navigator.userAgent+'|'+screen.width+'x'+screen.height).slice(0,80);
-    const res = await fetchGAS('registrarGanador', {premio:premio.nombre, precio:premio.precio, dispositivo});
-    if(res.ok) codigoGanador = res.codigo;
-  } catch(e) {
+  if (TEST_MODE) {
+    // Modo prueba: código falso, nunca pega al GAS ni genera un premio real
     const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    codigoGanador='COP-'+Array.from({length:5},()=>chars[Math.floor(Math.random()*chars.length)]).join('');
+    codigoGanador='TEST-'+Array.from({length:5},()=>chars[Math.floor(Math.random()*chars.length)]).join('');
+  } else {
+    try {
+      const dispositivo = (navigator.userAgent+'|'+screen.width+'x'+screen.height).slice(0,80);
+      const res = await fetchGAS('registrarGanador', {premio:premio.nombre, precio:premio.precio, dispositivo});
+      if(res.ok) codigoGanador = res.codigo;
+    } catch(e) {
+      const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      codigoGanador='COP-'+Array.from({length:5},()=>chars[Math.floor(Math.random()*chars.length)]).join('');
+    }
   }
 
   document.getElementById('codigoValor').textContent = codigoGanador;
