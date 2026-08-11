@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Pedidos · Copihue</title>
-<script>var APP_VERSION = "5";</script>
+<script>var APP_VERSION = "6";</script>
 <style>
 /*
   copihue-pedidos.html v1
@@ -566,43 +566,33 @@ let _provActual    = null; // proveedor seleccionado
 let _carrito       = {};   // { ID_PRODUCTO: { item, qty } }
 
 // ── Boot ─────────────────────────────────────────────────────────
-function pedPausarProducto(id, nombre, pausadoActual) {
+function pedPausarProducto(id, nombre) {
     if (!id) { showToast('❌ Sin ID de producto'); return; }
 
-    var nuevoPausado = !pausadoActual;
-
-    // Actualizar localmente optimista
+    // Sacar del array local inmediatamente — igual que reposicion.html
     if (_provActual) {
-        var prod = _provActual.productos.find(function(pr) { return pr.id == id; });
-        if (prod) prod.pausado = nuevoPausado;
+        _provActual.productos = _provActual.productos.filter(function(pr) { return pr.id != id; });
+        delete _carrito[id];
         _renderProductos();
         _actualizarFAB();
     }
-    showToast(nuevoPausado ? '⏸ ' + nombre + ' desactivado' : '▶️ ' + nombre + ' reactivado');
+    showToast('⏸ ' + nombre + ' desactivado');
 
-    // setPausadoNombre — misma lógica que reposicion.html
-    var payload = encodeURIComponent(JSON.stringify({ nombre: nombre, pausado: nuevoPausado ? 'SI' : '' }));
+    // Escribir en planilla
+    var payload = encodeURIComponent(JSON.stringify({ nombre: nombre, pausado: 'SI' }));
     var url = API_URL + '?action=setPausadoNombre&data=' + payload;
     fetch(url)
     .then(function(res) { return res.json(); })
     .then(function(data) {
         if (!data.success) {
-            // Revertir si falla
-            if (_provActual) {
-                var prod = _provActual.productos.find(function(pr) { return pr.id == id; });
-                if (prod) prod.pausado = pausadoActual;
-                _renderProductos();
-            }
             showToast('❌ ' + (data.mensaje || 'Error al guardar'));
+            // Recargar para restaurar estado real
+            cargarProveedores();
         }
     })
     .catch(function(e) {
-        if (_provActual) {
-            var prod = _provActual.productos.find(function(pr) { return pr.id == id; });
-            if (prod) prod.pausado = pausadoActual;
-            _renderProductos();
-        }
         showToast('❌ Sin conexión: ' + e.message);
+        cargarProveedores();
     });
 }
 
@@ -746,7 +736,7 @@ function _crearCardProd(p) {
       <span class="qty-num" id="qty_${p.id}">${enCarrito ? enCarrito.qty : qty}</span>
       <button class="qty-btn" onclick="cambiarQty(event,'${p.id}',+1)">+</button>
     </div>
-    <button class="btn-pausar-ped ${p.pausado ? 'reactivar' : ''}" onclick="event.stopPropagation();pedPausarProducto('${p.id}','${p.nombre.replace(/\'/g, String.fromCharCode(39)).replace(/"/g, '&quot;')}',${p.pausado ? true : false})">${p.pausado ? '▶️ Reactivar en lista' : '⏸ Desactivar de listas'}</button>`;
+    <button class="btn-pausar-ped" onclick="event.stopPropagation();pedPausarProducto('${p.id}','${p.nombre.replace(/\'/g, String.fromCharCode(39)).replace(/\x22/g, '&quot;')}')">⏸ Desactivar de listas</button>`;
 
   card.addEventListener('click', (e) => {
     if (e.target.classList.contains('qty-btn')) return;
