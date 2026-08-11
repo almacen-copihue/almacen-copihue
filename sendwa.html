@@ -6,9 +6,14 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>SendWA — Almacén Copihue ver.88</title>
+<title>SendWA — Almacén Copihue ver.89</title>
 <!--
   CHANGELOG sendwa.html
+  v89: - NUEVO — Badge de oferta (la franja "2X $X" arriba de la foto en "1 Foto")
+         ahora tiene sus propios controles, separados del Estilo Promo: 👁️
+         Mostrar / 🚫 Ocultar, y 3 tamaños (Tamaño 1/2/3). A diferencia del
+         Estilo Promo (solo 1:1), esto aplica a TODOS los formatos, porque
+         esa franja aparece en todos ellos.
   v88: - CAMBIO — "1 Foto" Clásico: revertido el "cover" de v87 a "contain" (la
          foto NUNCA se recorta, se ve completa, con aire alrededor). El look
          "ochentero" que se quería evitar no era culpa del contain — era el
@@ -799,7 +804,7 @@
           style="width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.2);
                  border:none;color:#fff;font-size:12px;font-weight:800;cursor:pointer;
                  flex-shrink:0;display:flex;align-items:center;justify-content:center;">?</button>
-  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.88</div>
+  <div id="ver-badge" style="background:rgba(255,255,255,.15);color:#fff;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.3px">ver.89</div>
   <button id="btn-dark" title="Modo oscuro">🌙</button>
 </div>
 
@@ -1014,6 +1019,20 @@
       </div>
       <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">☑ tildá los formatos que quieras generar juntos (hasta 9)</div>
       <button id="btn-formatos-multiples" style="display:none;width:100%;margin-top:6px;height:38px;border-radius:9px;border:none;background:#8e44ad;color:#fff;font-weight:800;font-size:12px;cursor:pointer;">📦 Generar seleccionados (0)</button>
+
+      <!-- 🏷️ Badge de oferta (franja "2X $X" arriba de la foto) — todos los formatos -->
+      <div id="oferta-badge-bar" style="background:var(--bg);border:1.5px dashed var(--border);border-radius:10px;padding:8px 10px;margin-top:8px;">
+        <div class="layout-section-label">🏷️ Badge de oferta (franja arriba de la foto)</div>
+        <div class="layout-row" id="oferta-badge-visible-row">
+          <button class="layout-btn active" data-badge-vis="1">👁️ Mostrar</button>
+          <button class="layout-btn" data-badge-vis="0">🚫 Ocultar</button>
+        </div>
+        <div class="layout-row" id="oferta-badge-tam-row" style="margin-top:6px">
+          <button class="layout-btn" data-badge-tam="1">Tamaño 1</button>
+          <button class="layout-btn active" data-badge-tam="2">Tamaño 2</button>
+          <button class="layout-btn" data-badge-tam="3">Tamaño 3</button>
+        </div>
+      </div>
 
       <!-- 🎨 Estilo Promo — badge explosivo, SOLO afecta al formato 1:1 -->
       <div id="promo-style-bar" style="display:none;background:var(--bg);border:1.5px dashed var(--border);border-radius:10px;padding:8px 10px;margin-top:8px;">
@@ -2527,6 +2546,12 @@ async function renderCollageMode() {
 
 let _singleFormat = { w: 1080, h: 1080 }; // formato activo
 
+// ── Badge de oferta (franja "2X $X" arriba de la foto) — aplica a TODOS los
+// formatos, a diferencia del Estilo Promo que es solo 1:1 ──
+let _ofertaBadgeVisible = true;
+let _ofertaBadgeTam = 2; // 1, 2 o 3
+const OFERTA_BADGE_TAMS = { 1: 0.028, 2: 0.04, 3: 0.058 }; // fracción de H
+
 // ── Estilo Promo (badge explosivo) — solo aplica al formato 1:1 ──
 let _promoEstilo    = 'normal';    // 'normal' | 'explosivo'
 let _promoBadgeTipo = 'explosion'; // 'ninguno' | 'explosion' | 'tarjeta'
@@ -2618,6 +2643,22 @@ document.getElementById('layout-format-row').onclick = e => {
   // en el resto de los formatos, tal cual pide la regla de "no alterar
   // obligatoriamente" los demás formatos.
   document.getElementById('promo-style-bar').style.display = (fw === fh) ? 'block' : 'none';
+  renderCollageMode();
+};
+
+// ── Badge de oferta (franja de arriba) — mostrar/ocultar y tamaño ──
+document.getElementById('oferta-badge-visible-row').onclick = e => {
+  const btn = e.target.closest('.layout-btn');
+  if (!btn) return;
+  _ofertaBadgeVisible = btn.dataset.badgeVis === '1';
+  document.querySelectorAll('#oferta-badge-visible-row .layout-btn').forEach(b => b.classList.toggle('active', b===btn));
+  renderCollageMode();
+};
+document.getElementById('oferta-badge-tam-row').onclick = e => {
+  const btn = e.target.closest('.layout-btn');
+  if (!btn) return;
+  _ofertaBadgeTam = Number(btn.dataset.badgeTam);
+  document.querySelectorAll('#oferta-badge-tam-row .layout-btn').forEach(b => b.classList.toggle('active', b===btn));
   renderCollageMode();
 };
 
@@ -3278,7 +3319,8 @@ async function drawSingleFmt(p, W=1080, H=1080) {
 
   // ── Zonas ──
   const HDRH = Math.round(H * 0.052);       // header tienda — proporcional, no fijo
-  const BADGEH = oferta ? Math.round(H * 0.04) : 0;
+  const ofertaBadgeOn = oferta && _ofertaBadgeVisible;
+  const BADGEH = ofertaBadgeOn ? Math.round(H * OFERTA_BADGE_TAMS[_ofertaBadgeTam]) : 0;
   const NAMEH = Math.round(H * 0.07);
   const PRICEH = tieneOfertaPrecio ? Math.round(H * 0.09) : Math.round(H * 0.065);
   const FTRH = Math.round(H * 0.04);
@@ -3290,9 +3332,9 @@ async function drawSingleFmt(p, W=1080, H=1080) {
   ctx.fillStyle='#fff'; ctx.font=`bold ${Math.round(HDRH*0.4)}px Segoe UI`; ctx.textAlign='center';
   ctx.fillText('🛒 ALMACÉN COPIHUE', W/2, HDRH*0.66);
 
-  // Badge oferta — franja fina, sin ocupar demasiado
+  // Badge oferta (franja "2X $X" / etc.) — mostrar/ocultar y tamaño configurables
   let curY = HDRH;
-  if (oferta && badgeColor) {
+  if (ofertaBadgeOn && badgeColor) {
     ctx.fillStyle = badgeColor; ctx.fillRect(0, curY, W, BADGEH);
     ctx.fillStyle='#fff'; ctx.font=`bold ${Math.round(BADGEH*0.5)}px Segoe UI`; ctx.textAlign='center';
     ctx.fillText(oferta.etiqueta.toUpperCase(), W/2, curY+BADGEH*0.68);
