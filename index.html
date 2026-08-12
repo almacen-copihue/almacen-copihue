@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🏪 Catálogo · Copihue v173</title>
+    <title>🏪 Catálogo · Copihue v174e</title>
     <!--
     CHANGELOG
     v173 · 2026-07-30
@@ -2749,13 +2749,14 @@
 <footer>
     <div class="footer-content">
         <p><span data-empresa-nombre>Almacén Copihue</span> - <span data-empresa-slogan>Productos de calidad con la confianza de siempre</span></p>
+        <p id="footer-divisas" style="display:none;font-size:0.8rem;opacity:0.85;margin-top:2px;"></p>
         <p>📍 <span data-empresa-direccion>Copihue 457</span> | 📞 <a data-empresa-wa href="https://wa.me/5492944907380" style="color:inherit;text-decoration:none;">+5492944907380</a> | ⏰ <span data-horario-rango>11:30 a 22:00 hrs.</span></p>
     </div>
 </footer>
 
 <script>
 // ========== VERSIÓN Y CONFIGURACIÓN ==========
-const APP_VERSION = 'copihue-index-v174b';
+const APP_VERSION = 'copihue-index-v174e';
 // Tag versión automático con fecha
 // versionTag se actualiza desde config_sistema (campo 'version')
 
@@ -3199,6 +3200,31 @@ async function cargarConfigSistema() {
             ciudad:    _get('ciudad')                        || ''
         };
         window._EMPRESA = _emp;
+
+        // ── DIVISAS (USD / CLP) — leídas desde planilla ──
+        const _usdValor    = parseFloat(_get('usd_valor'))   || 0;
+        const _usdActivo   = _get('usd_activo').toUpperCase() === 'TRUE' && _usdValor > 0;
+        const _usdFecha    = _get('usd_actualizado');
+        const _clpValor    = parseFloat(_get('clp_valor'))   || 0;
+        const _clpActivo   = _get('clp_activo').toUpperCase() === 'TRUE' && _clpValor > 0;
+        const _clpFecha    = _get('clp_actualizado');
+
+        window._DIVISAS = { usd: { valor: _usdValor, activo: _usdActivo }, clp: { valor: _clpValor, activo: _clpActivo } };
+
+        // Construir línea de divisas para el footer (solo si hay al menos una activa)
+        const _partesDivisas = [];
+        if (_usdActivo) _partesDivisas.push(`💵 USD $1 = $${_usdValor.toLocaleString('es-AR')}`);
+        if (_clpActivo) _partesDivisas.push(`🇨🇱 CLP $1 = $${_clpValor.toLocaleString('es-AR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`);
+
+        const elFooterDivisas = document.getElementById('footer-divisas');
+        if (elFooterDivisas) {
+            if (_partesDivisas.length) {
+                elFooterDivisas.textContent = '💱 Aceptamos: ' + _partesDivisas.join(' · ');
+                elFooterDivisas.style.display = '';
+            } else {
+                elFooterDivisas.style.display = 'none';
+            }
+        }
         document.querySelectorAll('[data-empresa-nombre]').forEach(el => el.textContent = _emp.nombre);
         document.querySelectorAll('[data-empresa-slogan]').forEach(el => el.textContent = _emp.slogan);
         document.querySelectorAll('[data-empresa-telefono]').forEach(el => el.textContent = '+' + _emp.telefono);
@@ -4128,7 +4154,18 @@ function renderizarCervecero() {
 
     const activo = _esCerveceroActivo();
 
-    // Siempre visible — nunca ocultar, sirve como teaser el resto de la semana
+    // Solo visible los jueves — ocultar el resto de la semana
+    const _ahoraCheck = new Date();
+    const _argCheck   = new Date(_ahoraCheck.toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+    const esJueves    = _argCheck.getDay() === 4;
+    if (!esJueves) {
+        container.classList.add('cls-oculto');
+        container.style.marginBottom = '';
+        console.log('🍺 Cervecero oculto — hoy no es jueves');
+        return;
+    }
+
+    // Siempre visible los jueves — teaser o activo según horario
     container.classList.remove('cls-oculto');
     container.style.marginBottom = '2rem';
 
@@ -5571,11 +5608,32 @@ function sendOrderViaWhatsApp() {
         }
         // COMBO / PROMO — price=original tachado, normal=precio promo (col L)
         else if (item.esPromo && _esPromoOComboActivo(product)) {
-            precioItem     = product.normal * item.quantity;          // ← precio real que paga
-            precioParaTotal = product.price  * item.quantity;         // ← precio antes (para ahorro)
+            precioItem     = product.normal * item.quantity;
+            precioParaTotal = product.price  * item.quantity;
             const ahorro    = precioParaTotal - precioItem;
             const porcentaje = Math.round(((product.price - product.normal) / product.price) * 100);
             ofertaInfo = `\n🎯 Ahorrás $${ahorro.toLocaleString('es-AR')} (-${porcentaje}%)`;
+        }
+        // MULTICOMPRA
+        else if (item.oferta && item.oferta.tipo === 'multicompra') {
+            const AT = item.oferta.mcCantidad;
+            const AU = item.oferta.mcPrecio;
+            const tipo = item.oferta.mcTipo;
+            let precioCalculado = item.quantity * product.price;
+            if (item.quantity >= AT && AT > 0 && AU > 0) {
+                if (tipo === '2X' || tipo === '3X' || tipo === 'NX' || tipo === 'LLEVÁ-PAGÁ') {
+                    const ciclos = Math.floor(item.quantity / AT);
+                    const resto  = item.quantity % AT;
+                    precioCalculado = ciclos * AU + resto * product.price;
+                } else if (tipo === '2DA_UNIDAD') {
+                    const pares = Math.floor(item.quantity / 2);
+                    const resto  = item.quantity % 2;
+                    precioCalculado = pares * (product.price + AU) + resto * product.price;
+                }
+            }
+            precioItem = Math.round(precioCalculado);
+            const ahorro = precioNormalItem - precioItem;
+            ofertaInfo = `\n📦 ${item.oferta.eslogan}${ahorro > 0 ? ` · Ahorrás $${ahorro.toLocaleString('es-AR')}` : ''}`;
         }
 
         totalNormal += precioParaTotal;
@@ -5583,7 +5641,7 @@ function sendOrderViaWhatsApp() {
         totalAhorro += (precioParaTotal - precioItem);
 
         // LÍNEA CON FORMATO MEJORADO
-        const nombreLinea = item.esOfertaEspecial || item.esOfertaDestacada || item.esOfertaRelampago || item.esOfertaUltimas || item.esPromo
+        const nombreLinea = item.esOfertaEspecial || item.esOfertaDestacada || item.esOfertaRelampago || item.esOfertaUltimas || item.esPromo || (item.oferta && item.oferta.tipo === 'multicompra')
             ? `${item.name} (OFERTA)` 
             : item.name;
             
@@ -7058,7 +7116,7 @@ setInterval(actualizarRelojHeader, 10000);
 (function() {
 const RASP_GAS     = 'https://script.google.com/macros/s/AKfycbzWZzDvdGfW8vd2-FpQolT852cdPMeHbfKugn9DBOlju75bE1D0SUNB5EKEDOsI2vP4lA/exec';
 const RASP_IMG     = 'https://raw.githubusercontent.com/almacen-copihue/almacen-copihue/main/imagenes-productos/';
-const WIN_CHANCE   = 0.20;
+const WIN_CHANCE   = 0.05; // 1 de cada 20 jugadores gana premio
 const LS_KEY       = 'rasp_';
 const LINEAS       = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
 
@@ -7265,7 +7323,13 @@ function raspVerificar(){
 async function raspMostrarCodigo(premio){
   try{
     const disp=(navigator.userAgent+'|'+screen.width+'x'+screen.height).slice(0,80);
-    const res=await raspFetch('registrarGanador',{premio:premio.nombre,precio:premio.precio,dispositivo:disp});
+    const res=await raspFetch('registrarGanador',{
+      premio:    premio.nombre,
+      precio:    premio.precio,
+      dispositivo: disp,
+      versionApp:  typeof APP_VERSION !== 'undefined' ? APP_VERSION : 'desconocida',
+      versionRasp: 'rasp-v174b'
+    });
     if(res.ok) raspCodigo=res.codigo;
   }catch(e){}
   if(!raspCodigo){
@@ -7296,7 +7360,8 @@ async function raspMostrarCodigo(premio){
   const msg='Hola 🌺 Gané una raspadita en '+empresa+'.\n\n'+
     '🎁 Premio: '+premio.nombre+'\n'+
     '💰 Valor: $'+premio.precio.toLocaleString('es-AR')+'\n'+
-    '🎟️ Código: '+raspCodigo+'\n\n'+
+    '🎟️ Código: '+raspCodigo+'\n'+
+    '🔖 Versión: rasp-v174b\n\n'+
     '⏰ Premio reservado hasta las '+cierreStr+' hs de hoy.\n'+
     '¿Puedo pasar a retirarlo? 😊';
   const btnWA=document.getElementById('raspBtnWA');
