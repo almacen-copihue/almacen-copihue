@@ -429,8 +429,8 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
         </div>
         <div class="cr" style="align-items:flex-start;">
           <label style="display:flex;align-items:center;gap:6px;flex:1;cursor:pointer;font-weight:400;">
-            <input type="checkbox" id="cfgInclElectro" onchange="poblarCandidatos()" style="width:14px;height:14px;flex:0;">
-            Incluir Electrónica y Tecnología
+            <input type="checkbox" id="cfgExclElectro" onchange="poblarCandidatos()" style="width:14px;height:14px;flex:0;">
+            Excluir Electrónica y Tecnología
           </label>
         </div>
       </div>
@@ -544,7 +544,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbzWZzDvdGfW8vd2-FpQolT852cdPMeHbfKugn9DBOlju75bE1D0SUNB5EKEDOsI2vP4lA/exec'; // v5.38: alineado con seba21/sendwa — el flyer apuntaba a otro deployment de Apps Script
-const APP_VERSION = 'v5.48';
+const APP_VERSION = 'v5.50';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -1578,16 +1578,18 @@ function toggleLog(){
 // Exclusiones generales (mínimo $1.500 / Electrónica y Tecnología) — aplican a
 // TODOS los modos. Centralizada acá para que el conteo de cada botón (badge) y la
 // lista real de candidatos usen siempre el mismo criterio y no queden desincronizados.
+// Tildado = excluir, en los dos checkboxes por igual (v5.50 — antes el de
+// Electrónica estaba al revés: "Incluir" tildado = mostrar).
 // opts.skipElectro=true: no aplica el filtro de Electrónica/Tecnología aunque el
-// checkbox esté destildado. Se usa en Destacadas (v5.43) — esa exclusión se pensó
+// checkbox esté tildado. Se usa en Destacadas (v5.43) — esa exclusión se pensó
 // para "Grilla Normal / productos más vendidos", no para Destacados.
 function aplicarExclusionesGenerales(arr, opts){
   opts = opts || {};
   const exclMin     = $('cfgExclMin') && $('cfgExclMin').checked;
-  const inclElectro = opts.skipElectro || ($('cfgInclElectro') && $('cfgInclElectro').checked);
+  const exclElectro = !opts.skipElectro && !!($('cfgExclElectro') && $('cfgExclElectro').checked);
   let out = arr;
   if(exclMin) out = out.filter(p=>p.price>=1500);
-  if(!inclElectro){
+  if(exclElectro){
     out = out.filter(p=>{
       const raw=_prods.find(x=>x.id===p.id);
       const c=quitarAcentos(p.cat||(raw?raw.cat:'')).toUpperCase();
@@ -2165,31 +2167,49 @@ function elegirPiezaPublicidad(faltan, indice){
 // Tarjeta publicitaria — mismas dimensiones/radio/borde que drawCard para que
 // ocupe exactamente el lugar de una tarjeta de producto sin alterar el grid.
 function drawCardAd(ctx,cx,cy,CW,CH,FH,P,pieza){
-  // Shell igual a drawCard, borde en color acento para distinguirla a simple vista
+  // Shell — mismas proporciones que una tarjeta de producto
   ctx.fillStyle=P.card; rr(ctx,cx,cy,CW,CH,10); ctx.fill();
-  ctx.strokeStyle=P.ac; ctx.lineWidth=1.5; rr(ctx,cx,cy,CW,CH,10); ctx.stroke();
+  ctx.strokeStyle=P.bdr; ctx.lineWidth=1; rr(ctx,cx,cy,CW,CH,10); ctx.stroke();
 
-  // Zona "foto" — fondo tenue + logo/nombre centrado
-  ctx.fillStyle=P.card2; rr(ctx,cx+5,cy+5,CW-10,FH-2,7); ctx.fill();
+  // "Zona foto" → placa de color sólido con anillos decorativos (motivo tipo
+  // sello editorial), en vez de fondo tenue con texto plano encima. Da
+  // sensación de pauta publicitaria diseñada, no de espacio relleno (v5.49).
+  ctx.save();
+  rr(ctx,cx+5,cy+5,CW-10,FH-2,7); ctx.clip();
+  ctx.fillStyle=P.ac; ctx.fillRect(cx+5,cy+5,CW-10,FH-2);
+  const ringCx=cx+CW/2, ringCy=cy+5+(FH-2)/2, ringBase=Math.min(CW,FH-2);
+  ctx.strokeStyle='rgba(255,255,255,0.16)'; ctx.lineWidth=Math.max(ringBase*0.035,2);
+  [0.86,0.60].forEach(f=>{ ctx.beginPath(); ctx.arc(ringCx,ringCy,ringBase*f*0.42,0,Math.PI*2); ctx.stroke(); });
+
   const sz = CW<85?'xs':CW<110?'sm':'md';
-  const logoFs = {xs:13,sm:15,md:18}[sz];
+  const logoFs = {xs:14,sm:16,md:19}[sz];
   const kickFs = {xs:7, sm:8, md:9}[sz];
-  ctx.textAlign='center';
-  ctx.fillStyle=P.ac;
+  ctx.textAlign='center'; ctx.fillStyle='#fff';
   ctx.font=`900 ${logoFs}px "Syne",sans-serif`;
-  ctx.fillText((_emp.nombre||'COPIHUE').toUpperCase(), cx+CW/2, cy+FH/2+2);
-  ctx.strokeStyle=P.ac; ctx.lineWidth=1;
-  ctx.beginPath();ctx.moveTo(cx+CW*0.34,cy+FH/2+10);ctx.lineTo(cx+CW*0.66,cy+FH/2+10);ctx.stroke();
-  ctx.fillStyle=P.sub;
+  ctx.fillText((_emp.nombre||'COPIHUE').toUpperCase(), ringCx, ringCy+2);
+  ctx.strokeStyle='rgba(255,255,255,0.85)'; ctx.lineWidth=1.4;
+  ctx.beginPath();ctx.moveTo(cx+CW*0.32,ringCy+10);ctx.lineTo(cx+CW*0.68,ringCy+10);ctx.stroke();
+  ctx.fillStyle='rgba(255,255,255,0.92)';
   ctx.font=`bold ${kickFs}px "DM Sans",sans-serif`;
-  ctx.fillText(pieza.kicker, cx+CW/2, cy+FH/2+22);
+  ctx.fillText(pieza.kicker.toUpperCase(), ringCx, ringCy+22);
+  ctx.restore();
 
-  // Zona de texto — misma estructura que drawCard (frase centrada abajo)
+  // Etiqueta "PUBLICIDAD" discreta en la esquina — transparencia editorial,
+  // igual que las revistas marcan sus pautas pagas, sin ambigüedad con un producto.
+  const tagW=Math.min(CW*0.56,80), tagH=13;
+  ctx.fillStyle=P.card; rr(ctx,cx+CW-tagW-4,cy+9,tagW,tagH,tagH/2); ctx.fill();
+  ctx.fillStyle=P.ac; ctx.textAlign='center';
+  ctx.font=`800 ${Math.max(CW*0.026,7)}px "DM Sans",sans-serif`;
+  ctx.fillText('PUBLICIDAD', cx+CW-tagW/2-4, cy+9+tagH/2+3);
+
+  // Zona de texto — frase centrada abajo, con acento de color en la línea divisoria
   const tzY=cy+FH+3;
+  ctx.strokeStyle=P.ac2; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(cx+CW/2-10,tzY); ctx.lineTo(cx+CW/2+10,tzY); ctx.stroke();
   const fraseFs = {xs:8,sm:9,md:10}[sz];
   ctx.fillStyle=P.txt; ctx.textAlign='center';
   ctx.font=`bold ${fraseFs}px "DM Sans",sans-serif`;
-  wrap(ctx, pieza.frase, cx+CW/2, tzY+fraseFs+4, CW-10, fraseFs+3, 3);
+  wrap(ctx, pieza.frase, cx+CW/2, tzY+fraseFs+7, CW-10, fraseFs+3, 3);
 }
 
 async function drawCard(ctx,p,cx,cy,CW,CH,FH,P,pk,soloUno=false){
@@ -2863,29 +2883,48 @@ function descargar(){
 
 async function compartirWA(){
   if(!_cvFin){alert('Generá el flyer primero');return;}
-  ld(true,'Preparando imagen...');
-  try{
-    const blob=await new Promise((res,rej)=>_cvFin.toBlob(b=>b?res(b):rej(new Error('toBlob falló')),'image/jpeg',.93));
-    ld(false);
-    const file=new File([blob],'copihue-flyer.jpg',{type:'image/jpeg'});
 
-    // Web Share API (Android Chrome, Safari iOS 15+)
-    if(navigator.share&&navigator.canShare&&navigator.canShare({files:[file]})){
+  // Si hay varias páginas, preguntar cuáles enviar en vez de mandar solo
+  // la que se está mirando en pantalla (v5.49).
+  let canvasAEnviar=[_cvFin];
+  if(_cvPaginas.length>1){
+    const todas=confirm(
+      `Este flyer tiene ${_cvPaginas.length} páginas.\n\n`+
+      `Aceptar = enviar las ${_cvPaginas.length} páginas\n`+
+      `Cancelar = enviar solo la página ${_pagActual+1} (la que estás viendo)`
+    );
+    if(todas) canvasAEnviar=_cvPaginas;
+  }
+
+  ld(true,'Preparando imagen'+(canvasAEnviar.length>1?'es...':'...'));
+  try{
+    const blobs=await Promise.all(canvasAEnviar.map(cv=>new Promise((res,rej)=>
+      cv.toBlob(b=>b?res(b):rej(new Error('toBlob falló')),'image/jpeg',.93))));
+    ld(false);
+    const files=blobs.map((b,i)=>new File([b],
+      canvasAEnviar.length>1?`copihue-flyer-pag${i+1}de${canvasAEnviar.length}.jpg`:'copihue-flyer.jpg',
+      {type:'image/jpeg'}));
+
+    // Web Share API (Android Chrome, Safari iOS 15+) — soporta múltiples archivos
+    if(navigator.share&&navigator.canShare&&navigator.canShare({files})){
       await navigator.share({
-        files:[file],
+        files,
         title:'Flyer '+_emp.nombre,
         text:'🏷️ ¡Ofertas en '+_emp.nombre+'!\n'+(_emp.web?'🛒 '+_emp.web:'')
       });
       return;
     }
 
-    // Fallback: descargar + abrir WhatsApp web
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');
-    a.href=url; a.download='copihue-flyer.jpg';
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(()=>URL.revokeObjectURL(url),3000);
-    // Abrir WhatsApp para que peguen la imagen manualmente
+    // Fallback: descargar todas + abrir WhatsApp web (el usuario las pega a mano)
+    for(let i=0;i<blobs.length;i++){
+      const url=URL.createObjectURL(blobs[i]);
+      const a=document.createElement('a');
+      a.href=url; a.download=files[i].name;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(()=>URL.revokeObjectURL(url),3000);
+      await new Promise(r=>setTimeout(r,300));
+    }
+    // Abrir WhatsApp para que peguen la(s) imagen(es) manualmente
     const waUrl=_emp.telefono
       ?'https://wa.me/'+_emp.telefono
       :'https://web.whatsapp.com/';
