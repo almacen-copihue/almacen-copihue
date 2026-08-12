@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-  <script>const APP_VERSION = 4;</script>
+  <script>const APP_VERSION = 5;</script>
   <title>Herramientas · Copihue</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -74,7 +74,6 @@
 
     .h-card {
       display: block;
-      text-decoration: none;
       background: rgba(255,255,255,0.04);
       border: 1px solid rgba(255,255,255,0.08);
       border-left: 3px solid #444;
@@ -82,7 +81,9 @@
       padding: 12px 14px;
       transition: background 0.15s, transform 0.12s;
     }
-    .h-card:active { transform: scale(0.98); }
+    .h-card.expandible { cursor: pointer; }
+    .h-card.expandible:active { transform: scale(0.98); }
+    .h-card.expandible:hover  { background: rgba(255,255,255,0.08); }
 
     /* colores de borde por estado */
     .h-card.est-correcto   { border-left-color: #3dd68c; }
@@ -90,10 +91,11 @@
     .h-card.est-esperar    { border-left-color: #5b8def; }
     .h-card.est-pendiente  { border-left-color: #a78bfa; }
     .h-card.est-descartada { border-left-color: #e05050; opacity: 0.55; }
-    .h-card.sin-link       { cursor: default; }
 
-    /* hover solo en las que tienen link */
-    a.h-card:hover { background: rgba(255,255,255,0.08); transform: translateY(-1px); }
+    /* ── detalle colapsable (descripción/observaciones/cuenta) ── */
+    .h-details { max-height: 0; overflow: hidden; }
+    .h-details.show { max-height: 600px; }
+    .h-toggle-ico { color: #666; font-size: 0.62rem; margin-left: 2px; }
 
     /* ── FILA SUPERIOR: nombre + tags ── */
     .h-top {
@@ -359,6 +361,8 @@ function renderizar() {
 
   let html = '';
 
+  _cardCounter = 0;
+
   if (correctas.length) {
     html += `<div class="sec-title">✅ LISTAS <span class="sec-count">${correctas.length}</span></div>`;
     html += `<div class="col-lista">`;
@@ -377,10 +381,21 @@ function renderizar() {
 }
 
 // ── CARD ÚNICA (aplica a todas) ───────────────────────────────────────────
+let _cardCounter = 0;
+
+function toggleCard(id) {
+  const det = document.getElementById(id);
+  const ico = document.getElementById(id + '-ico');
+  if (!det) return;
+  const abierta = det.classList.toggle('show');
+  if (ico) ico.textContent = abierta ? '▴' : '▾';
+}
+
 function cardHTML(h) {
   const url    = (h.url || '').trim();
   const esLink = /^https?:\/\//i.test(url);
   const estado = (h.estado || '').toUpperCase();
+  const cardId = 'det-' + (_cardCounter++);
 
   const claseEstado = {
     'CORRECTO':   'est-correcto',
@@ -398,37 +413,43 @@ function cardHTML(h) {
     'DESCARTADA': 'tag-descartada',
   }[estado] || 'tag-otro';
 
-  // El elemento es <a> con href si tiene link, <div> si no
-  const tag  = esLink ? 'a' : 'div';
-  const href = esLink ? ` href="${escHtml(url)}" target="_blank" rel="noopener"` : '';
-  const cls  = `h-card ${claseEstado}${esLink ? '' : ' sin-link'}`;
-
-  const ultimaObs = ultimaObservacion(h.observaciones);
+  // La tarjeta ya NO es un <a> completo: es un contenedor tocable que
+  // expande/colapsa detalle. El link real para ir a la app es aparte
+  // (btnAbrir), con stopPropagation para no pisar el toggle.
+  const ultimaObs    = ultimaObservacion(h.observaciones);
+  const tieneDetalle = !!(h.descripcion || ultimaObs || h.cuenta);
+  const cls = `h-card ${claseEstado}${esLink ? '' : ' sin-link'}${tieneDetalle ? ' expandible' : ''}`;
 
   const btnAbrir = esLink ? `
-    <div class="h-open">
+    <a href="${escHtml(url)}" target="_blank" rel="noopener" class="h-open" onclick="event.stopPropagation()">
       <span class="h-open-icon">🌐</span>
       <span class="h-open-text">
         <span class="h-open-label">Abrir aplicación</span>
         <span class="h-open-url">${escHtml(url.replace(/^https?:\/\//,'').replace(/\/$/,''))}</span>
       </span>
       <span class="h-open-arrow">↗</span>
-    </div>` : '';
+    </a>` : '';
 
-  return `<${tag}${href} class="${cls}">
+  const toggleAttr = tieneDetalle ? ` onclick="toggleCard('${cardId}')"` : '';
+  const toggleIco  = tieneDetalle ? `<span class="h-toggle-ico" id="${cardId}-ico">▾</span>` : '';
+
+  return `<div class="${cls}"${toggleAttr}>
     <div class="h-top">
       <div class="h-nombre">${escHtml(h.nombre || '—')}</div>
       <div class="h-tags">
         ${h.icono ? `<span class="tag tag-icono">${escHtml(h.icono)}</span>` : ''}
         ${h.version ? `<span class="tag tag-ver">v${escHtml(h.version)}</span>` : ''}
         <span class="tag ${claseTag}">${escHtml(estado || 'SIN ESTADO')}</span>
+        ${toggleIco}
       </div>
     </div>
-    ${h.descripcion ? `<div class="h-desc">${escHtml(h.descripcion)}</div>` : ''}
     ${btnAbrir}
-    ${ultimaObs ? `<div class="h-obs">${escHtml(ultimaObs)}</div>` : ''}
-    ${h.cuenta   ? `<div class="h-meta">✉ ${escHtml(h.cuenta)}</div>` : ''}
-  </${tag}>`;
+    ${tieneDetalle ? `<div class="h-details" id="${cardId}">
+      ${h.descripcion ? `<div class="h-desc">${escHtml(h.descripcion)}</div>` : ''}
+      ${ultimaObs ? `<div class="h-obs">${escHtml(ultimaObs)}</div>` : ''}
+      ${h.cuenta   ? `<div class="h-meta">✉ ${escHtml(h.cuenta)}</div>` : ''}
+    </div>` : ''}
+  </div>`;
 }
 
 function ultimaObservacion(obs) {
