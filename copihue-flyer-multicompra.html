@@ -754,81 +754,28 @@ async function recargar(){
     try{ const ro=await gasGet('getOfertas'); _of=ro.success?ro:{}; }
     catch(e){ _of={}; }
 
-    // 3b. Multicompra (2x1, 3x2, etc.)
-    // Camino A: _of.multicompraActiva — así lo leen seba21.html/sendwa.html/index.html,
-    // viene incluido en la misma respuesta de "getOfertas" de arriba.
-    // Camino B (respaldo): action=getMulticompraTodas — endpoint aparte del módulo
-    // flyer_multicompra.gs, por si en este backend "getOfertas" no lo incluye todavía.
-    _poolMulticompra=new Map();
-    _mcDiag = {fuente:'', ok:null, total:0, matcheados:0, sinMatch:[], error:'', muestra:[], rawKeys:[], arrayField:null};
+    // 3b. MULTICOMPRA
+    // La multicompra viene en el MISMO feed de productos (get sin action),
+    // con: tipo, cantidad, precioPack y grupo.
+    // Importante: no llamamos getMulticompraTodas, porque ese endpoint
+    // puede devolver el catálogo completo y no representa ofertas reales.
+    _poolMulticompra = new Map();
+    _mcDiag = {fuente:'feed de productos', ok:true, total:0, matcheados:0, sinMatch:[], error:'', muestra:[], rawKeys:[], arrayField:'productos'};
 
-    const mcArrA = _of.multicompraActiva || [];
-    if(mcArrA.length>0){
-      _mcDiag.fuente = 'getOfertas (multicompraActiva)';
-      _mcDiag.ok = true;
-      _mcDiag.total = mcArrA.length;
-      _mcDiag.muestra = mcArrA.slice(0,5).map(p=>({id:p.id, nombre:p.name||p.nombre, tipo:p.MULTICOMPRA_TIPO, cant:p.MULTICOMPRA_CANTIDAD, precio:p.MULTICOMPRA_PRECIO}));
-      mcArrA.forEach(p=>{
-        const local = _prods.find(x=>x.id===Number(p.id));
-        if(!local){ _mcDiag.sinMatch.push(p.name||p.nombre||('id '+p.id)); return; }
-        _mcDiag.matcheados++;
-        _poolMulticompra.set(local.id,{
-          tipo:     String(p.MULTICOMPRA_TIPO     || '').toUpperCase(),
-          cantidad: p.MULTICOMPRA_CANTIDAD || 0,
-          precio:   p.MULTICOMPRA_PRECIO   || 0, // igual que seba21/sendwa: puede ser unitario o total según cargue la planilla
-          grupo:    p.GRUPO_MULTICOMPRA    || ''
-        });
-      });
-    } else {
-      // Respaldo: endpoint dedicado del flyer
-      try{
-        let rm = await gasGet('getMulticompraTodas');
-        // Por si respuestaJSON() del lado del GAS devuelve un string en vez de objeto
-        if(typeof rm === 'string'){ try{ rm = JSON.parse(rm); }catch(e){ /* se queda como string */ } }
-        _mcDiag.fuente = 'getMulticompraTodas (respaldo)';
-        _mcDiag.rawKeys = (rm && typeof rm==='object') ? Object.keys(rm) : [];
+    _prods.forEach(p=>{
+      if(!p.mc) return;
+      _mcDiag.total++;
+      _mcDiag.matcheados++;
+      _poolMulticompra.set(p.id, p.mc);
+    });
 
-        // El array puede llamarse "items" (como dice el .gs) u otra cosa si algo
-        // se transformó en el camino — probamos varios nombres posibles.
-        const arrayField = Array.isArray(rm?.items) ? 'items'
-                          : Array.isArray(rm?.productos) ? 'productos'
-                          : Array.isArray(rm?.data) ? 'data'
-                          : null;
-        const itemsArr = arrayField ? rm[arrayField] : null;
-        _mcDiag.arrayField = arrayField;
+    _mcDiag.muestra = _prods.filter(p=>p.mc).slice(0,5).map(p=>({
+      id:p.id, nombre:p.name, tipo:p.mc.tipo, cant:p.mc.cantidad,
+      precio:p.mc.precio, grupo:p.mc.grupo
+    }));
 
-        _mcDiag.ok = rm ? (rm.ok!==undefined ? !!rm.ok : (itemsArr?true:false)) : false;
-        _mcDiag.total = (rm && rm.total) || (itemsArr?itemsArr.length:0) || 0;
-
-        if(itemsArr){
-          // Volcamos el objeto CRUDO completo (no solo los 4 campos que esperábamos)
-          // para ver la forma real, por si los nombres de propiedad son otros.
-          _mcDiag.muestra = itemsArr.slice(0,3).map(it=>JSON.stringify(it));
-          itemsArr.forEach(it=>{
-            let id = Number(it.id)||0;
-            if(!id){
-              // El id puede venir vacío en la fila — como respaldo, matcheamos por nombre exacto
-              const nombreQ = quitarAcentos(String(it.nombre||'').toLowerCase()).trim();
-              const match = _prods.find(p=>quitarAcentos(p.name.toLowerCase()).trim()===nombreQ);
-              if(match) id=match.id;
-            }
-            if(!id){ _mcDiag.sinMatch.push(it.nombre||'(sin nombre)'); return; }
-            _mcDiag.matcheados++;
-            _poolMulticompra.set(id,{
-              tipo:     String(it.tipo||'').toUpperCase(),
-              cantidad: it.cantidad||0,
-              precio:   it.precioPack||0, // precio TOTAL del pack (ej: 3 x $5.000 = $5.000 los 3)
-              grupo:    it.grupo||''
-            });
-          });
-        } else if(rm && rm.ok===false){
-          _mcDiag.error = rm.error||'(sin detalle)';
-          console.warn('⚠️ getMulticompraTodas devolvió error:', rm.error);
-        } else {
-          _mcDiag.error = 'La respuesta no trajo ningún array reconocible (items/productos/data).';
-        }
-      }catch(e){ _mcDiag.ok=false; _mcDiag.error = String(e); console.warn('⚠️ Error cargando multicompra:', e); }
-    }
+    console.log('📦 Multicompra directa del feed:', _mcDiag.total, 'productos');
+    console.log('📦 Ejemplos:', _mcDiag.muestra);
 
     // 4. Cervecero
     try{ const rc=await gasGet('getJuevesCervecero'); _cerv=rc||{}; }
@@ -1024,6 +971,17 @@ function normProds(arr){
       ventas:   parseInt(p.ventas||p.ventasUltimoMes||p.vendidos||p.unidadesVendidas)||0,
       costo,
       ganancia: costo>0 ? (price-costo) : (parseInt(p.ganancia||p.margen||p.utilidad)||0),
+      // MULTICOMPRA: viene directamente en el mismo feed de productos.
+      // No dependemos de getMulticompraTodas ni de IDs numéricos externos.
+      mc: (()=>{
+        const tipo = String(p.tipo||p.MULTICOMPRA_TIPO||'').trim().toUpperCase();
+        const cantidad = Number(p.cantidad||p.MULTICOMPRA_CANTIDAD||0);
+        const precioPack = Number(p.precioPack||p.MULTICOMPRA_PRECIO||0);
+        const grupo = String(p.grupo||p.GRUPO_MULTICOMPRA||'').trim();
+        return (tipo && cantidad>0 && precioPack>0)
+          ? {tipo,cantidad,precio:precioPack,grupo}
+          : null;
+      })(),
     };
   });
 }
@@ -1153,8 +1111,7 @@ function construirPools(){
   }
 
   // ── MULTICOMPRA (2x1, 3x2, etc.) ────────────────────────────────────────────
-  // _poolMulticompra viene de _of.multicompraActiva o, como respaldo, de
-  // action=getMulticompraTodas (flyer_multicompra.gs) — ver recargar().
+  // _poolMulticompra viene directamente del feed de productos — ver recargar().
   // mc.precio = precio TOTAL del pack (no unitario) — se muestra con la estrella
   // "estallido" en vez del badge normal (ver drawCard/drawStarburst).
   console.log('🔍 Multicompra: _poolMulticompra.size =', _poolMulticompra.size, '| _prods.length =', _prods.length);
