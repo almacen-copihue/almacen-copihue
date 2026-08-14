@@ -36,6 +36,34 @@
 
 ================================================================================
 
+  v447 — 13/8/2026 (aa)
+  ---------------------
+  • REDISEÑO DEFINITIVO del panel de pago mixto (a partir de spec revisado
+    con ChatGPT). Estructura FIJA — nada se mueve, nada se duplica, sin
+    pasos que aprender:
+    - Bloque "TOTAL A PAGAR" arriba, ancho completo, protagonista.
+    - Bloque PAGADO/FALTA lado a lado, geometría fija — cuando sobra
+      dinero el mismo casillero pasa a mostrar VUELTO (verde), nunca un
+      "falta -$X" negativo. PAGADO siempre refleja lo aplicado a la
+      venta (nunca más que el total), el excedente se ve solo en VUELTO.
+    - Los 6 medios (Efectivo, Pesos chilenos, Dólares, Tarjeta,
+      Transferencia, Fiado) están SIEMPRE visibles, mismo orden fijo,
+      mismo ancho completo. Tocar uno abre su propio formulario adentro
+      de esa misma tarjeta ("¿Cuánto recibís?" + Agregar); después
+      muestra "✓ Recibido $X" en el mismo lugar — no aparecen ni se
+      mueven tarjetas nuevas. Se puede reabrir para sumar más al mismo
+      medio, se acumula en esa tarjeta.
+    - Colores con función: verde=recibido/cubierto, rojo=falta, sin
+      arcoíris decorativo por método.
+    - Conversión de moneda extranjera: siempre multiplicar (recibido ×
+      cotización), nunca dividir — ya estaba bien en el cálculo, ahora
+      también se ve explícito en el equivalente que muestra cada
+      tarjeta ("20.000 CLP × $1,6 = $32.000 ARS").
+    Solo frontend — no toca code.gs. Los 4 casos de prueba obligatorios
+    del spec (mixto exacto, CLP con vuelto, USD con falta, ARS con
+    vuelto) corridos con jsdom sobre el archivo real, resultados exactos
+    a los pedidos.
+
   v446 — 13/8/2026 (z)
   ---------------------
   • El modal de "Confirmar venta" (donde vive el pago mixto) ahora ocupa
@@ -1270,7 +1298,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>🛒 POS · Copihue v446</title>
+    <title>🛒 POS · Copihue v447</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3107,72 +3135,51 @@
 
         <!-- v443 — PAGO MÚLTIPLE / MULTIMONEDA -->
         <div id="pmToggleWrap" style="padding:6px 20px 0;text-align:right;">
-            <span onclick="togglePagoMixto()" id="pmToggleLink" style="font-size:0.78rem;font-weight:700;color:#673ab7;cursor:pointer;text-decoration:underline;">➕ Pago con varios métodos / monedas</span>
+            <span onclick="togglePagoMixto()" id="pmToggleLink" style="font-size:0.78rem;font-weight:700;color:#555;cursor:pointer;text-decoration:underline;">➕ Pago con varios métodos / monedas</span>
         </div>
         <div id="panelPagoMixto" style="display:none;margin:8px 20px 0;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                <span style="font-size:0.85rem;font-weight:900;color:#4527a0;">💱 Pago mixto</span>
+                <span style="font-size:0.85rem;font-weight:900;color:#333;">💱 Pago mixto</span>
                 <span onclick="togglePagoMixto()" style="font-size:0.75rem;color:#888;cursor:pointer;">✕ cerrar</span>
             </div>
 
-            <!-- Tarjeta verde suave: cuánto hay que cobrar y cómo va la cuenta -->
-            <div style="background:#e8f5ea;border:1.5px solid #a5d6b0;border-radius:14px;padding:12px;margin-bottom:10px;">
-                <div style="text-align:center;margin-bottom:10px;">
-                    <div style="font-size:0.68rem;color:#2e7d32;text-transform:uppercase;font-weight:800;letter-spacing:0.3px;">A comprar</div>
-                    <div id="pmTotal" style="font-size:1.7rem;font-weight:900;color:#1b5e20;line-height:1.1;">$0</div>
+            <!-- BLOQUE 1 — TOTAL A PAGAR -->
+            <div style="background:#fff;border:2px solid #333;border-radius:14px;padding:14px;text-align:center;margin-bottom:8px;">
+                <div style="font-size:0.7rem;color:#666;text-transform:uppercase;font-weight:800;letter-spacing:0.4px;">Total a pagar</div>
+                <div id="pmTotal" style="font-size:2rem;font-weight:900;color:#1a1a1a;line-height:1.15;">$0</div>
+            </div>
+
+            <!-- BLOQUE 2 — PAGADO / FALTA (o VUELTO) — geometría fija, solo cambia el contenido -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+                <div style="background:#e8f5e9;border-radius:12px;padding:10px;text-align:center;">
+                    <div style="font-size:0.65rem;color:#2e7d32;text-transform:uppercase;font-weight:800;">Pagado</div>
+                    <div id="pmPagado" style="font-size:1.3rem;font-weight:900;color:#2e7d32;">$0</div>
                 </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-                    <div style="background:#fff;border-radius:10px;padding:8px 10px;">
-                        <div style="font-size:0.62rem;color:#888;text-transform:uppercase;font-weight:700;">Abono</div>
-                        <div id="pmPagado" style="font-size:1.05rem;font-weight:900;color:#2e7d32;">$0</div>
-                    </div>
-                    <div id="pmSaldoBox" style="background:#fff3e0;border-radius:10px;padding:8px 10px;">
-                        <div style="font-size:0.62rem;color:#e65100;text-transform:uppercase;font-weight:700;">Saldo</div>
-                        <div id="pmSaldo" style="font-size:1.05rem;font-weight:900;color:#e65100;">$0</div>
-                    </div>
-                </div>
-                <div id="pmVueltoBox" style="background:#c8e6c9;border-radius:10px;padding:8px 10px;margin-top:8px;display:none;text-align:center;">
-                    <div style="font-size:0.62rem;color:#1b5e20;text-transform:uppercase;font-weight:700;">Vuelto a entregar</div>
-                    <div id="pmVuelto" style="font-size:1.15rem;font-weight:900;color:#1b5e20;">$0</div>
+                <div id="pmFaltaBox" style="background:#ffebee;border-radius:12px;padding:10px;text-align:center;">
+                    <div id="pmFaltaLabel" style="font-size:0.65rem;color:#c62828;text-transform:uppercase;font-weight:800;">Falta</div>
+                    <div id="pmFaltaValor" style="font-size:1.3rem;font-weight:900;color:#c62828;">$0</div>
                 </div>
             </div>
 
-            <!-- Lista de pagos ya agregados -->
-            <div id="pmLista" style="margin-bottom:8px;"></div>
+            <!-- MEDIOS DE PAGO — orden fijo, siempre los 6 visibles, ninguno se oculta ni se mueve -->
+            <div id="pmMedios" style="display:flex;flex-direction:column;gap:8px;"></div>
 
-            <!-- Tarjeta salmón: cómo paga el cliente, paso a paso -->
-            <div style="background:#fdf0ec;border:1.5px solid #f3c4b5;border-radius:14px;padding:12px;">
-                <div style="font-size:0.68rem;color:#c2410c;text-transform:uppercase;font-weight:800;letter-spacing:0.3px;margin-bottom:6px;">Paso 1 · ¿Cómo paga?</div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px;">
-                    <button type="button" class="pm-metodo-chip seleccionado" data-metodo="EFECTIVO" data-moneda="ARS" onclick="_pmSeleccionarMetodo(this)" style="grid-column:span 2;">💵 Efectivo ARS</button>
-                    <button type="button" class="pm-metodo-chip" data-metodo="EFECTIVO" data-moneda="CLP" onclick="_pmSeleccionarMetodo(this)">🇨🇱 Efectivo CLP</button>
-                    <button type="button" class="pm-metodo-chip" data-metodo="EFECTIVO" data-moneda="USD" onclick="_pmSeleccionarMetodo(this)">💵 Efectivo USD</button>
-                    <button type="button" class="pm-metodo-chip" data-metodo="TARJETA" data-moneda="ARS" onclick="_pmSeleccionarMetodo(this)">💳 Tarjeta</button>
-                    <button type="button" class="pm-metodo-chip" data-metodo="TRANSFERENCIA" data-moneda="ARS" onclick="_pmSeleccionarMetodo(this)">📱 Transferencia</button>
-                    <button type="button" class="pm-metodo-chip" data-metodo="FIADO" data-moneda="ARS" onclick="_pmSeleccionarMetodo(this)" style="grid-column:span 2;">🧾 Fiado (por el saldo)</button>
-                </div>
-
-                <div style="font-size:0.68rem;color:#c2410c;text-transform:uppercase;font-weight:800;letter-spacing:0.3px;margin-bottom:6px;">Paso 2 · Monto y agregar</div>
-                <div style="display:flex;gap:6px;align-items:center;">
-                    <input id="pmMontoInput" type="number" inputmode="decimal" placeholder="Monto"
-                        style="flex:1;padding:9px 12px;border:1.5px solid #e0a894;border-radius:10px;font-size:0.95rem;box-sizing:border-box;">
-                    <button onclick="_pmAgregarPago()" style="padding:9px 16px;border:none;border-radius:10px;background:#e05d3f;color:#fff;font-weight:700;font-size:0.85rem;cursor:pointer;white-space:nowrap;">Agregar</button>
-                </div>
-                <div style="font-size:0.68rem;color:#a55;margin-top:4px;">👆 Tocá "Agregar" cada vez que cargues un monto — podés sumar varios antes de confirmar el cobro.</div>
-                <div id="pmFiadoClienteWrap" style="display:none;margin-top:6px;display:flex;gap:6px;">
-                    <input id="pmFiadoCliente" type="text" placeholder="👤 Nombre del cliente"
-                        style="flex:1;padding:8px 10px;border:1.5px solid #e0a894;border-radius:10px;font-size:0.85rem;box-sizing:border-box;">
-                    <input id="pmFiadoTelefono" type="tel" placeholder="📱 Teléfono (opcional)"
-                        style="flex:1;padding:8px 10px;border:1.5px solid #e0a894;border-radius:10px;font-size:0.85rem;box-sizing:border-box;">
-                </div>
-                <div id="pmEquivalentePreview" style="display:none;font-size:0.75rem;color:#c2410c;margin-top:4px;font-weight:700;"></div>
-                <div id="pmErrorMsg" style="display:none;font-size:0.75rem;color:#c62828;margin-top:4px;font-weight:700;"></div>
-
-            </div>
+            <div id="pmErrorMsg" style="display:none;font-size:0.8rem;color:#c62828;font-weight:700;margin-top:8px;padding:8px 10px;background:#ffebee;border-radius:10px;"></div>
         </div>
         <style>
-            .pm-metodo-chip { width:100%; padding:9px 8px; border:1.5px solid #e0a894; border-radius:12px; background:#fff; font-size:0.78rem; font-weight:700; cursor:pointer; color:#c2410c; font-family:inherit; box-sizing:border-box; }
-            .pm-metodo-chip.seleccionado { background:#e05d3f; border-color:#e05d3f; color:#fff; }
+            .pm-medio-card { border:1.5px solid #ddd; border-radius:12px; background:#fafafa; overflow:hidden; }
+            .pm-medio-card.pm-abierto { border-color:#333; background:#fff; }
+            .pm-medio-header { display:flex; justify-content:space-between; align-items:center; padding:12px 14px; cursor:pointer; }
+            .pm-medio-nombre { font-size:0.92rem; font-weight:800; color:#333; }
+            .pm-medio-estado { font-size:0.78rem; font-weight:700; color:#999; }
+            .pm-medio-estado.pm-cargado { color:#2e7d32; }
+            .pm-medio-form { display:none; padding:0 14px 14px; }
+            .pm-medio-card.pm-abierto .pm-medio-form { display:block; }
+            .pm-medio-pregunta { font-size:0.72rem; color:#666; text-transform:uppercase; font-weight:800; margin-bottom:6px; }
+            .pm-medio-input { width:100%; padding:12px 14px; border:1.5px solid #ccc; border-radius:10px; font-size:1.05rem; box-sizing:border-box; margin-bottom:8px; }
+            .pm-medio-btn-agregar { width:100%; padding:13px; border:none; border-radius:10px; background:#333; color:#fff; font-weight:800; font-size:0.9rem; cursor:pointer; letter-spacing:0.3px; }
+            .pm-medio-equivalente { font-size:0.78rem; color:#555; font-weight:700; margin-top:6px; }
+            .pm-medio-fiado-input { width:100%; padding:10px 12px; border:1.5px solid #ccc; border-radius:10px; font-size:0.9rem; box-sizing:border-box; margin-bottom:8px; }
         </style>
 
 
@@ -5129,14 +5136,26 @@ function _keyHandlerConfirm(e) {
 }
 
 // ============================================================
-// v443 — PAGO MÚLTIPLE / MULTIMONEDA
+// v443/v447 — PAGO MÚLTIPLE / MULTIMONEDA
 // El flujo simple (un solo método) NO pasa por acá — sigue yendo
 // directo a confirmarVenta()/confirmarFiado(), sin cambios.
+// v447 — estructura FIJA: los 6 medios están siempre visibles, en el
+// mismo orden, sin pasos ni tarjetas que aparecen/desaparecen. Tocar un
+// medio abre su propio formulario adentro de la misma tarjeta.
 // ============================================================
 let _pagosMixtos = [];
 let _pagoMixtoActivo = false;
-let _pmMetodoSel = { metodo: 'EFECTIVO', moneda: 'ARS' };
 let _cotizacionesCache = null;
+
+// Orden fijo — nunca se reordena ni se oculta ninguno.
+const _PM_MEDIOS_DEF = [
+    { metodo: 'EFECTIVO',      moneda: 'ARS', label: '💵 EFECTIVO' },
+    { metodo: 'EFECTIVO',      moneda: 'CLP', label: '🇨🇱 PESOS CHILENOS' },
+    { metodo: 'EFECTIVO',      moneda: 'USD', label: '🇺🇸 DÓLARES' },
+    { metodo: 'TARJETA',       moneda: 'ARS', label: '💳 TARJETA' },
+    { metodo: 'TRANSFERENCIA', moneda: 'ARS', label: '📱 TRANSFERENCIA' },
+    { metodo: 'FIADO',         moneda: 'ARS', label: '🧾 FIADO' }
+];
 
 async function _cargarCotizaciones() {
     if (_cotizacionesCache) return _cotizacionesCache;
@@ -5165,162 +5184,211 @@ async function togglePagoMixto() {
     if (abrir) {
         _pagosMixtos = [];
         await _cargarCotizaciones();
+        _pmRenderMedios();
         _pmRenderResumen();
-        _pmRenderLista();
     }
 }
 
-function _pmSeleccionarMetodo(btn) {
-    document.querySelectorAll('.pm-metodo-chip').forEach(b => b.classList.remove('seleccionado'));
-    btn.classList.add('seleccionado');
-    _pmMetodoSel = { metodo: btn.dataset.metodo, moneda: btn.dataset.moneda };
-    const input = document.getElementById('pmMontoInput');
-    const preview = document.getElementById('pmEquivalentePreview');
+// Arma las 6 tarjetas UNA sola vez al abrir el panel — de ahí en más solo
+// se actualiza su contenido interno (_pmActualizarEstadoMedio), nunca se
+// recrean ni se reordenan.
+function _pmRenderMedios() {
+    const cont = document.getElementById('pmMedios');
+    cont.innerHTML = _PM_MEDIOS_DEF.map((m, i) => {
+        const esExtranjera = m.moneda === 'USD' || m.moneda === 'CLP';
+        const esFiado = m.metodo === 'FIADO';
+        return `<div class="pm-medio-card" id="pmCard${i}" data-idx="${i}" data-metodo="${m.metodo}" data-moneda="${m.moneda}">
+            <div class="pm-medio-header" onclick="_pmToggleMedioCard(${i})">
+                <span class="pm-medio-nombre">${m.label}</span>
+                <span class="pm-medio-estado" id="pmEstado${i}">Tocar para cargar</span>
+            </div>
+            <div class="pm-medio-form">
+                ${esFiado ? `
+                <input class="pm-medio-fiado-input" id="pmFiadoCliente${i}" type="text" placeholder="👤 Nombre del cliente">
+                <input class="pm-medio-fiado-input" id="pmFiadoTelefono${i}" type="tel" placeholder="📱 Teléfono (opcional)">
+                ` : ''}
+                <div class="pm-medio-pregunta">¿Cuánto recibís?</div>
+                <input class="pm-medio-input" id="pmInput${i}" type="number" inputmode="decimal" placeholder="Monto"
+                    ${esExtranjera ? `oninput="_pmActualizarPreviewCard(${i})"` : ''}>
+                ${esExtranjera ? `<div class="pm-medio-equivalente" id="pmEquiv${i}" style="display:none;"></div>` : ''}
+                <button class="pm-medio-btn-agregar" onclick="_pmAgregarDesdeCard(${i})" style="margin-top:8px;">AGREGAR</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function _pmToggleMedioCard(idx) {
+    const card = document.getElementById('pmCard' + idx);
+    const yaAbierta = card.classList.contains('pm-abierto');
+    document.querySelectorAll('.pm-medio-card').forEach(c => c.classList.remove('pm-abierto'));
     document.getElementById('pmErrorMsg').style.display = 'none';
-    document.getElementById('pmFiadoClienteWrap').style.display = (_pmMetodoSel.metodo === 'FIADO') ? 'flex' : 'none';
+    if (yaAbierta) return; // tocar de nuevo la misma tarjeta la cierra
 
-    if (_pmMetodoSel.metodo === 'FIADO') {
-        const totalV = _totalCarritoConDescuentosGrupales();
-        const total = window._totalConRedondeo || totalV;
+    card.classList.add('pm-abierto');
+    const def = _PM_MEDIOS_DEF[idx];
+    const input = document.getElementById('pmInput' + idx);
+    input.value = '';
+
+    if (def.metodo === 'FIADO') {
+        const total = window._totalConRedondeo || _totalCarritoConDescuentosGrupales();
         const pagadoPrevio = _pagosMixtos.reduce((s,p)=>s+p.equivalenteARS,0);
-        const saldo = Math.max(0, total - pagadoPrevio);
-        input.value = saldo > 0 ? saldo : '';
-        preview.style.display = 'none';
-    } else if (_pmMetodoSel.moneda === 'USD' || _pmMetodoSel.moneda === 'CLP') {
-        input.value = '';
-        _pmActualizarPreview();
-    } else {
-        input.value = '';
-        preview.style.display = 'none';
+        const falta = Math.max(0, total - pagadoPrevio);
+        input.value = falta > 0 ? falta : '';
+    } else if (def.moneda === 'USD' || def.moneda === 'CLP') {
+        _pmActualizarPreviewCard(idx);
     }
-    input.focus();
+    setTimeout(() => input.focus(), 50);
 }
 
-function _pmActualizarPreview() {
-    const preview = document.getElementById('pmEquivalentePreview');
-    const input = document.getElementById('pmMontoInput');
-    if (_pmMetodoSel.moneda !== 'USD' && _pmMetodoSel.moneda !== 'CLP') { preview.style.display = 'none'; return; }
+// Muestra "cantidad_extranjera × cotización = equivalente ARS" — SIEMPRE
+// multiplicar, nunca dividir (v447 punto 7).
+function _pmActualizarPreviewCard(idx) {
+    const def = _PM_MEDIOS_DEF[idx];
+    const equivEl = document.getElementById('pmEquiv' + idx);
+    if (!equivEl) return;
     const cot = _cotizacionesCache;
-    const valorMoneda = _pmMetodoSel.moneda === 'USD' ? (cot && cot.usdValor) : (cot && cot.clpValor);
+    const valorMoneda = def.moneda === 'USD' ? (cot && cot.usdValor) : (cot && cot.clpValor);
     if (!cot || !valorMoneda) {
-        preview.textContent = '⚠️ No hay cotización de ' + _pmMetodoSel.moneda + ' cargada en config_sistema';
-        preview.style.display = 'block';
+        equivEl.textContent = '⚠️ No hay cotización de ' + def.moneda + ' cargada en config_sistema';
+        equivEl.style.display = 'block';
         return;
     }
-    const monto = parseFloat(input.value) || 0;
-    const eq = Math.round(monto * valorMoneda);
-    preview.textContent = `1 ${_pmMetodoSel.moneda} = $${valorMoneda.toLocaleString('es-AR')} ARS → equivale a $${eq.toLocaleString('es-AR')}`;
-    preview.style.display = 'block';
+    const monto = parseFloat(document.getElementById('pmInput' + idx).value) || 0;
+    const eq = Math.round(monto * valorMoneda); // extranjera × cotización = ARS — nunca ÷
+    equivEl.textContent = `${monto.toLocaleString('es-AR')} ${def.moneda} × $${valorMoneda.toLocaleString('es-AR')} = $${eq.toLocaleString('es-AR')} ARS`;
+    equivEl.style.display = 'block';
 }
 
-function _pmAgregarPago() {
-    const input = document.getElementById('pmMontoInput');
+function _pmAgregarDesdeCard(idx) {
+    const def = _PM_MEDIOS_DEF[idx];
+    const { metodo, moneda } = def;
+    const input = document.getElementById('pmInput' + idx);
     const errEl = document.getElementById('pmErrorMsg');
     errEl.style.display = 'none';
+
     const recibido = parseFloat(input.value);
     if (!recibido || recibido <= 0) { errEl.textContent = '⚠️ Ingresá un monto'; errEl.style.display = 'block'; return; }
 
-    const { metodo, moneda } = _pmMetodoSel;
     const cot = _cotizacionesCache;
     let cotizacion = 1, equivalenteARS = recibido;
-
-    const totalV = _totalCarritoConDescuentosGrupales();
-    const total = window._totalConRedondeo || totalV;
+    const total = window._totalConRedondeo || _totalCarritoConDescuentosGrupales();
     const pagadoPrevio = _pagosMixtos.reduce((s,p)=>s+p.equivalenteARS,0);
-    const saldoAntes = Math.max(0, total - pagadoPrevio);
+    const faltaAntes = Math.max(0, total - pagadoPrevio);
 
-    // v445 — segundo control de cordura (además del de config_sistema en el
-    // servidor): si por lo que sea el equivalente calculado da un número
-    // disparatado para una compra de almacén, se corta acá antes de dejar
-    // agregarlo — nunca debe poder pasar un vuelto de miles de millones.
-    const TOPE_EQUIVALENTE_ARS = 50000000; // 50 millones — generoso, pero corta cualquier locura
+    // Segundo control de cordura (además del de config_sistema en el
+    // servidor): si el equivalente calculado es disparatado para una
+    // compra de almacén, se corta antes de dejar agregarlo.
+    const TOPE_EQUIVALENTE_ARS = 50000000;
 
     if (moneda === 'USD') {
         if (!cot || !cot.usdActivo || !cot.usdValor) { errEl.textContent = '⚠️ No hay cotización de USD activa en config_sistema'; errEl.style.display = 'block'; return; }
         cotizacion = cot.usdValor;
-        equivalenteARS = Math.round(recibido * cotizacion);
+        equivalenteARS = Math.round(recibido * cotizacion); // × cotización, nunca ÷
         if (equivalenteARS > TOPE_EQUIVALENTE_ARS) {
-            errEl.textContent = `⚠️ Ese monto en USD da un equivalente de $${equivalenteARS.toLocaleString('es-AR')}, algo no cierra (¿la cotización configurada está bien?). No se agregó — revisá config_sistema.`;
+            errEl.textContent = `⚠️ Ese monto en USD da un equivalente de $${equivalenteARS.toLocaleString('es-AR')}, algo no cierra (¿la cotización configurada está bien?). No se agregó.`;
             errEl.style.display = 'block';
             return;
         }
         // Protección de sobrepago en USD — límite configurable (config_sistema
-        // usd_limite_sobrepago_pct, 20% si no está cargado). CLP NO tiene este
-        // límite (pedido explícito).
+        // usd_limite_sobrepago_pct, 20% si no está cargado). CLP no tiene
+        // este límite (pedido explícito).
         const limitePct = (cot.usdLimiteSobrepagoPct || 20) / 100;
-        const limiteMax = saldoAntes * (1 + limitePct);
-        if (saldoAntes > 0 && equivalenteARS > limiteMax) {
-            errEl.textContent = `⚠️ Ese USD equivale a $${equivalenteARS.toLocaleString('es-AR')}, supera el saldo ($${saldoAntes.toLocaleString('es-AR')}) por más del ${cot.usdLimiteSobrepagoPct||20}% permitido. Revisá el monto.`;
+        const limiteMax = faltaAntes * (1 + limitePct);
+        if (faltaAntes > 0 && equivalenteARS > limiteMax) {
+            errEl.textContent = `⚠️ Ese USD equivale a $${equivalenteARS.toLocaleString('es-AR')}, supera lo que falta ($${faltaAntes.toLocaleString('es-AR')}) por más del ${cot.usdLimiteSobrepagoPct||20}% permitido. Revisá el monto.`;
             errEl.style.display = 'block';
             return;
         }
     } else if (moneda === 'CLP') {
         if (!cot || !cot.clpActivo || !cot.clpValor) { errEl.textContent = '⚠️ No hay cotización de CLP activa en config_sistema'; errEl.style.display = 'block'; return; }
         cotizacion = cot.clpValor;
-        equivalenteARS = Math.round(recibido * cotizacion);
+        equivalenteARS = Math.round(recibido * cotizacion); // × cotización, nunca ÷
         if (equivalenteARS > TOPE_EQUIVALENTE_ARS) {
-            errEl.textContent = `⚠️ Ese monto en CLP da un equivalente de $${equivalenteARS.toLocaleString('es-AR')}, algo no cierra (¿la cotización configurada está bien?). No se agregó — revisá config_sistema.`;
+            errEl.textContent = `⚠️ Ese monto en CLP da un equivalente de $${equivalenteARS.toLocaleString('es-AR')}, algo no cierra (¿la cotización configurada está bien?). No se agregó.`;
             errEl.style.display = 'block';
             return;
         }
-        // CLP no tiene límite de SOBREPAGO — puede generar vuelto grande, es
-        // válido. El tope de arriba es solo para valores absurdos/errores.
+        // CLP no tiene límite de sobrepago — puede generar vuelto grande, es válido.
     } else if (metodo === 'FIADO') {
-        if (recibido > saldoAntes) {
-            errEl.textContent = `⚠️ El fiado no puede superar el saldo pendiente ($${saldoAntes.toLocaleString('es-AR')})`;
+        if (recibido > faltaAntes) {
+            errEl.textContent = `⚠️ El fiado no puede superar lo que falta ($${faltaAntes.toLocaleString('es-AR')})`;
             errEl.style.display = 'block';
             return;
         }
-        const cliente = (document.getElementById('pmFiadoCliente').value || '').trim();
+        const cliente = (document.getElementById('pmFiadoCliente' + idx).value || '').trim();
         if (!cliente) { errEl.textContent = '⚠️ Ingresá el nombre del cliente para el fiado'; errEl.style.display = 'block'; return; }
-        equivalenteARS = recibido;
-        const telefono = (document.getElementById('pmFiadoTelefono').value || '').trim();
-        _pagosMixtos.push({ metodo, moneda, recibido, cotizacion, equivalenteARS, cliente, telefono });
-        input.value = ''; document.getElementById('pmFiadoCliente').value = ''; document.getElementById('pmFiadoTelefono').value = '';
-        _pmRenderLista(); _pmRenderResumen();
+        const telefono = (document.getElementById('pmFiadoTelefono' + idx).value || '').trim();
+        _pagosMixtos.push({ metodo, moneda, recibido, cotizacion: 1, equivalenteARS: recibido, cliente, telefono });
+        document.getElementById('pmFiadoCliente' + idx).value = '';
+        document.getElementById('pmFiadoTelefono' + idx).value = '';
+        input.value = '';
+        document.getElementById('pmCard' + idx).classList.remove('pm-abierto');
+        _pmActualizarEstadoMedio(idx);
+        _pmRenderResumen();
         return;
     }
 
     _pagosMixtos.push({ metodo, moneda, recibido, cotizacion, equivalenteARS });
     input.value = '';
-    document.getElementById('pmEquivalentePreview').style.display = 'none';
-    _pmRenderLista();
+    const equivEl = document.getElementById('pmEquiv' + idx);
+    if (equivEl) equivEl.style.display = 'none';
+    document.getElementById('pmCard' + idx).classList.remove('pm-abierto');
+    _pmActualizarEstadoMedio(idx);
     _pmRenderResumen();
 }
 
-function _pmQuitarPago(idx) {
-    _pagosMixtos.splice(idx, 1);
-    _pmRenderLista();
-    _pmRenderResumen();
-}
-
-function _pmRenderLista() {
-    const el = document.getElementById('pmLista');
-    if (!_pagosMixtos.length) { el.innerHTML = ''; return; }
-    const iconos = { EFECTIVO:'💵', TARJETA:'💳', TRANSFERENCIA:'📱', FIADO:'🧾' };
-    el.innerHTML = _pagosMixtos.map((p, i) => {
-        const montoTxt = p.moneda === 'ARS' ? `$${p.recibido.toLocaleString('es-AR')}` : `${p.recibido.toLocaleString('es-AR')} ${p.moneda} (≈$${p.equivalenteARS.toLocaleString('es-AR')})`;
-        const clienteTxt = p.cliente ? ` — ${p.cliente}` : '';
-        return `<div style="display:flex;justify-content:space-between;align-items:center;background:#fff;border-radius:8px;padding:7px 10px;margin-bottom:5px;">
-            <span style="font-size:0.8rem;font-weight:700;color:#444;">${iconos[p.metodo]||'💰'} ${p.metodo}${p.moneda!=='ARS'?' '+p.moneda:''} — ${montoTxt}${clienteTxt}</span>
-            <span onclick="_pmQuitarPago(${i})" style="color:#c62828;font-size:0.85rem;cursor:pointer;padding:2px 6px;">✕</span>
-        </div>`;
-    }).join('');
+// Suma todo lo cargado para ESE medio+moneda y actualiza el texto de su
+// tarjeta ("✓ Recibido $X") — la tarjeta nunca se mueve ni se duplica.
+function _pmActualizarEstadoMedio(idx) {
+    const def = _PM_MEDIOS_DEF[idx];
+    const estadoEl = document.getElementById('pmEstado' + idx);
+    const entradas = _pagosMixtos.filter(p => p.metodo === def.metodo && p.moneda === def.moneda);
+    if (!entradas.length) {
+        estadoEl.textContent = 'Tocar para cargar';
+        estadoEl.classList.remove('pm-cargado');
+        return;
+    }
+    const totalRecibido = entradas.reduce((s,p)=>s+p.recibido,0);
+    const totalEquiv = entradas.reduce((s,p)=>s+p.equivalenteARS,0);
+    const txt = def.moneda === 'ARS'
+        ? `✓ Recibido $${totalRecibido.toLocaleString('es-AR')}`
+        : `✓ Recibido ${totalRecibido.toLocaleString('es-AR')} ${def.moneda} (≈$${totalEquiv.toLocaleString('es-AR')})`;
+    estadoEl.textContent = txt;
+    estadoEl.classList.add('pm-cargado');
 }
 
 function _pmRenderResumen() {
     const totalV = _totalCarritoConDescuentosGrupales();
     const total = window._totalConRedondeo || totalV;
-    const pagado = _pagosMixtos.reduce((s,p)=>s+p.equivalenteARS,0);
-    const saldo = Math.max(0, total - pagado);
-    const vuelto = Math.max(0, pagado - total);
+    const pagadoBruto = _pagosMixtos.reduce((s,p)=>s+p.equivalenteARS,0);
+    // v447 punto 10: PAGADO muestra lo aplicado a la venta, nunca más que
+    // el total — el excedente se ve en VUELTO, no infla el "pagado".
+    const pagado = Math.min(pagadoBruto, total);
+    const falta = Math.max(0, total - pagadoBruto);
+    const vuelto = Math.max(0, pagadoBruto - total);
 
     document.getElementById('pmTotal').textContent = '$' + total.toLocaleString('es-AR');
     document.getElementById('pmPagado').textContent = '$' + pagado.toLocaleString('es-AR');
-    document.getElementById('pmSaldo').textContent = '$' + saldo.toLocaleString('es-AR');
-    document.getElementById('pmSaldoBox').style.display = saldo > 0 ? 'block' : 'none';
-    document.getElementById('pmVueltoBox').style.display = vuelto > 0 ? 'block' : 'none';
-    if (vuelto > 0) document.getElementById('pmVuelto').textContent = '$' + vuelto.toLocaleString('es-AR');
+
+    // Mismo casillero: FALTA (rojo) mientras falta plata, VUELTO (verde,
+    // nunca negativo) cuando sobra — la geometría no cambia, solo el
+    // contenido y el color (v447 punto 2/10/11).
+    const faltaBox = document.getElementById('pmFaltaBox');
+    const faltaLabel = document.getElementById('pmFaltaLabel');
+    const faltaValor = document.getElementById('pmFaltaValor');
+    if (vuelto > 0) {
+        faltaBox.style.background = '#e8f5e9';
+        faltaLabel.style.color = '#2e7d32';
+        faltaLabel.textContent = 'Vuelto';
+        faltaValor.style.color = '#2e7d32';
+        faltaValor.textContent = '$' + vuelto.toLocaleString('es-AR');
+    } else {
+        faltaBox.style.background = '#ffebee';
+        faltaLabel.style.color = '#c62828';
+        faltaLabel.textContent = 'Falta';
+        faltaValor.style.color = '#c62828';
+        faltaValor.textContent = '$' + falta.toLocaleString('es-AR');
+    }
 }
 
 // La venta se procesa UNA SOLA VEZ acá (spec punto 16) — no hay una llamada
