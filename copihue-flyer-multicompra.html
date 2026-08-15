@@ -466,7 +466,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-const VERSION = 'v1.5';
+const VERSION = 'v1.7';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -754,28 +754,94 @@ async function recargar(){
     try{ const ro=await gasGet('getOfertas'); _of=ro.success?ro:{}; }
     catch(e){ _of={}; }
 
-    // 3b. MULTICOMPRA
-    // La multicompra viene en el MISMO feed de productos (get sin action),
-    // con: tipo, cantidad, precioPack y grupo.
-    // Importante: no llamamos getMulticompraTodas, porque ese endpoint
-    // puede devolver el catálogo completo y no representa ofertas reales.
-    _poolMulticompra = new Map();
-    _mcDiag = {fuente:'feed de productos', ok:true, total:0, matcheados:0, sinMatch:[], error:'', muestra:[], rawKeys:[], arrayField:'productos'};
+    // 3b. Multicompra (2x1, 3x2, etc.)
+    // Camino A (principal): cada producto ya trae la info en su propio campo
+    // "categoriaOferta" (ej: "📦 2x $4900") en el mismo fetch de productos de arriba —
+    // así lo vimos confirmado en la respuesta real del backend.
+    // Camino B / C (respaldo): _of.multicompraActiva o action=getMulticompraTodas.
+    _poolMulticompra=new Map();
+    _mcDiag = {fuente:'', ok:null, total:0, matcheados:0, sinMatch:[], error:'', muestra:[], rawKeys:[], arrayField:null};
 
+    const RX_MC = /📦\s*(\d+)\s*x\s*\$?\s*([\d.,]+)/i;
     _prods.forEach(p=>{
-      if(!p.mc) return;
-      _mcDiag.total++;
-      _mcDiag.matcheados++;
-      _poolMulticompra.set(p.id, p.mc);
+      const m = RX_MC.exec(p.ofertaTxt||'');
+      if(!m) return;
+      const cantidad = parseInt(m[1])||0;
+      const precio = parseInt(m[2].replace(/[.,]/g,''))||0;
+      if(cantidad>0 && precio>0) _poolMulticompra.set(p.id,{tipo:'', cantidad, precio, grupo:''});
     });
 
-    _mcDiag.muestra = _prods.filter(p=>p.mc).slice(0,5).map(p=>({
-      id:p.id, nombre:p.name, tipo:p.mc.tipo, cant:p.mc.cantidad,
-      precio:p.mc.precio, grupo:p.mc.grupo
-    }));
+    if(_poolMulticompra.size>0){
+      _mcDiag.fuente = 'categoriaOferta (por producto)';
+      _mcDiag.ok = true;
+      _mcDiag.total = _poolMulticompra.size;
+      _mcDiag.matcheados = _poolMulticompra.size;
+      _mcDiag.muestra = [..._poolMulticompra.entries()].slice(0,3).map(([id,mc])=>{
+        const p=_prods.find(x=>x.id===id);
+        return JSON.stringify({id, nombre:p?p.name:'', cantidad:mc.cantidad, precio:mc.precio});
+      });
+    } else {
+      const mcArrA = _of.multicompraActiva || [];
+      if(mcArrA.length>0){
+        _mcDiag.fuente = 'getOfertas (multicompraActiva)';
+        _mcDiag.ok = true;
+        _mcDiag.total = mcArrA.length;
+        _mcDiag.muestra = mcArrA.slice(0,5).map(p=>JSON.stringify({id:p.id, nombre:p.name||p.nombre, tipo:p.MULTICOMPRA_TIPO, cant:p.MULTICOMPRA_CANTIDAD, precio:p.MULTICOMPRA_PRECIO}));
+        mcArrA.forEach(p=>{
+          const local = _prods.find(x=>x.id===Number(p.id));
+          if(!local){ _mcDiag.sinMatch.push(p.name||p.nombre||('id '+p.id)); return; }
+          _mcDiag.matcheados++;
+          _poolMulticompra.set(local.id,{
+            tipo:     String(p.MULTICOMPRA_TIPO     || '').toUpperCase(),
+            cantidad: p.MULTICOMPRA_CANTIDAD || 0,
+            precio:   p.MULTICOMPRA_PRECIO   || 0,
+            grupo:    p.GRUPO_MULTICOMPRA    || ''
+          });
+        });
+      } else {
+        // Último respaldo: endpoint dedicado del flyer
+        try{
+          let rm = await gasGet('getMulticompraTodas');
+          if(typeof rm === 'string'){ try{ rm = JSON.parse(rm); }catch(e){} }
+          _mcDiag.fuente = 'getMulticompraTodas (respaldo)';
+          _mcDiag.rawKeys = (rm && typeof rm==='object') ? Object.keys(rm) : [];
 
-    console.log('📦 Multicompra directa del feed:', _mcDiag.total, 'productos');
-    console.log('📦 Ejemplos:', _mcDiag.muestra);
+          const arrayField = Array.isArray(rm?.items) ? 'items'
+                            : Array.isArray(rm?.productos) ? 'productos'
+                            : Array.isArray(rm?.data) ? 'data'
+                            : null;
+          const itemsArr = arrayField ? rm[arrayField] : null;
+          _mcDiag.arrayField = arrayField;
+
+          _mcDiag.ok = rm ? (rm.ok!==undefined ? !!rm.ok : (itemsArr?true:false)) : false;
+          _mcDiag.total = (rm && rm.total) || (itemsArr?itemsArr.length:0) || 0;
+
+          if(itemsArr){
+            _mcDiag.muestra = itemsArr.slice(0,3).map(it=>JSON.stringify(it));
+            itemsArr.forEach(it=>{
+              let id = Number(it.id)||0;
+              if(!id){
+                const nombreQ = quitarAcentos(String(it.nombre||'').toLowerCase()).trim();
+                const match = _prods.find(p=>quitarAcentos(p.name.toLowerCase()).trim()===nombreQ);
+                if(match) id=match.id;
+              }
+              if(!id){ _mcDiag.sinMatch.push(it.nombre||'(sin nombre)'); return; }
+              _mcDiag.matcheados++;
+              _poolMulticompra.set(id,{
+                tipo:     String(it.tipo||'').toUpperCase(),
+                cantidad: it.cantidad||0,
+                precio:   it.precioPack||0,
+                grupo:    it.grupo||''
+              });
+            });
+          } else if(rm && rm.ok===false){
+            _mcDiag.error = rm.error||'(sin detalle)';
+          } else {
+            _mcDiag.error = 'La respuesta no trajo ningún array reconocible (items/productos/data).';
+          }
+        }catch(e){ _mcDiag.ok=false; _mcDiag.error = String(e); }
+      }
+    }
 
     // 4. Cervecero
     try{ const rc=await gasGet('getJuevesCervecero'); _cerv=rc||{}; }
@@ -971,17 +1037,7 @@ function normProds(arr){
       ventas:   parseInt(p.ventas||p.ventasUltimoMes||p.vendidos||p.unidadesVendidas)||0,
       costo,
       ganancia: costo>0 ? (price-costo) : (parseInt(p.ganancia||p.margen||p.utilidad)||0),
-      // MULTICOMPRA: viene directamente en el mismo feed de productos.
-      // No dependemos de getMulticompraTodas ni de IDs numéricos externos.
-      mc: (()=>{
-        const tipo = String(p.tipo||p.MULTICOMPRA_TIPO||'').trim().toUpperCase();
-        const cantidad = Number(p.cantidad||p.MULTICOMPRA_CANTIDAD||0);
-        const precioPack = Number(p.precioPack||p.MULTICOMPRA_PRECIO||0);
-        const grupo = String(p.grupo||p.GRUPO_MULTICOMPRA||'').trim();
-        return (tipo && cantidad>0 && precioPack>0)
-          ? {tipo,cantidad,precio:precioPack,grupo}
-          : null;
-      })(),
+      ofertaTxt: String(p.categoriaOferta||'').trim(), // ej: "📦 2x $4900", "sin oferta", "especial"...
     };
   });
 }
@@ -1111,7 +1167,8 @@ function construirPools(){
   }
 
   // ── MULTICOMPRA (2x1, 3x2, etc.) ────────────────────────────────────────────
-  // _poolMulticompra viene directamente del feed de productos — ver recargar().
+  // _poolMulticompra viene de _of.multicompraActiva o, como respaldo, de
+  // action=getMulticompraTodas (flyer_multicompra.gs) — ver recargar().
   // mc.precio = precio TOTAL del pack (no unitario) — se muestra con la estrella
   // "estallido" en vez del badge normal (ver drawCard/drawStarburst).
   console.log('🔍 Multicompra: _poolMulticompra.size =', _poolMulticompra.size, '| _prods.length =', _prods.length);
@@ -2095,11 +2152,17 @@ function drawCardAd(ctx,cx,cy,CW,CH,FH,P,pieza){
   [0.86,0.60].forEach(f=>{ ctx.beginPath(); ctx.arc(ringCx,ringCy,ringBase*f*0.42,0,Math.PI*2); ctx.stroke(); });
 
   const sz = CW<85?'xs':CW<110?'sm':'md';
-  const logoFs = {xs:14,sm:16,md:19}[sz];
+  let logoFs = {xs:14,sm:16,md:19}[sz];
   const kickFs = {xs:7, sm:8, md:9}[sz];
+  const nombreEmp = (_emp.nombre||'COPIHUE').toUpperCase();
   ctx.textAlign='center'; ctx.fillStyle='#fff';
   ctx.font=`900 ${logoFs}px "Syne",sans-serif`;
-  ctx.fillText((_emp.nombre||'COPIHUE').toUpperCase(), ringCx, ringCy+2);
+  const maxTextW = CW*0.82;
+  while(ctx.measureText(nombreEmp).width>maxTextW && logoFs>8){
+    logoFs--;
+    ctx.font=`900 ${logoFs}px "Syne",sans-serif`;
+  }
+  ctx.fillText(nombreEmp, ringCx, ringCy+2);
   ctx.strokeStyle='rgba(255,255,255,0.85)'; ctx.lineWidth=1.4;
   ctx.beginPath();ctx.moveTo(cx+CW*0.32,ringCy+10);ctx.lineTo(cx+CW*0.68,ringCy+10);ctx.stroke();
   ctx.fillStyle='rgba(255,255,255,0.92)';
