@@ -6,9 +6,16 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>SendWA — Almacén Copihue ver.101</title>
+<title>SendWA — Almacén Copihue ver.102</title>
 <!--
   CHANGELOG sendwa.html
+  v102: - CAMBIO — "Precio como badge": antes se ocultaba TODO el precio de
+          abajo (tachado + oferta) cuando el badge estaba activo. Ahora solo
+          se oculta el precio nuevo/oferta (ese ya se ve en el badge
+          explosivo/tarjeta/círculo sobre la foto) y se conserva el precio
+          "antes" tachado, agrandado ya que queda solo — así se ve la
+          comparación antes/ahora. Si el producto no tiene oferta activa
+          (no hay "antes" que mostrar), abajo no queda nada, igual que antes.
   v101: - FIX — 🏷️ Badges por tipo de oferta: Mostrar/Ocultar, Color y Tamaño
           NO tenían ningún efecto en Relámpago y Multicompra (los tipos
           "por cantidad", esCantidad=true). Motivo: en el collage de 6 fotos
@@ -3806,15 +3813,19 @@ async function drawProductCard(ctx, p, x, y, W, H, preloadedImg) {
   const FS_SABORES = Math.max(W * 0.038, 9);
   const SABORES_H = tieneSabores ? FS_SABORES + 6 : 0;
   const FS_ANTES  = Math.max(W * 0.044, 9);
+  const FS_ANTES_SOLO = Math.max(W * 0.062, 11); // el "antes" tachado más grande cuando queda solo (el precio nuevo se fue al badge sobre la foto)
   const FS_OFERTA = Math.max(W * 0.068, 12);
   const FS_PRECIO = Math.max(W * 0.070, 12);
-  // Si el badge de precio (sobre la foto) está activo, el precio "de fábrica"
-  // abajo de la foto queda redundante — se oculta y ese espacio se le devuelve
-  // a la foto, en vez de dejar un hueco vacío.
+  // Si el badge de precio (sobre la foto) está activo, el precio nuevo/oferta
+  // queda redundante ahí abajo (ya se ve en el badge) y se oculta. El precio
+  // "antes" tachado SÍ se conserva (agrandado, ya que queda solo) — sirve
+  // como referencia de comparación con el precio del badge.
   const _precioBadgeActivo = _precioBadgeEstilo !== 'ninguno';
-  const PRECIO_H  = _precioBadgeActivo ? 0 : (tieneOfertaPrecio
-    ? FS_ANTES + 4 + FS_OFERTA + 6   // tachado + oferta
-    : FS_PRECIO + 6);                 // precio normal
+  const PRECIO_H  = _precioBadgeActivo
+    ? (tieneOfertaPrecio ? FS_ANTES_SOLO + 6 : 0)   // solo el tachado (si hay oferta); nada si no hay
+    : (tieneOfertaPrecio
+      ? FS_ANTES + 4 + FS_OFERTA + 6   // tachado + oferta
+      : FS_PRECIO + 6);                 // precio normal
   const PAD_V    = 8;
   const TEXTH    = PAD_V + NOMBRE_H + SABORES_H + PRECIO_H + PAD_V;
   const IMGH     = H - TEXTH;
@@ -3953,9 +3964,25 @@ async function drawProductCard(ctx, p, x, y, W, H, preloadedImg) {
     afterName += SABORES_H;
   }
 
-  // Precio — se omite si el badge de precio sobre la foto está activo (ver
-  // _precioBadgeActivo más arriba), para no mostrarlo duplicado.
-  if (!_precioBadgeActivo) {
+  // Precio — con el badge de precio activo, el precio nuevo/oferta ya se ve
+  // sobre la foto (badge explosivo/tarjeta/círculo), así que acá solo queda
+  // el "antes" tachado como referencia (más grande, ya que va solo). Si no
+  // hay oferta activa, no queda nada que mostrar acá (el precio normal
+  // también se fue al badge).
+  if (_precioBadgeActivo) {
+    if (tieneOfertaPrecio) {
+      ctx.fillStyle = '#888888';
+      ctx.font = `${FS_ANTES_SOLO}px Segoe UI`; ctx.textAlign = 'center';
+      const antesStr = fmt(p.precioVenta);
+      const ty_a = afterName + FS_ANTES_SOLO;
+      ctx.fillText(antesStr, mx, ty_a);
+      const tw = ctx.measureText(antesStr).width;
+      ctx.beginPath();
+      ctx.strokeStyle = '#777'; ctx.lineWidth = Math.max(W * 0.01, 1.8);
+      ctx.moveTo(mx - tw/2, ty_a - FS_ANTES_SOLO*0.35);
+      ctx.lineTo(mx + tw/2, ty_a - FS_ANTES_SOLO*0.35); ctx.stroke();
+    }
+  } else {
     if (tieneOfertaPrecio) {
       // Tachado
       ctx.fillStyle = '#888888';
