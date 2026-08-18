@@ -466,7 +466,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbxhKFk2WAi-KRY5xGBsI6_6Pvp3jDjt8mSRXvy7I1WehNmBpJamqK9G9Q1ZJSCSgAdfDA/exec';
-const VERSION = 'v1.7';
+const VERSION = 'v1.8';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -2836,21 +2836,39 @@ async function descargarTodas(){
 }
 
 // ── EXPORTAR ───────────────────────────────────────────────────────────────────
+function esMobile(){
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
 function descargar(){
   if(!_cvFin){alert('Generá el flyer primero');return;}
-  // toBlob + createObjectURL funciona en móvil; toDataURL puede fallar en canvas grandes
-  _cvFin.toBlob(blob=>{
-    if(!blob){alert('No se pudo generar el archivo');return;}
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');
-    a.href=url;
-    const sufPag=_cvPaginas.length>1?'-pag'+(_pagActual+1)+'de'+_cvPaginas.length:'';
-    a.download='copihue-flyer-'+_modo+sufPag+'-'+Date.now()+'.jpg';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(()=>URL.revokeObjectURL(url),3000);
-  },'image/jpeg',.93);
+  try{
+    // toBlob + createObjectURL funciona en móvil; toDataURL puede fallar en canvas grandes
+    _cvFin.toBlob(blob=>{
+      try{
+        if(!blob){alert('❌ No se pudo generar el archivo (toBlob devolvió vacío)');return;}
+        const url=URL.createObjectURL(blob);
+        if(esMobile()){
+          // En el celular, el click programático de <a download> suele quedar bloqueado
+          // en silencio porque ya pasó el "gesto directo" del usuario (toBlob es async).
+          // Abrir en pestaña nueva sí funciona siempre: desde ahí se guarda con "mantener
+          // presionado → Descargar imagen".
+          const w=window.open(url,'_blank');
+          if(!w) alert('⚠️ El navegador bloqueó la pestaña nueva. Habilitá pop-ups para este sitio, o mantené presionada la imagen del flyer para guardarla directo.');
+          setTimeout(()=>URL.revokeObjectURL(url),15000);
+        } else {
+          const a=document.createElement('a');
+          a.href=url;
+          const sufPag=_cvPaginas.length>1?'-pag'+(_pagActual+1)+'de'+_cvPaginas.length:'';
+          a.download='copihue-flyer-'+_modo+sufPag+'-'+Date.now()+'.jpg';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(()=>URL.revokeObjectURL(url),3000);
+        }
+      }catch(e2){ console.error('descargar (toBlob callback):',e2); alert('❌ Error al descargar: '+e2.message); }
+    },'image/jpeg',.93);
+  }catch(e){ console.error('descargar:',e); alert('❌ Error al descargar: '+e.message); }
 }
 
 async function compartirWA(){
@@ -2871,12 +2889,17 @@ async function compartirWA(){
       return;
     }
 
-    // Fallback: descargar + abrir WhatsApp web
+    // Fallback: mostrar/descargar la imagen y abrir WhatsApp aparte
     const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');
-    a.href=url; a.download='copihue-flyer.jpg';
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(()=>URL.revokeObjectURL(url),3000);
+    if(esMobile()){
+      const w=window.open(url,'_blank');
+      if(!w) alert('⚠️ El navegador bloqueó la pestaña nueva. Habilitá pop-ups, o mantené presionada la imagen para guardarla y compartirla desde WhatsApp manualmente.');
+    } else {
+      const a=document.createElement('a');
+      a.href=url; a.download='copihue-flyer.jpg';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    }
+    setTimeout(()=>URL.revokeObjectURL(url),15000);
     // Abrir WhatsApp para que peguen la imagen manualmente
     const waUrl=_emp.telefono
       ?'https://wa.me/'+_emp.telefono
@@ -2885,7 +2908,7 @@ async function compartirWA(){
   }catch(e){
     ld(false);
     // Si compartir fue cancelado por el usuario no es error real
-    if(e.name!=='AbortError') alert('No se pudo compartir: '+e.message);
+    if(e.name!=='AbortError'){ console.error('compartirWA:',e); alert('❌ No se pudo compartir: '+e.message); }
   }
 }
 
