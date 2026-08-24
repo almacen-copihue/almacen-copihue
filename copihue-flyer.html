@@ -420,6 +420,34 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
             <option value="12" selected>3x4 (12 productos)</option>
           </select>
         </div>
+        <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--bdr2);font-size:.62rem;font-weight:700;color:var(--tm);text-transform:uppercase;letter-spacing:.03em;">
+          Badge de Promo/Combo
+        </div>
+        <div class="cr"><label>Forma</label>
+          <select id="cfgBadgeForma">
+            <option value="rect">▭ Rectangular</option>
+            <option value="circulo">⬤ Círculo</option>
+            <option value="explosivo">💥 Explosivo</option>
+          </select>
+        </div>
+        <div class="cr"><label>Color</label>
+          <input type="color" id="cfgBadgeColor" value="#B000FF" style="width:44px;height:26px;padding:1px;border-radius:6px;">
+        </div>
+        <div class="cr"><label>Tamaño</label>
+          <select id="cfgBadgeTam">
+            <option value="sm">Chico</option>
+            <option value="md" selected>Mediano</option>
+            <option value="lg">Grande</option>
+          </select>
+        </div>
+        <div class="cr"><label>Ubicación</label>
+          <select id="cfgBadgePos">
+            <option value="tr" selected>↗ Arriba-derecha</option>
+            <option value="tl">↖ Arriba-izquierda</option>
+            <option value="br">↘ Abajo-derecha</option>
+            <option value="bl">↙ Abajo-izquierda</option>
+          </select>
+        </div>
       </div>
     </div>
 
@@ -579,7 +607,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbzWZzDvdGfW8vd2-FpQolT852cdPMeHbfKugn9DBOlju75bE1D0SUNB5EKEDOsI2vP4lA/exec'; // v5.38: alineado con seba21/sendwa — el flyer apuntaba a otro deployment de Apps Script
-const APP_VERSION = 'v5.62';
+const APP_VERSION = 'v5.64';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -732,6 +760,18 @@ const MODO_HDR = {
   combinado:  {t:'🌟 OFERTAS DESTACADAS',     s:'Relámpago · Destacadas · Especiales'},
 };
 
+// v5.63: el subtítulo de "combinado" estaba fijo en "Relámpago · Destacadas ·
+// Especiales" aunque el usuario hubiera elegido otra combinación (ej. Promos +
+// Combos) — ahora arma el título/subtítulo según lo que esté realmente
+// tildado en _modos, en vez de un texto fijo.
+function getModoInfo(){
+  if(_modo==='combinado'){
+    const partes=[..._modos].map(m=>(MODO_BADGE[m]&&MODO_BADGE[m].label)||m.toUpperCase());
+    return {t:'🌟 OFERTAS COPIHUE', s:partes.join(' · ')};
+  }
+  return MODO_HDR[_modo]||MODO_HDR.manual;
+}
+
 // ── ESTADO ────────────────────────────────────────────────────────────────────
 let _emp   = {nombre:'Almacén Copihue',direccion:'',ciudad:'',web:'',telefono:''};
 let _prods = [];
@@ -742,6 +782,15 @@ let _poolMulticompra = new Map(); // id → {tipo,cantidad,precio,grupo} — des
 let _mcDiag = {}; // info de la última carga, para el botón de diagnóstico en pantalla
 let _modo  = null;
 let _modos = new Set(); // multi-selección de modos — arranca vacío, elegís vos
+let _badgeCfg = {forma:'rect', color:'#B000FF', tam:'md', pos:'tr'}; // v5.64 — badge PROMO/COMBO configurable
+function leerBadgeCfg(){
+  _badgeCfg = {
+    forma: ($('cfgBadgeForma')||{}).value || 'rect',
+    color: ($('cfgBadgeColor')||{}).value || '#B000FF',
+    tam:   ($('cfgBadgeTam')||{}).value   || 'md',
+    pos:   ($('cfgBadgePos')||{}).value   || 'tr',
+  };
+}
 let _cand  = [];
 let _sel   = new Set();
 let _cvFin = null;   // canvas final (SCALE_OUT×) — página actualmente mostrada
@@ -2158,6 +2207,57 @@ function splitEtiquetaEstrella(etiqueta){
   return [words.slice(0,mid).join(' '), words.slice(mid).join(' ')];
 }
 
+function hexContraste(hex){
+  const h=(hex||'#B000FF').replace('#','');
+  const r=parseInt(h.substr(0,2),16)||0, g=parseInt(h.substr(2,2),16)||0, b=parseInt(h.substr(4,2),16)||0;
+  const lum=(0.299*r+0.587*g+0.114*b)/255;
+  return lum>0.6?'#1a1a1a':'#ffffff';
+}
+
+// v5.64: badge de PROMO/COMBO configurable — forma (rectangular/círculo/
+// explosivo), color, tamaño y ubicación, a pedido del usuario (reemplaza el
+// % descartado en v5.62/v5.63, que no era confiable con precios cargados a
+// mano). `area` es la caja de referencia dentro de la cual se ancla la
+// esquina elegida: la foto en tarjetas grandes, la miniatura en la lista.
+function drawOfertaBadge(ctx, area, label, cfg){
+  const txtColor = hexContraste(cfg.color);
+  const escala = {sm:0.78, md:1, lg:1.3}[cfg.tam]||1;
+  ctx.save();
+  if(cfg.forma==='explosivo'){
+    const rOuter = Math.max(18, Math.min(area.w,area.h)*0.30)*escala;
+    const rInner = rOuter*0.58;
+    const pad = rOuter+3;
+    const cx2 = cfg.pos.indexOf('l')!==-1 ? area.x+pad : area.x+area.w-pad;
+    const cy2 = cfg.pos.indexOf('t')!==-1 ? area.y+pad : area.y+area.h-pad;
+    drawStarburst(ctx,cx2,cy2,rOuter,rInner,10,cfg.color);
+    ctx.fillStyle=txtColor; ctx.textAlign='center';
+    let fs=Math.max(rOuter*0.30,8);
+    ctx.font=`900 ${fs}px "DM Sans",sans-serif`;
+    while(ctx.measureText(label).width>rOuter*1.35 && fs>7){fs--;ctx.font=`900 ${fs}px "DM Sans",sans-serif`;}
+    ctx.fillText(label, cx2, cy2+fs*0.32);
+  } else if(cfg.forma==='circulo'){
+    let fs=Math.max(9*escala,7);
+    ctx.font=`bold ${fs}px "DM Sans",sans-serif`;
+    const diam=Math.max(ctx.measureText(label).width+16, 34*escala);
+    const r=diam/2, pad=r+3;
+    const cx2 = cfg.pos.indexOf('l')!==-1 ? area.x+pad : area.x+area.w-pad;
+    const cy2 = cfg.pos.indexOf('t')!==-1 ? area.y+pad : area.y+area.h-pad;
+    ctx.beginPath(); ctx.arc(cx2,cy2,r,0,Math.PI*2); ctx.fillStyle=cfg.color; ctx.fill();
+    ctx.fillStyle=txtColor; ctx.textAlign='center';
+    ctx.fillText(label, cx2, cy2+fs*0.32);
+  } else { // rect
+    let fs=Math.max(9.5*escala,7);
+    ctx.font=`bold ${fs}px "DM Sans",sans-serif`;
+    const bw=Math.max(ctx.measureText(label).width+14, 32*escala), bh=20*escala;
+    const bx = cfg.pos.indexOf('l')!==-1 ? area.x+4 : area.x+area.w-bw-4;
+    const by = cfg.pos.indexOf('t')!==-1 ? area.y+4 : area.y+area.h-bh-4;
+    rr(ctx,bx,by,bw,bh,5); ctx.fillStyle=cfg.color; ctx.fill();
+    ctx.fillStyle=txtColor; ctx.textAlign='center';
+    ctx.fillText(label, bx+bw/2, by+bh/2+fs*0.32);
+  }
+  ctx.restore();
+}
+
 function wrap(ctx,text,x,y,maxW,lh,maxL){
   const words=text.split(' ');let line='',lines=[];
   for(const w of words){
@@ -2443,7 +2543,9 @@ async function drawCard(ctx,p,cx,cy,CW,CH,FH,P,pk,soloUno=false){
       ctx.fillText(l1.toUpperCase(),scx,scy+fs1*0.32-lift);
     }
   } else if(_badgeLbl && _hasDiscBdg){
-    if(_is2daBdg){
+    if(_tipo2==='promos' || _tipo2==='combo'){
+      drawOfertaBadge(ctx, {x:cx,y:cy,w:CW,h:FH}, _badgeLbl, _badgeCfg);
+    } else if(_is2daBdg){
       // Badge 2 líneas: "2DA" arriba, "50%" grande abajo
       const bw=36, bh=30, bx=cx+CW-bw-4, by=cy+5;
       rr(ctx,bx,by,bw,bh,5); ctx.fillStyle=_badgeC.hex; ctx.fill();
@@ -2620,7 +2722,7 @@ async function dibujarGrid(prods,pk){
   const H=82+ROWS*CH+(ROWS-1)*GAP+PAD+52;
   const{cv,ctx}=mkCv(W,H);
   drawBg(ctx,W,H,pk);
-  const sy=drawHdr(ctx,W,MODO_HDR[_modo]||MODO_HDR.manual,P,0,prods);
+  const sy=drawHdr(ctx,W,getModoInfo(),P,0,prods);
   await Promise.all(prods.map((p,i)=>{
     const col=i%COLS,row=Math.floor(i/COLS);
     return drawCard(ctx,p,PAD+col*(CW+GAP),sy+row*(CH+GAP),CW,CH,FH,P,pk,soloUno);
@@ -2646,8 +2748,8 @@ async function dibujarLista(prods,pk){
   const H=HDR+prods.length*ROW+PAD+FTR;
   const{cv,ctx}=mkCv(W,H);
   drawBg(ctx,W,H,pk);
-  const info=MODO_HDR[_modo]||MODO_HDR.manual;
-  const _listaSy = drawHdr(ctx,W,MODO_HDR[_modo]||MODO_HDR.manual,P,0,prods);
+  const info=getModoInfo();
+  const _listaSy = drawHdr(ctx,W,info,P,0,prods);
   const HDR2=_listaSy;
   await Promise.all(prods.map(async(p,i)=>{
     const ov=_overrides[p.id],price=ov?ov.price:p.price,po=ov?ov.po:p.po,pct=ov?ov.pct:p.pct,et=ov?ov.et:p.et;
@@ -2664,6 +2766,10 @@ async function dibujarLista(prods,pk){
       ctx.fillStyle=P.card2;rr(ctx,8,y+11,FOTO,FOTO,7);ctx.fill();
       ctx.font='18px sans-serif';ctx.textAlign='center';ctx.fillText('🛒',8+FOTO/2,y+42);
     }
+    const _tipoL=getOfertaTipo(p);
+    if((_tipoL==='promos'||_tipoL==='combo') && po<price){
+      drawOfertaBadge(ctx, {x:8,y:y+11,w:FOTO,h:FOTO}, getBadgeLabel(p), _badgeCfg);
+    }
     ctx.fillStyle=P.txt;ctx.textAlign='left';ctx.font='bold 12px "DM Sans",sans-serif';
     wrap(ctx,p.name,66,y+23,W-160,14,2);
     ctx.fillStyle=P.ac;ctx.font='bold 18px "DM Sans",sans-serif';ctx.textAlign='right';
@@ -2675,11 +2781,10 @@ async function dibujarLista(prods,pk){
       ctx.strokeStyle=P.ten;ctx.lineWidth=1;
       ctx.beginPath();ctx.moveTo(W-PAD-38-tw,y+47);ctx.lineTo(W-PAD-38,y+47);ctx.stroke();
     }
-    if(pct>=5){
-      ctx.fillStyle=P.ac;rr(ctx,W-PAD-36,y+10,32,18,4);ctx.fill();
-      ctx.fillStyle=P.btxt;ctx.font='bold 9px "DM Sans",sans-serif';ctx.textAlign='center';
-      ctx.fillText('-'+pct+'%',W-PAD-20,y+22);
-    }
+    // v5.63: se sacó el badge de "-X%" acá (el usuario no lo quiere más — con
+    // precios cargados a mano el % calculado no es fiable). Queda solo el
+    // antes tachado (arriba) + el precio ahora, igual que en las tarjetas
+    // grandes.
     ctx.strokeStyle=P.bdr;ctx.lineWidth=.5;
     ctx.beginPath();ctx.moveTo(10,y+ROW);ctx.lineTo(W-10,y+ROW);ctx.stroke();
   }));
@@ -2690,7 +2795,7 @@ async function dibujarStory(prods,pk){
   const P=PAL[pk],W=540,H=960;
   const{cv,ctx}=mkCv(W,H);
   drawBg(ctx,W,H,pk);
-  const info=MODO_HDR[_modo]||MODO_HDR.manual;
+  const info=getModoInfo();
   ctx.fillStyle=P.ac;ctx.fillRect(0,0,W,5);
   ctx.fillStyle=P.ac;ctx.font='bold 14px "DM Sans",sans-serif';ctx.textAlign='center';
   ctx.fillText(_emp.nombre.toUpperCase(),W/2,36);
@@ -2714,7 +2819,7 @@ async function dibujarBanner(prods,pk){
   const P=PAL[pk],maxB=Math.min(prods.length,4),pB=prods.slice(0,maxB);
   const W=820,H=356;const{cv,ctx}=mkCv(W,H);
   drawBg(ctx,W,H,pk);
-  const info=MODO_HDR[_modo]||MODO_HDR.manual;
+  const info=getModoInfo();
   const HDR=46;ctx.fillStyle=P.ac;ctx.fillRect(0,0,W,HDR);
   ctx.fillStyle='#fff';ctx.font='bold 18px "Syne",sans-serif';ctx.textAlign='center';
   ctx.fillText(_emp.nombre.toUpperCase()+'  ·  '+info.t.replace(/^[^\s]+\s/,''),W/2,32);
@@ -3059,6 +3164,7 @@ async function generarFlyer(prodsIn){
   const prods = prodsIn || _cand.filter(p=>_sel.has(p.id));
   if(!prods.length){alert('Seleccioná al menos un producto');return;}
   const pk=$('cfgFondo').value, fmt=$('cfgFormato').value;
+  leerBadgeCfg();
   ld(true,'Generando flyer (cargando imágenes)...');
   try{
     const fns={lista:dibujarLista,story:dibujarStory,banner:dibujarBanner};
