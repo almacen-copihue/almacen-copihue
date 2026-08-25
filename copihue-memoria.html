@@ -15,7 +15,7 @@
     --crema: #fdf8ec;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { overscroll-behavior-y: contain; }
+  html, body { overscroll-behavior: contain; }
 
   body {
     background: linear-gradient(160deg, var(--verde) 0%, var(--verde-dark) 100%);
@@ -61,7 +61,7 @@
     width: 100%;
     max-width: 460px;
   }
-  .card { aspect-ratio: 1 / 1; perspective: 800px; cursor: pointer; }
+  .card { aspect-ratio: 1 / 1; perspective: 800px; cursor: pointer; touch-action: manipulation; }
   .card-inner {
     position: relative; width: 100%; height: 100%;
     transition: transform 0.45s cubic-bezier(.4,.2,.2,1);
@@ -113,6 +113,58 @@
   }
 
   footer { margin-top: 22px; font-size: 0.75rem; opacity: 0.65; text-align: center; }
+
+  /* ─── RANKING ─── */
+  .ranking {
+    margin-top: 18px; width: 100%; max-width: 400px;
+    background: rgba(255,255,255,0.1); border-radius: 14px; padding: 12px 16px;
+  }
+  .ranking h3 {
+    font-family: 'Playfair Display', serif; font-size: 1rem; text-align: center;
+    margin-bottom: 8px; color: var(--dorado);
+  }
+  .ranking-row {
+    display: grid; grid-template-columns: 24px 50px 1fr 60px;
+    gap: 8px; align-items: center; font-size: 0.8rem;
+    padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.08);
+  }
+  .ranking-row:last-child { border-bottom: none; }
+  .ranking-row .pos { opacity: 0.6; font-weight: 700; }
+  .ranking-row .ini { font-family: 'Playfair Display', serif; font-weight: 900; letter-spacing: 1px; color: var(--dorado); }
+  .ranking-row .det { opacity: 0.8; font-size: 0.72rem; }
+  .ranking-row .pts { text-align: right; font-weight: 700; }
+  .ranking-empty { text-align: center; font-size: 0.78rem; opacity: 0.7; padding: 6px 0; }
+
+  /* ─── MODAL INICIALES (estilo arcade) ─── */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; z-index: 999;
+    background: rgba(0,0,0,0.55);
+    align-items: center; justify-content: center; padding: 20px;
+  }
+  .modal-overlay.activo { display: flex; }
+  .modal-box {
+    background: #1b1b1b; border: 2px solid var(--dorado); border-radius: 14px;
+    padding: 22px 24px; max-width: 320px; width: 100%; text-align: center;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+  }
+  .modal-box .trofeo { font-size: 2rem; display: block; margin-bottom: 4px; }
+  .modal-box h3 {
+    font-family: 'Playfair Display', serif; color: var(--dorado); font-size: 1.15rem; margin-bottom: 4px;
+  }
+  .modal-box p { color: rgba(255,255,255,0.7); font-size: 0.78rem; margin-bottom: 16px; }
+  .iniciales-inputs { display: flex; gap: 10px; justify-content: center; margin-bottom: 18px; }
+  .iniciales-inputs input {
+    width: 48px; height: 58px; text-align: center; font-size: 1.6rem; font-weight: 900;
+    font-family: 'Playfair Display', serif; text-transform: uppercase;
+    background: #2c2c2c; color: var(--dorado); border: 2px solid rgba(201,162,39,0.4);
+    border-radius: 8px; caret-color: var(--dorado);
+  }
+  .iniciales-inputs input:focus { outline: none; border-color: var(--dorado); }
+  .btn-guardar-record {
+    background: var(--dorado); color: #1b1b1b; border: none; padding: 10px 24px;
+    border-radius: 999px; font-weight: 700; cursor: pointer; font-size: 0.9rem; width: 100%;
+  }
+  .btn-guardar-record:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
 </head>
 <body>
@@ -145,7 +197,26 @@
 <div class="win" id="win">
   <h2>🎉 ¡Completaste el almacén!</h2>
   <p id="winText"></p>
-  <button class="reset" onclick="startGame()">Jugar de nuevo</button>
+  <button class="reset" onclick="iniciar()">Jugar de nuevo</button>
+</div>
+
+<div class="ranking" id="ranking" style="display:none">
+  <h3>🏆 Mejores puntajes</h3>
+  <div id="rankingList"></div>
+</div>
+
+<div class="modal-overlay" id="modalIniciales">
+  <div class="modal-box">
+    <span class="trofeo">🏆</span>
+    <h3>¡Nuevo récord!</h3>
+    <p>Entraste al top 10. Ingresá tus iniciales:</p>
+    <div class="iniciales-inputs">
+      <input type="text" maxlength="1" id="ini1" autocapitalize="characters">
+      <input type="text" maxlength="1" id="ini2" autocapitalize="characters">
+      <input type="text" maxlength="1" id="ini3" autocapitalize="characters">
+    </div>
+    <button class="btn-guardar-record" id="btnGuardarRecord" onclick="guardarIniciales()">Guardar</button>
+  </div>
 </div>
 
 <footer>El Almacén Copihue 🌸</footer>
@@ -154,7 +225,7 @@
 // ═══════════════════════════════════════════════════════════════
 //  VERSIÓN
 // ═══════════════════════════════════════════════════════════════
-const APP_VERSION = 'v1.0';
+const APP_VERSION = 'v1.2';
 document.getElementById('appVersion').textContent = APP_VERSION;
 
 // ═══════════════════════════════════════════════════════════════
@@ -164,8 +235,13 @@ const GAS_URL  = 'https://script.google.com/macros/s/AKfycbzWZzDvdGfW8vd2-FpQolT
 const IMG_BASE = 'https://raw.githubusercontent.com/almacen-copihue/almacen-copihue/main/imagenes-productos/';
 const PARES    = 8; // 8 pares = 16 cartas
 
+// Backend separado, solo para records de los minijuegos (planilla propia)
+const GAMES_URL = 'https://script.google.com/macros/s/AKfycbyegP1TSQSccsjYorXIpgAJH1nVAO9fzmg3hwKQNk116Mgx1M6Rs1XUn0JkiusVmGareg/exec';
+const NOMBRE_JUEGO = 'memoria';
+let ultimoPuntaje = null; // { movimientos, tiempoSeg, puntaje }
+
 let deck = [], flipped = [], matched = 0, moves = 0, lock = false;
-let timer = null, seconds = 0;
+let timer = null, seconds = 0, pendingTimeout = null;
 
 function toSlug(nombre) {
   return nombre
@@ -180,6 +256,13 @@ function imgUrl(nombre) { return IMG_BASE + toSlug(nombre) + '.jpg'; }
 
 async function fetchGAS(action, data) {
   let url = GAS_URL + '?action=' + action;
+  if (data) url += '&data=' + encodeURIComponent(JSON.stringify(data));
+  const r = await fetch(url);
+  return r.json();
+}
+
+async function fetchGames(action, data) {
+  let url = GAMES_URL + '?action=' + action;
   if (data) url += '&data=' + encodeURIComponent(JSON.stringify(data));
   const r = await fetch(url);
   return r.json();
@@ -227,10 +310,12 @@ function shuffle(arr) {
 function startGame(productos) {
   clearInterval(timer);
   seconds = 0; moves = 0; matched = 0; flipped = []; lock = false;
+  if (pendingTimeout) { clearTimeout(pendingTimeout); pendingTimeout = null; }
   document.getElementById('moves').textContent = '0';
   document.getElementById('pairs').textContent = `0/${PARES}`;
   document.getElementById('time').textContent = '00:00';
   document.getElementById('win').classList.remove('show');
+  document.getElementById('ranking').style.display = 'none';
   mostrarEstado('juego');
 
   deck = shuffle([...productos, ...productos]);
@@ -265,9 +350,22 @@ function startGame(productos) {
 }
 
 function flipCard(card) {
-  if (lock) return;
   if (card.classList.contains('flipped') || card.classList.contains('matched')) return;
-  if (flipped.length === 2) return;
+
+  if (lock) {
+    // Había un par sin coincidir esperando para darse vuelta: resolverlo
+    // ya mismo en vez de ignorar este click, para que nunca haga falta
+    // tocar dos veces la misma carta.
+    if (pendingTimeout) {
+      clearTimeout(pendingTimeout);
+      pendingTimeout = null;
+    }
+    flipped.forEach(c => c.classList.remove('flipped'));
+    flipped = [];
+    lock = false;
+  }
+
+  if (flipped.length === 2) return; // por las dudas, nunca más de 2 activas
 
   card.classList.add('flipped');
   flipped.push(card);
@@ -278,34 +376,118 @@ function flipCard(card) {
     lock = true;
     const [a, b] = flipped;
     if (a.dataset.nombre === b.dataset.nombre) {
-      setTimeout(() => {
+      pendingTimeout = setTimeout(() => {
         a.classList.add('matched');
         b.classList.add('matched');
         matched++;
         document.getElementById('pairs').textContent = `${matched}/${PARES}`;
         flipped = [];
         lock = false;
+        pendingTimeout = null;
         if (matched === PARES) endGame();
       }, 350);
     } else {
-      setTimeout(() => {
+      pendingTimeout = setTimeout(() => {
         a.classList.remove('flipped');
         b.classList.remove('flipped');
         flipped = [];
         lock = false;
+        pendingTimeout = null;
       }, 800);
     }
   }
 }
 
-function endGame() {
+async function endGame() {
   clearInterval(timer);
   const m = String(Math.floor(seconds / 60)).padStart(2, '0');
   const s = String(seconds % 60).padStart(2, '0');
   document.getElementById('winText').textContent =
     `Lo lograste en ${moves} movimientos y ${m}:${s} minutos.`;
   document.getElementById('win').classList.add('show');
+
+  // Puntaje combinado: movimientos + medio punto por segundo. Más bajo = mejor.
+  const puntaje = moves + (seconds / 2);
+  ultimoPuntaje = { movimientos: moves, tiempoSeg: seconds, puntaje };
+
+  try {
+    const res = await fetchGames('obtenerRecords', { juego: NOMBRE_JUEGO });
+    const records = (res.ok && res.records) ? res.records : [];
+    const entraAlTop = records.length < 10 || puntaje < records[records.length - 1].puntaje;
+    mostrarRanking(records);
+    if (entraAlTop) {
+      abrirModalIniciales();
+    }
+  } catch (err) {
+    console.error('No se pudo consultar el ranking:', err);
+  }
 }
+
+function mostrarRanking(records) {
+  const cont = document.getElementById('rankingList');
+  document.getElementById('ranking').style.display = 'block';
+  if (!records || records.length === 0) {
+    cont.innerHTML = '<div class="ranking-empty">Todavía no hay puntajes registrados. ¡Sé el primero!</div>';
+    return;
+  }
+  cont.innerHTML = records.map((r, i) => {
+    const mm = String(Math.floor(r.tiempoSeg / 60)).padStart(2, '0');
+    const ss = String(r.tiempoSeg % 60).padStart(2, '0');
+    return `
+      <div class="ranking-row">
+        <span class="pos">${i + 1}º</span>
+        <span class="ini">${r.iniciales}</span>
+        <span class="det">${r.movimientos} mov · ${mm}:${ss}</span>
+        <span class="pts">${r.puntaje.toFixed(1)}</span>
+      </div>`;
+  }).join('');
+}
+
+function abrirModalIniciales() {
+  document.getElementById('ini1').value = '';
+  document.getElementById('ini2').value = '';
+  document.getElementById('ini3').value = '';
+  document.getElementById('modalIniciales').classList.add('activo');
+  setTimeout(() => document.getElementById('ini1').focus(), 100);
+}
+
+async function guardarIniciales() {
+  const i1 = document.getElementById('ini1').value.trim();
+  const i2 = document.getElementById('ini2').value.trim();
+  const i3 = document.getElementById('ini3').value.trim();
+  const iniciales = (i1 + i2 + i3).toUpperCase() || '???';
+
+  const btn = document.getElementById('btnGuardarRecord');
+  btn.disabled = true;
+  btn.textContent = 'Guardando...';
+
+  try {
+    await fetchGames('guardarRecord', {
+      juego: NOMBRE_JUEGO,
+      iniciales,
+      movimientos: ultimoPuntaje.movimientos,
+      tiempoSeg: ultimoPuntaje.tiempoSeg
+    });
+    const res = await fetchGames('obtenerRecords', { juego: NOMBRE_JUEGO });
+    if (res.ok && res.records) mostrarRanking(res.records);
+  } catch (err) {
+    console.error('No se pudo guardar el récord:', err);
+  } finally {
+    document.getElementById('modalIniciales').classList.remove('activo');
+    btn.disabled = false;
+    btn.textContent = 'Guardar';
+  }
+}
+
+// Auto-avanzar entre los 3 casilleros de iniciales, como en los arcades
+['ini1', 'ini2', 'ini3'].forEach((id, idx, arr) => {
+  document.getElementById(id).addEventListener('input', (e) => {
+    e.target.value = e.target.value.replace(/[^a-zA-Z]/g, '').toUpperCase();
+    if (e.target.value && idx < arr.length - 1) {
+      document.getElementById(arr[idx + 1]).focus();
+    }
+  });
+});
 
 iniciar();
 </script>
