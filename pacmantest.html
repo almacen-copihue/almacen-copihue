@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>PAC-MAN</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{width:100%;height:100%;background:#000;overflow:hidden;user-select:none;touch-action:none;font-family:monospace;}
+#hud{position:fixed;top:0;left:0;right:0;height:32px;display:flex;justify-content:space-between;align-items:center;padding:0 12px;color:#FFD700;font-size:10px;font-weight:bold;background:#000;z-index:10;letter-spacing:1px;}
+canvas{position:fixed;top:32px;display:block;image-rendering:pixelated;}
+
+/* Botones izquierda - tipo joystick PS2 */
+#left-btns{position:fixed;left:16px;bottom:20px;display:flex;flex-direction:column;gap:14px;z-index:110;}
+.psbtn{
+  width:56px;height:56px;border-radius:50%;border:none;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  touch-action:manipulation;
+  font-size:11px;font-weight:bold;letter-spacing:0;
+  box-shadow:0 6px 20px #000c,0 2px 0 #ffffff15 inset,0 -3px 0 #00000077 inset;
+  -webkit-tap-highlight-color:transparent;
+}
+.psbtn:active{transform:scale(0.88);}
+#pbtn-pause{
+  background:radial-gradient(ellipse at 42% 38%,#2a2a4a,#0d0d20);
+  color:#88aaff;border:2px solid #333355;
+}
+#pbtn-exit{
+  background:radial-gradient(ellipse at 42% 38%,#3a1010,#180404);
+  color:#ff6666;border:2px solid #441111;
+}
+
+/* Joystick derecho */
+#joy-wrap{position:fixed;right:16px;bottom:16px;z-index:110;touch-action:none;}
+#joy-base{
+  width:148px;height:148px;border-radius:50%;
+  background:radial-gradient(ellipse at 42% 38%,#3a3a4a,#111120 65%);
+  box-shadow:0 10px 36px #000b,0 2px 0 #ffffff18 inset,0 -3px 0 #00000099 inset,
+             0 0 0 3px #222233,0 0 0 6px #0d0d18;
+  display:flex;align-items:center;justify-content:center;position:relative;
+}
+#joy-base::before{
+  content:'';position:absolute;width:138px;height:138px;border-radius:50%;
+  border:1px solid #ffffff0a;
+}
+.ja{position:absolute;color:#ffffff1a;font-size:9px;pointer-events:none;font-family:monospace;}
+.ja.u{top:12px;left:50%;transform:translateX(-50%);}
+.ja.d{bottom:12px;left:50%;transform:translateX(-50%);}
+.ja.l{left:12px;top:50%;transform:translateY(-50%);}
+.ja.r{right:12px;top:50%;transform:translateY(-50%);}
+#joy-cap{
+  width:60px;height:60px;border-radius:50%;pointer-events:none;
+  background:radial-gradient(ellipse at 40% 35%,#4a4a5a,#1e1e2e 60%,#0d0d18);
+  box-shadow:0 5px 16px #000c,0 2px 0 #ffffff12 inset,0 -2px 4px #00000099 inset;
+  position:relative;
+}
+#joy-cap::after{
+  content:'';position:absolute;inset:12px;border-radius:50%;
+  background:radial-gradient(ellipse at 38% 32%,#ffffff06,transparent 60%);
+}
+
+/* Raspadita */
+#raspa-instruction{color:#FFD700;font-size:13px;font-family:monospace;margin-bottom:10px;text-align:center;animation:pulse 1s infinite alternate;}
+@keyframes pulse{from{opacity:0.6}to{opacity:1}}
+#raspa-wrap{position:relative;width:260px;height:120px;border-radius:12px;overflow:hidden;border:3px solid #FFD700;box-shadow:0 0 20px #FFD70066;margin:0 auto;}
+#raspa-canvas{position:absolute;top:0;left:0;z-index:2;cursor:crosshair;touch-action:none;}
+#raspa-prize{
+  position:absolute;top:0;left:0;width:100%;height:100%;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  background:linear-gradient(135deg,#1a1a2e,#16213e);
+  font-family:monospace;text-align:center;z-index:1;
+}
+#raspa-prize .prize-emoji{font-size:36px;margin-bottom:4px;}
+#raspa-prize .prize-name{color:#FFD700;font-size:15px;font-weight:bold;}
+#raspa-prize .prize-desc{color:#aaaacc;font-size:11px;margin-top:2px;}
+#raspa-code{
+  margin-top:14px;text-align:center;font-family:monospace;
+  background:#0d0d1a;border:1px solid #444466;border-radius:10px;
+  padding:10px 18px;width:260px;box-sizing:border-box;
+}
+#raspa-code-label{color:#aaaacc;font-size:10px;letter-spacing:1px;text-transform:uppercase;}
+#raspa-code-value{
+  color:#FFD700;font-size:20px;font-weight:bold;letter-spacing:3px;
+  margin:4px 0;text-shadow:0 0 10px #FFD70088;
+}
+#raspa-code-hint{color:#666688;font-size:10px;}
+
+/* Overlays */
+.ov{position:fixed;inset:0;background:#0000000f;backdrop-filter:brightness(0.3);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:300;gap:24px;}
+.ov-title{color:#FFD700;font-size:clamp(20px,7vw,32px);text-shadow:0 0 30px #FFD700aa;text-align:center;font-family:monospace;font-weight:bold;letter-spacing:3px;}
+.ov-sub{color:#aaaaaa;font-size:11px;text-align:center;line-height:2;font-family:monospace;}
+.ov-btn{
+  padding:15px 32px;font-size:13px;font-weight:bold;font-family:monospace;
+  border:none;border-radius:8px;cursor:pointer;letter-spacing:2px;
+  touch-action:manipulation;
+  box-shadow:0 4px 20px #0008;
+}
+.ov-btn:active{transform:scale(0.94);}
+.btn-yellow{background:linear-gradient(150deg,#FFD700,#e08000);color:#111;}
+.btn-blue{background:linear-gradient(150deg,#00ccff,#0044ff);color:#fff;}
+#lf{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#00ffff;font-size:22px;font-weight:bold;text-shadow:0 0 24px #00ffff;opacity:0;pointer-events:none;z-index:200;transition:opacity 0.5s;font-family:monospace;letter-spacing:2px;}
+</style>
+</head>
+<body>
+<div id="hud">
+  <span>SCORE <span id="sv">0</span></span>
+  <span>NIV <span id="lv">1</span></span>
+  <span id="ld">♥♥♥</span>
+</div>
+<canvas id="c"></canvas>
+
+<div id="left-btns">
+  <button class="psbtn" id="pbtn-pause">⏸</button>
+  <button class="psbtn" id="pbtn-exit">✕</button>
+</div>
+
+<div id="joy-wrap">
+  <div id="joy-base">
+    <span class="ja u">▲</span><span class="ja d">▼</span>
+    <span class="ja l">◄</span><span class="ja r">►</span>
+    <div id="joy-cap"></div>
+  </div>
+</div>
+
+<div class="ov" id="ov-start">
+  <div class="ov-title">PAC·MAN</div>
+  <div class="ov-sub">Joystick para mover</div>
+  <button class="ov-btn btn-yellow" id="btn-start">▶  INICIAR</button>
+</div>
+<div class="ov" id="ov-pause" style="display:none">
+  <div class="ov-title">PAUSA</div>
+  <button class="ov-btn btn-blue" id="btn-resume">▶  CONTINUAR</button>
+</div>
+<div class="ov" id="ov-over" style="display:none">
+  <div class="ov-title">GAME OVER</div>
+  <div class="ov-sub">PUNTAJE: <span id="fs">0</span></div>
+  <button class="ov-btn btn-yellow" id="btn-restart">↩  REINICIAR</button>
+</div>
+<div id="lf"></div>
+
+<!-- RASPADITA -->
+<div class="ov" id="ov-raspa" style="display:none">
+  <div class="ov-title" style="font-size:clamp(16px,5vw,24px)">🎮 ¡NIVEL <span id="raspa-niv"></span> COMPLETADO!</div>
+  <div id="raspa-instruction">✨ Rascá para revelar tu premio</div>
+  <div id="raspa-wrap">
+    <canvas id="raspa-canvas" width="260" height="120"></canvas>
+    <div id="raspa-prize"></div>
+  </div>
+  <div id="raspa-code" style="display:none">
+    <div id="raspa-code-label">Código de canje</div>
+    <div id="raspa-code-value"></div>
+    <div id="raspa-code-hint">Mostrá este código en caja 🏪</div>
+  </div>
+  <button class="ov-btn btn-yellow" id="btn-raspa-next" style="display:none">▶  SEGUIR JUGANDO</button>
+</div>
+
+<script>
+// ===================== CANVAS =====================
+const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
+const COLS=21,ROWS=21;
+let CELL=1;
+function resize(){
+  const W=window.innerWidth,H=window.innerHeight-32;
+  CELL=Math.floor(Math.min(W/COLS,H/ROWS));
+  canvas.width=COLS*CELL;canvas.height=ROWS*CELL;
+  canvas.style.left=Math.floor((W-canvas.width)/2)+'px';
+  canvas.style.top='32px';
+}
+window.addEventListener('resize',resize);resize();
+
+// ===================== MAP =====================
+// 0=dot 1=wall 2=empty 3=power
+const TMAP=[
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+  [1,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1],
+  [1,3,1,1,0,1,1,1,0,1,1,1,0,1,1,1,0,1,1,3,1],
+  [1,0,1,1,0,1,1,1,0,1,1,1,0,1,1,1,0,1,1,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,1,1,0,1,0,1,1,1,1,1,1,1,0,1,0,1,1,0,1],
+  [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1],
+  [1,1,1,1,0,1,1,1,2,2,2,2,2,1,1,1,0,1,1,1,1],
+  [1,1,1,1,0,1,2,2,2,2,2,2,2,2,2,1,0,1,1,1,1],
+  [1,1,1,1,0,1,2,1,1,2,2,2,1,1,2,1,0,1,1,1,1],
+  [2,2,2,2,0,2,2,1,2,2,2,2,2,1,2,2,0,2,2,2,2],
+  [1,1,1,1,0,1,2,1,1,1,1,1,1,1,2,1,0,1,1,1,1],
+  [1,1,1,1,0,1,2,2,2,2,2,2,2,2,2,1,0,1,1,1,1],
+  [1,1,1,1,0,1,2,2,1,1,1,1,1,2,2,1,0,1,1,1,1],
+  [1,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1],
+  [1,0,1,1,0,1,1,1,0,1,1,1,0,1,1,1,0,1,1,0,1],
+  [1,3,0,1,0,0,0,0,0,0,2,0,0,0,0,0,0,1,0,3,1],
+  [1,1,0,1,0,1,0,1,1,1,1,1,1,1,0,1,0,1,0,1,1],
+  [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1],
+  [1,0,1,1,1,1,1,1,0,1,1,1,0,1,1,1,1,1,1,0,1],
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+];
+
+// ===================== STATE =====================
+const GC=['#FF0000','#FFB8FF','#00FFFF','#FFB852'];
+let map,totalDots,eaten,score,lives,level,gameState,blinkT,pwrTimer,tick;
+let pac,ghosts,nextDx,nextDy;
+
+function isWall(col,row){
+  if(row<0||row>=ROWS)return true;
+  if(col<0||col>=COLS)return false; // tunnel
+  return map[row][col]===1;
+}
+
+function initGame(lvl){
+  level=lvl;
+  if(lvl===1){score=0;lives=3;}
+  gameState='playing';blinkT=0;pwrTimer=0;eaten=0;tick=0;
+  map=TMAP.map(r=>[...r]);
+  totalDots=0;map.forEach(r=>r.forEach(c=>{if(c===0||c===3)totalDots++;}));
+
+  // Pacman: tile-based position
+  pac={col:10,row:16,dx:0,dy:0,queued:{dx:0,dy:0},mouth:0,mdir:1};
+  nextDx=0;nextDy=0;
+
+  // Ghost speed in tiles/tick
+  const sp=0.08+(lvl-1)*0.01;
+  // Each ghost starts at center of ghost house, released progressively
+  ghosts=[
+    mkGhost(10,9,GC[0],sp,0),
+    mkGhost(9, 9,GC[1],sp,200),
+    mkGhost(11,9,GC[2],sp,400),
+    mkGhost(10,10,GC[3],sp,600),
+  ];
+
+  document.getElementById('lv').textContent=level;
+  updateHUD();showOv(null);
+}
+
+function mkGhost(col,row,color,sp,releaseAt){
+  return{col,row,x:col,y:row,dx:0,dy:-1,color,scared:false,sp,
+         releaseAt,released:false,
+         // Phase: 'home'=bouncing in house, 'exit'=moving to exit, 'chase'=chasing
+         phase:'home',bounceDir:1};
+}
+
+function updateHUD(){
+  document.getElementById('sv').textContent=score;
+  let h='';for(let i=0;i<lives;i++)h+='♥';
+  document.getElementById('ld').textContent=h||'☠';
+}
+
+function showOv(id){
+  ['ov-start','ov-pause','ov-over','ov-raspa'].forEach(s=>
+    document.getElementById(s).style.display=s===id?'flex':'none'
+  );
+}
+
+// ===================== PACMAN MOVEMENT =====================
+// Tile-based: pacman moves one tile at a time, smoothly interpolated
+// pac.col/row = current tile, pac.x/y = visual position (interpolated)
+// pac.moving = true while animating between tiles
+// pac.progress = 0..1 animation progress
+
+function initPacPos(){
+  pac.x=pac.col;pac.y=pac.row;pac.progress=1;pac.moving=false;
+}
+
+// ---- DIRECTION SYSTEM WITH LOOKAHEAD ----
+// Stores requested direction + searches ahead for next valid intersection
+let wantDx=0,wantDy=0,wantTTL=0;
+const WANT_TTL=60;    // frames to remember input
+const LOOK_AHEAD=10;  // tiles to scan ahead for intersection
+
+function setDir(dx,dy){
+  nextDx=dx;nextDy=dy;
+  wantDx=dx;wantDy=dy;wantTTL=WANT_TTL;
+}
+
+// Returns how many tiles ahead (0..LOOK_AHEAD) the turn is possible, or -1
+function tilesUntilTurn(fromCol,fromRow,moveDx,moveDy,turnDx,turnDy){
+  for(let i=0;i<=LOOK_AHEAD;i++){
+    const c=fromCol+moveDx*i, r=fromRow+moveDy*i;
+    if(isWall(c,r)) return -1; // path blocked before turn
+    if(!isWall(c+turnDx,r+turnDy)) return i; // turn possible here
+  }
+  return -1;
+}
+
+// Pre-commit: if a turn is coming soon, lock it in
+// Returns true if we scheduled a pre-turn
+function tryPreTurn(){
+  if(wantTTL<=0) return false;
+  const dx=wantDx,dy=wantDy;
+  if(dx===pac.dx&&dy===pac.dy) return false; // same dir, no need
+  if(dx===-pac.dx&&dy===-pac.dy){
+    // U-turn: apply immediately
+    if(!pac.moving){pac.dx=dx;pac.dy=dy;return true;}
+    return false;
+  }
+  // Lookahead: find next intersection where we can turn
+  const dist=tilesUntilTurn(pac.col,pac.row,pac.dx,pac.dy,dx,dy);
+  if(dist<0) return false;
+  // If 0 tiles away (current tile), apply now
+  if(dist===0){wantTTL=0;nextDx=dx;nextDy=dy;return false;}
+  // If 1-LOOK_AHEAD tiles away, set a "pre-turn" flag so we auto-turn when we arrive
+  pac.preTurnDx=dx;pac.preTurnDy=dy;pac.preTurnAt=dist;
+  return true;
+}
+
+function updatePac(){
+  pac.mouth+=0.15*pac.mdir;
+  if(pac.mouth>1)pac.mdir=-1;
+  if(pac.mouth<0)pac.mdir=1;
+
+  if(wantTTL>0){wantTTL--;tryPreTurn();} else if(wantDx!==0||wantDy!==0){tryPreTurn();}
+
+  // Best queued dir
+  const qdx=wantTTL>0?wantDx:nextDx;
+  const qdy=wantTTL>0?wantDy:nextDy;
+
+  if(!pac.moving){
+    let moved=false;
+    // Pre-turn: arrived at planned intersection?
+    if(pac.preTurnAt===0&&pac.preTurnDx!==undefined){
+      const pd=pac.preTurnDx,py2=pac.preTurnDy;
+      if(!isWall(pac.col+pd,pac.row+py2)){
+        pac.dx=pd;pac.dy=py2;pac.preTurnAt=undefined;wantTTL=0;
+        startPacMove();moved=true;
+      } else {pac.preTurnAt=undefined;}
+    }
+    if(!moved&&(qdx!==0||qdy!==0)){
+      if(!isWall(pac.col+qdx,pac.row+qdy)){
+        pac.dx=qdx;pac.dy=qdy;wantTTL=0;pac.preTurnAt=undefined;
+        startPacMove();moved=true;
+      }
+    }
+    if(!moved&&(pac.dx!==0||pac.dy!==0)){
+      if(!isWall(pac.col+pac.dx,pac.row+pac.dy)) startPacMove();
+    }
+  } else {
+    // Count down pre-turn distance each tile
+    if(pac.preTurnAt>0) pac.preTurnAt--;
+    // Re-evaluate if joystick still held
+    if(wantTTL>0&&pac.preTurnAt===undefined) tryPreTurn();
+    pac.progress+=0.18;
+    if(pac.progress>=1){
+      pac.col=pac.targetCol;pac.row=pac.targetRow;
+      if(pac.col<0)pac.col=COLS-1;
+      if(pac.col>=COLS)pac.col=0;
+      pac.x=pac.col;pac.y=pac.row;pac.moving=false;
+      eatDot();
+      // Apply queued turn on arrival
+      const q2x=wantTTL>0?wantDx:nextDx;
+      const q2y=wantTTL>0?wantDy:nextDy;
+      if(q2x!==0||q2y!==0){
+        if(!isWall(pac.col+q2x,pac.row+q2y)){pac.dx=q2x;pac.dy=q2y;wantTTL=0;pac.preTurnAt=undefined;}
+      }
+    } else {
+      pac.x=pac.col+(pac.targetCol-pac.col)*pac.progress;
+      pac.y=pac.row+(pac.targetRow-pac.row)*pac.progress;
+    }
+  }
+}
+
+function startPacMove(){
+  pac.targetCol=pac.col+pac.dx;
+  pac.targetRow=pac.row+pac.dy;
+  pac.progress=0;
+  pac.moving=true;
+}
+
+function eatDot(){
+  const c=pac.col,r=pac.row;
+  if(c<0||c>=COLS||r<0||r>=ROWS)return;
+  if(map[r][c]===0){map[r][c]=2;score+=10;eaten++;updateHUD();}
+  else if(map[r][c]===3){
+    map[r][c]=2;score+=50;eaten++;
+    pwrTimer=350;ghosts.forEach(g=>{if(g.phase==='chase')g.scared=true;});
+    updateHUD();
+  }
+  if(eaten>=totalDots)levelUp();
+}
+
+// ===================== GHOST MOVEMENT =====================
+const DDIRS=[{dx:0,dy:-1},{dx:0,dy:1},{dx:-1,dy:0},{dx:1,dy:0}];
+
+function updateGhost(g){
+  tick; // used via outer scope
+
+  // --- HOME PHASE: bounce up/down inside house ---
+  if(g.phase==='home'){
+    if(tick>=g.releaseAt)g.phase='exit';
+    else{
+      // Bounce vertically between row 9 and 10
+      g.y+=g.bounceDir*0.04;
+      if(g.y>=10){g.y=10;g.bounceDir=-1;}
+      if(g.y<=8.8){g.y=8.8;g.bounceDir=1;}
+      g.x=g.col; // stay in column
+      return;
+    }
+  }
+
+  // --- EXIT PHASE: move to exit tile (10,7) then up ---
+  if(g.phase==='exit'){
+    // Target: col=10, row=7 (just above ghost house)
+    const tx=10,ty=7;
+    // Move toward col 10 first
+    if(Math.abs(g.x-10)>0.08){
+      g.x+=Math.sign(10-g.x)*Math.min(0.08,Math.abs(g.x-10));
+      g.y=Math.round(g.y); // keep row stable
+    } else {
+      g.x=10;
+      // Then move up toward row 7
+      if(g.y>ty+0.05){
+        g.y-=0.08;
+      } else {
+        g.y=ty;g.x=tx;
+        g.col=tx;g.row=ty;
+        g.phase='chase';
+        g.dx=[-1,1][Math.floor(Math.random()*2)];g.dy=0;
+      }
+    }
+    return;
+  }
+
+  // --- CHASE PHASE: tile-based movement ---
+  if(!g.moving){
+    // At tile center — pick next direction
+    const opts=[];
+    DDIRS.forEach(d=>{
+      if(d.dx===-g.dx&&d.dy===-g.dy)return; // no U-turn
+      const nc=g.col+d.dx,nr=g.row+d.dy;
+      if(nc<0||nc>=COLS||nr<0||nr>=ROWS)return;
+      if(map[nr][nc]===1)return;
+      opts.push(d);
+    });
+    if(opts.length===0){
+      // Dead end — allow U-turn
+      DDIRS.forEach(d=>{
+        const nc=g.col+d.dx,nr=g.row+d.dy;
+        if(nc>=0&&nc<COLS&&nr>=0&&nr<ROWS&&map[nr][nc]!==1)opts.push(d);
+      });
+    }
+    if(opts.length>0){
+      let chosen;
+      if(g.scared){
+        chosen=opts[Math.floor(Math.random()*opts.length)];
+      } else {
+        // Chase: minimize distance to pac
+        chosen=opts.reduce((best,d)=>{
+          const nc=g.col+d.dx,nr=g.row+d.dy;
+          const dist=Math.hypot(nc-pac.x,nr-pac.y);
+          const bd=Math.hypot(g.col+best.dx-pac.x,g.row+best.dy-pac.y);
+          return dist<bd?d:best;
+        });
+      }
+      g.dx=chosen.dx;g.dy=chosen.dy;
+      g.targetCol=g.col+g.dx;g.targetRow=g.row+g.dy;
+      // Tunnel
+      if(g.targetCol<0)g.targetCol=COLS-1;
+      if(g.targetCol>=COLS)g.targetCol=0;
+      g.progress=0;g.moving=true;
+    }
+  } else {
+    g.progress+=g.sp;
+    if(g.progress>=1){
+      g.col=g.targetCol;g.row=g.targetRow;
+      g.x=g.col;g.y=g.row;
+      g.moving=false;
+    } else {
+      g.x=g.col+(g.targetCol-g.col)*g.progress;
+      g.y=g.row+(g.targetRow-g.row)*g.progress;
+    }
+  }
+}
+
+function checkCollisions(){
+  ghosts.forEach(g=>{
+    if(g.phase!=='chase')return;
+    const dist=Math.hypot(g.x-pac.x,g.y-pac.y);
+    if(dist<0.75){
+      if(g.scared){
+        // Send back home
+        g.x=10;g.y=9;g.col=10;g.row=9;g.scared=false;
+        g.phase='home';g.releaseAt=tick+400;g.moving=false;
+        score+=200;updateHUD();
+      } else {
+        loseLife();
+      }
+    }
+  });
+}
+
+function loseLife(){
+  lives--;updateHUD();
+  if(lives<=0){
+    gameState='over';
+    document.getElementById('fs').textContent=score;
+    showOv('ov-over');
+  } else {
+    pac.col=10;pac.row=16;pac.x=10;pac.y=16;pac.dx=0;pac.dy=0;pac.moving=false;
+    nextDx=0;nextDy=0;
+    ghosts.forEach((g,i)=>{
+      g.x=g.col=[9,10,11,10][i];g.y=g.row=[9,9,9,10][i];
+      g.phase='home';g.releaseAt=tick+(i*200);g.moving=false;g.scared=false;g.bounceDir=1;
+    });
+  }
+}
+
+// ===================== RASPADITA =====================
+const PREMIOS=[
+  {emoji:'☕',name:'Café gratis',desc:'1 café del día'},
+  {emoji:'🍫',name:'Alfajor gratis',desc:'Uno a elección'},
+  {emoji:'🥤',name:'Bebida gratis',desc:'Lata o botella 500ml'},
+  {emoji:'🍕',name:'10% de descuento',desc:'En tu próxima compra'},
+  {emoji:'🎁',name:'Sorpresa del almacén',desc:'Preguntá en caja'},
+  {emoji:'🍪',name:'Galletitas gratis',desc:'Paquete a elección'},
+];
+
+function genCode(niv){
+  const now=new Date();
+  const pad=n=>String(n).padStart(2,'0');
+  const ts=`${pad(now.getDate())}${pad(now.getMonth()+1)}${String(now.getFullYear()).slice(2)}${pad(now.getHours())}${pad(now.getMinutes())}`;
+  return `PAC${niv}-${ts}`;
+}
+
+function showRaspadita(niv){
+  gameState='raspa';
+  document.getElementById('raspa-niv').textContent=niv;
+
+  // Elegir premio random
+  const pr=PREMIOS[Math.floor(Math.random()*PREMIOS.length)];
+  const prize=document.getElementById('raspa-prize');
+  prize.innerHTML=`<span class="prize-emoji">${pr.emoji}</span><span class="prize-name">${pr.name}</span><span class="prize-desc">${pr.desc}</span>`;
+
+  // Código único
+  const code=genCode(niv);
+  document.getElementById('raspa-code-value').textContent=code;
+  document.getElementById('raspa-code').style.display='none';
+  document.getElementById('btn-raspa-next').style.display='none';
+  document.getElementById('raspa-instruction').style.display='block';
+
+  // Setup canvas raspadita
+  const rc=document.getElementById('raspa-canvas');
+  rc.width=260;rc.height=120;
+  const rctx=rc.getContext('2d');
+  // Capa plateada para raspar
+  const grad=rctx.createLinearGradient(0,0,260,120);
+  grad.addColorStop(0,'#c0c0c0');
+  grad.addColorStop(0.4,'#e8e8e8');
+  grad.addColorStop(0.6,'#a8a8a8');
+  grad.addColorStop(1,'#c0c0c0');
+  rctx.fillStyle=grad;
+  rctx.fillRect(0,0,260,120);
+  rctx.fillStyle='#888888';
+  rctx.font='bold 13px monospace';
+  rctx.textAlign='center';
+  rctx.fillText('✦ RASCÁ AQUÍ ✦',130,55);
+  rctx.fillText('ALMACÉN COPIHUE',130,75);
+
+  // Raspar con dedo/mouse
+  let scratching=false;
+  let revealed=false;
+  rctx.globalCompositeOperation='destination-out';
+
+  function scratch(x,y){
+    rctx.beginPath();
+    rctx.arc(x,y,22,0,Math.PI*2);
+    rctx.fill();
+    // Chequear % revelado
+    if(!revealed){
+      const data=rctx.getImageData(0,0,260,120).data;
+      let transparent=0;
+      for(let i=3;i<data.length;i+=4) if(data[i]<128) transparent++;
+      if(transparent/(260*120)>0.55){
+        revealed=true;
+        rctx.clearRect(0,0,260,120); // revelar todo
+        document.getElementById('raspa-instruction').style.display='none';
+        document.getElementById('raspa-code').style.display='block';
+        document.getElementById('btn-raspa-next').style.display='block';
+      }
+    }
+  }
+
+  function getPos(e,canvas){
+    const r=canvas.getBoundingClientRect();
+    if(e.touches) return {x:e.touches[0].clientX-r.left,y:e.touches[0].clientY-r.top};
+    return {x:e.clientX-r.left,y:e.clientY-r.top};
+  }
+
+  // Clonar canvas para limpiar listeners viejos
+  const newRc=rc.cloneNode(true);
+  rc.parentNode.replaceChild(newRc,rc);
+  const nrctx=newRc.getContext('2d');
+  nrctx.drawImage(rc,0,0);
+  // Redibujar capa plateada
+  nrctx.fillStyle=grad;nrctx.fillRect(0,0,260,120);
+  nrctx.fillStyle='#888888';nrctx.font='bold 13px monospace';nrctx.textAlign='center';
+  nrctx.fillText('✦ RASCÁ AQUÍ ✦',130,55);nrctx.fillText('ALMACÉN COPIHUE',130,75);
+  nrctx.globalCompositeOperation='destination-out';
+
+  function scratchNew(x,y){
+    nrctx.beginPath();nrctx.arc(x,y,22,0,Math.PI*2);nrctx.fill();
+    if(!revealed){
+      const data=nrctx.getImageData(0,0,260,120).data;
+      let t=0;for(let i=3;i<data.length;i+=4)if(data[i]<128)t++;
+      if(t/(260*120)>0.55){
+        revealed=true;nrctx.clearRect(0,0,260,120);
+        document.getElementById('raspa-instruction').style.display='none';
+        document.getElementById('raspa-code').style.display='block';
+        document.getElementById('btn-raspa-next').style.display='block';
+      }
+    }
+  }
+  newRc.addEventListener('mousedown',e=>{scratching=true;const p=getPos(e,newRc);scratchNew(p.x,p.y);});
+  newRc.addEventListener('mousemove',e=>{if(scratching){const p=getPos(e,newRc);scratchNew(p.x,p.y);}});
+  newRc.addEventListener('mouseup',()=>scratching=false);
+  newRc.addEventListener('touchstart',e=>{e.preventDefault();scratching=true;const p=getPos(e,newRc);scratchNew(p.x,p.y);},{passive:false});
+  newRc.addEventListener('touchmove',e=>{e.preventDefault();if(scratching){const p=getPos(e,newRc);scratchNew(p.x,p.y);}},{passive:false});
+  newRc.addEventListener('touchend',()=>scratching=false);
+
+  showOv('ov-raspa');
+}
+
+function levelUp(){
+  gameState='lvlup';
+  const el=document.getElementById('lf');
+  el.textContent='NIVEL '+(level+1)+'!';el.style.opacity=1;
+  setTimeout(()=>{el.style.opacity=0;showRaspadita(level+1);},1500);
+}
+
+// ===================== DRAW =====================
+function drawMap(){
+  const C=CELL;
+  map.forEach((row,ry)=>row.forEach((v,cx)=>{
+    const px=cx*C,py=ry*C;
+    if(v===1){
+      ctx.fillStyle='#0011cc';ctx.fillRect(px,py,C,C);
+      ctx.fillStyle='#000aaa';ctx.fillRect(px+2,py+2,C-4,C-4);
+    } else if(v===0){
+      ctx.fillStyle='#FFD700';
+      ctx.beginPath();ctx.arc(px+C/2,py+C/2,Math.max(2,C*0.12),0,Math.PI*2);ctx.fill();
+    } else if(v===3){
+      if(Math.floor(blinkT/10)%2===0){
+        ctx.shadowColor='#fff';ctx.shadowBlur=16;ctx.fillStyle='#ffffff';
+        ctx.beginPath();ctx.arc(px+C/2,py+C/2,Math.max(3,C*0.26),0,Math.PI*2);ctx.fill();
+        ctx.shadowBlur=0;
+      }
+    }
+  }));
+  // Ghost house door
+  ctx.fillStyle='#ff88ff';ctx.fillRect(10*C+C*0.2,7*C+C*0.42,C*0.6,C*0.16);
+}
+
+function drawPac(){
+  const C=CELL,px=pac.x*C+C/2,py=pac.y*C+C/2,r=C*0.44;
+  let a=0;
+  if(pac.dx===1)a=0;else if(pac.dx===-1)a=Math.PI;
+  else if(pac.dy===-1)a=-Math.PI/2;else if(pac.dy===1)a=Math.PI/2;
+  const m=Math.max(0.05,pac.mouth)*0.3;
+  ctx.fillStyle='#FFD700';ctx.shadowColor='#FFD700aa';ctx.shadowBlur=8;
+  ctx.beginPath();ctx.moveTo(px,py);
+  ctx.arc(px,py,r,a+m,a+Math.PI*2-m);
+  ctx.closePath();ctx.fill();ctx.shadowBlur=0;
+}
+
+function drawGhosts(){
+  const C=CELL;
+  ghosts.forEach(g=>{
+    const gx=g.x*C+C/2,gy=g.y*C+C/2,r=C*0.42;
+    let col=g.color;
+    if(g.scared)col=(pwrTimer<100&&Math.floor(pwrTimer/8)%2===0)?'#ffffff':'#2222ff';
+    ctx.fillStyle=col;
+    // Body top arc
+    ctx.beginPath();ctx.arc(gx,gy-r*0.08,r,Math.PI,0);
+    // Wavy bottom
+    const bot=gy+r*0.85,seg=r*2/3;
+    ctx.lineTo(gx+r,bot);
+    for(let i=0;i<3;i++)ctx.quadraticCurveTo(gx+r-seg*(i+0.5),gy+r*(i%2===0?0.55:0.9),gx+r-seg*(i+1),bot);
+    ctx.lineTo(gx-r,gy-r*0.08);ctx.closePath();ctx.fill();
+    if(!g.scared){
+      // Eyes
+      ctx.fillStyle='#fff';
+      ctx.beginPath();ctx.ellipse(gx-r*0.3,gy-r*0.12,r*0.22,r*0.27,0,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.ellipse(gx+r*0.3,gy-r*0.12,r*0.22,r*0.27,0,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='#0066ff';
+      ctx.beginPath();ctx.arc(gx-r*0.28,gy-r*0.08,r*0.13,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.arc(gx+r*0.32,gy-r*0.08,r*0.13,0,Math.PI*2);ctx.fill();
+    }
+  });
+}
+
+// ===================== LOOP =====================
+function loop(){
+  ctx.fillStyle='#000';ctx.fillRect(0,0,canvas.width,canvas.height);
+  if(!map){requestAnimationFrame(loop);return;}
+  blinkT++;
+  drawMap();
+  if(gameState==='playing'||gameState==='lvlup'){
+    tick++;
+    updatePac();
+    ghosts.forEach(updateGhost);
+    if(gameState==='playing'){
+      checkCollisions();
+      if(pwrTimer>0){pwrTimer--;if(pwrTimer===0)ghosts.forEach(g=>g.scared=false);}
+    }
+  }
+  drawGhosts();drawPac();
+  requestAnimationFrame(loop);
+}
+
+// ===================== BUTTONS =====================
+document.getElementById('btn-start').onclick=()=>initGame(1);
+document.getElementById('btn-restart').onclick=()=>initGame(1);
+document.getElementById('btn-resume').onclick=()=>{
+  gameState='playing';showOv(null);
+  document.getElementById('pbtn-pause').textContent='⏸';
+};
+document.getElementById('pbtn-pause').onclick=()=>{
+  if(gameState==='playing'){
+    gameState='paused';
+    document.getElementById('pbtn-pause').textContent='▶';
+    showOv('ov-pause');
+  } else if(gameState==='paused'){
+    gameState='playing';
+    document.getElementById('pbtn-pause').textContent='⏸';
+    showOv(null);
+  }
+};
+document.getElementById('pbtn-exit').onclick=()=>{
+  gameState='start';
+  document.getElementById('pbtn-pause').textContent='⏸';
+  document.getElementById('btn-raspa-next').addEventListener('click',()=>{
+    ['ov-start','ov-pause','ov-over','ov-raspa'].forEach(s=>
+      document.getElementById(s).style.display='none');
+    initGame(level+1);
+    gameState='play';
+  });
+
+  showOv('ov-start');
+};
+
+// ===================== JOYSTICK =====================
+const joyBase=document.getElementById('joy-base');
+const joyCap=document.getElementById('joy-cap');
+const JDEAD=16,JMAX=34;
+let jActive=false,jId=-1;
+
+function jCenter(){const r=joyBase.getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2};}
+function jApply(cx,cy){
+  const c=jCenter(),ox=cx-c.x,oy=cy-c.y;
+  const d=Math.sqrt(ox*ox+oy*oy);
+  const cl=Math.min(d,JMAX),a=Math.atan2(oy,ox);
+  joyCap.style.transform=`translate(${Math.cos(a)*cl}px,${Math.sin(a)*cl}px)`;
+  if(d>JDEAD){
+    // Bias toward current movement axis to avoid diagonal confusion
+    let dx,dy;
+    const ratio=Math.abs(ox)/Math.abs(oy+0.001);
+    if(ratio>1.3){dx=ox>0?1:-1;dy=0;}       // clearly horizontal
+    else if(ratio<0.77){dx=0;dy=oy>0?1:-1;} // clearly vertical
+    else{
+      // Diagonal: prefer perpendicular to current movement
+      if(pac&&(pac.dx!==0)){dx=0;dy=oy>0?1:-1;}
+      else{dx=ox>0?1:-1;dy=0;}
+    }
+    setDir(dx,dy);
+    wantTTL=WANT_TTL; // keep refreshing while finger held
+  }
+}
+function jReset(){jActive=false;jId=-1;joyCap.style.transform='';}
+
+joyBase.addEventListener('touchstart',e=>{
+  e.preventDefault();e.stopPropagation();
+  if(jActive)return;
+  const t=e.changedTouches[0];jId=t.identifier;jActive=true;jApply(t.clientX,t.clientY);
+},{passive:false});
+joyBase.addEventListener('touchmove',e=>{
+  e.preventDefault();e.stopPropagation();
+  for(const t of e.changedTouches){if(t.identifier===jId)jApply(t.clientX,t.clientY);}
+},{passive:false});
+joyBase.addEventListener('touchend',e=>{
+  e.preventDefault();e.stopPropagation();
+  for(const t of e.changedTouches){if(t.identifier===jId)jReset();}
+},{passive:false});
+joyBase.addEventListener('touchcancel',e=>{e.preventDefault();jReset();},{passive:false});
+
+// Mouse fallback
+joyBase.addEventListener('mousedown',e=>{jActive=true;jApply(e.clientX,e.clientY);});
+window.addEventListener('mousemove',e=>{if(jActive)jApply(e.clientX,e.clientY);});
+window.addEventListener('mouseup',()=>{if(jActive)jReset();});
+
+// Keyboard
+document.addEventListener('keydown',e=>{
+  if(e.key==='ArrowUp'||e.key==='w')setDir(0,-1);
+  if(e.key==='ArrowDown'||e.key==='s')setDir(0,1);
+  if(e.key==='ArrowLeft'||e.key==='a')setDir(-1,0);
+  if(e.key==='ArrowRight'||e.key==='d')setDir(1,0);
+  if(e.key==='p'||e.key==='Escape')document.getElementById('pbtn-pause').click();
+});
+
+// ===================== INIT =====================
+gameState='start';showOv('ov-start');
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
