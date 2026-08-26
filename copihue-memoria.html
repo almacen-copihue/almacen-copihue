@@ -225,7 +225,7 @@
 // ═══════════════════════════════════════════════════════════════
 //  VERSIÓN
 // ═══════════════════════════════════════════════════════════════
-const APP_VERSION = 'v1.2';
+const APP_VERSION = 'v1.3';
 document.getElementById('appVersion').textContent = APP_VERSION;
 
 // ═══════════════════════════════════════════════════════════════
@@ -238,7 +238,7 @@ const PARES    = 8; // 8 pares = 16 cartas
 // Backend separado, solo para records de los minijuegos (planilla propia)
 const GAMES_URL = 'https://script.google.com/macros/s/AKfycbyegP1TSQSccsjYorXIpgAJH1nVAO9fzmg3hwKQNk116Mgx1M6Rs1XUn0JkiusVmGareg/exec';
 const NOMBRE_JUEGO = 'memoria';
-let ultimoPuntaje = null; // { movimientos, tiempoSeg, puntaje }
+let ultimoPuntaje = null; // { puntaje, detalle }
 
 let deck = [], flipped = [], matched = 0, moves = 0, lock = false;
 let timer = null, seconds = 0, pendingTimeout = null;
@@ -402,18 +402,21 @@ async function endGame() {
   clearInterval(timer);
   const m = String(Math.floor(seconds / 60)).padStart(2, '0');
   const s = String(seconds % 60).padStart(2, '0');
+  const tiempoTexto = `${m}:${s}`;
   document.getElementById('winText').textContent =
-    `Lo lograste en ${moves} movimientos y ${m}:${s} minutos.`;
+    `Lo lograste en ${moves} movimientos y ${tiempoTexto} minutos.`;
   document.getElementById('win').classList.add('show');
 
-  // Puntaje combinado: movimientos + medio punto por segundo. Más bajo = mejor.
-  const puntaje = moves + (seconds / 2);
-  ultimoPuntaje = { movimientos: moves, tiempoSeg: seconds, puntaje };
+  // Puntaje: empieza en un piso alto y resta por cada movimiento/segundo de más.
+  // Mayor puntaje = mejor (convención compartida con todos los minijuegos).
+  const puntaje = Math.max(0, 200 - (moves * 4) - seconds);
+  const detalle = `${moves} mov · ${tiempoTexto}`;
+  ultimoPuntaje = { puntaje, detalle };
 
   try {
     const res = await fetchGames('obtenerRecords', { juego: NOMBRE_JUEGO });
     const records = (res.ok && res.records) ? res.records : [];
-    const entraAlTop = records.length < 10 || puntaje < records[records.length - 1].puntaje;
+    const entraAlTop = records.length < 10 || puntaje > records[records.length - 1].puntaje;
     mostrarRanking(records);
     if (entraAlTop) {
       abrirModalIniciales();
@@ -430,17 +433,13 @@ function mostrarRanking(records) {
     cont.innerHTML = '<div class="ranking-empty">Todavía no hay puntajes registrados. ¡Sé el primero!</div>';
     return;
   }
-  cont.innerHTML = records.map((r, i) => {
-    const mm = String(Math.floor(r.tiempoSeg / 60)).padStart(2, '0');
-    const ss = String(r.tiempoSeg % 60).padStart(2, '0');
-    return `
+  cont.innerHTML = records.map((r, i) => `
       <div class="ranking-row">
         <span class="pos">${i + 1}º</span>
         <span class="ini">${r.iniciales}</span>
-        <span class="det">${r.movimientos} mov · ${mm}:${ss}</span>
-        <span class="pts">${r.puntaje.toFixed(1)}</span>
-      </div>`;
-  }).join('');
+        <span class="det">${r.detalle}</span>
+        <span class="pts">${r.puntaje}</span>
+      </div>`).join('');
 }
 
 function abrirModalIniciales() {
@@ -465,8 +464,8 @@ async function guardarIniciales() {
     await fetchGames('guardarRecord', {
       juego: NOMBRE_JUEGO,
       iniciales,
-      movimientos: ultimoPuntaje.movimientos,
-      tiempoSeg: ultimoPuntaje.tiempoSeg
+      puntaje: ultimoPuntaje.puntaje,
+      detalle: ultimoPuntaje.detalle
     });
     const res = await fetchGames('obtenerRecords', { juego: NOMBRE_JUEGO });
     if (res.ok && res.records) mostrarRanking(res.records);
