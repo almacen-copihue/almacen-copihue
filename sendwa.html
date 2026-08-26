@@ -9,6 +9,18 @@
 <title>SendWA — Almacén Copihue</title>
 <!--
   CHANGELOG sendwa.html
+  v111: - NUEVO — Segunda capa de protección contra salir sin preguntar,
+          totalmente independiente del sistema de popstate de arriba (que
+          seguía fallando en algún caso puntual no reproducido todavía):
+          window.addEventListener('beforeunload', ...) — nativo del
+          navegador, dispara justo antes de que la página se cierre o
+          navegue de verdad, sea cual sea la causa (doble disparo de
+          popstate, bfcache, gesto raro, lo que sea). Si el usuario ya
+          confirmó salir por el diálogo propio, no se duplica el aviso.
+          Límite honesto: en algunos navegadores móviles beforeunload no
+          cubre el gesto físico de "atrás" (sí cubre cerrar pestaña/
+          refrescar) — no es 100% infalible, pero es una protección real y
+          distinta a la anterior, no más de lo mismo.
   v110: - FIX — Botón atrás con varios paneles/acordeones abiertos a la vez:
           antes cerraba solo UNO por cada toque de atrás, así que con 3-4
           paneles abiertos hacían falta 3-4 toques seguidos — fácil de
@@ -1618,7 +1630,7 @@
 // pestaña y el badge del header se arman solos a partir de esta constante
 // (ver aplicarVersionUI() más abajo, llamada al final de init()).
 // ============================================================
-const APP_VERSION = 110;
+const APP_VERSION = 111;
 function aplicarVersionUI() {
   document.title = `SendWA — Almacén Copihue ver.${APP_VERSION}`;
   const badge = document.getElementById('ver-badge');
@@ -6029,6 +6041,7 @@ function _sendwaPopstateHandler(e) {
   if (confirmaSalir) {
     // Sacamos nuestro propio listener ANTES de navegar, para que el back
     // real no quede atrapado en un loop disparando este mismo handler.
+    _permitirSalirSendwa = true; // ya confirmó por el diálogo propio — no duplicar con beforeunload
     window.removeEventListener('popstate', _sendwaPopstateHandler);
     history.go(-1);
   } else {
@@ -6036,6 +6049,26 @@ function _sendwaPopstateHandler(e) {
   }
 }
 window.addEventListener('popstate', _sendwaPopstateHandler);
+
+// ── SEGUNDA CAPA, independiente de todo lo de arriba ──────────────────────
+// Javier reportó varias veces que, pese al sistema de arriba, el atrás igual
+// sacaba de la página sin preguntar — probablemente algún caso puntual del
+// navegador/webview que no logramos reproducir todavía (doble disparo de
+// popstate, bfcache, gesto de swipe muy rápido, etc.). En vez de seguir
+// afinando el mismo mecanismo, esto es un sistema DISTINTO y nativo del
+// navegador: beforeunload dispara justo antes de que la página se cierre o
+// navegue de verdad, sea cual sea la causa — funciona aunque el sistema de
+// arriba falle por completo. Limitación honesta: en algunos navegadores
+// móviles, beforeunload no se dispara para el gesto físico de "atrás"
+// (solo para cerrar pestaña/refrescar) — no es 100% infalible tampoco, pero
+// es una protección real e independiente, no una variación de la anterior.
+let _permitirSalirSendwa = false;
+window.addEventListener('beforeunload', (e) => {
+  if (_permitirSalirSendwa) return; // ya confirmó por el diálogo propio de arriba
+  e.preventDefault();
+  e.returnValue = ''; // Chrome requiere esto para mostrar el diálogo nativo
+  return '';
+});
 
 async function init() {
   aplicarVersionUI();
