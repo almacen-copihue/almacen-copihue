@@ -428,6 +428,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
             <option value="rect">▭ Rectangular</option>
             <option value="circulo">⬤ Círculo</option>
             <option value="explosivo">💥 Explosivo</option>
+            <option value="ninguno">🚫 Ninguno (oculto)</option>
           </select>
         </div>
         <div class="cr"><label>Color</label>
@@ -607,7 +608,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbzWZzDvdGfW8vd2-FpQolT852cdPMeHbfKugn9DBOlju75bE1D0SUNB5EKEDOsI2vP4lA/exec'; // v5.38: alineado con seba21/sendwa — el flyer apuntaba a otro deployment de Apps Script
-const APP_VERSION = 'v5.64';
+const APP_VERSION = 'v5.65';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -2214,46 +2215,65 @@ function hexContraste(hex){
   return lum>0.6?'#1a1a1a':'#ffffff';
 }
 
-// v5.64: badge de PROMO/COMBO configurable — forma (rectangular/círculo/
-// explosivo), color, tamaño y ubicación, a pedido del usuario (reemplaza el
-// % descartado en v5.62/v5.63, que no era confiable con precios cargados a
-// mano). `area` es la caja de referencia dentro de la cual se ancla la
-// esquina elegida: la foto en tarjetas grandes, la miniatura en la lista.
-function drawOfertaBadge(ctx, area, label, cfg){
+// v5.65: ahora el badge de Promo/Combo (cuando forma!=='ninguno') muestra el
+// PRECIO DE VENTA en vez de solo el texto — el usuario prefiere que el precio
+// "salga de donde está normal" (el bloque bajo la foto) y viva en el badge.
+// 2 líneas: etiqueta chica arriba (PROMO/COMBO) + precio grande abajo.
+// También se corrigió el anclaje: antes se insertaba completo DENTRO de la
+// foto, alejándose del borde a medida que crecía el tamaño; ahora el borde
+// exterior queda siempre pegado a la esquina de la foto (se solapa un poco
+// hacia afuera, como un sticker), sin importar el tamaño elegido.
+function drawOfertaBadge(ctx, area, label, cfg, precioTxt){
   const txtColor = hexContraste(cfg.color);
   const escala = {sm:0.78, md:1, lg:1.3}[cfg.tam]||1;
   ctx.save();
   if(cfg.forma==='explosivo'){
-    const rOuter = Math.max(18, Math.min(area.w,area.h)*0.30)*escala;
+    const rOuter = Math.max(20, Math.min(area.w,area.h)*0.26)*escala;
     const rInner = rOuter*0.58;
-    const pad = rOuter+3;
+    const pad = rOuter*0.62; // <rOuter → el sticker se solapa hacia afuera del borde, pegado
     const cx2 = cfg.pos.indexOf('l')!==-1 ? area.x+pad : area.x+area.w-pad;
     const cy2 = cfg.pos.indexOf('t')!==-1 ? area.y+pad : area.y+area.h-pad;
     drawStarburst(ctx,cx2,cy2,rOuter,rInner,10,cfg.color);
     ctx.fillStyle=txtColor; ctx.textAlign='center';
-    let fs=Math.max(rOuter*0.30,8);
-    ctx.font=`900 ${fs}px "DM Sans",sans-serif`;
-    while(ctx.measureText(label).width>rOuter*1.35 && fs>7){fs--;ctx.font=`900 ${fs}px "DM Sans",sans-serif`;}
-    ctx.fillText(label, cx2, cy2+fs*0.32);
+    let fs1=Math.max(rOuter*0.20,8);
+    ctx.font=`700 ${fs1}px "DM Sans",sans-serif`;
+    while(ctx.measureText(label).width>rOuter*1.2 && fs1>6){fs1--;ctx.font=`700 ${fs1}px "DM Sans",sans-serif`;}
+    let fs2=Math.max(rOuter*0.34,10);
+    ctx.font=`900 ${fs2}px "DM Sans",sans-serif`;
+    while(ctx.measureText(precioTxt).width>rOuter*1.3 && fs2>7){fs2--;ctx.font=`900 ${fs2}px "DM Sans",sans-serif`;}
+    ctx.font=`700 ${fs1}px "DM Sans",sans-serif`;
+    ctx.fillText(label, cx2, cy2-fs2*0.35);
+    ctx.font=`900 ${fs2}px "DM Sans",sans-serif`;
+    ctx.fillText(precioTxt, cx2, cy2+fs2*0.55);
   } else if(cfg.forma==='circulo'){
-    let fs=Math.max(9*escala,7);
-    ctx.font=`bold ${fs}px "DM Sans",sans-serif`;
-    const diam=Math.max(ctx.measureText(label).width+16, 34*escala);
-    const r=diam/2, pad=r+3;
+    let fs2=Math.max(11*escala,8);
+    ctx.font=`900 ${fs2}px "DM Sans",sans-serif`;
+    while(ctx.measureText(precioTxt).width> (34*escala) && fs2>7){fs2--;ctx.font=`900 ${fs2}px "DM Sans",sans-serif`;}
+    const fs1=Math.max(fs2*0.5,7);
+    const diam=Math.max(ctx.measureText(precioTxt).width+16, 44*escala, fs1*6);
+    const r=diam/2, pad=r*0.62;
     const cx2 = cfg.pos.indexOf('l')!==-1 ? area.x+pad : area.x+area.w-pad;
     const cy2 = cfg.pos.indexOf('t')!==-1 ? area.y+pad : area.y+area.h-pad;
     ctx.beginPath(); ctx.arc(cx2,cy2,r,0,Math.PI*2); ctx.fillStyle=cfg.color; ctx.fill();
     ctx.fillStyle=txtColor; ctx.textAlign='center';
-    ctx.fillText(label, cx2, cy2+fs*0.32);
+    ctx.font=`700 ${fs1}px "DM Sans",sans-serif`;
+    ctx.fillText(label, cx2, cy2-fs2*0.32);
+    ctx.font=`900 ${fs2}px "DM Sans",sans-serif`;
+    ctx.fillText(precioTxt, cx2, cy2+fs2*0.55);
   } else { // rect
-    let fs=Math.max(9.5*escala,7);
-    ctx.font=`bold ${fs}px "DM Sans",sans-serif`;
-    const bw=Math.max(ctx.measureText(label).width+14, 32*escala), bh=20*escala;
-    const bx = cfg.pos.indexOf('l')!==-1 ? area.x+4 : area.x+area.w-bw-4;
-    const by = cfg.pos.indexOf('t')!==-1 ? area.y+4 : area.y+area.h-bh-4;
-    rr(ctx,bx,by,bw,bh,5); ctx.fillStyle=cfg.color; ctx.fill();
+    let fs2=Math.max(12*escala,8);
+    ctx.font=`900 ${fs2}px "DM Sans",sans-serif`;
+    const fs1=Math.max(fs2*0.48,7);
+    const bw=Math.max(ctx.measureText(precioTxt).width+14, 40*escala);
+    const bh=(fs1+fs2+8)*escala;
+    const bx = cfg.pos.indexOf('l')!==-1 ? area.x+2 : area.x+area.w-bw-2;
+    const by = cfg.pos.indexOf('t')!==-1 ? area.y+2 : area.y+area.h-bh-2;
+    rr(ctx,bx,by,bw,bh,6); ctx.fillStyle=cfg.color; ctx.fill();
     ctx.fillStyle=txtColor; ctx.textAlign='center';
-    ctx.fillText(label, bx+bw/2, by+bh/2+fs*0.32);
+    ctx.font=`700 ${fs1}px "DM Sans",sans-serif`;
+    ctx.fillText(label, bx+bw/2, by+fs1+4);
+    ctx.font=`900 ${fs2}px "DM Sans",sans-serif`;
+    ctx.fillText(precioTxt, bx+bw/2, by+bh-6);
   }
   ctx.restore();
 }
@@ -2543,8 +2563,10 @@ async function drawCard(ctx,p,cx,cy,CW,CH,FH,P,pk,soloUno=false){
       ctx.fillText(l1.toUpperCase(),scx,scy+fs1*0.32-lift);
     }
   } else if(_badgeLbl && _hasDiscBdg){
-    if(_tipo2==='promos' || _tipo2==='combo'){
-      drawOfertaBadge(ctx, {x:cx,y:cy,w:CW,h:FH}, _badgeLbl, _badgeCfg);
+    if((_tipo2==='promos' || _tipo2==='combo') && _badgeCfg.forma!=='ninguno'){
+      drawOfertaBadge(ctx, {x:cx,y:cy,w:CW,h:FH}, _badgeLbl, _badgeCfg, '$'+fmt(po));
+    } else if(_tipo2==='promos' || _tipo2==='combo'){
+      // forma==='ninguno' → sin badge, el precio sigue su camino normal más abajo
     } else if(_is2daBdg){
       // Badge 2 líneas: "2DA" arriba, "50%" grande abajo
       const bw=36, bh=30, bx=cx+CW-bw-4, by=cy+5;
@@ -2574,6 +2596,10 @@ async function drawCard(ctx,p,cx,cy,CW,CH,FH,P,pk,soloUno=false){
   const is2da = tipo2==='relampago_2da50' && !_overrides[p.id];
   const isNxM = tipo2==='relampago_nxm'  && !_overrides[p.id];
   const hasDisc = po < price || is2da || isNxM;
+  // v5.65: cuando el badge de Promo/Combo está mostrando el precio (forma
+  // != 'ninguno'), el bloque de abajo deja de repetir el AHORA — queda solo
+  // el ANTES tachado, centrado.
+  const _badgeMuestraPrecio = (tipo2==='promos'||tipo2==='combo') && _badgeCfg.forma!=='ninguno' && po<price;
 
   // Tamaños relativos según ancho de card
   const sz    = CW<85?'xs':CW<110?'sm':'md';
@@ -2584,7 +2610,9 @@ async function drawCard(ctx,p,cx,cy,CW,CH,FH,P,pk,soloUno=false){
 
   // Altura total del bloque de precios
   const promoLines = (is2da||isNxM) ? 1 : 0;
-  const blkH = (po < price)
+  const blkH = _badgeMuestraPrecio
+    ? antFs+2
+    : (po < price)
     ? antFs+2 + ahoFs+1 + (promoLines ? proFs+2 : 0)
     : ahoFs+1 + (promoLines ? proFs+2 : 0);
   const PAD_BOT = 6;
@@ -2612,7 +2640,23 @@ async function drawCard(ctx,p,cx,cy,CW,CH,FH,P,pk,soloUno=false){
   ctx.beginPath();ctx.moveTo(cx+6,blkY-4);ctx.lineTo(cx+CW-6,blkY-4);ctx.stroke();
 
   // ── 3. BLOQUE DE PRECIOS ─────────────────────────────────────────────────
-  if(po < price){
+  if(_badgeMuestraPrecio){
+    // El AHORA ya se muestra en el badge sobre la foto — acá solo el ANTES,
+    // tachado y centrado (v5.65).
+    const antColor='#7a9a7a';
+    ctx.fillStyle=antColor;
+    ctx.font=antFs+'px "DM Mono",sans-serif';
+    ctx.textAlign='center';
+    const antTxt='$'+fmt(price);
+    const antY=blkY+antFs;
+    ctx.fillText(antTxt, cx+CW/2, antY);
+    const antW=ctx.measureText(antTxt).width;
+    ctx.strokeStyle=antColor; ctx.lineWidth=1;
+    ctx.beginPath();
+    ctx.moveTo(cx+CW/2-antW/2, antY-Math.round(antFs*0.4));
+    ctx.lineTo(cx+CW/2+antW/2, antY-Math.round(antFs*0.4));
+    ctx.stroke();
+  } else if(po < price){
     // ANTES — 62% tamaño, gris-verde tenue, tachado fino
     // Solo color y tachado lo distinguen, NO el tamaño
     const antColor='#7a9a7a';         // más tenue — presente pero no grita
@@ -2767,8 +2811,8 @@ async function dibujarLista(prods,pk){
       ctx.font='18px sans-serif';ctx.textAlign='center';ctx.fillText('🛒',8+FOTO/2,y+42);
     }
     const _tipoL=getOfertaTipo(p);
-    if((_tipoL==='promos'||_tipoL==='combo') && po<price){
-      drawOfertaBadge(ctx, {x:8,y:y+11,w:FOTO,h:FOTO}, getBadgeLabel(p), _badgeCfg);
+    if((_tipoL==='promos'||_tipoL==='combo') && po<price && _badgeCfg.forma!=='ninguno'){
+      drawOfertaBadge(ctx, {x:8,y:y+11,w:FOTO,h:FOTO}, getBadgeLabel(p), _badgeCfg, '$'+fmt(po));
     }
     ctx.fillStyle=P.txt;ctx.textAlign='left';ctx.font='bold 12px "DM Sans",sans-serif';
     wrap(ctx,p.name,66,y+23,W-160,14,2);
