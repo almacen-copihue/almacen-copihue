@@ -608,7 +608,7 @@ header{background:linear-gradient(135deg,var(--pd),var(--p));color:#fff;padding:
 <script>
 // ─────────────────────────────────────────────────────────────────────────────
 const GAS = 'https://script.google.com/macros/s/AKfycbzWZzDvdGfW8vd2-FpQolT852cdPMeHbfKugn9DBOlju75bE1D0SUNB5EKEDOsI2vP4lA/exec'; // v5.38: alineado con seba21/sendwa — el flyer apuntaba a otro deployment de Apps Script
-const APP_VERSION = 'v5.65';
+const APP_VERSION = 'v5.66';
 
 // Escala del canvas de salida (2 = 2× respecto al tamaño visual = alta calidad)
 // El preview en pantalla se muestra al 50% del tamaño real
@@ -2504,6 +2504,12 @@ async function drawCard(ctx,p,cx,cy,CW,CH,FH,P,pk,soloUno=false){
 
   // Imagen full resolution
   const img=await loadImg(p.name);
+  // v5.66: la foto se dibuja en "contain" (se ve completa, con aire alrededor
+  // si no es cuadrada) — el badge se anclaba a la CAJA completa (cx,cy,CW,FH),
+  // no a la foto real, así que en fotos con aire quedaba flotando en el
+  // margen en vez de pegado a la foto. Ahora se guarda el rectángulo real
+  // donde se dibujó la imagen y el badge se ancla a ESE rectángulo.
+  let _fotoRect = {x:cx+5, y:cy+5, w:CW-10, h:FH-2};
   if(img){
     ctx.save();rr(ctx,cx+5,cy+5,CW-10,FH-2,7);ctx.clip();
     const iw=img.naturalWidth||img.width, ih=img.naturalHeight||img.height;
@@ -2525,6 +2531,7 @@ async function drawCard(ctx,p,cx,cy,CW,CH,FH,P,pk,soloUno=false){
     const dy=cy+5+(areaH-ih*sc)/2;
     ctx.drawImage(img,dx,dy,iw*sc,ih*sc);
     ctx.restore();
+    _fotoRect = {x:dx, y:dy, w:iw*sc, h:ih*sc};
   } else {
     ctx.fillStyle=P.card2;rr(ctx,cx+5,cy+5,CW-10,FH-2,7);ctx.fill();
     ctx.font='24px sans-serif';ctx.textAlign='center';ctx.fillText('🛒',cx+CW/2,cy+FH/2+8);
@@ -2564,7 +2571,7 @@ async function drawCard(ctx,p,cx,cy,CW,CH,FH,P,pk,soloUno=false){
     }
   } else if(_badgeLbl && _hasDiscBdg){
     if((_tipo2==='promos' || _tipo2==='combo') && _badgeCfg.forma!=='ninguno'){
-      drawOfertaBadge(ctx, {x:cx,y:cy,w:CW,h:FH}, _badgeLbl, _badgeCfg, '$'+fmt(po));
+      drawOfertaBadge(ctx, _fotoRect, _badgeLbl, _badgeCfg, '$'+fmt(po));
     } else if(_tipo2==='promos' || _tipo2==='combo'){
       // forma==='ninguno' → sin badge, el precio sigue su camino normal más abajo
     } else if(_is2daBdg){
@@ -2802,17 +2809,20 @@ async function dibujarLista(prods,pk){
     ctx.fillStyle=P.ac;ctx.fillRect(0,y,4,ROW);
     const FOTO=50;
     const img=await loadImg(p.name);
+    let _fotoRectL = {x:8,y:y+11,w:FOTO,h:FOTO};
     if(img){
       ctx.save();rr(ctx,8,y+11,FOTO,FOTO,7);ctx.clip();
       const iw=img.naturalWidth||img.width,ih=img.naturalHeight||img.height,sc=Math.min(FOTO/iw,FOTO/ih);
-      ctx.drawImage(img,8+(FOTO-iw*sc)/2,y+11+(FOTO-ih*sc)/2,iw*sc,ih*sc);ctx.restore();
+      const dxL=8+(FOTO-iw*sc)/2, dyL=y+11+(FOTO-ih*sc)/2;
+      ctx.drawImage(img,dxL,dyL,iw*sc,ih*sc);ctx.restore();
+      _fotoRectL = {x:dxL,y:dyL,w:iw*sc,h:ih*sc};
     } else {
       ctx.fillStyle=P.card2;rr(ctx,8,y+11,FOTO,FOTO,7);ctx.fill();
       ctx.font='18px sans-serif';ctx.textAlign='center';ctx.fillText('🛒',8+FOTO/2,y+42);
     }
     const _tipoL=getOfertaTipo(p);
     if((_tipoL==='promos'||_tipoL==='combo') && po<price && _badgeCfg.forma!=='ninguno'){
-      drawOfertaBadge(ctx, {x:8,y:y+11,w:FOTO,h:FOTO}, getBadgeLabel(p), _badgeCfg, '$'+fmt(po));
+      drawOfertaBadge(ctx, _fotoRectL, getBadgeLabel(p), _badgeCfg, '$'+fmt(po));
     }
     ctx.fillStyle=P.txt;ctx.textAlign='left';ctx.font='bold 12px "DM Sans",sans-serif';
     wrap(ctx,p.name,66,y+23,W-160,14,2);
