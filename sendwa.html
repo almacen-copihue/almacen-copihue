@@ -9,6 +9,13 @@
 <title>SendWA — Almacén Copihue</title>
 <!--
   CHANGELOG sendwa.html
+  v113: - NUEVO — Mismo joystick de ajuste fino del v112, ahora también en
+          "💲 Precio como badge" (Tarjeta/Explosivo/Círculo) — se había
+          agregado solo a "Badges por tipo de oferta" y a este le faltaba.
+          Misma mecánica: 10px por toque sobre la posición de la grilla de 9,
+          botón "●" para volver al centro exacto, tope ±120px, se resetea a
+          0 al cambiar de posición base. El offset fino también se guarda y
+          restaura con "💾 Guardar esta lista" / "📥 Cargar desde planilla".
   v112: - NUEVO — Joystick de ajuste fino para "🏷️ Badges por tipo de oferta"
           (los de tipo estrella: ⚡ Relámpago x cantidad y 📦 Multicompra),
           debajo de la grilla de 9 posiciones. Cruz de 4 flechas + botón
@@ -1456,6 +1463,21 @@
             <button class="pb-pos-btn" data-pos="bc" style="border-radius:6px;border:1.5px solid var(--border);background:var(--card-bg);cursor:pointer;">↓</button>
             <button class="pb-pos-btn" data-pos="br" style="border-radius:6px;border:1.5px solid var(--border);background:var(--card-bg);cursor:pointer;">↘</button>
           </div>
+          <div class="layout-section-label" style="margin-top:8px">Ajuste fino (mueve en vivo, de a poquito, sobre la posición elegida arriba)</div>
+          <div style="display:flex;align-items:center;gap:14px;">
+            <div id="pb-joystick" style="display:grid;grid-template-columns:repeat(3,32px);grid-template-rows:repeat(3,32px);gap:2px;">
+              <span></span>
+              <button class="pb-nudge-btn" data-dx="0" data-dy="-1" style="border-radius:6px;border:1.5px solid var(--border);background:var(--card-bg);cursor:pointer;">↑</button>
+              <span></span>
+              <button class="pb-nudge-btn" data-dx="-1" data-dy="0" style="border-radius:6px;border:1.5px solid var(--border);background:var(--card-bg);cursor:pointer;">←</button>
+              <button id="pb-nudge-reset" style="border-radius:6px;border:1.5px solid var(--border);background:var(--card-bg);cursor:pointer;font-size:10px;" title="Volver al centro exacto de la posición elegida">●</button>
+              <button class="pb-nudge-btn" data-dx="1" data-dy="0" style="border-radius:6px;border:1.5px solid var(--border);background:var(--card-bg);cursor:pointer;">→</button>
+              <span></span>
+              <button class="pb-nudge-btn" data-dx="0" data-dy="1" style="border-radius:6px;border:1.5px solid var(--border);background:var(--card-bg);cursor:pointer;">↓</button>
+              <span></span>
+            </div>
+            <span id="pb-nudge-info" style="font-size:10px;color:var(--text-muted);">offset: 0, 0</span>
+          </div>
           <div style="font-size:10px;color:var(--text-muted);margin-top:6px;">💡 Cuando el badge de precio está activo, el precio "de fábrica" abajo de la foto se oculta automáticamente para no duplicarlo.</div>
         </div>
       </div>
@@ -1655,7 +1677,7 @@
 // pestaña y el badge del header se arman solos a partir de esta constante
 // (ver aplicarVersionUI() más abajo, llamada al final de init()).
 // ============================================================
-const APP_VERSION = 112;
+const APP_VERSION = 113;
 function aplicarVersionUI() {
   document.title = `SendWA — Almacén Copihue ver.${APP_VERSION}`;
   const badge = document.getElementById('ver-badge');
@@ -3121,6 +3143,7 @@ document.getElementById('collage-collage-controls')?.addEventListener('click', e
   const pbPosBtn = e.target.closest('.pb-pos-btn');
   if (pbPosBtn) {
     _precioBadgePos = pbPosBtn.dataset.pos;
+    _precioBadgeOffX = 0; _precioBadgeOffY = 0;
     document.querySelectorAll('.pb-pos-btn').forEach(b => {
       const on = b === pbPosBtn;
       b.classList.toggle('active', on);
@@ -3128,6 +3151,24 @@ document.getElementById('collage-collage-controls')?.addEventListener('click', e
       b.style.borderColor = on ? 'var(--primary)' : 'var(--border)';
       b.style.color = on ? '#fff' : 'var(--text)';
     });
+    _actualizarInfoNudgePb();
+    renderCollagePage();
+    return;
+  }
+  const pbNudgeBtn = e.target.closest('.pb-nudge-btn');
+  if (pbNudgeBtn) {
+    const PASO = 10;
+    const LIMITE = 120;
+    _precioBadgeOffX = Math.max(-LIMITE, Math.min(LIMITE, _precioBadgeOffX + Number(pbNudgeBtn.dataset.dx) * PASO));
+    _precioBadgeOffY = Math.max(-LIMITE, Math.min(LIMITE, _precioBadgeOffY + Number(pbNudgeBtn.dataset.dy) * PASO));
+    _actualizarInfoNudgePb();
+    renderCollagePage();
+    return;
+  }
+  const pbNudgeReset = e.target.closest('#pb-nudge-reset');
+  if (pbNudgeReset) {
+    _precioBadgeOffX = 0; _precioBadgeOffY = 0;
+    _actualizarInfoNudgePb();
     renderCollagePage();
     return;
   }
@@ -3318,6 +3359,8 @@ let _precioBadgeColor = '#2d5a22';
 let _precioBadgeFontColor = '#ffffff';
 let _precioBadgeTam = 2;   // 1-4, mismo multiplicador que TIPO_BADGE_TAMS
 let _precioBadgePos = 'bl'; // tl,tc,tr, cl,cc,cr, bl,bc,br — misma grilla que Estilo Promo
+let _precioBadgeOffX = 0; // ajuste fino en vivo, sobre la posición de la grilla
+let _precioBadgeOffY = 0;
 function drawPrecioBadge(ctx, p, oferta, x, y, W, IMGH) {
   if (_precioBadgeEstilo === 'ninguno') return;
   const precio = (oferta && oferta.precio) ? oferta.precio : p.precioVenta;
@@ -3327,7 +3370,7 @@ function drawPrecioBadge(ctx, p, oferta, x, y, W, IMGH) {
   const tamMult = TIPO_BADGE_TAMS[_precioBadgeTam] || 1;
   // Posición configurable (por defecto esquina inferior izquierda, igual que antes)
   const [xf, yf] = PROMO_POSICIONES[_precioBadgePos] || PROMO_POSICIONES.bl;
-  const cx = x + W * xf, cy = y + IMGH * yf;
+  const cx = x + W * xf + (_precioBadgeOffX || 0), cy = y + IMGH * yf + (_precioBadgeOffY || 0);
 
   if (_precioBadgeEstilo === 'explosivo') {
     const r = W * 0.20 * tamMult;
@@ -3556,6 +3599,11 @@ function _actualizarInfoNudge() {
   const info = document.getElementById('rl-nudge-info');
   if (!info || !cfg) return;
   info.textContent = `offset: ${cfg.offX || 0}, ${cfg.offY || 0}`;
+}
+function _actualizarInfoNudgePb() {
+  const info = document.getElementById('pb-nudge-info');
+  if (!info) return;
+  info.textContent = `offset: ${_precioBadgeOffX || 0}, ${_precioBadgeOffY || 0}`;
 }
 _sincronizarPanelBadgeTipo(); // estado inicial del panel, coherente con _badgeTipoActivo
 document.getElementById('promo-tam-row').onclick = e => {
@@ -5307,6 +5355,8 @@ function _capturarDiseno() {
     precioBadgeFontColor: _precioBadgeFontColor,
     precioBadgeTam: _precioBadgeTam,
     precioBadgePos: _precioBadgePos,
+    precioBadgeOffX: _precioBadgeOffX,
+    precioBadgeOffY: _precioBadgeOffY,
     badges: JSON.parse(JSON.stringify(_badgeConfig))
   };
 }
@@ -5322,9 +5372,12 @@ function _aplicarDiseno(d) {
   if (d.precioBadgeFontColor) _precioBadgeFontColor = d.precioBadgeFontColor;
   if (d.precioBadgeTam) _precioBadgeTam = d.precioBadgeTam;
   if (d.precioBadgePos) _precioBadgePos = d.precioBadgePos;
+  if (d.precioBadgeOffX != null) _precioBadgeOffX = d.precioBadgeOffX;
+  if (d.precioBadgeOffY != null) _precioBadgeOffY = d.precioBadgeOffY;
   if (d.badges) Object.keys(d.badges).forEach(t => { if (_badgeConfig[t]) Object.assign(_badgeConfig[t], d.badges[t]); });
   _sincronizarPanelBadgeTipo();
   _sincronizarPanelPrecioBadge();
+  _actualizarInfoNudgePb();
 }
 // Refleja _precioBadgeEstilo/Color/Tam/FontColor/Pos en los botones del panel
 // "Precio como badge" — necesario al restaurar una lista guardada.
