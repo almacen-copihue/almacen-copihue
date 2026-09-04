@@ -9,6 +9,18 @@
 <title>SendWA — Almacén Copihue</title>
 <!--
   CHANGELOG sendwa.html
+  v114: - NUEVO — IA Sugerencia ya no se limita siempre a 36: nuevo paso
+          "Cantidad" entre elegir el criterio y las categorías, mismo
+          patrón que configurar grilla/badge — 36 (default), Top 50, Top 70,
+          Top 100, o 🔓 Sin límite (todo lo que cumpla el criterio en las
+          categorías elegidas). Útil para armar lista de compra completa o
+          revisar todo el stock real, no solo un recorte fijo.
+        - NUEVO — Con el criterio 📦 Mayor stock disponible, cada tarjeta de
+          la grilla muestra el número de stock (chip negro arriba a la
+          izquierda de la foto) — se prende solo al usar ese criterio.
+          Sumado un botón manual "📦 Mostrar/Ocultar stock en la lista" en
+          el panel de herramientas, para prenderlo/apagarlo cuando quieras,
+          sin depender de la IA.
   v113: - NUEVO — Mismo joystick de ajuste fino del v112, ahora también en
           "💲 Precio como badge" (Tarjeta/Explosivo/Círculo) — se había
           agregado solo a "Badges por tipo de oferta" y a este le faltaba.
@@ -1262,6 +1274,7 @@
     <button class="tool-btn t-orange" id="btn-dl">⬇️ Descargar</button>
     <button class="tool-btn t-dark"   id="btn-ia-suggest">✨ IA Sugerencia</button>
     <button class="tool-btn" id="btn-guardar-lista" style="background:#00695c;color:#fff;">💾 Guardar lista seleccionada</button>
+    <button class="tool-btn" id="btn-toggle-stock" style="background:#455a64;color:#fff;">📦 Mostrar stock en la lista</button>
     <button class="tool-btn" id="btn-cargar-lista" style="background:#00695c;color:#fff;">📂 Cargar lista guardada</button>
     <input type="file" id="input-cargar-lista" accept="application/json" style="display:none;">
     <button class="tool-btn" id="btn-ofertas-planilla" style="background:#004d40;color:#fff;">📋 Ofertas activas en planilla</button>
@@ -1677,7 +1690,7 @@
 // pestaña y el badge del header se arman solos a partir de esta constante
 // (ver aplicarVersionUI() más abajo, llamada al final de init()).
 // ============================================================
-const APP_VERSION = 113;
+const APP_VERSION = 114;
 function aplicarVersionUI() {
   document.title = `SendWA — Almacén Copihue ver.${APP_VERSION}`;
   const badge = document.getElementById('ver-badge');
@@ -1841,6 +1854,9 @@ function calcularOferta(p) {
 let allProducts = [];
 let filteredProducts = [];
 let selectedIds = new Set();
+// Mostrar el número de stock en cada tarjeta de la grilla — se prende solo
+// al usar el criterio "stock" de IA Sugerencia, o a mano con el chip 📦 Stock.
+let _mostrarStockEnLista = false;
 let currentFilter = 'todos';
 let currentSearch = '';
 let precioMinimo = parseInt(localStorage.getItem('sendwa_precio_min') || '0') || 0;
@@ -2395,6 +2411,7 @@ function renderGrid() {
          data-id="${p.id}" data-idx="${filteredProducts.indexOf(p)}"
          onclick="toggleSelect('${p.id}')" ${marcoStyle}>
       ${sinStock ? `<div class="badge-sin-stock">Sin stock</div>` : ''}
+      ${(_mostrarStockEnLista && !sinStock) ? `<div style="position:absolute;top:6px;left:6px;z-index:5;background:rgba(0,0,0,.72);color:#fff;font-size:10px;font-weight:800;padding:2px 6px;border-radius:6px;">📦 Stock: ${p.stock}</div>` : ''}
       ${imgEl}
       <div class="card-order">${orderNum||''}</div>
       <div class="card-check">✓</div>
@@ -5459,6 +5476,11 @@ function _guardarListaComoJSON() {
   toast(`💾 Lista "${payload.lista}" guardada (${items.length} productos + diseño${payload.ofertaSimple ? ' + precios' : ''})`);
 }
 on('btn-guardar-lista', _guardarListaComoJSON);
+on('btn-toggle-stock', () => {
+  _mostrarStockEnLista = !_mostrarStockEnLista;
+  document.getElementById('btn-toggle-stock').textContent = _mostrarStockEnLista ? '📦 Ocultar stock de la lista' : '📦 Mostrar stock en la lista';
+  renderGrid();
+});
 on('btn-cargar-lista', () => {
   document.getElementById('input-cargar-lista').click();
 });
@@ -5769,6 +5791,38 @@ on('btn-ia-suggest', async () => {
     return;
   }
 
+  // ── PASO 1.5: Cantidad — igual patrón que configurar grilla/badge: elegís
+  // el límite en vez de que quede fijo en 36 siempre. "Sin límite" trae TODO
+  // lo que cumpla el criterio en las categorías elegidas, útil para armar
+  // lista de compra o revisar stock real completo, no solo un top acotado.
+  const limiteElegido = await new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'sendwa-adhoc-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:flex-end;justify-content:center';
+    const sheet = document.createElement('div');
+    sheet.style.cssText = 'background:white;border-radius:20px 20px 0 0;width:100%;max-width:500px;padding:20px 16px 30px';
+    sheet.innerHTML = `
+      <div style="font-size:15px;font-weight:800;color:#1a2e17;margin-bottom:14px;text-align:center">✨ IA Sugerencia — Cantidad</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button data-lim="36"  style="padding:12px;border-radius:12px;border:none;background:#4a7c3f;color:#fff;font-size:13px;font-weight:700;cursor:pointer">36 (default de siempre)</button>
+        <button data-lim="50"  style="padding:12px;border-radius:12px;border:none;background:#2980b9;color:#fff;font-size:13px;font-weight:700;cursor:pointer">Top 50</button>
+        <button data-lim="70"  style="padding:12px;border-radius:12px;border:none;background:#8e44ad;color:#fff;font-size:13px;font-weight:700;cursor:pointer">Top 70</button>
+        <button data-lim="100" style="padding:12px;border-radius:12px;border:none;background:#c0392b;color:#fff;font-size:13px;font-weight:700;cursor:pointer">Top 100</button>
+        <button data-lim="0"   style="padding:12px;border-radius:12px;border:none;background:#e67e22;color:#fff;font-size:13px;font-weight:700;cursor:pointer">🔓 Sin límite (todo lo que cumpla)</button>
+        <button data-lim="cancel" style="padding:12px;border-radius:12px;border:1.5px solid #d4e4cf;background:#f5f7f4;color:#5a7055;font-size:13px;cursor:pointer">✕ Cancelar</button>
+      </div>`;
+    overlay.appendChild(sheet);
+    sheet.addEventListener('click', e => {
+      const btn = e.target.closest('button[data-lim]');
+      if (!btn) return;
+      document.body.removeChild(overlay);
+      resolve(btn.dataset.lim === 'cancel' ? null : Number(btn.dataset.lim));
+    });
+    overlay.addEventListener('click', e => { if (e.target === overlay) { document.body.removeChild(overlay); resolve(null); } });
+    document.body.appendChild(overlay);
+  });
+  if (limiteElegido === null) return;
+
   // ── PASO 2: Selector de categorías ──────────────────────────
   // Obtener todas las categorías con stock disponible
   const todasCats = [...new Set(allProducts
@@ -5864,6 +5918,10 @@ on('btn-ia-suggest', async () => {
     });
   } else if (modo === 'stock') {
     candidatos.sort((a,b) => (b.stock||0) - (a.stock||0));
+    // Este criterio es justo para revisar stock real / armar lista de compra
+    // — mostrar el número de stock en cada tarjeta de la grilla de ahora en
+    // más (hasta que se apague a mano con el chip "📦 Stock").
+    _mostrarStockEnLista = true;
   } else if (modo === 'oferta') {
     candidatos = candidatos.filter(p => p.catOferta);
     candidatos.sort((a,b) => (PRIORITY_ORDER[a.catOferta]||6) - (PRIORITY_ORDER[b.catOferta]||6));
@@ -5871,7 +5929,9 @@ on('btn-ia-suggest', async () => {
 
   if (!candidatos.length) { toast('⚠️ Sin productos para ese criterio en esas categorías'); return; }
 
-  const limite = currentMode === 'estado' ? 36 : 20;
+  // limiteElegido === 0 significa "sin límite" — Number.MAX_SAFE_INTEGER en
+  // la práctica no corta nada, deja pasar todo lo que cumplió el criterio.
+  const limite = limiteElegido === 0 ? Number.MAX_SAFE_INTEGER : limiteElegido;
   const cupo = Math.max(0, limite - selectedIds.size);
   // Elegir primero los N mejores según el criterio, SIN sesgo por categoría
   // (si agrupara antes de elegir, una categoría con más productos taparía a
@@ -5890,7 +5950,7 @@ on('btn-ia-suggest', async () => {
     agregados++;
   }
   saveRecent();
-  toast(`✨ IA agregó ${agregados} producto${agregados !== 1 ? 's' : ''} (total: ${selectedIds.size})`);
+  toast(`✨ IA agregó ${agregados} producto${agregados !== 1 ? 's' : ''} (total: ${selectedIds.size})${modo === 'stock' ? ' — 📦 stock visible en cada tarjeta' : ''}`);
   renderGrid();
 });
 
