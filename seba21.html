@@ -36,6 +36,21 @@
 
 ================================================================================
 
+  v458 — 17/8/2026 (ll)
+  ---------------------
+  • NUEVO — editor rápido de Multicompra dentro de "Ajustar producto"
+    (sección "📦 Multicompra"): activar/desactivar + cantidad + precio del
+    pack, sin tocar Tipo ni Grupo (fuera de alcance, se editan solo desde
+    la planilla si hace falta). Antes, activar una promo multicompra
+    significaba entrar a la planilla y tocar 3 columnas a mano. Precarga
+    el valor real actual del producto seleccionado. Requiere Code.gs
+    v10.11 (agrega mcActiva/mcCantidad/mcPrecio al listado de productos y
+    la escritura correspondiente en ajustarProducto — las columnas se
+    ubican por nombre de encabezado, igual que ya hacía getOfertas, nunca
+    por índice fijo). Probado: producto con multicompra activa precarga
+    bien (2 / $5.000), producto sin multicompra queda destildado con los
+    campos ocultos, tildar el checkbox los muestra.
+
   v457 — 16/8/2026 (kk)
   ---------------------
   • NUEVO — botón chiquito (▾/▸) arriba de "Vaciar carrito"/"Cobrar" para
@@ -1411,7 +1426,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>🛒 POS · Copihue v457</title>
+    <title>🛒 POS · Copihue v458</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2722,6 +2737,28 @@
                     <div style="font-size:0.7rem;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">🏷️ Categoría</div>
                     <div class="categorias-grid" id="ajusteCatGrid" style="margin-bottom:8px;"></div>
                     <input type="hidden" id="ajusteCategoria">
+
+                    <!-- v10.11 — editor rápido de Multicompra -->
+                    <div style="font-size:0.7rem;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.5px;margin:14px 0 8px;border-top:1px solid #eee;padding-top:12px;">📦 Multicompra</div>
+                    <label style="display:flex;align-items:center;gap:8px;margin-bottom:10px;cursor:pointer;font-size:0.9rem;font-weight:600;color:#444;">
+                        <input type="checkbox" id="ajusteMcActiva" onchange="_ajusteToggleMcCampos()" style="width:20px;height:20px;">
+                        Promo multicompra activa
+                    </label>
+                    <div id="ajusteMcCampos" style="display:none;">
+                        <div style="display:flex;gap:10px;">
+                            <div style="flex:1;">
+                                <div style="font-size:0.68rem;color:#888;margin-bottom:4px;">Cantidad</div>
+                                <input type="number" id="ajusteMcCantidad" min="2" step="1" placeholder="2"
+                                       style="width:100%;font-size:1.05rem;font-weight:700;border:2px solid #d1c4e9;border-radius:10px;padding:8px 10px;box-sizing:border-box;">
+                            </div>
+                            <div style="flex:1;">
+                                <div style="font-size:0.68rem;color:#888;margin-bottom:4px;">Precio del pack</div>
+                                <input type="number" id="ajusteMcPrecio" min="0" step="100" placeholder="$"
+                                       style="width:100%;font-size:1.05rem;font-weight:700;border:2px solid #d1c4e9;border-radius:10px;padding:8px 10px;box-sizing:border-box;">
+                            </div>
+                        </div>
+                        <div style="font-size:0.7rem;color:#999;margin-top:6px;">Ej: cantidad 2, precio $6.000 → "2x $6.000"</div>
+                    </div>
                 </div>
 
             </div>
@@ -3889,6 +3926,9 @@ async function cargarProductos() {
                 vencimiento: p.vencimiento || '',
                 diaCritico: (p.diaCritico || '').toLowerCase().trim(),
                 precioCosto: parseInt(p.precioCosto) || 0,
+                mcActiva: Boolean(p.mcActiva),
+                mcCantidad: parseInt(p.mcCantidad) || 0,
+                mcPrecio: parseInt(p.mcPrecio) || 0,
                 stockMin: parseInt(p.stockMin) || 0,
                 relampago: (p.relampago !== undefined && p.relampago !== null && p.relampago !== '') ? (isNaN(parseInt(p.relampago)) ? String(p.relampago).trim() : parseInt(p.relampago)) : 0,
                 destacada: parseInt(p.destacada) || 0,
@@ -7721,6 +7761,17 @@ function seleccionarAjuste(id) {
         if (btnActivo) btnActivo.classList.add('activo');
     }
     document.getElementById('ajustePanel').style.display = 'block';
+
+    // v10.11 — editor rápido de Multicompra: precargar con el valor real actual
+    document.getElementById('ajusteMcActiva').checked = !!p.mcActiva;
+    document.getElementById('ajusteMcCantidad').value = p.mcCantidad || '';
+    document.getElementById('ajusteMcPrecio').value = p.mcPrecio || '';
+    _ajusteToggleMcCampos();
+}
+
+function _ajusteToggleMcCampos() {
+    const activa = document.getElementById('ajusteMcActiva').checked;
+    document.getElementById('ajusteMcCampos').style.display = activa ? 'block' : 'none';
 }
 
 let _ajusteCatBtnActivo = null; // referencia directa al botón activo — evita querySelectorAll
@@ -7752,6 +7803,9 @@ async function guardarAjuste() {
     try {
         const nombreNuevo = document.getElementById('ajusteNombreNuevo').value.trim().toUpperCase();
         const catAjuste = ajusteCategoriaSeleccionada || null;
+        const mcActivaNueva = document.getElementById('ajusteMcActiva').checked;
+        const mcCantidadNueva = Number(document.getElementById('ajusteMcCantidad').value) || 0;
+        const mcPrecioNueva = Number(document.getElementById('ajusteMcPrecio').value) || 0;
         const datos = {
             producto: ajusteProducto.name,
             nombreNuevo: nombreNuevo !== ajusteProducto.name ? nombreNuevo : null,
@@ -7760,7 +7814,10 @@ async function guardarAjuste() {
             precioAntes: ajusteProducto.price,
             precioDespues: precioNuevo !== ajusteProducto.price ? precioNuevo : null,
             categoriaAntes: ajusteProducto.category,
-            categoriaDespues: catAjuste !== ajusteProducto.category ? catAjuste : null
+            categoriaDespues: catAjuste !== ajusteProducto.category ? catAjuste : null,
+            mcActiva: mcActivaNueva,
+            mcCantidad: mcCantidadNueva,
+            mcPrecio: mcPrecioNueva
         };
         const url = API_URL + '?action=ajusteRapido&data=' + encodeURIComponent(JSON.stringify(datos));
         const resp = await _apiFetchUrl('registrarMovimientoCaja', url);
@@ -7775,6 +7832,9 @@ async function guardarAjuste() {
             if (catAjuste && catAjuste !== ajusteProducto.category) {
                 ajusteProducto.category = catAjuste;
             }
+            ajusteProducto.mcActiva = mcActivaNueva;
+            ajusteProducto.mcCantidad = mcCantidadNueva;
+            ajusteProducto.mcPrecio = mcPrecioNueva;
             if (precioNuevo !== ajusteProducto.price) {
                 ajusteProducto.price = precioNuevo;
                 mostrarToast('✅ Producto actualizado', 'verde');
