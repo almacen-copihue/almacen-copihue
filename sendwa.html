@@ -9,6 +9,14 @@
 <title>SendWA — Almacén Copihue</title>
 <!--
   CHANGELOG sendwa.html
+  v115: - NUEVO — Botón "🔀 Orden ▾" nuevo en la barra de filtros, junto a
+          Ofertas/Categorías/Precio. Opciones: 🔄 Automático (el de siempre,
+          por categoría+stock+ventas), 🔤 A→Z, 🔤 Z→A, 📦 Stock mayor→menor,
+          📦 Stock menor→mayor, 💲 Precio menor→mayor, 💲 Precio mayor→menor.
+          Se aplica sobre el resultado del filtro activo (categoría, oferta,
+          etc.), no lo reemplaza. Con un orden manual activo, los separadores
+          por categoría se ocultan (quedarían salpicados sin sentido en un
+          A-Z o por precio) — vuelven solos al elegir "Automático" de nuevo.
   v114: - NUEVO — IA Sugerencia ya no se limita siempre a 36: nuevo paso
           "Cantidad" entre elegir el criterio y las categorías, mismo
           patrón que configurar grilla/badge — 36 (default), Top 50, Top 70,
@@ -1188,6 +1196,7 @@
   <button class="fbar-btn fb-cats"    id="fb-cats"    onclick="toggleFBar('cats')">📦 Categorías ▾</button>
   <button class="fbar-btn fb-buscar"                  onclick="toggleSearch()">🔍 Buscar</button>
   <button class="fbar-btn" id="fb-precio" onclick="toggleFBar('precio')" style="background:#16a085">💲 Precio ▾</button>
+  <button class="fbar-btn" id="fb-orden" onclick="toggleFBar('orden')" style="background:#7b5ea7">🔀 Orden ▾</button>
 </div>
 
 <!-- Panel flotante Ofertas -->
@@ -1231,6 +1240,21 @@
            style="flex:1;height:32px;padding:0 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--card-bg);color:var(--text);font-size:13px;">
     <button onclick="setPrecioMinimo(parseInt(document.getElementById('precio-min-input').value)||0)"
             style="height:32px;padding:0 14px;border-radius:8px;border:none;background:var(--primary);color:#fff;font-size:12px;font-weight:700;cursor:pointer;">OK</button>
+  </div>
+</div>
+
+<!-- Panel Orden manual — anula temporalmente el orden automático (categoría/
+     stock/ventas) de sortProducts() hasta que se elija "Automático" de nuevo -->
+<div class="filter-panel" id="panel-orden">
+  <div class="filter-panel-title">Ordenar la lista por:</div>
+  <div class="filter-chips-wrap">
+    <button class="filter-chip orden-chip active" data-orden="">🔄 Automático (de siempre)</button>
+    <button class="filter-chip orden-chip" data-orden="az">🔤 A → Z</button>
+    <button class="filter-chip orden-chip" data-orden="za">🔤 Z → A</button>
+    <button class="filter-chip orden-chip" data-orden="stock_desc">📦 Stock: mayor a menor</button>
+    <button class="filter-chip orden-chip" data-orden="stock_asc">📦 Stock: menor a mayor</button>
+    <button class="filter-chip orden-chip" data-orden="precio_asc">💲 Precio: menor a mayor</button>
+    <button class="filter-chip orden-chip" data-orden="precio_desc">💲 Precio: mayor a menor</button>
   </div>
 </div>
 
@@ -1690,7 +1714,7 @@
 // pestaña y el badge del header se arman solos a partir de esta constante
 // (ver aplicarVersionUI() más abajo, llamada al final de init()).
 // ============================================================
-const APP_VERSION = 114;
+const APP_VERSION = 115;
 function aplicarVersionUI() {
   document.title = `SendWA — Almacén Copihue ver.${APP_VERSION}`;
   const badge = document.getElementById('ver-badge');
@@ -1857,6 +1881,20 @@ let selectedIds = new Set();
 // Mostrar el número de stock en cada tarjeta de la grilla — se prende solo
 // al usar el criterio "stock" de IA Sugerencia, o a mano con el chip 📦 Stock.
 let _mostrarStockEnLista = false;
+// Orden manual — anula temporalmente el orden automático de sortProducts()
+// (categoría/stock/ventas). '' = automático (comportamiento de siempre).
+let _ordenManual = '';
+function aplicarOrdenManual(sorted) {
+  if (!_ordenManual) return sorted;
+  const out = [...sorted];
+  if (_ordenManual === 'az') out.sort((a,b) => norm(a.nombre||'').localeCompare(norm(b.nombre||'')));
+  else if (_ordenManual === 'za') out.sort((a,b) => norm(b.nombre||'').localeCompare(norm(a.nombre||'')));
+  else if (_ordenManual === 'stock_desc') out.sort((a,b) => (b.stock||0) - (a.stock||0));
+  else if (_ordenManual === 'stock_asc') out.sort((a,b) => (a.stock||0) - (b.stock||0));
+  else if (_ordenManual === 'precio_asc') out.sort((a,b) => (a.precioVenta||0) - (b.precioVenta||0));
+  else if (_ordenManual === 'precio_desc') out.sort((a,b) => (b.precioVenta||0) - (a.precioVenta||0));
+  return out;
+}
 let currentFilter = 'todos';
 let currentSearch = '';
 let precioMinimo = parseInt(localStorage.getItem('sendwa_precio_min') || '0') || 0;
@@ -2298,7 +2336,7 @@ function applyFilter() {
     });
   }
 
-  filteredProducts = sortProducts(f, currentMode);
+  filteredProducts = aplicarOrdenManual(sortProducts(f, currentMode));
   renderGrid();
 }
 
@@ -2311,6 +2349,10 @@ function getCatEmoji(cat) {
 }
 
 function insertSeparators(products) {
+  // Con un orden manual activo (A-Z, stock, precio) los separadores por
+  // categoría quedarían salpicados sin sentido — se muestra la lista plana.
+  if (_ordenManual) return products;
+
   // Vista Ofertas estilo FLYER — sin separadores de categoría, un único header
   const esVistaOfertaFlyer = ['oferta','activo','relampago','destacado','especial',
     'promo','combo','ultimas','multicompra','recienllegado'].includes(currentFilter);
@@ -5481,6 +5523,13 @@ on('btn-toggle-stock', () => {
   document.getElementById('btn-toggle-stock').textContent = _mostrarStockEnLista ? '📦 Ocultar stock de la lista' : '📦 Mostrar stock en la lista';
   renderGrid();
 });
+document.getElementById('panel-orden').addEventListener('click', e => {
+  const chip = e.target.closest('.orden-chip');
+  if (!chip) return;
+  _ordenManual = chip.dataset.orden;
+  document.querySelectorAll('.orden-chip').forEach(c => c.classList.toggle('active', c === chip));
+  applyFilter();
+});
 on('btn-cargar-lista', () => {
   document.getElementById('input-cargar-lista').click();
 });
@@ -6020,8 +6069,8 @@ window.setPrecioMinimo = function(valor) {
 };
 
 window.toggleFBar = function(tipo) {
-  const panelMap = { ofertas:'panel-ofertas', cats:'panel-cats', precio:'panel-precio' };
-  const btnMap   = { ofertas:'fb-ofertas', cats:'fb-cats', precio:'fb-precio' };
+  const panelMap = { ofertas:'panel-ofertas', cats:'panel-cats', precio:'panel-precio', orden:'panel-orden' };
+  const btnMap   = { ofertas:'fb-ofertas', cats:'fb-cats', precio:'fb-precio', orden:'fb-orden' };
   const panelId  = panelMap[tipo];
   const btnId    = btnMap[tipo];
   const panel = document.getElementById(panelId);
