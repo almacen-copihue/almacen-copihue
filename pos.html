@@ -36,6 +36,85 @@
 
 ================================================================================
 
+  v457 — 16/8/2026 (kk)
+  ---------------------
+  • NUEVO — botón chiquito (▾/▸) arriba de "Vaciar carrito"/"Cobrar" para
+    plegarlos cuando tapan mucho el listado. Solo cambia display, sin
+    ningún cálculo ni conexión a la planilla — cero impacto en velocidad.
+    Recuerda cómo lo dejaste (localStorage), incluso después de un
+    refresh. Probado con jsdom: plegar → guarda → simular refresh →
+    sigue plegado → desplegar de nuevo, todo correcto.
+
+  v456 — 16/8/2026 (jj)
+  ---------------------
+  • Un poco más grande todavía el total del botón flotante de "Cobrar"
+    (0.78rem → 0.92rem, botón 74px → 80px).
+
+  v455 — 16/8/2026 (ii)
+  ---------------------
+  • El Enter del teclado en el campo de monto (pago mixto) ahora hace lo
+    mismo que tocar "Agregar" — no hace falta bajar el dedo hasta el botón.
+  • Alias de transferencia "pago.copihue" mostrado al cliente, bastante
+    más grande (1.4rem → 2.1rem).
+  • El total del botón flotante verde de "Cobrar" (abajo del ícono de
+    vaciar carrito) era casi ilegible (0.44rem) — casi el doble de grande
+    ahora, con el botón un poco más grande también para que entre.
+
+  v454 — 16/8/2026 (hh)
+  ---------------------
+  • FIX — dentro del modal, tocar +/- en un producto (o borrarlo, o
+    aplicar/quitar el redondeo) actualizaba el total de arriba, pero el
+    panel de pago mixto (TOTAL/PAGADO/FALTA/VUELTO) se quedaba con los
+    números viejos. Ahora se refresca en vivo en los tres puntos donde
+    puede cambiar el total: cambio de cantidad, eliminar producto, y
+    redondeo. Probado con jsdom: +1 en un producto de $1.000 pasa el panel
+    de "Falta $0" a "Falta $1.000" al instante, y -1 lo vuelve a cubrir.
+
+  v453 — 16/8/2026 (gg)
+  ---------------------
+  • FIX IMPORTANTE — corrige el enfoque de v450, que estaba mal. Caso real:
+    sobraba $300 de vuelto, el cliente pidió llevarlo en caramelos, se
+    cerró el modal para agregarlos al carrito y al volver a abrir el pago
+    mixto ya cargado había desaparecido. v450 borraba todo el pago mixto
+    cada vez que se reabría el modal — pensando que siempre era una venta
+    nueva, pero cerrar a mitad de cobro para agregar otro producto es un
+    caso válido y debía mantenerse. Ahora:
+    - El pago mixto en curso NUNCA se borra solo por cerrar/reabrir el
+      modal — se mantiene y se recalcula contra el total actual.
+    - Se guarda en localStorage junto con el carrito, así que sobrevive
+      incluso a un refresh de página.
+    - Solo se borra con "Vaciar carrito" o al confirmar el cobro con
+      éxito — exactamente como se pidió.
+  • Probado con jsdom: guardar → simular refresh → restaurar (mantiene
+    monto y estado), y confirmado que "Vaciar carrito" sigue limpiando
+    todo incluido el localStorage.
+
+  v452 — 16/8/2026 (ff)
+  ---------------------
+  • Tarjetas de medio de pago: texto vacío pasó de "Tocar para cargar" a
+    "Tocar" (más simple), y el ícono de cada medio (💵🇨🇱🇺🇸💳📱🧾) quedó
+    bastante más grande, separado del nombre.
+  • "Vaciar carrito" — no se encontró la causa (probado en aislado, sin
+    errores); queda pendiente por si vuelve a pasar con más detalle.
+
+  v451 — 16/8/2026 (ee)
+  ---------------------
+  • El ticket que se envía al cliente por WhatsApp ahora muestra el
+    detalle real del pago cuando fue mixto (ej. "Efectivo: $2.700 /
+    Efectivo USD: 2 USD (≈$3.000)") en vez de solo la palabra "MIXTO".
+  • Tarjeta de medio de pago abierta: título con fondo verde muy suave +
+    flecha (▾/▴) que indica que se puede colapsar/expandir tocando ahí.
+  • VUELTO pasa de verde a naranja (código de colores del sistema) — PAGADO
+    sigue verde, FALTA sigue rojo.
+
+  v450 — 14/8/2026 (dd)
+  ---------------------
+  • FIX — el panel de pago mixto quedaba con montos viejos si cerrabas el
+    modal sin confirmar (ej. "¿lleva algo más?"), agregabas otro producto
+    y volvías a abrir: el total de la línea de productos se actualizaba
+    bien, pero el panel mixto no. Ahora se resetea siempre al abrir el
+    modal — nunca arrastra datos de un carrito anterior.
+
   v449 — 14/8/2026 (cc)
   ---------------------
   • CORRECCIÓN del bloque de pagos recibidos (spec revisado con ChatGPT,
@@ -1332,7 +1411,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>🛒 POS · Copihue v449</title>
+    <title>🛒 POS · Copihue v457</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2427,37 +2506,49 @@
                        touch-action:manipulation;">↑</button>
     </div>
 
-    <!-- Vaciar carrito -->
-    <div id="fabLimpiar">
-        <button onclick="limpiarVenta()"
-                title="Vaciar carrito"
-                style="width:52px;height:52px;border-radius:50%;border:none;cursor:pointer;
-                       background:linear-gradient(135deg,#b71c1c,#c62828);
-                       color:white;font-size:1.4rem;
-                       box-shadow:0 4px 14px rgba(183,28,28,0.45);
-                       display:flex;align-items:center;justify-content:center;
-                       touch-action:manipulation;">🗑️</button>
-    </div>
+    <!-- v457 — plegar/desplegar Vaciar+Cobrar. No afecta rendimiento (solo
+         cambia display:none/flex, sin ningún cálculo ni llamada a la
+         planilla) — solo tapa menos pantalla cuando ya no hace falta
+         verlos. Recuerda cómo lo dejaste. -->
+    <div id="fabTogglePliegue" onclick="_toggleFabColapso()"
+         style="width:30px;height:30px;border-radius:50%;border:none;cursor:pointer;
+                background:rgba(0,0,0,0.4);color:white;font-size:0.9rem;font-weight:900;
+                display:flex;align-items:center;justify-content:center;
+                touch-action:manipulation;">▾</div>
 
-    <!-- Cobrar -->
-    <div id="fabCobrar" style="position:relative;">
-        <div id="badgePendientes" style="display:none;position:absolute;top:-4px;right:-4px;
-             background:#e53935;color:white;border-radius:50%;width:20px;height:20px;
-             font-size:0.65rem;font-weight:900;display:none;align-items:center;
-             justify-content:center;z-index:10;border:2px solid white;pointer-events:none;"></div>
-        <button onclick="abrirConfirmacion()"
-                title="Cobrar"
-                style="width:64px;height:64px;border-radius:50%;border:none;cursor:pointer;
-                       background:linear-gradient(135deg,#1b5e20,#2e7d32);
-                       color:white;font-family:inherit;
-                       box-shadow:0 4px 18px rgba(27,94,32,0.55);
-                       display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
-                       touch-action:manipulation;">
-            <span style="font-size:1.5rem;line-height:1;">✅</span>
-            <span id="btnCobrarTotal" style="font-size:0.44rem;font-weight:900;line-height:1;
-                  letter-spacing:-0.3px;max-width:58px;overflow:hidden;
-                  text-overflow:ellipsis;white-space:nowrap;">$0</span>
-        </button>
+    <div id="fabColapsable" style="display:flex;flex-direction:column;align-items:center;gap:10px;">
+        <!-- Vaciar carrito -->
+        <div id="fabLimpiar">
+            <button onclick="limpiarVenta()"
+                    title="Vaciar carrito"
+                    style="width:52px;height:52px;border-radius:50%;border:none;cursor:pointer;
+                           background:linear-gradient(135deg,#b71c1c,#c62828);
+                           color:white;font-size:1.4rem;
+                           box-shadow:0 4px 14px rgba(183,28,28,0.45);
+                           display:flex;align-items:center;justify-content:center;
+                           touch-action:manipulation;">🗑️</button>
+        </div>
+
+        <!-- Cobrar -->
+        <div id="fabCobrar" style="position:relative;">
+            <div id="badgePendientes" style="display:none;position:absolute;top:-4px;right:-4px;
+                 background:#e53935;color:white;border-radius:50%;width:20px;height:20px;
+                 font-size:0.65rem;font-weight:900;display:none;align-items:center;
+                 justify-content:center;z-index:10;border:2px solid white;pointer-events:none;"></div>
+            <button onclick="abrirConfirmacion()"
+                    title="Cobrar"
+                    style="width:80px;height:80px;border-radius:50%;border:none;cursor:pointer;
+                           background:linear-gradient(135deg,#1b5e20,#2e7d32);
+                           color:white;font-family:inherit;
+                           box-shadow:0 4px 18px rgba(27,94,32,0.55);
+                           display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+                           touch-action:manipulation;">
+                <span style="font-size:1rem;line-height:1;">✅</span>
+                <span id="btnCobrarTotal" style="font-size:0.92rem;font-weight:900;line-height:1.1;
+                      letter-spacing:-0.3px;max-width:72px;overflow:hidden;
+                      text-overflow:ellipsis;white-space:nowrap;">$0</span>
+            </button>
+        </div>
     </div>
 </div>
 
@@ -3202,11 +3293,15 @@
         </div>
         <style>
             .pm-medio-card { border:1.5px solid #ddd; border-radius:12px; background:#fafafa; overflow:hidden; }
-            .pm-medio-card.pm-abierto { border-color:#333; background:#fff; }
-            .pm-medio-header { display:flex; justify-content:space-between; align-items:center; padding:12px 14px; cursor:pointer; }
-            .pm-medio-nombre { font-size:0.92rem; font-weight:800; color:#333; }
+            .pm-medio-card.pm-abierto { border-color:#8bc9a0; background:#fff; }
+            .pm-medio-header { display:flex; justify-content:space-between; align-items:center; padding:12px 14px; cursor:pointer; transition:background 0.15s; }
+            .pm-medio-card.pm-abierto .pm-medio-header { background:#eaf7ee; } /* verde muy suave — indica "esta se puede colapsar" */
+            .pm-medio-nombre { font-size:0.92rem; font-weight:800; color:#333; display:flex; align-items:center; gap:8px; }
+            .pm-medio-icono { font-size:1.8rem; line-height:1; }
             .pm-medio-estado { font-size:0.85rem; font-weight:700; color:#999; text-align:right; }
             .pm-medio-estado.pm-cargado { color:#2e7d32; font-size:1.05rem; font-weight:900; }
+            .pm-medio-flecha { color:#888; font-size:0.75rem; transition:transform 0.15s; }
+            .pm-medio-card.pm-abierto .pm-medio-flecha { transform:rotate(180deg); color:#2e7d32; }
             .pm-medio-form { display:none; padding:0 14px 14px; }
             .pm-medio-card.pm-abierto .pm-medio-form { display:block; }
             .pm-medio-pregunta { font-size:0.72rem; color:#666; text-transform:uppercase; font-weight:800; margin-bottom:6px; }
@@ -3250,7 +3345,7 @@
                 <!-- Alias grande -->
                 <div style="margin-top:10px;background:#e8f5e9;border-radius:10px;padding:10px;">
                     <div style="font-size:0.72rem;color:#555;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Alias de transferencia</div>
-                    <div style="font-size:1.4rem;font-weight:900;color:#1b5e20;letter-spacing:1px;">pago.copihue</div>
+                    <div style="font-size:2.1rem;font-weight:900;color:#1b5e20;letter-spacing:1px;">pago.copihue</div>
                 </div>
                 <div style="background:#fff3e0;border-radius:10px;padding:8px 12px;
                             font-size:0.78rem;color:#e65100;font-weight:700;margin-top:8px;
@@ -4588,6 +4683,27 @@ function cambiarCantidad(id, delta) {
     _refreshResultadosBadges(typeof id === 'string' && id.startsWith('peso_') ? null : Number(id));
 }
 
+// v457 — plegar/desplegar Vaciar+Cobrar. Solo cambia display:none/flex, no
+// hay ningún cálculo ni conexión a la planilla — cero impacto en velocidad.
+const FAB_PLEGADO_KEY = 'copihue_fab_plegado';
+
+function _toggleFabColapso() {
+    const cont = document.getElementById('fabColapsable');
+    const plegar = cont.style.display !== 'none';
+    cont.style.display = plegar ? 'none' : 'flex';
+    document.getElementById('fabTogglePliegue').textContent = plegar ? '▸' : '▾';
+    localStorage.setItem(FAB_PLEGADO_KEY, plegar ? '1' : '0');
+}
+
+function _aplicarEstadoFabColapso() {
+    const plegado = localStorage.getItem(FAB_PLEGADO_KEY) === '1';
+    const cont = document.getElementById('fabColapsable');
+    const toggle = document.getElementById('fabTogglePliegue');
+    if (!cont || !toggle) return;
+    cont.style.display = plegado ? 'none' : 'flex';
+    toggle.textContent = plegado ? '▸' : '▾';
+}
+
 function limpiarVenta() {
     if (ventaActual.length === 0) return;
     ventaActual = [];
@@ -4604,6 +4720,7 @@ function limpiarVenta() {
         if (panel) panel.style.display = 'none';
         const link = document.getElementById('pmToggleLink');
         if (link) link.textContent = '➕ Pago con varios métodos / monedas';
+        localStorage.removeItem('copihue_pago_mixto_pendiente'); // v453
     }
 }
 
@@ -4825,6 +4942,11 @@ function actualizarTotalConRedondeo() {
     // Guardar total final para confirmarVenta
     window._totalConRedondeo = totalMostrar;
     window._descuentoRedondeo = descuento;
+
+    // v454 — punto central por el que pasa cualquier cambio de total
+    // (redondeo, +/-, agregar/quitar producto) — refrescar acá cubre todos
+    // los casos de una sola vez.
+    if (document.getElementById('pmTotal')) _pmRenderResumen();
 }
 
 // ===== LIMPIAR BÚSQUEDA =====
@@ -5039,6 +5161,7 @@ function _modalDel(idx) {
         window._totalConRedondeo = total;
         const totalRow = el.querySelector('.confirm-total-row span:last-child');
         if (totalRow) totalRow.textContent = '$' + total.toLocaleString('es-AR');
+        if (document.getElementById('pmTotal')) _pmRenderResumen(); // v454
     }; // fin _doDelete
 
     if (filaElim) {
@@ -5086,6 +5209,11 @@ function _patchFilaModal(idx) {
     window._totalConRedondeo = total;
     const totalRow = el.querySelector('.confirm-total-row span:last-child');
     if (totalRow) totalRow.textContent = '$' + total.toLocaleString('es-AR');
+
+    // v454 — si había un pago mixto en curso, +/- en un producto cambiaba
+    // el total de arriba pero el panel de pago mixto (PAGADO/FALTA/VUELTO)
+    // se quedaba con los números viejos.
+    if (document.getElementById('pmTotal')) _pmRenderResumen();
 }
 
 function _reRenderModal() {
@@ -5157,6 +5285,26 @@ function abrirConfirmacion() {
     window._descuentoRedondeo = 0;
 
     seleccionarMetodo('efectivo');
+
+    // v453 — CORRECCIÓN de v450: aquel fix borraba el pago mixto entero al
+    // reabrir el modal, pensando que siempre era una venta distinta. Pero
+    // es un caso real y válido cerrar el modal a mitad de cobro para
+    // agregar otro producto (ej.: "el vuelto llévelo en caramelos" → se
+    // cierra, se agregan los caramelos, se vuelve a abrir) — ahí el pago
+    // ya cargado se tiene que mantener, solo se recalcula contra el total
+    // nuevo. Ahora NUNCA se borra acá — solo con "Vaciar carrito" o al
+    // confirmar el cobro con éxito.
+    if (_pagosMixtos.length > 0) {
+        _pagoMixtoActivo = true;
+        const panelMixto = document.getElementById('panelPagoMixto');
+        if (panelMixto) panelMixto.style.display = 'block';
+        const linkMixto = document.getElementById('pmToggleLink');
+        if (linkMixto) linkMixto.textContent = '➖ Ocultar pago mixto';
+        _pmRenderMedios();
+        _PM_MEDIOS_DEF.forEach((_, i) => { _pmActualizarEstadoMedio(i); _pmRenderDetalleCard(i); });
+        _pmRenderResumen();
+    }
+
     document.getElementById('modalConfirm').classList.add('open');
     // Ocultar FABs mientras el modal está abierto
     if (MOBILE) document.getElementById('fabStack').style.display = 'none';
@@ -5194,12 +5342,12 @@ let _cotizacionesCache = null;
 
 // Orden fijo — nunca se reordena ni se oculta ninguno.
 const _PM_MEDIOS_DEF = [
-    { metodo: 'EFECTIVO',      moneda: 'ARS', label: '💵 EFECTIVO' },
-    { metodo: 'EFECTIVO',      moneda: 'CLP', label: '🇨🇱 PESOS CHILENOS' },
-    { metodo: 'EFECTIVO',      moneda: 'USD', label: '🇺🇸 DÓLARES' },
-    { metodo: 'TARJETA',       moneda: 'ARS', label: '💳 TARJETA' },
-    { metodo: 'TRANSFERENCIA', moneda: 'ARS', label: '📱 TRANSFERENCIA' },
-    { metodo: 'FIADO',         moneda: 'ARS', label: '🧾 FIADO' }
+    { metodo: 'EFECTIVO',      moneda: 'ARS', emoji: '💵', nombre: 'EFECTIVO' },
+    { metodo: 'EFECTIVO',      moneda: 'CLP', emoji: '🇨🇱', nombre: 'PESOS CHILENOS' },
+    { metodo: 'EFECTIVO',      moneda: 'USD', emoji: '🇺🇸', nombre: 'DÓLARES' },
+    { metodo: 'TARJETA',       moneda: 'ARS', emoji: '💳', nombre: 'TARJETA' },
+    { metodo: 'TRANSFERENCIA', moneda: 'ARS', emoji: '📱', nombre: 'TRANSFERENCIA' },
+    { metodo: 'FIADO',         moneda: 'ARS', emoji: '🧾', nombre: 'FIADO' }
 ];
 
 async function _cargarCotizaciones() {
@@ -5238,6 +5386,31 @@ async function togglePagoMixto() {
 // se actualiza su contenido interno (_pmActualizarEstadoMedio), nunca se
 // recrean ni se reordenan.
 let _pmPagoIdSeq = 1; // v448 — id único por ingreso individual (para poder borrar uno solo)
+const PM_PENDIENTE_KEY = 'copihue_pago_mixto_pendiente'; // v453
+
+// v453 — el detalle de cómo se está cobrando ahora sobrevive a cerrar el
+// modal para agregar más productos (ej. dar caramelos en vez de vuelto) e
+// incluso a un refresh de página, igual que ya hace el carrito. Solo se
+// borra con "Vaciar carrito" o al confirmar el cobro con éxito.
+function _pmGuardarEstadoPendiente() {
+    if (!_pagosMixtos.length) { localStorage.removeItem(PM_PENDIENTE_KEY); return; }
+    try {
+        localStorage.setItem(PM_PENDIENTE_KEY, JSON.stringify({ pagos: _pagosMixtos, activo: _pagoMixtoActivo }));
+    } catch(e) { console.warn('⚠️ No se pudo guardar el pago mixto pendiente:', e); }
+}
+
+function _pmRestaurarEstadoPendiente() {
+    const guardado = localStorage.getItem(PM_PENDIENTE_KEY);
+    if (!guardado) return;
+    try {
+        const data = JSON.parse(guardado);
+        if (data && Array.isArray(data.pagos) && data.pagos.length) {
+            _pagosMixtos = data.pagos;
+            _pagoMixtoActivo = true;
+            _pmPagoIdSeq = Math.max(0, ..._pagosMixtos.map(p => p._id || 0)) + 1;
+        }
+    } catch(e) { localStorage.removeItem(PM_PENDIENTE_KEY); }
+}
 
 function _pmRenderMedios() {
     const cont = document.getElementById('pmMedios');
@@ -5246,8 +5419,11 @@ function _pmRenderMedios() {
         const esFiado = m.metodo === 'FIADO';
         return `<div class="pm-medio-card" id="pmCard${i}" data-idx="${i}" data-metodo="${m.metodo}" data-moneda="${m.moneda}">
             <div class="pm-medio-header" onclick="_pmToggleMedioCard(${i})">
-                <span class="pm-medio-nombre">${m.label}</span>
-                <span class="pm-medio-estado" id="pmEstado${i}">Tocar para cargar</span>
+                <span class="pm-medio-nombre"><span class="pm-medio-icono">${m.emoji}</span> ${m.nombre}</span>
+                <span style="display:flex;align-items:center;gap:8px;">
+                    <span class="pm-medio-estado" id="pmEstado${i}">Tocar</span>
+                    <span class="pm-medio-flecha" id="pmFlecha${i}">▾</span>
+                </span>
             </div>
             <div class="pm-medio-form">
                 <div id="pmDetalle${i}"></div>
@@ -5261,6 +5437,7 @@ function _pmRenderMedios() {
                 ` : ''}
                 <div class="pm-medio-pregunta">¿Cuánto recibís?</div>
                 <input class="pm-medio-input" id="pmInput${i}" type="number" inputmode="decimal" placeholder="Monto"
+                    onkeydown="if(event.key==='Enter'){event.preventDefault();_pmAgregarDesdeCard(${i});}"
                     ${esExtranjera ? `oninput="_pmActualizarPreviewCard(${i})"` : ''}>
                 ${esExtranjera ? `<div class="pm-medio-equivalente" id="pmEquiv${i}" style="display:none;"></div>` : ''}
                 <button class="pm-medio-btn-agregar" id="pmBtnAgregar${i}" onclick="_pmAgregarDesdeCard(${i})" style="margin-top:8px;">AGREGAR</button>
@@ -5342,6 +5519,7 @@ function _pmQuitarIngreso(pagoId) {
         _pmRenderDetalleCard(idx);
     }
     _pmRenderResumen();
+    _pmGuardarEstadoPendiente();
 }
 
 // Mismo patrón que fiadoFiltrarClientes()/fiadoSeleccionarCliente() del
@@ -5485,6 +5663,7 @@ function _pmAgregarDesdeCard(idx) {
         _pmActualizarEstadoMedio(idx);
         _pmRenderDetalleCard(idx);
         _pmRenderResumen();
+        _pmGuardarEstadoPendiente();
         return;
     }
 
@@ -5497,6 +5676,7 @@ function _pmAgregarDesdeCard(idx) {
     _pmActualizarEstadoMedio(idx);
     _pmRenderDetalleCard(idx);
     _pmRenderResumen();
+    _pmGuardarEstadoPendiente();
 }
 
 // v448 punto 2 — el importe recibido va en VERDE, a la derecha, tamaño
@@ -5507,7 +5687,7 @@ function _pmActualizarEstadoMedio(idx) {
     const estadoEl = document.getElementById('pmEstado' + idx);
     const entradas = _pagosMixtos.filter(p => p.metodo === def.metodo && p.moneda === def.moneda);
     if (!entradas.length) {
-        estadoEl.textContent = 'Tocar para cargar';
+        estadoEl.textContent = 'Tocar';
         estadoEl.classList.remove('pm-cargado');
         return;
     }
@@ -5533,17 +5713,18 @@ function _pmRenderResumen() {
     document.getElementById('pmTotal').textContent = '$' + total.toLocaleString('es-AR');
     document.getElementById('pmPagado').textContent = '$' + pagado.toLocaleString('es-AR');
 
-    // Mismo casillero: FALTA (rojo) mientras falta plata, VUELTO (verde,
-    // nunca negativo) cuando sobra — la geometría no cambia, solo el
-    // contenido y el color (v447 punto 2/10/11).
+    // Mismo casillero: FALTA (rojo) mientras falta plata, VUELTO (naranja
+    // — código de colores del sistema, no verde) cuando sobra — la
+    // geometría no cambia, solo el contenido y el color (v447 punto
+    // 2/10/11, ajustado en v451 a naranja).
     const faltaBox = document.getElementById('pmFaltaBox');
     const faltaLabel = document.getElementById('pmFaltaLabel');
     const faltaValor = document.getElementById('pmFaltaValor');
     if (vuelto > 0) {
-        faltaBox.style.background = '#e8f5e9';
-        faltaLabel.style.color = '#2e7d32';
+        faltaBox.style.background = '#fff3e0';
+        faltaLabel.style.color = '#e65100';
         faltaLabel.textContent = 'Vuelto';
-        faltaValor.style.color = '#2e7d32';
+        faltaValor.style.color = '#e65100';
         faltaValor.textContent = '$' + vuelto.toLocaleString('es-AR');
     } else {
         faltaBox.style.background = '#ffebee';
@@ -5669,11 +5850,12 @@ async function confirmarVentaMixta() {
             }
         }
 
-        window._ultimaVenta = { items: itemsSnapshot, total, totalOriginal: totalV, descuentoRedondeo: window._descuentoRedondeo || 0, hora, metodo: metodoPagoTexto };
+        window._ultimaVenta = { items: itemsSnapshot, total, totalOriginal: totalV, descuentoRedondeo: window._descuentoRedondeo || 0, hora, metodo: metodoPagoTexto, detallePagos };
 
         // Resetear panel mixto y volver el selector simple a Efectivo
         _pagoMixtoActivo = false;
         _pagosMixtos = [];
+        localStorage.removeItem(PM_PENDIENTE_KEY); // v453
         document.getElementById('panelPagoMixto').style.display = 'none';
         document.getElementById('pmToggleLink').textContent = '➕ Pago con varios métodos / monedas';
         seleccionarMetodo('efectivo');
@@ -5916,6 +6098,20 @@ function enviarTicketWA() {
     var meses = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
     var fecha = dias[hoy.getDay()] + ' ' + hoy.getDate() + ' ' + meses[hoy.getMonth()];
     var metodoLabel = { efectivo:'Efectivo', posnet:'Posnet', transferencia:'Transferencia' }[v.metodo] || v.metodo;
+    // v451 — si la venta fue con pago mixto, mostrar el detalle real en vez
+    // de solo la palabra "MIXTO" (que no le dice nada al cliente).
+    if (v.detallePagos && v.detallePagos.pagos && v.detallePagos.pagos.length > 1) {
+        var nombresMedio = { EFECTIVO:'Efectivo', TARJETA:'Tarjeta', TRANSFERENCIA:'Transferencia', FIADO:'Fiado' };
+        metodoLabel = v.detallePagos.pagos.map(function(p) {
+            var nombre = nombresMedio[p.metodo] || p.metodo;
+            if (p.moneda !== 'ARS') nombre += ' ' + p.moneda;
+            var monto = p.moneda === 'ARS' ? p.recibido : p.recibido + ' ' + p.moneda + ' (≈$' + p.equivalenteARS.toLocaleString('es-AR') + ')';
+            return '• ' + nombre + ': ' + (p.moneda === 'ARS' ? '$' + monto.toLocaleString('es-AR') : monto);
+        }).join('\n');
+        if (v.detallePagos.vueltoARS > 0) {
+            metodoLabel += '\nVuelto: $' + v.detallePagos.vueltoARS.toLocaleString('es-AR');
+        }
+    }
     var lineas = v.items.map(function(i) {
         var nombre = i.name.length > 28 ? i.name.substring(0, 28) + '...' : i.name;
         return i.qty + 'x ' + nombre + ' $' + (i.price * i.qty).toLocaleString('es-AR');
@@ -9945,6 +10141,8 @@ cargarProductos().then(async () => {
     } else {
         renderVenta();
     }
+    _pmRestaurarEstadoPendiente(); // v453 — pago mixto pendiente sobrevive a un refresh, igual que el carrito
+    _aplicarEstadoFabColapso(); // v457
 });
 </script>
 <!-- MODAL SELECTOR DE CANTIDAD -->
