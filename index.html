@@ -2846,7 +2846,7 @@
 
 <script>
 // ========== VERSIÓN Y CONFIGURACIÓN ==========
-const APP_VERSION = 'copihue-index-v192';
+const APP_VERSION = 'copihue-index-v191';
 // Tag versión automático con fecha
 // versionTag se actualiza desde config_sistema (campo 'version')
 
@@ -4646,60 +4646,12 @@ function actualizarTodasLasVistas() {
     _setLoadingProgress(3);
 }
 
-// ========== CACHE DE CATÁLOGO (localStorage) ==========
-// v192 — guarda la última respuesta buena del backend para pintar
-// el catálogo al instante en visitas repetidas, mientras en paralelo
-// se pide la versión fresca y se actualiza en silencio. No acorta el
-// tiempo real del backend, pero solo se paga una vez cada 10 minutos
-// por dispositivo en vez de en cada visita.
-const _CATALOGO_CACHE_KEY = 'copihue_catalogo_cache_v1';
-const _CATALOGO_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutos
-
-function _guardarCatalogoCache(datos) {
-    try {
-        localStorage.setItem(_CATALOGO_CACHE_KEY, JSON.stringify({ ts: Date.now(), datos: datos }));
-    } catch (e) {
-        // localStorage lleno o deshabilitado (modo privado, etc.) — seguimos sin cache, no rompe nada
-        console.warn('⚠️ No se pudo guardar cache de catálogo:', e.message);
-    }
-}
-
-function _leerCatalogoCache() {
-    try {
-        const raw = localStorage.getItem(_CATALOGO_CACHE_KEY);
-        if (!raw) return null;
-        const obj = JSON.parse(raw);
-        if (!obj || !obj.ts || !obj.datos) return null;
-        if (Date.now() - obj.ts > _CATALOGO_CACHE_TTL_MS) return null; // vencido, se pide fresco
-        return obj.datos;
-    } catch (e) {
-        return null;
-    }
-}
-
 // ========== CARGAR PRODUCTOS DESDE API ==========
 async function loadProductsFromAPI() {
     try {
         console.log('🚀 Cargando productos desde API...');
-
+        
         const TU_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzWZzDvdGfW8vd2-FpQolT852cdPMeHbfKugn9DBOlju75bE1D0SUNB5EKEDOsI2vP4lA/exec';
-
-        // Si hay cache vigente (< 10 min), pintamos ya con eso — el cliente ve
-        // el catálogo al instante en vez de esperar. El fetch fresco de abajo
-        // sigue su curso igual y sobreescribe todo apenas llega.
-        const datosCache = _leerCatalogoCache();
-        if (datosCache) {
-            console.log('⚡ Catálogo pintado desde cache local, refrescando en segundo plano...');
-            if (datosCache.productos && Array.isArray(datosCache.productos)) {
-                processAPIData(datosCache);
-            } else if (Array.isArray(datosCache)) {
-                processAPIData({ productos: datosCache });
-            }
-            renderCategories();
-            actualizarTodasLasVistas();
-            _setLoadingProgress(3);
-            ocultarLoadingOverlay();
-        }
 
         const respuesta = await fetch(TU_APPS_SCRIPT_URL + '?cache=' + Date.now(), {
             method: 'GET',
@@ -4712,10 +4664,8 @@ async function loadProductsFromAPI() {
 
         if (datos.productos && Array.isArray(datos.productos)) {
             processAPIData(datos);
-            _guardarCatalogoCache(datos);
         } else if (Array.isArray(datos)) {
             processAPIData({ productos: datos });
-            _guardarCatalogoCache({ productos: datos });
         } else {
             throw new Error('Formato de datos no reconocido');
         }
