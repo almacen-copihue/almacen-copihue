@@ -9850,24 +9850,46 @@ function _resumenGruposMulticompra(items) {
         if (!(AT > 0 && AU > 0 && qty >= AT)) return;
         const pnormalProm = g.totalNormal / qty;
         let totalConPack;
+        let numBloques = 0, cantidadPorBloque = 0;
         if (tipo === '2X' || tipo === '3X' || tipo === 'NX' || tipo === 'LLEVÁ-PAGÁ') {
             const ciclos = Math.floor(qty / AT);
             totalConPack = ciclos * AU + (qty % AT) * pnormalProm;
+            numBloques = ciclos;
+            cantidadPorBloque = AT;
         } else if (tipo === '2DA_UNIDAD') {
             const pares = Math.floor(qty / 2);
             totalConPack = pares * (pnormalProm + AU) + (qty % 2) * pnormalProm;
+            numBloques = pares;
+            cantidadPorBloque = 2;
         } else {
             totalConPack = g.totalNormal;
         }
         const ahorro = Math.round(g.totalNormal - totalConPack);
         if (ahorro <= 0) return;
+        // v470 — reparte el mismo "ahorro" ya calculado arriba en bloques
+        // individuales (uno por cada pack logrado), para mostrarlos como
+        // promos separadas al cliente en vez de un único número agregado.
+        // No recalcula ni cambia ahorro/totalConPack — solo lo divide en
+        // partes iguales; el resto de redondeo (si lo hay) cae en el
+        // último bloque para que la suma siga dando exacto.
+        const bloques = [];
+        if (numBloques > 0) {
+            const base = Math.floor(ahorro / numBloques);
+            let acumulado = 0;
+            for (let i = 0; i < numBloques; i++) {
+                const monto = (i === numBloques - 1) ? (ahorro - acumulado) : base;
+                acumulado += monto;
+                bloques.push({ cantidad: cantidadPorBloque, ahorro: monto });
+            }
+        }
         resumen.push({ grupo, qtyTotal: qty,
             totalNormal: Math.round(g.totalNormal),
             totalConPack: Math.round(totalConPack),
             ahorro, etiquetaPack: `📦 ${AT}x $${AU.toLocaleString('es-AR')}`,
             // v429 — para diferenciar "2 iguales" (mismo producto) de
             // "2 combinadas" (sabores/variantes distintos) en el texto
-            sonIguales: g.idsDistintos.size <= 1 });
+            sonIguales: g.idsDistintos.size <= 1,
+            bloques });
     });
     return resumen;
 }
@@ -9881,14 +9903,34 @@ function _totalCarritoConDescuentosGrupales(items) {
 }
 
 // Construye HTML del resumen de grupos para panel lateral y modal.
+// v470 — CAMBIO VISUAL (no toca cálculo): antes mostraba una sola línea
+// técnica agregada por grupo ("2x $9.000 · 4 unidades combinadas −$2.000").
+// Ahora muestra un bloque por cada pack logrado (mismo color que ya usa
+// la etiqueta/fondo de ese grupo en las filas del carrito, vía
+// _colorGrupoMulticompra), con lenguaje simple ("N unidades · Ahorraste
+// $X"), y cierra con el ahorro total de todas las ofertas juntas.
 function _resumenGrupalHTML() {
-    return _resumenGruposMulticompra().map(g => `
+    const grupos = _resumenGruposMulticompra();
+    if (!grupos.length) return '';
+    const filasBloques = grupos.map(g => {
+        const color = _colorGrupoMulticompra(g.grupo);
+        return g.bloques.map(b => `
         <div style="display:flex;justify-content:space-between;align-items:center;
-             padding:6px 12px;background:#F5F0FF;border-radius:6px;margin:4px 0;
-             font-size:0.78rem;color:#5B2A9E;">
-            <span>${g.etiquetaPack} · ${g.qtyTotal} ${g.sonIguales ? 'unidades iguales' : 'unidades combinadas'}</span>
-            <span style="font-weight:800;">−$${g.ahorro.toLocaleString('es-AR')}</span>
+             padding:6px 12px;background:${color}14;border-left:3px solid ${color};
+             border-radius:6px;margin:4px 0;font-size:0.78rem;color:${color};">
+            <span>📦 ${b.cantidad} unidades</span>
+            <span style="font-weight:800;">Ahorraste $${b.ahorro.toLocaleString('es-AR')}</span>
         </div>`).join('');
+    }).join('');
+    const ahorroTotal = grupos.reduce((s, g) => s + g.ahorro, 0);
+    const filaTotal = `
+        <div style="display:flex;justify-content:space-between;align-items:center;
+             padding:8px 12px;margin:6px 0 2px;font-size:0.82rem;font-weight:800;
+             color:#166534;">
+            <span>💰 AHORRASTE EN TOTAL</span>
+            <span>$${ahorroTotal.toLocaleString('es-AR')}</span>
+        </div>`;
+    return filasBloques + filaTotal;
 }
 
 // Actualiza el bloque visual de resumen grupal en el panel lateral.
