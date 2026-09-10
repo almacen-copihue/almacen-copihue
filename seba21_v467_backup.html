@@ -36,28 +36,36 @@
 
 ================================================================================
 
-  v467 — 07/9/2026
+  v467 — 09/9/2026
   ---------------------
-  • Multicompra grupal (gaseosas que combinan variantes, ej. Manaos,
-    Cunnington): antes se mostraban con un texto violeta clarito, sin
-    decir de qué grupo eran y sin ver el descuento por línea (el ahorro
-    solo aparecía sumado al pie). Ahora:
-    - Cada línea muestra el NOMBRE del grupo en el cartel ("📦 MANAOS ·
-      Combinable 3x $6.000"), y tiene su propia tarjeta de color de fondo
-      — un color distinto por grupo, asignado por orden de aparición en
-      la venta (nunca se repite entre dos grupos presentes al mismo
-      tiempo; antes un hash simple hacía chocar "MANAOS" y "CUNNINGTON"
-      en el mismo color, corregido antes de entregar).
-    - Cada línea muestra su parte proporcional del ahorro real del grupo
-      (tachado + nuevo precio + "−$X"), una vez que el grupo alcanzó el
-      mínimo combinado — antes de eso, sigue viéndose normal sin
-      descuento (no hay nada que repartir todavía). Mismo tratamiento en
-      el carrito y en el modal "Confirmar venta".
-    - Probado: suma de los ahorros estimados por línea coincide exacto
-      con el ahorro real del grupo (ej. $1.000 + $500 = $1.500).
-    Solo visual/cálculo de presentación — el total real de la venta lo
-    sigue calculando _totalCarritoConDescuentosGrupales() como siempre,
-    esto no lo toca.
+  • MEJORA — multicompra GRUPAL (combinable entre productos distintos) ahora
+    sigue el MISMO patrón visual que cualquier otra oferta, en vez de
+    mostrarse con precio plano: izquierda el producto con su badge, derecha
+    precio tachado (normal) arriba y precio con descuento abajo, ahorro en
+    verde debajo. Antes esto solo pasaba con multicompra individual (2X/3X
+    sin grupo); ahora es uniforme para todo tipo de multicompra, tanto en
+    el panel principal como en el modal "Confirmar venta". El ahorro del
+    grupo se reparte proporcionalmente entre las líneas participantes según
+    cuántas unidades aportó cada una (siempre suma exacto al ahorro total
+    del grupo).
+  • MEJORA — código de color por grupo/combo: cada grupo de multicompra
+    combinable tiene ahora un color pastel propio y ESTABLE (no cambia
+    entre renders), usado tanto en el badge de cada producto como en su
+    línea de descuento al pie — así se puede seguir de un vistazo qué
+    productos se están combinando en cada promo. Si son varias unidades
+    IGUALES del mismo producto formando más de un pack (ej. 6 unidades con
+    AT=3 → 2 packs), se muestran dos badges separados ("3x $X" + "3x $X"),
+    cada uno con su propio color dentro de la misma paleta — igual que
+    pedido: "si son 6 iguales, se los muestro 3x y 3x".
+  • MEJORA — sección de resumen (panel y modal): ahora muestra "Subtotal
+    (antes de combos)" arriba de la lista de descuentos, cada descuento con
+    el color de su grupo, y "Ahorro combos" en verde al pie, antes del
+    TOTAL final.
+  • Base: se agregaron _infoLineaMulticompraGrupal() (única fuente de
+    verdad para el cálculo proporcional por línea, la usan panel y modal
+    por igual) y _colorGrupoBg/_colorGrupoBorde/_colorGrupoTexto() (hash
+    determinístico de texto a color pastel — mismo grupo, mismo color,
+    siempre).
 
   v466 — 06/9/2026
   ---------------------
@@ -4936,7 +4944,6 @@ function limpiarVenta() {
         if (flecha) flecha.textContent = '›';
         localStorage.removeItem('copihue_pago_mixto_pendiente'); // v453
     }
-    _gruposColorAsignado.clear(); // v467 — próxima venta arranca con la paleta libre
 }
 
 // ========== RENDER VENTA ==========
@@ -5029,52 +5036,42 @@ function _renderVentaCompleta(ligero) {
 // reutilizada tanto por el render completo como por el patch quirúrgico
 // _patchFilaVenta() de abajo. No cambia ningún HTML/clase existente —
 // mismo template exacto, ahora con data-item-id para poder ubicar la fila.
-// v467 — color distinto por cada GRUPO_MULTICOMPRA (Manaos, Cunnington,
-// etc). Un hash simple podía hacer chocar dos nombres distintos en el
-// mismo color (probado: "MANAOS" y "CUNNINGTON" chocaban) — en cambio,
-// se asigna el próximo color libre de la paleta la primera vez que
-// aparece cada grupo en la venta actual, así dos grupos presentes al
-// mismo tiempo en el carrito NUNCA comparten color.
-const _GRUPO_MC_COLORES = ['#7C3AED', '#0891B2', '#DB2777', '#D97706', '#059669', '#DC2626', '#4F46E5', '#0D9488', '#CA8A04', '#0369A1'];
-let _gruposColorAsignado = new Map();
-function _colorGrupoMulticompra(grupo) {
-    const g = String(grupo || '');
-    if (!_gruposColorAsignado.has(g)) {
-        _gruposColorAsignado.set(g, _GRUPO_MC_COLORES[_gruposColorAsignado.size % _GRUPO_MC_COLORES.length]);
-    }
-    return _gruposColorAsignado.get(g);
-}
-
-// Estima el ahorro/precio de ESTA línea dentro de su grupo, repartiendo el
-// ahorro real del grupo (que solo se conoce una vez completo) en proporción
-// a la cantidad de esta línea. Antes de que el grupo llegue al mínimo,
-// _resumenGruposMulticompra() no lo incluye — en ese caso no hay nada que
-// mostrar todavía (fila normal, sin descuento).
-function _estimarGrupalLinea(item) {
-    const mc = _poolMulticompra.get(item.id);
-    if (!mc || !mc.grupo) return null;
-    const resumen = _resumenGruposMulticompra().find(g => g.grupo === mc.grupo);
-    if (!resumen) return { grupo: mc.grupo, color: _colorGrupoMulticompra(mc.grupo), ahorro: 0, completo: false };
-    const ahorroLinea = Math.round(resumen.ahorro * (item.qty / resumen.qtyTotal));
-    return { grupo: mc.grupo, color: _colorGrupoMulticompra(mc.grupo), ahorro: ahorroLinea, completo: true };
-}
-
 function _filaVentaHTML(item, esDesktopPanel) {
     const imgSrc = `imagenes-productos/${simplificarNombre(item.name)}.jpg`;
 
+    // v10.15 — multicompra GRUPAL: antes se mostraba con precio plano (sin
+    // tachado ni ahorro), tratamiento aparte de todas las demás ofertas.
+    // Ahora se calcula la parte proporcional de ahorro que le toca a ESTA
+    // línea dentro de su grupo, para que se vea con el MISMO patrón que
+    // cualquier otra oferta: tachado + precio + ahorro en verde.
+    const infoGrupal = (item.ofertaTipo === 'multicompra-grupal') ? _infoLineaMulticompraGrupal(item) : null;
+
     // ── Calcular precios y ahorro ──────────────────────────────
-    const tieneOferta  = item.precioModificado && item.precioOriginal > 0 && item.precioOriginal > item.price
+    const tieneOferta  = (infoGrupal && infoGrupal.lineAhorro > 0)
+                      || item.precioModificado && item.precioOriginal > 0 && item.precioOriginal > item.price
                       || (item.ofertaTipo === 'promo' || item.ofertaTipo === 'combo') && item.ofertaEtiqueta;
-    const precioUnit   = item.price;
+    // precioUnit/precioOriginalUnit: valores POR UNIDAD (igual que el resto
+    // de las ofertas en este panel) — item.price ya es el precio normal
+    // para líneas grupales, así que sirve directo como "antes".
+    const precioOriginalUnit = infoGrupal ? item.price : item.precioOriginal;
+    const precioUnit   = infoGrupal ? Math.round(infoGrupal.lineConPack / item.qty) : item.price;
     // NxM: usar precioTotalCalc si existe (evita desvíos por redondeo de unitario promedio)
-    const subtotal     = item.precioTotalCalc != null ? item.precioTotalCalc : Math.round(precioUnit * item.qty);
-    const ahorroTotal  = tieneOferta ? Math.round(item.precioOriginal * item.qty - subtotal) : 0;
+    const subtotal     = infoGrupal ? infoGrupal.lineConPack
+                        : (item.precioTotalCalc != null ? item.precioTotalCalc : Math.round(precioUnit * item.qty));
+    const ahorroTotal  = infoGrupal ? infoGrupal.lineAhorro
+                        : (tieneOferta ? Math.round(item.precioOriginal * item.qty - subtotal) : 0);
 
     // ── Texto de fórmula según tipo ────────────────────────────
     let formulaHTML = '';
     let colOferta   = '';   // color del badge
-    let grupalInfo  = null; // v467 — solo se llena para multicompra-grupal
-    if ((tieneOferta || item.ofertaTipo === 'multicompra-grupal') && item.ofertaEtiqueta) {
+    if (infoGrupal) {
+        // v10.15 — un chip de color por pack formado (mismo color estable
+        // por grupo/pack en todo el panel y el modal de confirmar venta).
+        colOferta = infoGrupal.colorTexto;
+        formulaHTML = `<div class="item-oferta-formula" style="display:flex;flex-wrap:wrap;gap:3px;">` +
+            infoGrupal.badges.map(b => `<span style="background:${b.bg};border:1px solid ${b.borde};color:${b.col};font-size:.6rem;font-weight:700;padding:1px 6px;border-radius:6px;white-space:nowrap;">${b.texto}</span>`).join('') +
+            `</div>`;
+    } else if (tieneOferta && item.ofertaEtiqueta) {
         const tipo = item.ofertaTipo || '';
         if (tipo === 'cervecero') {
             colOferta = '#1565c0';
@@ -5092,14 +5089,6 @@ function _filaVentaHTML(item, esDesktopPanel) {
         } else if (tipo === 'multicompra') {
             colOferta = '#7C3AED';
             formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">${item.ofertaEtiqueta || '📦 Multicompra'}</div>`;
-        } else if (tipo === 'multicompra-grupal') {
-            // v467 — un color propio por grupo (Manaos, Cunnington, etc) y
-            // el nombre del grupo visible en la etiqueta, para saber de un
-            // vistazo con qué está combinando cada producto.
-            grupalInfo = _estimarGrupalLinea(item);
-            colOferta = grupalInfo ? grupalInfo.color : '#7C3AED';
-            const nombreGrupo = grupalInfo ? grupalInfo.grupo : '';
-            formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta};white-space:normal;">📦 ${nombreGrupo} · ${item.ofertaEtiqueta ? item.ofertaEtiqueta.replace('📦 Combinable ', '') : 'Combinable'}</div>`;
         } else if (tipo === 'ultimas') {
             colOferta = '#b71c1c';
             formulaHTML = `<div class="item-oferta-formula" style="color:${colOferta}">${item.ofertaEtiqueta || '🏷️ ÚLTIMAS UNIDADES'}</div>`;
@@ -5115,26 +5104,12 @@ function _filaVentaHTML(item, esDesktopPanel) {
         }
     }
 
-    // v467 — si la línea es de un grupo YA completo (alcanzó el mínimo
-    // combinado), se le da el mismo trato visual que a las demás ofertas:
-    // tarjeta de color + precio tachado/nuevo + ahorro, en vez de quedar
-    // aparte esperando el resumen del pie. El monto es la parte proporcional
-    // de esta línea dentro del ahorro real del grupo.
-    const grupalConDescuento = grupalInfo && grupalInfo.completo && grupalInfo.ahorro > 0;
-    const subtotalMostrado = grupalConDescuento ? (subtotal - grupalInfo.ahorro) : subtotal;
-
     // ── Columna de precio ──────────────────────────────────────
     const precioColHTML = tieneOferta
         ? `<div style="flex-shrink:0;text-align:right;min-width:64px;">
-            <span class="item-precio-antes">$${item.precioOriginal.toLocaleString('es-AR')}</span>
+            <span class="item-precio-antes">$${precioOriginalUnit.toLocaleString('es-AR')}</span>
             <span class="item-precio-con-oferta" style="color:${colOferta||'var(--verde-oscuro)'}">$${precioUnit.toLocaleString('es-AR')}</span>
             ${item.esPeso ? '' : `<span class="item-ahorro-badge">−$${ahorroTotal.toLocaleString('es-AR')}</span>`}
-          </div>`
-        : grupalConDescuento
-        ? `<div style="flex-shrink:0;text-align:right;min-width:64px;">
-            <span class="item-precio-antes">$${precioUnit.toLocaleString('es-AR')}</span>
-            <span class="item-precio-con-oferta" style="color:${colOferta}">≈$${Math.round(subtotalMostrado / item.qty).toLocaleString('es-AR')}</span>
-            <span class="item-ahorro-badge">−$${grupalInfo.ahorro.toLocaleString('es-AR')}</span>
           </div>`
         : `<span class="item-precio-editable ${item.precioModificado ? 'modificado' : ''}"
                  onclick="editarPrecioCarrito('${item.id}')"
@@ -5142,12 +5117,8 @@ function _filaVentaHTML(item, esDesktopPanel) {
              $${precioUnit.toLocaleString('es-AR')}
            </span>`;
 
-    // v467 — tarjeta de color de fondo (bien suave) cuando el grupo combinó
-    // — para diferenciarlo de un vistazo del resto del carrito.
-    const fondoGrupal = grupalInfo ? `background:${grupalInfo.color}14;border-radius:10px;` : '';
-
     return `
-    <div class="item-venta" data-item-id="${item.id}" style="${fondoGrupal}">
+    <div class="item-venta" data-item-id="${item.id}">
         ${esDesktopPanel ? `<img class="item-venta-img" src="${imgSrc}"
              onerror="this.style.display='none'"
              onclick="abrirInfoProd(${item.esPeso ? item.idOriginal : item.id})"
@@ -5170,7 +5141,7 @@ function _filaVentaHTML(item, esDesktopPanel) {
             `}
         </div>
         ${precioColHTML}
-        <div class="item-subtotal">$${subtotalMostrado.toLocaleString('es-AR')}</div>
+        <div class="item-subtotal">$${subtotal.toLocaleString('es-AR')}</div>
     </div>`;
 }
 
@@ -5334,8 +5305,14 @@ function _buildDetalleModalHTML() {
 // _patchFilaModal(), así ambos generan EXACTAMENTE el mismo HTML y no puede
 // quedar una fila "a medias" (cantidad nueva pero precio/tachado/ahorro viejos).
 function _filaModalHTML(item, idx, esDesktop) {
-    const subtotalBruto = item.precioTotalCalc != null ? item.precioTotalCalc : Math.round(item.price * item.qty);
-    const tieneOferta = (item.precioModificado && item.precioOriginal > item.price)
+    // v10.15 — multicompra GRUPAL: mismo tratamiento que el resto de las
+    // ofertas (tachado + precio + ahorro en verde), en vez de precio plano.
+    const infoGrupal = (item.ofertaTipo === 'multicompra-grupal') ? _infoLineaMulticompraGrupal(item) : null;
+
+    const subtotal    = infoGrupal ? infoGrupal.lineConPack
+                       : (item.precioTotalCalc != null ? item.precioTotalCalc : Math.round(item.price * item.qty));
+    const tieneOferta = (infoGrupal && infoGrupal.lineAhorro > 0)
+                     || (item.precioModificado && item.precioOriginal > item.price)
                      || (item.ofertaTipo === 'promo' || item.ofertaTipo === 'combo') && !!item.ofertaEtiqueta;
 
     const colores = {
@@ -5345,56 +5322,39 @@ function _filaModalHTML(item, idx, esDesktop) {
         promo: '#6a1b9a', combo: '#00838f',
         multicompra: '#7C3AED'
     };
+    const col = infoGrupal ? infoGrupal.colorTexto : (colores[item.ofertaTipo] || '#f9a825');
 
-    // v467 — mismo trato que en el carrito: color propio por grupo, nombre
-    // del grupo en el badge, descuento estimado proporcional a esta línea
-    // (una vez que el grupo alcanzó el mínimo combinado).
-    const grupalInfo = item.ofertaTipo === 'multicompra-grupal' ? _estimarGrupalLinea(item) : null;
-    const grupalConDescuento = grupalInfo && grupalInfo.completo && grupalInfo.ahorro > 0;
-    const subtotal = grupalConDescuento ? (subtotalBruto - grupalInfo.ahorro) : subtotalBruto;
-    const col = grupalInfo ? grupalInfo.color : (colores[item.ofertaTipo] || '#f9a825');
+    // v10.15 — con multicompra grupal, un chip por pack formado (mismo
+    // color estable que usa la fila del panel principal y el resumen de
+    // abajo, así se puede seguir de un vistazo qué pertenece a qué combo).
+    const badgeHTML = infoGrupal
+        ? infoGrupal.badges.map(b => `<span style="background:${b.bg};border:1px solid ${b.borde};color:${b.col};font-size:.55rem;font-weight:700;padding:1px 5px;border-radius:6px;white-space:nowrap;margin-left:3px;">${b.texto}</span>`).join('')
+        : (item.ofertaEtiqueta
+            ? `<span style="background:${col};color:#fff;font-size:.55rem;font-weight:800;padding:1px 5px;border-radius:6px;white-space:nowrap;margin-left:3px;">${item.ofertaEtiqueta}</span>`
+            : '');
 
-    const etiquetaMostrada = grupalInfo && item.ofertaEtiqueta
-        ? `📦 ${grupalInfo.grupo} · ${item.ofertaEtiqueta.replace('📦 Combinable ', '')}`
-        : item.ofertaEtiqueta;
-    const badgeHTML = etiquetaMostrada
-        ? `<span style="background:${col};color:#fff;font-size:.55rem;font-weight:800;padding:1px 5px;border-radius:6px;white-space:nowrap;margin-left:3px;">${etiquetaMostrada}</span>`
-        : '';
+    const precioNormalTotal = infoGrupal ? infoGrupal.lineNormal : (item.precioOriginal * item.qty);
+    const ahorroTotalLinea  = infoGrupal ? infoGrupal.lineAhorro : ((item.precioOriginal - item.price) * item.qty);
 
     const precioColModal = tieneOferta
         ? `<div style="text-align:right;min-width:72px;flex-shrink:0;">
             <span style="font-size:0.62rem;color:#bbb;text-decoration:line-through;display:block;">
-                $${(item.precioOriginal * item.qty).toLocaleString('es-AR')}
+                $${Math.round(precioNormalTotal).toLocaleString('es-AR')}
             </span>
             <span style="font-weight:800;font-size:0.9rem;color:${col};">
                 $${subtotal.toLocaleString('es-AR')}
             </span>
             ${item.esPeso ? '' : `<span style="font-size:0.55rem;background:#e8f5e9;color:#2e7d32;border-radius:4px;padding:0 4px;display:block;">
-                −$${((item.precioOriginal - item.price) * item.qty).toLocaleString('es-AR')}
+                −$${Math.round(ahorroTotalLinea).toLocaleString('es-AR')}
             </span>`}
            </div>`
-        : grupalConDescuento
-        ? `<div style="text-align:right;min-width:72px;flex-shrink:0;">
-            <span style="font-size:0.62rem;color:#bbb;text-decoration:line-through;display:block;">
-                $${subtotalBruto.toLocaleString('es-AR')}
-            </span>
-            <span style="font-weight:800;font-size:0.9rem;color:${col};">
-                ≈$${subtotal.toLocaleString('es-AR')}
-            </span>
-            <span style="font-size:0.55rem;background:#e8f5e9;color:#2e7d32;border-radius:4px;padding:0 4px;display:block;">
-                −$${grupalInfo.ahorro.toLocaleString('es-AR')}
-            </span>
-           </div>`
         : `<span style="font-weight:700;min-width:64px;text-align:right;font-size:0.9rem;flex-shrink:0;">$${subtotal.toLocaleString('es-AR')}</span>`;
-
-    // v467 — tarjeta de color de fondo (bien suave) para líneas de un grupo combinado
-    const fondoGrupal = grupalInfo ? `background:${grupalInfo.color}14;` : '';
 
     // Fila unificada mobile+desktop — tap=+1, botones − y +, swipe izquierda=-1
     return `<div class="confirm-item confirm-fila-editable"
                  data-idx="${idx}"
                  onclick="_modalQty(${idx},1)"
-                 style="display:flex;align-items:center;gap:8px;padding:9px 12px;cursor:pointer;user-select:none;${fondoGrupal}">
+                 style="display:flex;align-items:center;gap:8px;padding:9px 12px;cursor:pointer;user-select:none;">
         ${esDesktop ? `<img src="imagenes-productos/${simplificarNombre(item.name)}.jpg"
              onerror="this.style.display='none'"
              style="width:34px;height:34px;border-radius:6px;object-fit:cover;background:#e8f5e9;flex-shrink:0;">` : ''}
@@ -9819,27 +9779,92 @@ function _resumenGruposMulticompra(items) {
         const AT = g.AT, AU = g.AU, tipo = g.tipo, qty = g.qtyTotal;
         if (!(AT > 0 && AU > 0 && qty >= AT)) return;
         const pnormalProm = g.totalNormal / qty;
-        let totalConPack;
+        let totalConPack, ciclos;
         if (tipo === '2X' || tipo === '3X' || tipo === 'NX' || tipo === 'LLEVÁ-PAGÁ') {
-            const ciclos = Math.floor(qty / AT);
+            ciclos = Math.floor(qty / AT);
             totalConPack = ciclos * AU + (qty % AT) * pnormalProm;
         } else if (tipo === '2DA_UNIDAD') {
-            const pares = Math.floor(qty / 2);
-            totalConPack = pares * (pnormalProm + AU) + (qty % 2) * pnormalProm;
+            ciclos = Math.floor(qty / 2);
+            totalConPack = ciclos * (pnormalProm + AU) + (qty % 2) * pnormalProm;
         } else {
+            ciclos = 0;
             totalConPack = g.totalNormal;
         }
         const ahorro = Math.round(g.totalNormal - totalConPack);
         if (ahorro <= 0) return;
+        // v10.15 — color estable por grupo (mismo grupo = mismo color siempre,
+        // no cambia entre renders) para que se pueda seguir visualmente qué
+        // productos se están combinando en cada promo.
         resumen.push({ grupo, qtyTotal: qty,
             totalNormal: Math.round(g.totalNormal),
             totalConPack: Math.round(totalConPack),
             ahorro, etiquetaPack: `📦 ${AT}x $${AU.toLocaleString('es-AR')}`,
             // v429 — para diferenciar "2 iguales" (mismo producto) de
             // "2 combinadas" (sabores/variantes distintos) en el texto
-            sonIguales: g.idsDistintos.size <= 1 });
+            sonIguales: g.idsDistintos.size <= 1,
+            AT, AU, ciclos,
+            colorBg: _colorGrupoBg(grupo), colorBorde: _colorGrupoBorde(grupo), colorTexto: _colorGrupoTexto(grupo) });
     });
     return resumen;
+}
+
+// v10.15 — Color pastel estable (hash determinístico del texto, no random
+// verdadero) para identificar visualmente cada grupo/combo de multicompra.
+// Mismo grupo (o mismo grupo+pack) siempre da el mismo color, tanto en el
+// panel principal como en el modal de confirmar venta, y no cambia entre
+// renders — un color que cambiara solo por re-renderizar confundiría más
+// de lo que ayuda.
+function _hashColorSeed(seed) {
+    let h = 0;
+    const s = String(seed);
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return h % 360;
+}
+function _colorGrupoBg(seed)    { return `hsl(${_hashColorSeed(seed)}, 70%, 91%)`; }
+function _colorGrupoBorde(seed) { return `hsl(${_hashColorSeed(seed)}, 50%, 72%)`; }
+function _colorGrupoTexto(seed) { return `hsl(${_hashColorSeed(seed)}, 60%, 30%)`; }
+
+// v10.15 — dado un ítem con multicompra GRUPAL activa, calcula la parte
+// proporcional del ahorro del grupo que le corresponde a ESTA línea (una
+// sola fuente de verdad, la usan tanto _filaVentaHTML del panel como
+// _filaModalHTML del modal de confirmar venta). El descuento real se define
+// a nivel de grupo (varios productos se combinan entre sí); acá se reparte
+// ese ahorro entre las líneas participantes según cuántas unidades aportó
+// cada una, para que cada producto se vea con el mismo patrón que cualquier
+// otra oferta: tachado + precio + ahorro en verde, en vez de precio plano.
+function _infoLineaMulticompraGrupal(item) {
+    const mc = _poolMulticompra.get(item.id);
+    if (!mc || !mc.grupo) return null;
+    const resumen = _resumenGruposMulticompra().find(g => g.grupo === mc.grupo);
+    if (!resumen || resumen.qtyTotal <= 0) return null;
+    const lineNormal  = Math.round((item.price || 0) * item.qty); // item.price = precio normal en líneas grupales
+    const lineAhorro  = Math.round(resumen.ahorro * item.qty / resumen.qtyTotal);
+    const lineConPack = lineNormal - lineAhorro;
+
+    // Badges: si el grupo es de UN SOLO producto (sonIguales) y forma más de
+    // un pack completo (ej. 6 unidades iguales con AT=3 → 2 packs), se
+    // muestra un badge por pack — "3x $X" + "3x $X" — cada uno con su propio
+    // color dentro de la misma paleta, para que el cliente vea cómo se van
+    // formando los packs. Si el grupo combina productos distintos, se usa
+    // un solo badge con el color del grupo (qué unidad exacta de qué
+    // producto fue a qué pack no se desglosa, para no complicar la lectura).
+    let badges;
+    if (resumen.sonIguales && resumen.ciclos > 1) {
+        badges = [];
+        for (let k = 0; k < resumen.ciclos; k++) {
+            const seed = mc.grupo + '#' + k;
+            badges.push({
+                texto: `📦 ${resumen.AT}x $${resumen.AU.toLocaleString('es-AR')}`,
+                bg: _colorGrupoBg(seed), borde: _colorGrupoBorde(seed), col: _colorGrupoTexto(seed)
+            });
+        }
+    } else {
+        badges = [{
+            texto: `📦 ${resumen.AT}x $${resumen.AU.toLocaleString('es-AR')}`,
+            bg: resumen.colorBg, borde: resumen.colorBorde, col: resumen.colorTexto
+        }];
+    }
+    return { lineNormal, lineAhorro, lineConPack, badges, colorBg: resumen.colorBg, colorTexto: resumen.colorTexto };
 }
 
 // Total real descontando ahorro grupal. Usar en lugar de ventaActual.reduce.
@@ -9851,14 +9876,32 @@ function _totalCarritoConDescuentosGrupales(items) {
 }
 
 // Construye HTML del resumen de grupos para panel lateral y modal.
+// v10.15 — antes solo listaba cada grupo en un color púrpura fijo. Ahora:
+// 1) cada grupo tiene su propio color estable (mismo criterio que las
+//    líneas de producto, así el badge de la línea y su descuento acá abajo
+//    se ven con el mismo color); 2) se agrega "Subtotal (antes de combos)"
+//    arriba de la lista de descuentos y "Ahorro combos" en verde al pie,
+//    como pidió el usuario.
 function _resumenGrupalHTML() {
-    return _resumenGruposMulticompra().map(g => `
+    const grupos = _resumenGruposMulticompra();
+    if (!grupos.length) return '';
+    const subtotalBruto = Math.round((ventaActual || []).reduce((s, i) => s + i.price * i.qty, 0));
+    const ahorroTotal   = grupos.reduce((s, g) => s + g.ahorro, 0);
+    const lineas = grupos.map(g => `
         <div style="display:flex;justify-content:space-between;align-items:center;
-             padding:6px 12px;background:#F5F0FF;border-radius:6px;margin:4px 0;
-             font-size:0.78rem;color:#5B2A9E;">
-            <span>${g.etiquetaPack} · ${g.qtyTotal} ${g.sonIguales ? 'unidades iguales' : 'unidades combinadas'}</span>
+             padding:6px 12px;background:${g.colorBg};border:1px solid ${g.colorBorde};border-radius:6px;margin:4px 0;
+             font-size:0.78rem;color:${g.colorTexto};">
+            <span>${g.etiquetaPack}${g.ciclos > 1 ? ' ×' + g.ciclos : ''} · ${g.qtyTotal} ${g.sonIguales ? 'unidades iguales' : 'unidades combinadas'}</span>
             <span style="font-weight:800;">−$${g.ahorro.toLocaleString('es-AR')}</span>
         </div>`).join('');
+    return `
+        <div style="display:flex;justify-content:space-between;padding:4px 12px;font-size:0.78rem;color:#777;">
+            <span>Subtotal (antes de combos)</span><span>$${subtotalBruto.toLocaleString('es-AR')}</span>
+        </div>
+        ${lineas}
+        <div style="display:flex;justify-content:space-between;padding:4px 12px;font-size:0.8rem;font-weight:800;color:#2e7d32;">
+            <span>Ahorro combos</span><span>−$${Math.round(ahorroTotal).toLocaleString('es-AR')}</span>
+        </div>`;
 }
 
 // Actualiza el bloque visual de resumen grupal en el panel lateral.
