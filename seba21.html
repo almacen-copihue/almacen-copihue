@@ -36,6 +36,34 @@
 
 ================================================================================
 
+  v474 — 11/9/2026
+  ---------------------
+  FIX CRÍTICO DE RAÍZ — tenías razón, era el Code.gs. Comparaste el
+  Code.gs viejo (v10.10) contra el actual (v10.15, ya aplicado en tu Apps
+  Script) y encontramos la pieza que faltaba del lado del frontend:
+    • El motor de precio REAL del carrito, _poolMulticompra, se armaba
+      EXCLUSIVAMENTE desde data.multicompraActiva (getOfertas()), que
+      tiene un tope de 6 productos (pensado para no saturar el catálogo/
+      flyer con demasiadas ofertas destacadas — límite correcto para ESE
+      uso, mal reutilizado acá). Si ya había 6 productos con multicompra
+      activa antes en la planilla, los productos siguientes (ej. Manaos,
+      Cunnington) quedaban totalmente afuera del cálculo — no aplicaban
+      descuento NUNCA, sin importar la cantidad en el carrito. No era el
+      reparto proporcional, no era el sistema de tarjetas, no era "SI" vs
+      "TRUE" — era el catálogo filtrando en silencio el motor de cobro.
+    • El backend (v10.15, ya lo tenías corriendo) agregó mcTipo y mcGrupo
+      al listado COMPLETO de productos (sin límite), junto a mcActiva/
+      mcCantidad/mcPrecio que ya estaban. Pero el frontend nunca leía esos
+      2 campos nuevos ni cambió de dónde arma el pool — seguía usando la
+      lista capada a 6. Ahora:
+      - El mapeo de productos lee también mcTipo/mcGrupo (antes solo
+        mcActiva/mcCantidad/mcPrecio).
+      - _poolMulticompra se arma recorriendo el listado COMPLETO de
+        productos (filtrando por mcActiva), no data.multicompraActiva.
+  Con esto, cualquier producto con multicompra activa en la planilla
+  entra al motor de precio sin importar cuántos otros ya la tengan activa
+  — se acabó el límite de 6 silencioso.
+
   v473 — 11/9/2026
   ---------------------
   REVERTIDO — sistema de tarjetas de multicompra por prioridad (v10.19,
@@ -1804,7 +1832,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>🛒 POS · Copihue v473</title>
+    <title>🛒 POS · Copihue v474</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -4316,6 +4344,10 @@ async function cargarProductos() {
                 mcActiva: Boolean(p.mcActiva),
                 mcCantidad: parseInt(p.mcCantidad) || 0,
                 mcPrecio: parseInt(p.mcPrecio) || 0,
+                // v10.22 — mcTipo/mcGrupo (backend v10.15): antes NO se leían acá,
+                // solo existían en la lista capada a 6 de multicompraActiva.
+                mcTipo: String(p.mcTipo || '').trim().toUpperCase(),
+                mcGrupo: String(p.mcGrupo || '').trim().toUpperCase(),
                 stockMin: parseInt(p.stockMin) || 0,
                 relampago: (p.relampago !== undefined && p.relampago !== null && p.relampago !== '') ? (isNaN(parseInt(p.relampago)) ? String(p.relampago).trim() : parseInt(p.relampago)) : 0,
                 destacada: parseInt(p.destacada) || 0,
@@ -9751,14 +9783,29 @@ async function cargarPoolsOfertas() {
         (data.destacadasActivas || []).filter(p => p.categoria !== 'CERVEZAS').forEach(p => _poolIdsDestacadas.add(Number(p.id)));
         _destacadasFiltradas = new Set([..._poolIdsDestacadas]); // sincronizado con backend
         _poolMulticompra.clear();
-        (data.multicompraActiva || []).forEach(p => {
-            const local = productos.find(lp => lp.id === Number(p.id));
-            if (local) _poolMulticompra.set(local.id, {
-                tipo:     p.MULTICOMPRA_TIPO     || '',
-                cantidad: p.MULTICOMPRA_CANTIDAD || 0,
-                precio:   p.MULTICOMPRA_PRECIO   || 0,
-                grupo:    p.GRUPO_MULTICOMPRA    || ''
-            });
+        // v10.22 — FIX CRÍTICO DE RAÍZ (backend v10.15, confirmado comparando
+        // Code.gs viejo vs actual): _poolMulticompra —el motor de precio REAL
+        // que usa el carrito— se armaba EXCLUSIVAMENTE desde
+        // data.multicompraActiva (getOfertas()), que tiene un tope de 6
+        // productos (pensado para no saturar el catálogo/flyer con demasiadas
+        // ofertas destacadas). Si ya había 6 productos con multicompra activa
+        // antes en la planilla, los siguientes (ej. Manaos, Cunnington)
+        // quedaban afuera del cálculo de precio real — nunca aplicaban
+        // descuento, sin importar la cantidad en el carrito. No era un
+        // problema de "SI" vs "TRUE" ni del reparto proporcional — era el
+        // límite del catálogo filtrando en silencio el motor de cobro.
+        // Ahora se arma desde el listado COMPLETO de productos (sin límite),
+        // usando mcActiva/mcTipo/mcCantidad/mcPrecio/mcGrupo, ya expuestos
+        // ahí por el backend desde v10.15.
+        productos.forEach(p => {
+            if (p.mcActiva) {
+                _poolMulticompra.set(p.id, {
+                    tipo:     p.mcTipo || '',
+                    cantidad: p.mcCantidad || 0,
+                    precio:   p.mcPrecio || 0,
+                    grupo:    p.mcGrupo || ''
+                });
+            }
         });
         (data.especialesActivas || []).filter(p => p.categoria !== 'CERVEZAS').forEach(p => _poolIdsEspeciales.add(Number(p.id)));
         // Solo se usan las seleccionadas manualmente — nunca fallback automático
