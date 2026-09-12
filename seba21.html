@@ -4387,6 +4387,7 @@ async function cargarProductos() {
         setTimeout(procesarVencidosDeAyer, 1500); // auto-zero stock confirmados ayer
         setTimeout(verificarAlertasDelDia, 800);
         setTimeout(alertarFiadosVencidos, 4000);  // fiados vencidos (1 llamada/día)
+        setTimeout(() => alertarMulticompraBloqueada(data.alertasMulticompra), 900); // v10.17 — blindaje de promociones
         programarRecordatorioCierre();
         // Recuperar carrito pendiente si existe
         setTimeout(verificarVentaPendiente, 1000);
@@ -8944,6 +8945,35 @@ async function procesarVencidosDeAyer() {
             nombresFail.join(', ') + ' · Hacelo manualmente en la planilla', '#e65100');
         console.warn('⚠️ Auto-zero falló para:', nombresFail);
     }
+}
+
+// ── Blindaje de promociones: alerta de multicompra bloqueada (v10.17) ───────
+// Reusa el mismo panel de notificaciones que el resto del POS (agregarNotifPos
+// / NOTIF_POS_KEY) — no crea ningún sistema de alertas paralelo. La lista
+// data.alertasMulticompra viene del backend (Code.gs): cada producto ahí
+// sigue vendiéndose normal a su precio base, solo su multicompra quedó sin
+// publicar por no dar ahorro real. Se avisa una vez por día por cada
+// combinación producto+cantidad+precio ya notificada, para no repetir el
+// mismo aviso en cada recarga; si el motivo cambia (ej. otro precio cargado)
+// se vuelve a avisar.
+function alertarMulticompraBloqueada(alertas) {
+    if (!alertas || alertas.length === 0) return;
+    const hoyKey = fechaArgentina();
+    const lsKey = 'copihue_mc_bloqueada_alertadas_' + hoyKey;
+    let yaAlertadas = [];
+    try { yaAlertadas = JSON.parse(localStorage.getItem(lsKey) || '[]'); } catch(e) { yaAlertadas = []; }
+
+    const clave = a => `${a.producto}|${a.cantidad}|${a.precioPack}|${a.precioBase}`;
+    const nuevas = alertas.filter(a => !yaAlertadas.includes(clave(a)));
+    if (nuevas.length === 0) return;
+
+    nuevas.forEach(a => {
+        agregarNotifPos('🚨', 'Multicompra bloqueada',
+            `${a.producto} · Base $${a.precioBase} · Promo ${a.cantidad}×$${a.precioPack} · ${a.motivo} · Sigue vendiéndose a $${a.precioBase}`,
+            '#c62828');
+    });
+
+    localStorage.setItem(lsKey, JSON.stringify(Array.from(new Set(yaAlertadas.concat(alertas.map(clave))))));
 }
 
 // ── Alerta de fiados vencidos ────────────────────────────────────────────────
