@@ -212,8 +212,51 @@ contra esta tabla o preguntarme.
 7. Una cosa por vez, sin excepciones.
 
 ## CHANCE LOG — OBLIGATORIO
-Al final de cada sesión de trabajo relevante, generar un CHANCE LOG
-descriptivo (no un changelog técnico — un registro con contexto y
-recuperación, pensado para que cualquier IA o yo mismo en 3 meses pueda
-reconstruir qué pasó y por qué). Estructura: QUÉ / POR QUÉ / CÓMO / DÓNDE
-/ PROBLEMA QUE EVITA O RESUELVE / SI SE ROMPE / PENDIENTE.
+Registro descriptivo de cada sesión de desarrollo con IA, en su propio
+archivo `CHANCE_LOG.md` (no vive dentro de este `CLAUDE.md`, para no
+hacerlo crecer sin límite). NO es un changelog técnico de una línea por
+cambio — es un registro con contexto y capacidad de recuperación, pensado
+para que cualquier IA (o yo mismo dentro de 3 meses) pueda reconstruir
+qué pasó, por qué, y cómo deshacerlo si hace falta.
+
+**Cuándo generarlo:** al final de cada sesión de trabajo relevante (no
+hace falta para una pregunta suelta de 2 minutos, sí para cualquier
+cambio de código, decisión de arquitectura, o diagnóstico largo).
+
+**Estructura obligatoria por sesión:**
+
+```
+## SESIÓN N — [quién/qué IA, tema en una frase]
+
+QUÉ: qué se hizo, en una o dos líneas.
+
+POR QUÉ: qué problema motivó el cambio — el síntoma real, no solo "se pidió".
+
+CÓMO: la solución concreta, con suficiente detalle técnico para que otra
+IA no tenga que releer todo el código para entenderla.
+
+DÓNDE: archivo(s) y sección/función exacta que se tocó.
+
+PROBLEMA QUE EVITA O RESUELVE: qué se rompe si esto no existe, o qué
+bug puntual se corrigió.
+
+SI SE ROMPE: cómo volver atrás — qué backup restaurar, o qué revertir.
+
+PENDIENTE: qué quedó abierto de esta sesión puntual (no es la lista
+general del proyecto, solo lo que esta sesión dejó a medio camino).
+```
+
+Al cierre de cada día con varias sesiones, agregar además:
+
+```
+## PROBLEMAS ABIERTOS AL CIERRE DEL DÍA (fecha)
+[lista numerada de todo lo que quedó sin resolver, con el contexto
+mínimo para retomarlo sin tener que releer toda la sesión]
+
+## PRÓXIMO PASO (al retomar)
+[el primer paso concreto para la próxima sesión, no una lista de deseos]
+```
+
+Ver `CHANCE_LOG.md` para el historial completo — ya arranca con una
+entrada real (13/09/2026: fix de caché v10.18, separación de
+`multicompra.gs`, diagnóstico del apagón por wifi).
