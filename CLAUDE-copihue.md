@@ -146,6 +146,34 @@ SANGRE (Internet / wifi del local)
     - Este chequeo va ANTES de gastar horas revisando código (hubiese
       evitado buena parte del diagnóstico del 13/09/2026).
 
+21. **VERIFICAR LA URL DEL GAS ANTES DE CONFIAR EN UN ARCHIVO — grave:**
+    nunca asumir que la URL del backend (`API_URL`, `GAS_URL_FLYER`, o
+    cualquier otra constante) que trae un archivo es la correcta, así
+    parezca "el archivo real" (subido por Victor, bajado de GitHub, el
+    que sea). Antes de construir cualquier cosa sobre un archivo:
+    1. Abrir la URL de exec directo en el navegador y confirmar que
+       devuelve datos reales y actuales — no alcanza con "responde algo".
+    2. Si el archivo tiene más de una constante de URL (es común, ver
+       Regla 14 sobre la doble constante de seba21), verificar **todas**,
+       nunca asumir que hay una sola con solo encontrar la primera.
+    3. Después de CUALQUIER corrección manual de una URL repetida en
+       varios lugares (la haga Victor a mano en GitHub, o la IA) — volver
+       a buscar (grep/Ctrl+F) el string viejo en **todo** el archivo para
+       confirmar cero rastros. Entre 6-7 apariciones es fácil que se
+       escape una.
+    - **Incidente real (13-14/09/2026):** se trabajó una sesión entera
+      sobre `seba21.html` e `index.html` con una URL de GAS
+      desactualizada/incorrecta ya presente en los archivos desde el
+      principio, sin que nadie lo detectara — hasta que Victor la
+      encontró comparando contra sus propias notas guardadas. De no
+      detectarse, todo el trabajo de la sesión hubiese quedado apuntando
+      a un backend equivocado sin que ninguna prueba en pantalla lo
+      hubiera revelado (los errores se vieron como "lentitud" o "wifi",
+      no como "URL incorrecta").
+    - Moraleja: la URL del GAS es tan "cimiento" como el código y la
+      planilla — no basta con que el archivo "se vea bien", hay que
+      probar la conexión real antes de dar por buena una sesión de trabajo.
+
 ## ARQUITECTURA
 Copihue es de un solo local — **no** es multicliente. No hay prefijos,
 no hay PIN por cliente, no hay tokens de sesión por usuario externo. El
