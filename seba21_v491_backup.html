@@ -1854,7 +1854,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>🛒 POS · Copihue v488</title>
+    <title>🛒 POS · Copihue v491</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2788,6 +2788,10 @@
     <link rel="prefetch" href="copihue-reportes.html">
 </head>
 <body>
+    <div style="position:fixed;top:0;left:0;right:0;z-index:99999;background:repeating-linear-gradient(45deg,#000,#000 10px,#ffcc00 10px,#ffcc00 20px);color:#000;text-align:center;font-weight:900;font-size:0.85rem;padding:6px 8px;">
+        🚧 STAGING / MANTENIMIENTO — NO ES EL SITIO REAL 🚧
+    </div>
+    <div style="height:32px;"></div>
 
 <!-- HEADER -->
 <div class="header" id="headerPrincipal" style="flex-direction:column;gap:6px;padding:8px 16px;">
@@ -3597,6 +3601,8 @@
         </div>
         <div class="resumen-card" id="resumenCard"><!-- se llena dinámico --></div>
         <div class="resumen-ventas-lista" id="resumenLista"><!-- se llena dinámico --></div>
+        <button class="btn-resumen" onclick="verVentasRealesPlanilla(this)" style="width:100%;margin:8px 0;background:#1976D2;color:#fff;border:none;border-radius:10px;padding:10px;font-weight:700;">📋 Ver ventas reales (planilla)</button>
+        <div id="resumenReal"></div>
         <button class="btn-cerrar-dia" onclick="cerrarDia()">🔒 Cerrar día y resetear</button>
     </div>
 </div>
@@ -3899,7 +3905,7 @@ function badgeStock(stock) {
 }
 
 // ========== CONFIG ==========
-const API_URL = 'https://script.google.com/macros/s/AKfycbx-84yapENFqCNS1nfivFOR4P25l8U27gEoeWvVL6Nu5HmKr8e7m3KIJjshqtR_2brrHA/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbzQccLKYVVhdCGzX8_SKd59rcifTTm_Ciuu0MPDVNBNEtDhG0LOB7WylhYVMSFAypB9pg/exec';
 
 // Timeout unificado para todas las llamadas a Apps Script
 const API_TIMEOUT_MS = 25000;
@@ -4360,9 +4366,14 @@ async function _recargaSilenciosa() {
     } catch(e) { console.warn('Recarga silenciosa:', e.message); }
 }
 
-async function cargarProductos() {
+async function cargarProductos(intento = 1) {
+    const MAX_INTENTOS_CATALOGO = 3;
     const ind = document.getElementById('indicadorCarga');
-    if (ind) { ind.classList.remove('ok'); ind.classList.add('cargando'); ind.title = 'Cargando...'; }
+    if (ind) {
+        ind.classList.remove('ok');
+        ind.classList.add('cargando');
+        ind.title = intento > 1 ? `Reintentando... (${intento}/${MAX_INTENTOS_CATALOGO})` : 'Cargando...';
+    }
     try {
         const r = await fetch(API_URL + '?cache=' + Date.now(), { redirect: 'follow', signal: _timeoutSignal(API_TIMEOUT_MS) });
         const data = await r.json();
@@ -4413,6 +4424,18 @@ async function cargarProductos() {
         // Ofertas automáticas por vencimiento (después del relámpago)
         setTimeout(verificarOfertasAutomaticas, 3500);
     } catch(e) {
+        // 17/09/2026 — reintento automático (lectura simple, sin riesgo de
+        // duplicar ni perder nada, a diferencia de una venta): hasta 3
+        // intentos con espera creciente (5s/10s/15s) antes de rendirse y
+        // mostrar el error en rojo como antes.
+        if (intento < MAX_INTENTOS_CATALOGO) {
+            const esperaMs = intento * 5000;
+            const indRetry = document.getElementById('indicadorCarga');
+            if (indRetry) indRetry.title = `Reintentando en ${esperaMs / 1000}s... (${intento}/${MAX_INTENTOS_CATALOGO})`;
+            console.warn(`⚠️ Falló carga de catálogo (intento ${intento}) — reintentando en ${esperaMs}ms:`, e.message);
+            setTimeout(() => cargarProductos(intento + 1), esperaMs);
+            return;
+        }
         mostrarToast('❌ Error al cargar productos', 'rojo');
         const indErr = document.getElementById('indicadorCarga');
         if (indErr) { indErr.classList.remove('cargando'); indErr.title = 'Error de conexión'; }
@@ -6722,7 +6745,7 @@ async function confirmarVentaMixta() {
             console.warn('⚠️ No se pudo conectar con la planilla (venta mixta):', e);
         }
 
-        guardarVentaDia({ items: itemsSnapshot, total, hora, stockRebajado: stockOk, metodoPago: metodoPagoTexto, detallePagos });
+        guardarVentaDia({ items: itemsSnapshot, total, hora, stockRebajado: stockOk, metodoPago: metodoPagoTexto, detallePagos, idVenta });
 
         if (!stockOk) {
             try {
@@ -6824,6 +6847,10 @@ async function confirmarVenta() {
     // Rebajar stock en Apps Script (Google Sheets)
     let stockOk = false;
     let metodoPagoFinal = metodoPagoActual.toUpperCase();
+    // v16/09/2026 — se declara ACÁ (fuera del try) para que guardarVentaDia,
+    // más abajo, pueda guardarlo junto a la venta — necesario para poder
+    // reconciliar el aviso "stock pendiente" cuando el reintento sí funciona.
+    let idVenta = null;
     try {
         const ventaData = ventaActual.map(i => ({
             id: i.esPeso ? i.idOriginal : i.id,
@@ -6838,7 +6865,7 @@ async function confirmarVenta() {
         }));
         // Agregar método de pago al request
         metodoPagoFinal = metodoPagoActual.toUpperCase();
-        const idVenta = 'v_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+        idVenta = 'v_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
         const ventaPayload = { items: ventaData, metodoPago: metodoPagoFinal, vendedor: vendedorActual, idVenta };
         const dataEncoded = encodeURIComponent(JSON.stringify(ventaPayload));
         const url = API_URL + '?action=vender&data=' + dataEncoded;
@@ -6852,7 +6879,7 @@ async function confirmarVenta() {
     }
 
     // Guardar en historial local del día pase lo que pase
-    guardarVentaDia({ items: [...ventaActual], total, hora, stockRebajado: stockOk, metodoPago: metodoPagoFinal || metodoPagoActual });
+    guardarVentaDia({ items: [...ventaActual], total, hora, stockRebajado: stockOk, metodoPago: metodoPagoFinal || metodoPagoActual, idVenta });
 
     // Si falló el stock — guardar para reintento automático en segundo plano
     if (!stockOk) {
@@ -7402,6 +7429,27 @@ async function _reenviarVentasPendientes() {
                 if (resp.success) {
                     console.log('✅ Venta pendiente enviada correctamente:', venta.idVenta || venta.ts);
                     if (venta.idVenta) idsSincronizados.add(venta.idVenta);
+
+                    // v16/09/2026 — FIX RAÍZ: marcar la venta como confirmada en
+                    // el historial local del día ("Hoy"), para que el aviso
+                    // "⚠️ Stock pendiente de rebaja manual" desaparezca solo
+                    // cuando el reintento funciona. El bloque viejo que hacía
+                    // esto (ver v488) apuntaba a una clave de localStorage
+                    // (`ventas_dia_`) que nunca coincidía con la real
+                    // (`getHoyKey()` = `copihue_ventas_` + fecha) — este aviso
+                    // jamás se borraba solo, en NINGUNA versión anterior. Ahora
+                    // busca por idVenta en la clave correcta.
+                    if (venta.idVenta) {
+                        try {
+                            const keyHoy = getHoyKey();
+                            const ventasHoyLocal = JSON.parse(localStorage.getItem(keyHoy) || '[]');
+                            const idxVenta = ventasHoyLocal.findIndex(v => v.idVenta === venta.idVenta);
+                            if (idxVenta >= 0 && !ventasHoyLocal[idxVenta].stockRebajado) {
+                                ventasHoyLocal[idxVenta].stockRebajado = true;
+                                localStorage.setItem(keyHoy, JSON.stringify(ventasHoyLocal));
+                            }
+                        } catch (eReconcile) { console.warn('⚠️ No se pudo reconciliar venta local:', eReconcile); }
+                    }
                     mostrarToast('✅ Stock sincronizado con la planilla', 'verde');
                     // Si era venta FIADO y GAS devolvió ticket, actualizar hoja Fiados
                     if (venta.idFiado && (resp.ticket || resp.numeroTicket)) {
@@ -7532,6 +7580,56 @@ function cerrarResumen() {
 }
 function cerrarModalResumen(e) {
     if (e.target === document.getElementById('modalResumen')) cerrarResumen();
+}
+
+// v14/09/2026 (retomado 16/09) — botón "Ver ventas reales (planilla)" dentro
+// del resumen "Hoy": trae los datos REALES desde la hoja Ventas vía
+// getReportes() (misma acción que usa copihue-reportes.html), en vez de
+// depender solo del historial local (localStorage), que puede desincronizarse
+// si una venta quedó pendiente de sincronizar o si se usó otro celular.
+async function verVentasRealesPlanilla(btn) {
+    const cont = document.getElementById('resumenReal');
+    if (!cont) return;
+    const textoOriginal = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Consultando planilla...'; }
+    cont.innerHTML = '';
+    try {
+        const data = await _apiFetch('getReportes');
+        if (data.error) throw new Error(data.mensaje || 'Error del servidor');
+        const hoy = _getDateKeyAR();
+        const totalesHoy = (data.totales || []).filter(t => t.fechaStr === hoy);
+        const itemsHoy = (data.items || []).filter(i => i.fechaStr === hoy);
+        const totalReal = totalesHoy.reduce((s, t) => s + t.total, 0);
+
+        cont.innerHTML = `
+            <div style="font-size:0.75rem;font-weight:700;color:#1976D2;text-transform:uppercase;letter-spacing:0.5px;padding:12px 0 6px;border-top:1px dashed #ccc;margin-top:8px;">
+                📋 Real en planilla (hoy)
+            </div>
+            <div class="resumen-stat">
+                <span class="resumen-stat-label">💰 Total real (planilla)</span>
+                <span class="resumen-stat-valor grande">$${totalReal.toLocaleString('es-AR')}</span>
+            </div>
+            <div class="resumen-stat">
+                <span class="resumen-stat-label">🛒 Tickets en planilla</span>
+                <span class="resumen-stat-valor">${totalesHoy.length}</span>
+            </div>
+            ${totalesHoy.length === 0
+                ? '<div style="text-align:center;padding:1rem;color:#bbb;">Sin ventas registradas hoy en la planilla</div>'
+                : [...totalesHoy].reverse().map(t => `
+                    <div class="resumen-venta-item">
+                        <div style="display:flex;justify-content:space-between;align-items:center;">
+                            <span class="resumen-venta-hora">🎫 #${t.ticket} — 🕐 ${t.hora}</span>
+                            <span class="resumen-venta-total">$${t.total.toLocaleString('es-AR')}</span>
+                        </div>
+                        <div class="resumen-venta-detalle">${t.metodo}${t.vendedor ? ' · ' + t.vendedor : ''}</div>
+                    </div>
+                `).join('')}
+        `;
+    } catch (e) {
+        cont.innerHTML = `<div style="text-align:center;padding:1rem;color:#e53935;">❌ No se pudo traer la planilla: ${e.message || e}</div>`;
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }
+    }
 }
 
 function cerrarDia() {
@@ -11707,7 +11805,7 @@ document.getElementById('modalWifiQR').addEventListener('click', function(e) {
 </div>
 
 <script>               
-const GAS_URL_FLYER = 'https://script.google.com/macros/s/AKfycbx-84yapENFqCNS1nfivFOR4P25l8U27gEoeWvVL6Nu5HmKr8e7m3KIJjshqtR_2brrHA/exec';
+const GAS_URL_FLYER = 'https://script.google.com/macros/s/AKfycbzQccLKYVVhdCGzX8_SKd59rcifTTm_Ciuu0MPDVNBNEtDhG0LOB7WylhYVMSFAypB9pg/exec';
 let _flyerCanvasAdmin = null;
 let _flyerProductos = [];
 let _flyerHoraCierre = 22;
@@ -14889,7 +14987,7 @@ async function _procesarVentaFiado(datosFiado, itemsSnapshot) {
     } catch(e) { console.warn('⚠️ Error guardar fiado:', e); }
 
     // 3. Guardar historial local (usando snapshot)
-    guardarVentaDia({ items: itemsSnapshot, total, hora, stockRebajado: stockOk, metodoPago: 'FIADO' });
+    guardarVentaDia({ items: itemsSnapshot, total, hora, stockRebajado: stockOk, metodoPago: 'FIADO', idVenta: idVentaFiado });
 
     // 4. Actualizar stock local (usando snapshot)
     itemsSnapshot.forEach(item => {
