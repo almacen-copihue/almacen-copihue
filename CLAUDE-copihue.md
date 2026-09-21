@@ -174,6 +174,47 @@ SANGRE (Internet / wifi del local)
       planilla — no basta con que el archivo "se vea bien", hay que
       probar la conexión real antes de dar por buena una sesión de trabajo.
 
+22. **AL DUPLICAR CIMIENTOS (crear una copia de staging desde producción),
+    CHEQUEAR REFERENCIAS HARDCODEADAS A PRODUCCIÓN EN TODOS LOS ARCHIVOS
+    `.gs`:** cuando se duplica un proyecto de Apps Script para armar una
+    copia de staging, cualquier constante que apunte a IDs de planilla,
+    URLs u otros identificadores de producción viaja sin cambios en la
+    copia — Apps Script no las actualiza solo. Es responsabilidad de la
+    IA revisar **todas** antes de dar la copia de staging por lista, no
+    responsabilidad de Victor ("estas cosas no debo pensarlas yo, yo no
+    soy el programador" — palabras textuales de Victor sobre este punto).
+    - **Incidente real (14/09/2026):** al duplicar el proyecto de Apps
+      Script para crear staging, `const SS_ID` quedó apuntando a la
+      planilla de **producción** — una venta de prueba en staging
+      terminó escrita en la planilla real. Se detectó recién al comparar
+      un ticket de prueba contra la planilla real.
+    - Mismo criterio se aplica al revés: cualquier `code.gs` armado para
+      staging a partir de un `code.gs` de producción (pegado por Victor,
+      bajado de GitHub, el que sea) debe tener su `SS_ID` cambiado a la
+      planilla de staging ANTES de entregarse como "listo para staging"
+      — grep/confirmar la SS_ID correcta es un paso obligatorio de toda
+      entrega, no una corrección posterior.
+
+23. **CUANDO UN CAMBIO CORRECTO NO MEJORA NADA, VERIFICAR PRIMERO A QUÉ
+    CEREBRO LE ESTÁS HABLANDO — antes de seguir programando o depurando
+    lógica:** si el código de una función parece bien escrito pero el
+    comportamiento no cambia pase lo que pase (por más veces que se
+    corrija, se pruebe, se reescriba), el primer sospechoso no es la
+    lógica — es la conexión. Confirmar que el archivo apunta al backend
+    real y actual (`API_URL`/`SS_ID` correctos, no una copia vieja, no
+    staging por error) antes de invertir más tiempo revisando o
+    reescribiendo la función en sí.
+    - **Incidente real (19/09/2026):** multicompra y otras funciones
+      parecían rotas ("por más código que le metiera y actualizara
+      code.gs, si estaba a un cerebro antiguo no había forma") pese a
+      tener código correcto — la causa real era que varios archivos
+      (`copihue-ingreso.html`, `sendwa.html`, y otras 13 extremidades
+      más) tenían una URL de GAS vieja/desactualizada, encontrada recién
+      al auditarlas todas juntas de una sola vez.
+    - Moraleja: un cambio de proceso (código nuevo, código corregido) que
+      "no mejora nada" es una señal para chequear el cimiento (regla 21),
+      no una señal para seguir cambiando el proceso.
+
 ## ARQUITECTURA
 Copihue es de un solo local — **no** es multicliente. No hay prefijos,
 no hay PIN por cliente, no hay tokens de sesión por usuario externo. El
@@ -183,7 +224,7 @@ Una sola planilla ("Almacén Copihue - Base de Datos") es la fuente única
 de verdad. Todas las apps HTML le leen/escriben a través del mismo
 `code.gs` (+ archivos satélite del mismo proyecto de Apps Script).
 
-## INVENTARIO DE EXTREMIDADES (confirmado 13/09/2026)
+## INVENTARIO DE EXTREMIDADES (actualizado 19/09/2026)
 
 Copihue tiene decenas de archivos `.html` deployados históricamente. La
 mayoría son residuos de pruebas. Estas son las **maduras, en uso real,
@@ -191,21 +232,27 @@ con historial de bugs reportados y resueltos** — las que importan:
 
 | Archivo | Versión | Para qué |
 |---|---|---|
-| `seba21.html` | v469 | POS interno — el más activo, el corazón del día a día |
-| `sendwa.html` | v117 | Ofertas por WhatsApp |
-| `index.html` | — | Catálogo público |
-| `copihue-fiado.html` | v33 | Fiados (bug conocido: abono con más de un ticket pendiente) |
-| `copihue-reportes.html` | v35 | Reportes de ventas |
-| `copihue-ingreso.html` | v20 | Ingreso de mercadería |
-| `copihue-finanzas.html` | v22 | Finanzas — sin pendientes conocidos |
-| `copihue-flyer.html` | v5.8 | Generador de flyers |
-| `copihue-pedidos.html` | v5 | Pedidos a proveedores |
+| `seba21.html` | v496 | POS interno — el más activo, el corazón del día a día |
+| `sendwa.html` | v120 | Ofertas por WhatsApp |
+| `index.html` | v201 | Catálogo público |
+| `copihue-fiado.html` | v37 | Fiados (bug conocido: abono con más de un ticket pendiente) |
+| `copihue-reportes.html` | — | Reportes de ventas |
+| `copihue-ingreso.html` (diálogo simple, dentro de la planilla) | v25 | Ingreso de mercadería — abre desde el menú 🏪 COPIHUE de la planilla |
+| `copihue-ingreso.html` (app standalone) | v25 | Ingreso de mercadería — versión más madura, con historial y "Deshacer" |
+| `copihue-finanzas.html` | — | Finanzas |
+| `copihue-flyer.html` | v5.70 | Generador de flyers |
+| `copihue-pedidos.html` | v7 | Pedidos a proveedores |
 | `copihue-herramientas.html` | — | Panel/dashboard que lista todo el ecosistema |
-| `copihue-compras.html` | v2 | Lista de compras |
+| `copihue-compras.html` | v3 | Lista de compras |
 | `copihue-config-ofertas.html` | v10 | Config de ofertas (bug conocido: horarios desbordados) |
 | `copihue-horario.html`, `copihue-fotos.html`, `copihue-publicador.html`, `copihue-dashboard.html` | — | Secundarias, uso menor pero activo |
-| `copihue-raspadita.html` | v11 | Juego para clientes |
-| `copihue-2x1.html`, `copihue-reposicion.html`, `copihue-flyer-multicompra.html` | v1 | Nuevas — ya nacieron aplicando Reglas de Oro |
+| `copihue-raspadita.html` | v13 | Juego para clientes |
+| `copihue-tragamonedas.html` | — | Juego para clientes |
+| `copihue-dinero.html` | — | Finanzas (revisar solapamiento con copihue-finanzas) |
+| `copihue-memoria.html` | v1.4 | Tiene su propia `GAMES_URL` separada de `API_URL` — no confundirlas al auditar |
+| `copihue-cotizacion.html` | v4 | Cotización |
+| `copihue-reposicion.html` | v2 | Reposición |
+| `copihue-2x1.html`, `copihue-flyer-multicompra.html` | v1 | Nuevas — ya nacieron aplicando Reglas de Oro |
 
 ### Sospechosos de ser residuos — NO tocar como si fueran "el real" sin confirmar antes conmigo:
 - `seba21alma15.html`, `elalmacencopihue.html` — variantes de seba21 con
@@ -214,7 +261,7 @@ con historial de bugs reportados y resueltos** — las que importan:
   `sendwa_b.html`, `sendwa_c.html`, `sendwav8.html`,
   `sendwadeepseekok.html`, `s_fixed.html`, `z.html`,
   `sendwa_copihue_pro.html` — 11 variantes sueltas sin versión mientras
-  el real (`sendwa.html`) ya va por v117.
+  el real (`sendwa.html`) ya va por v120.
 - `copihue-caratulas.html` — sin relación con el negocio del almacén.
 
 ### Extras para clientes — en desarrollo, no son residuo:
@@ -241,6 +288,11 @@ contra esta tabla o preguntarme.
 - Tocar cerebro y extremidades al mismo tiempo (regla 17).
 - Asumir que "todo se cayó" es un bug de código antes de chequear wifi y
   Ejecuciones (regla 19).
+- Duplicar cimientos para staging sin auditar referencias hardcodeadas a
+  producción en todos los `.gs` (regla 22).
+- Seguir depurando/reescribiendo una función cuando el síntoma real es
+  "no mejora nada pase lo que pase" — chequear primero a qué cerebro le
+  habla el archivo (regla 23).
 
 ## FLUJO DE TRABAJO
 1. Yo pido en criollo.
@@ -259,14 +311,17 @@ producción:
 1. **Versión staging**: mismo cambio, pero con **todas** las constantes
    de URL del backend (`API_URL`, `GAS_URL_FLYER`, y cualquier otra que
    exista — buscar TODAS las que matcheen `_URL` o `script.google.com`,
-   no asumir que hay una sola) apuntando a la copia viva. Se le agrega
-   además un letrero visible "🚧 MANTENIMIENTO / STAGING" en el frente,
-   para que sea imposible confundirla con producción a simple vista.
+   no asumir que hay una sola) apuntando a la copia viva, y con `SS_ID`
+   (del lado de `code.gs`) apuntando a la planilla de staging — ver
+   Regla 22. Se le agrega además un letrero visible
+   "🚧 MANTENIMIENTO / STAGING" en el frente (o, del lado de `code.gs`,
+   el cartel de cabecera con cuenta/URL/repo/planilla de staging), para
+   que sea imposible confundirla con producción a simple vista.
 2. Esa versión se sube al repo de staging (`almacen-copihue-staging`,
    cuenta `victoralvarezojeda`) y se prueba ahí.
 3. Una vez confirmado que el cambio funciona bien: se entrega la
-   **versión final** — mismo código, URLs apuntando a producción, sin el
-   letrero de mantenimiento — recién ahí lista para el repo real
+   **versión final** — mismo código, URLs/SS_ID apuntando a producción,
+   sin el letrero de mantenimiento — recién ahí lista para el repo real
    (`almacen-copihue`, cuenta `javierojedabariloche`).
 
 **Lección del 13/09/2026:** `seba21.html` tenía DOS constantes de URL
