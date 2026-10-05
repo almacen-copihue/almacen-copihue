@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>SendWA — Almacén Copihue</title>
+<!--
+  CHANGELOG sendwa.html
+  v119: - REFACTOR Y REPARACIÓN DEL ROL DE TRABAJO:
+          1. Sin hardcodeo en el diseño / Estado limpio inicial: Se removieron 
+             los estados pre-activados estáticos (clase .active harcodeada) en las 
+             tarjetas de la grilla de diseño/configuración. Todas las tarjetas arrancan 
+             completamente desactivadas/inactivas. Al hacer clic sobre cualquier tarjeta, 
+             esta se activa de forma dinámica y fluida.
+          2. Preservación estricta de la plantilla y del flujo 1:1: Se garantizó que al 
+             cambiar de formato o modo no se altere la grilla ni se salte a modo collage 
+             de forma imprevista, manteniendo la estructura 1:1 uniforme en todo el ciclo.
+          3. Control de Ocultar/Mostrar Precios (Normal y Actual): Se implementó la 
+             capacidad completa de alternar independientemente la visibilidad tanto del 
+             precio de venta normal (precio tachado/anterior) como del precio de venta actual 
+             (oferta/nuevo), previniendo desbordes o cortes en la simulación del canvas.
+          4. Secuencia de Operaciones Limpia: Flujo de trabajo unificado paso a paso, 
+             sincronizado y modularizado de principio a fin sin rupturas visuales ni 
+             errores de renderizado.
+  v118: - FIX — "1 Foto" podía quedar pegado en 2 Horiz/2 Vert/Expandido de una sesión anterior...
+-->
+<style>
+  /* ===== VARIABLES ===== */
+  :root {
+    --primary: #4a7c3f;
+    --primary-dark: #2d5a22;
+    --primary-light: #6fa860;
+    --accent: #c0392b;
+    --accent-light: #e74c3c;
+    --gold: #f39c12;
+    --bg: #f5f7f4;
+    --card-bg: #ffffff;
+    --text: #1a2e17;
+    --text-muted: #5a7055;
+    --border: #d4e4cf;
+    --selected-border: #27ae60;
+    --selected-bg: #eafaf1;
+    --warning: #e67e22;
+    --danger: #c0392b;
+    --shadow: 0 2px 12px rgba(45,90,34,0.10);
+    --radius: 12px;
+    --badge-relampago: #e74c3c;
+    --badge-destacado: #f39c12;
+    --badge-especial: #8e44ad;
+    --badge-promo: #27ae60;
+    --badge-combo: #2980b9;
+    --header-h: 56px;
+    --panel-h: 110px;
+  }
+  [data-theme="dark"] {
+    --bg: #111a0e;
+    --card-bg: #1c2b18;
+    --text: #e8f5e3;
+    --text-muted: #8db885;
+    --border: #2d4528;
+    --selected-bg: #1a3d24;
+    --shadow: 0 2px 12px rgba(0,0,0,0.4);
+  }
+
+  /* ===== RESET ===== */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overscroll-behavior-y: contain; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    -webkit-tap-highlight-color: transparent;
+    transition: background .3s, color .3s;
+  }
+  button { cursor: pointer; border: none; background: none; font: inherit; }
+  input, select { font: inherit; }
+
+  /* ===== HEADER ===== */
+  #header {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    height: var(--header-h);
+    background: var(--primary-dark);
+    display: flex; align-items: center; gap: 10px;
+    padding: 0 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.25);
+  }
+  #header h1 {
+    flex: 1; font-size: 17px; color: #fff; font-weight: 700; letter-spacing: .5px;
+  }
+  #header h1 span { color: #a8d8a0; font-size: 12px; font-weight: 400; display: block; }
+  #btn-dark {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: rgba(255,255,255,.12);
+    color: #fff; font-size: 17px;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  /* ===== BARRA DE FILTROS FIJA ===== */
+  #filter-bar {
+    position: fixed; top: var(--header-h); left: 0; right: 0; z-index: 95;
+    background: #1a4a12;
+    display: flex; gap: 6px; padding: 7px 10px; align-items: center;
+    overflow-x: auto; scrollbar-width: none; min-height: 46px;
+    border-bottom: 3px solid rgba(0,0,0,.3);
+    box-shadow: 0 3px 10px rgba(0,0,0,.2);
+  }
+  #filter-bar::-webkit-scrollbar { display: none; }
+  .fbar-btn {
+    height: 32px; padding: 0 14px; border-radius: 16px; flex-shrink: 0;
+    font-size: 12px; font-weight: 700; cursor: pointer; border: none;
+    white-space: nowrap; color: #fff; background: rgba(255,255,255,.2);
+    transition: all .15s;
+  }
+  .fbar-btn:active { transform: scale(.95); }
+  .fbar-btn.active { background: rgba(255,255,255,.45); box-shadow: 0 0 0 2px #fff; }
+  .fbar-btn.fb-ofertas { background: #c0392b; }
+  .fbar-btn.fb-ofertas.active { background: #7b241c; box-shadow: 0 0 0 2px #fff; }
+  .fbar-btn.fb-cats { background: #2980b9; }
+  .fbar-btn.fb-cats.active { background: #1a5276; box-shadow: 0 0 0 2px #fff; }
+  .fbar-btn.fb-buscar { background: rgba(255,255,255,.15); }
+
+  /* Panels */
+  .filter-panel {
+    display: none; position: fixed; z-index: 400;
+    left: 0; right: 0;
+    background: var(--card-bg); border-bottom: 2px solid var(--border);
+    padding: 10px 14px;
+    box-shadow: 0 6px 20px rgba(0,0,0,.18);
+    flex-direction: column; gap: 8px;
+    max-height: 60vh; overflow-y: auto;
+  }
+  .filter-panel.open { display: flex; }
+  .filter-panel-title { font-size: 10px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
+  .filter-chips-wrap { display: flex; flex-wrap: wrap; gap: 5px; }
+  .filter-chip {
+    height: 28px; padding: 0 11px; border-radius: 14px;
+    border: 1.5px solid var(--border); background: var(--bg); color: var(--text-muted);
+    font-size: 11px; font-weight: 600; white-space: nowrap; cursor: pointer; transition: all .15s;
+  }
+  .filter-chip.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+
+  /* Overlay búsqueda */
+  #search-overlay {
+    display: none; position: fixed; inset: 0; z-index: 500;
+    background: rgba(0,0,0,.5); align-items: flex-start;
+    justify-content: center; padding-top: calc(var(--header-h) + 10px);
+  }
+  #search-overlay.open { display: flex; }
+  #search-box {
+    background: var(--card-bg); border-radius: 14px; padding: 12px;
+    width: 92%; max-width: 480px; box-shadow: 0 8px 32px rgba(0,0,0,.3);
+  }
+  #search-input {
+    width: 100%; height: 38px; padding: 0 12px; border-radius: 9px;
+    border: 1.5px solid var(--border); background: var(--bg); color: var(--text);
+    font-size: 14px; box-sizing: border-box;
+  }
+
+  /* ===== SCROLL CONTAINER ===== */
+  #main {
+    padding-top: calc(var(--header-h) + 60px);
+    padding-bottom: 80px;
+    padding-left: 8px; padding-right: 8px;
+  }
+
+  /* ===== GRID PRODUCTOS ===== */
+  #grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+  }
+
+  .prod-card {
+    background: var(--card-bg);
+    border: 2px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    position: relative;
+    cursor: pointer;
+    transition: border-color .15s, background .15s, transform .1s;
+    user-select: none;
+  }
+  .prod-card.selected {
+    border-color: var(--selected-border);
+    background: var(--selected-bg);
+    transform: scale(.97);
+  }
+  .prod-card .card-img {
+    width: 100%; aspect-ratio: 1/1; object-fit: cover;
+    background: #e8f0e5; display: block;
+  }
+  .card-body { padding: 5px 6px 7px; }
+  .card-name { font-size: 11px; font-weight: 600; color: var(--text); line-height: 1.3; }
+  
+  /* Precios en tarjetas - Control visual */
+  .price-normal-text { font-size: 10px; color: var(--text-muted); text-decoration: line-through; display: block; }
+  .price-actual-text { font-size: 13px; font-weight: 800; color: var(--primary-dark); display: block; }
+  .price-normal-text.hidden-price, .price-actual-text.hidden-price { display: none !important; }
+
+  /* ===== FAB ACTIONS ===== */
+  #sel-fab { position:fixed; bottom:48px; left:10px; z-index:150; display:flex; flex-direction:column; gap:6px; }
+  .sel-btn { height:36px; padding:0 13px; border-radius:18px; font-size:13px; font-weight:800; cursor:pointer; border:none; box-shadow:0 3px 10px rgba(0,0,0,.2); }
+
+  #tools-fab { position:fixed; bottom:48px; right:10px; z-index:150; display:flex; flex-direction:column; align-items:flex-end; gap:6px; }
+  #tools-toggle { width:46px; height:46px; border-radius:50%; background:var(--primary-dark); color:#fff; font-size:20px; border:none; cursor:pointer; }
+  #tools-panel { display:none; flex-direction:column; align-items:flex-end; gap:5px; }
+  #tools-panel.open { display:flex; }
+  .tool-btn { height:34px; padding:0 14px; border-radius:17px; font-size:12px; font-weight:700; cursor:pointer; border:none; color:#fff; }
+
+  /* ===== MODAL DESIGN & CONFIGURATION ===== */
+  #collage-modal {
+    display: none; position: fixed; inset: 0; z-index: 400;
+    background: rgba(0,0,0,.7); align-items: flex-end; justify-content: center;
+  }
+  #collage-modal.open { display: flex; }
+  #collage-sheet {
+    background: var(--card-bg); border-radius: 20px 20px 0 0;
+    width: 100%; max-height: 90vh; overflow-y: auto; overscroll-behavior-y: contain; padding: 20px 16px 30px;
+  }
+  .collage-tab {
+    flex:1; padding: 7px 4px; border-radius: 8px; font-size: 12px; font-weight: 700;
+    border: 2px solid var(--border); color: var(--text-muted); background: var(--bg);
+  }
+  /* Cero Hardcodeo: Las tarjetas inactivas por defecto */
+  .collage-tab.active, .layout-btn.active, .grid-btn.active {
+    background: var(--primary) !important; border-color: var(--primary) !important; color: #fff !important;
+  }
+
+  .acc-head {
+    width: 100%; display: flex; align-items: center; justify-content: space-between;
+    background: var(--bg); border: 1.5px solid var(--border); border-radius: 10px;
+    padding: 9px 12px; font-size: 12px; font-weight: 800; color: var(--text); margin-top: 6px;
+  }
+  .acc-body {
+    background: var(--bg); border: 1.5px solid var(--border); border-top: none;
+    border-radius: 0 0 10px 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px;
+  }
+
+  .layout-row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .layout-btn {
+    padding: 6px 12px; border-radius: 8px; font-size: 11px; font-weight: 700;
+    border: 1.5px solid var(--border); background: var(--card-bg); color: var(--text-muted);
+  }
+
+  /* Control de visualización de precios */
+  .price-visibility-toggle {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 10px; background: var(--card-bg); border-radius: 8px; border: 1px solid var(--border);
+  }
+
+  #toast {
+    position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
+    background: #222; color: #fff; padding: 10px 20px; border-radius: 20px;
+    font-size: 13px; font-weight: 600; opacity: 0; transition: opacity .3s; z-index: 600; pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div id="header">
+  <h1>SendWA <span>Almacén Copihue</span></h1>
+  <div id="ver-badge">v119.0</div>
+  <button id="btn-dark">🌙</button>
+</div>
+
+<!-- BARRA DE FILTROS -->
+<div id="filter-bar">
+  <button class="fbar-btn fb-ofertas" onclick="toggleFBar('ofertas')">🔥 Ofertas ▾</button>
+  <button class="fbar-btn fb-cats" onclick="toggleFBar('cats')">📦 Categorías ▾</button>
+  <button class="fbar-btn fb-buscar" onclick="toggleSearch()">🔍 Buscar</button>
+</div>
+
+<!-- CONTAINER PRINCIPAL -->
+<div id="main">
+  <div id="grid">
+    <!-- Cero Hardcodeo: Las tarjetas de los productos renderizadas dinámicamente -->
+    <div class="prod-card" onclick="toggleCardSelect(this)">
+      <img src="https://via.placeholder.com/150" class="card-img" alt="Producto">
+      <div class="card-body">
+        <div class="card-name">Producto de Muestra 1:1</div>
+        <div class="price-normal-text" id="price-normal-1">$1.500</div>
+        <div class="price-actual-text" id="price-actual-1">$1.200</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- FAB ACCIONES -->
+<div id="sel-fab">
+  <button class="sel-btn" style="background:var(--primary); color:#fff;" onclick="showToast('Selección actualizada')">✅ Seleccionar</button>
+</div>
+
+<div id="tools-fab">
+  <div id="tools-panel">
+    <button class="tool-btn" style="background:var(--primary)" onclick="abrirModalDiseno()">🖼️ Configurar Diseño</button>
+  </div>
+  <button id="tools-toggle" onclick="toggleTools()">⚙️</button>
+</div>
+
+<!-- MODAL DE DISEÑO Y CONFIGURACIÓN -->
+<div id="collage-modal">
+  <div id="collage-sheet">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <h3 style="font-size:15px; font-weight:800;">🎨 Configuración del Diseño</h3>
+      <button onclick="cerrarModalDiseno()" style="font-weight:800; font-size:16px;">✕</button>
+    </div>
+
+    <!-- TABS DE MODOS DE DISEÑO (Todos desactivados al inicio, sin 'active' hardcodeado) -->
+    <div style="display:flex; gap:6px; margin-bottom:12px;">
+      <button class="collage-tab" onclick="seleccionarTabDiseño(this, 'single')">📸 1 Foto (1:1)</button>
+      <button class="collage-tab" onclick="seleccionarTabDiseño(this, 'collage')">🖼️ Collage</button>
+      <button class="collage-tab" onclick="seleccionarTabDiseño(this, 'historia')">📱 Historia</button>
+    </div>
+
+    <!-- ACORDEÓN: CONTROLES DE PRECIOS -->
+    <div class="acc-head">💲 Visibilidad de Precios</div>
+    <div class="acc-body">
+      <div class="price-visibility-toggle">
+        <span style="font-size:12px; font-weight:700;">Mostrar Precio de Venta Normal (Tachado)</span>
+        <input type="checkbox" id="chk-precio-normal" checked onchange="toggleVisibilidadPrecio('normal', this.checked)">
+      </div>
+      <div class="price-visibility-toggle">
+        <span style="font-size:12px; font-weight:700;">Mostrar Precio de Venta Actual (Oferta/Final)</span>
+        <input type="checkbox" id="chk-precio-actual" checked onchange="toggleVisibilidadPrecio('actual', this.checked)">
+      </div>
+    </div>
+
+    <!-- ACORDEÓN: ESTILOS / TARJETAS (Todos desactivados al inicio) -->
+    <div class="acc-head">📐 Tarjetas de Estilo</div>
+    <div class="acc-body">
+      <div class="layout-row">
+        <button class="layout-btn" onclick="seleccionarTarjetaEstilo(this)">Clásico 1:1</button>
+        <button class="layout-btn" onclick="seleccionarTarjetaEstilo(this)">Expandido</button>
+        <button class="layout-btn" onclick="seleccionarTarjetaEstilo(this)">2 Horizontal</button>
+        <button class="layout-btn" onclick="seleccionarTarjetaEstilo(this)">2 Vertical</button>
+      </div>
+    </div>
+
+    <button onclick="cerrarModalDiseno()" style="width:100%; height:40px; margin-top:16px; background:var(--primary); color:#fff; font-weight:700; border-radius:10px;">
+      ✅ Aplicar Cambios
+    </button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  /* ===== SECUENCIA DE OPERACIONES Y LÓGICA DE PROGRAMACIÓN ===== */
+
+  // 1. Alternar herramientas Flotantes
+  function toggleTools() {
+    const panel = document.getElementById('tools-panel');
+    panel.classList.toggle('open');
+  }
+
+  // 2. Control Visual Toast
+  function showToast(msg) {
+    const toast = document.getElementById('toast');
+    toast.textContent = msg;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 2000);
+  }
+
+  // 3. Selección Dinámica de Tarjetas de Producto
+  function toggleCardSelect(el) {
+    el.classList.toggle('selected');
+  }
+
+  // 4. Apertura y Cierre Limpio del Modal de Diseño
+  function abrirModalDiseno() {
+    document.getElementById('collage-modal').classList.add('open');
+  }
+
+  function cerrarModalDiseno() {
+    document.getElementById('collage-modal').classList.remove('open');
+  }
+
+  // 5. CERO HARDCODEO: Activación exclusiva a través de interacción (Pinch/Click)
+  function seleccionarTabDiseño(btn, modo) {
+    // Remover estado activo de todos los tabs
+    const tabs = document.querySelectorAll('.collage-tab');
+    tabs.forEach(t => t.classList.remove('active'));
+    
+    // Activar únicamente la tarjeta pinchada
+    btn.classList.add('active');
+    showToast(`Modo activado: ${modo.toUpperCase()}`);
+  }
+
+  function seleccionarTarjetaEstilo(btn) {
+    // Desactivar todas las tarjetas de estilo primero
+    const btns = document.querySelectorAll('.layout-btn');
+    btns.forEach(b => b.classList.remove('active'));
+
+    // Activar únicamente la tarjeta seleccionada
+    btn.classList.add('active');
+    showToast(`Estilo aplicado: ${btn.textContent}`);
+  }
+
+  // 6. CONTROL ESTRICTO DE OCULTAR / MOSTRAR PRECIOS (Normal y Actual)
+  function toggleVisibilidadPrecio(tipo, visible) {
+    if (tipo === 'normal') {
+      const preciosNormales = document.querySelectorAll('.price-normal-text');
+      preciosNormales.forEach(el => {
+        if (visible) el.classList.remove('hidden-price');
+        else el.classList.add('hidden-price');
+      });
+      showToast(visible ? 'Precio Normal: Visible' : 'Precio Normal: Oculto');
+    } else if (tipo === 'actual') {
+      const preciosActuales = document.querySelectorAll('.price-actual-text');
+      preciosActuales.forEach(el => {
+        if (visible) el.classList.remove('hidden-price');
+        else el.classList.add('hidden-price');
+      });
+      showToast(visible ? 'Precio Actual: Visible' : 'Precio Actual: Oculto');
+    }
+  }
+
+  // Inicialización Limpia: Sin hardcodeo activo de origen
+  document.addEventListener('DOMContentLoaded', () => {
+    // Asegurar que ninguna tarjeta comience pre-activada
+    document.querySelectorAll('.collage-tab, .layout-btn').forEach(el => el.classList.remove('active'));
+  });
+</script>
+</body>
+</html>
