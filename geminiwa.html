@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>SendWA — Almacén Copihue</title>
+<style>
+  /* ===== VARIABLES & RESET ===== */
+  :root {
+    --primary: #4a7c3f;
+    --primary-dark: #2d5a22;
+    --primary-light: #6fa860;
+    --accent: #c0392b;
+    --bg: #f5f7f4;
+    --card-bg: #ffffff;
+    --text: #1a2e17;
+    --text-muted: #5a7055;
+    --border: #d4e4cf;
+    --radius: 12px;
+    --header-h: 56px;
+  }
+  [data-theme="dark"] {
+    --bg: #111a0e;
+    --card-bg: #1c2b18;
+    --text: #e8f5e3;
+    --text-muted: #8db885;
+    --border: #2d4528;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overscroll-behavior-y: contain; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  button { cursor: pointer; border: none; background: none; font: inherit; }
+  input, select { font: inherit; }
+
+  /* ===== HEADER ===== */
+  #header {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    height: var(--header-h);
+    background: var(--primary-dark);
+    display: flex; align-items: center; gap: 10px; padding: 0 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.25);
+  }
+  #header h1 { flex: 1; font-size: 17px; color: #fff; font-weight: 700; }
+  #header h1 span { color: #a8d8a0; font-size: 12px; font-weight: 400; display: block; }
+
+  /* ===== MODAL COLLAGE REDISEÑADO ===== */
+  #collage-modal {
+    display: none; position: fixed; inset: 0; z-index: 400;
+    background: rgba(0,0,0,.7); align-items: flex-end; justify-content: center;
+  }
+  #collage-modal.open { display: flex; }
+  
+  #collage-sheet {
+    background: var(--card-bg);
+    border-radius: 20px 20px 0 0;
+    width: 100%; max-width: 768px;
+    height: 92vh; max-height: 92vh;
+    overflow-y: auto; overscroll-behavior-y: contain;
+    padding: 16px; position: relative;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+
+  #btn-modal-close-x {
+    position: sticky; top: 0; align-self: flex-end; z-index: 410;
+    width: 36px; height: 36px; border-radius: 50%;
+    background: rgba(0,0,0,.7); color: #fff; font-size: 18px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    border: 2px solid rgba(255,255,255,.3); margin-bottom: -36px;
+  }
+
+  /* SECCIÓN 1 (TOP): SELECCIÓN DE IMÁGENES / PRODUCTOS */
+  .collage-section-top {
+    display: flex; flex-direction: column; gap: 8px; flex-shrink: 0;
+  }
+  .section-label {
+    font-size: 11px; font-weight: 800; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: .5px;
+  }
+  .image-selector-row {
+    display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none;
+  }
+  .image-selector-row::-webkit-scrollbar { display: none; }
+  .single-thumb {
+    display: inline-flex; flex-direction: column; align-items: center;
+    gap: 3px; cursor: pointer; padding: 4px; border-radius: 8px;
+    border: 2px solid var(--border); background: var(--card-bg); min-width: 68px;
+    flex-shrink: 0; transition: border-color .15s;
+  }
+  .single-thumb.active { border-color: var(--primary); background: var(--bg); }
+  .single-thumb img { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; }
+  .single-thumb span { font-size: 9px; color: var(--text-muted); max-width: 60px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+  /* SECCIÓN 2 (MIDDLE): PREVIEW DE RESULTADO FINAL (SIN CORTES) */
+  .collage-section-preview {
+    display: flex; justify-content: center; align-items: center;
+    background: #000; border-radius: 12px; padding: 8px;
+    flex-shrink: 0; min-height: 200px;
+  }
+  #collage-canvas {
+    max-width: 100%; height: auto; max-height: 45vh;
+    object-fit: contain; border-radius: 6px; display: block; margin: 0 auto;
+  }
+
+  /* SECCIÓN 3 (BOTTOM): HERRAMIENTAS DE EDICIÓN & MODALES COLAPSABLES */
+  .collage-section-tools {
+    display: flex; flex-direction: column; gap: 10px; flex-grow: 1;
+  }
+
+  /* MODALES Y ACORDEONES COLAPSABLES */
+  .acc {
+    border: 1.5px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--bg);
+  }
+  .acc-head {
+    width: 100%; display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 12px; font-size: 12px; font-weight: 800; color: var(--text);
+    cursor: pointer; background: var(--bg); border: none; text-align: left;
+  }
+  .acc-head .acc-arrow { transition: transform .2s; color: var(--text-muted); font-size: 11px; }
+  .acc.open .acc-head { border-bottom: 1px solid var(--border); }
+  .acc.open .acc-arrow { transform: rotate(180deg); }
+  .acc-body {
+    display: none; padding: 10px; flex-direction: column; gap: 8px; background: var(--card-bg);
+  }
+  .acc.open .acc-body { display: flex; }
+
+  /* CONTROLES DENTRO DE LOS MODALES */
+  .tool-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .tool-btn-chip {
+    padding: 6px 12px; border-radius: 14px; font-size: 11px; font-weight: 700;
+    border: 1.5px solid var(--border); background: var(--bg); color: var(--text);
+  }
+  .tool-btn-chip.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .tool-input {
+    width: 100%; height: 36px; padding: 0 10px; border-radius: 8px;
+    border: 1.5px solid var(--border); font-size: 13px; box-sizing: border-box;
+  }
+
+  /* POSICIONAMIENTO JUSTO DEBAJO DE LA PREVIEW PARA PRECIO/BADGE */
+  .badge-price-section {
+    order: -1; /* Forzado a subir justo debajo del preview */
+  }
+
+  #collage-actions { display: flex; gap: 8px; margin-top: 10px; flex-shrink: 0; }
+  #btn-collage-dl { flex: 1; height: 42px; border-radius: 10px; background: var(--primary); color: #fff; font-weight: 700; }
+  #btn-collage-close { flex: 1; height: 42px; border-radius: 10px; background: var(--bg); border: 1.5px solid var(--border); font-weight: 700; }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>SendWA <span>Almacén Copihue</span></h1>
+</div>
+
+<!-- MODAL PRINCIPAL COLLAGE -->
+<div id="collage-modal" class="open">
+  <div id="collage-sheet">
+    <button id="btn-modal-close-x" onclick="closeModal()">✕</button>
+
+    <!-- 1. TOP: SELECCIÓN DE IMÁGENES -->
+    <div class="collage-section-top">
+      <span class="section-label">1. Selección de Imágenes</span>
+      <div class="image-selector-row" id="image-selector-list">
+        <div class="single-thumb active" onclick="selectImage(0, this)">
+          <img src="https://via.placeholder.com/100" alt="Prod 1">
+          <span>Producto 1</span>
+        </div>
+        <div class="single-thumb" onclick="selectImage(1, this)">
+          <img src="https://via.placeholder.com/100" alt="Prod 2">
+          <span>Producto 2</span>
+        </div>
+        <div class="single-thumb" onclick="selectImage(2, this)">
+          <img src="https://via.placeholder.com/100" alt="Prod 3">
+          <span>Producto 3</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. MIDDLE: PREVIEW RESULTADO FINAL (SIN CORTES) -->
+    <div class="collage-section-preview">
+      <canvas id="collage-canvas" width="1080" height="1080"></canvas>
+    </div>
+
+    <!-- 3. BOTTOM: MODALES DE CONFIGURACIÓN Y HERRAMIENTAS DE EDICIÓN -->
+    <div class="collage-section-tools">
+
+      <!-- SUBE JUSTO DEBAJO DE LA PREVIEW: PRECIO Y BADGE -->
+      <div class="acc badge-price-section" id="acc-precio">
+        <button class="acc-head" onclick="toggleAcc('acc-precio')">
+          <span>💲 Precio y Badge de Oferta</span>
+          <span class="acc-arrow">▼</span>
+        </button>
+        <div class="acc-body">
+          <label class="section-label">Estilo del Badge</label>
+          <div class="tool-row">
+            <button class="tool-btn-chip active">Ninguno</button>
+            <button class="tool-btn-chip">🏷️ Tarjeta</button>
+            <button class="tool-btn-chip">💥 Explosivo</button>
+            <button class="tool-btn-chip">⭕ Círculo</button>
+          </div>
+          <label class="section-label">Ajuste Fino / Posición</label>
+          <input type="text" class="tool-input" placeholder="Ej: SOLO HOY / $1.200">
+        </div>
+      </div>
+
+      <!-- FORMATO Y RED SOCIAL -->
+      <div class="acc" id="acc-formato">
+        <button class="acc-head" onclick="toggleAcc('acc-formato')">
+          <span>📐 Formato y Red Social</span>
+          <span class="acc-arrow">▼</span>
+        </button>
+        <div class="acc-body">
+          <div class="tool-row">
+            <button class="tool-btn-chip active">1:1 Cuadrado</button>
+            <button class="tool-btn-chip">9:16 Estado WA</button>
+            <button class="tool-btn-chip">4:5 Feed IG</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- TÍTULO GRANDE DEL FLYER -->
+      <div class="acc" id="acc-titulo">
+        <button class="acc-head" onclick="toggleAcc('acc-titulo')">
+          <span>📢 Título grande del Flyer</span>
+          <span class="acc-arrow">▼</span>
+        </button>
+        <div class="acc-body">
+          <input type="text" class="tool-input" placeholder="Escribí un título (ej: 🔥 OFERTAS RELÁMPAGO)">
+        </div>
+      </div>
+
+      <!-- FONDO DEL FLYER -->
+      <div class="acc" id="acc-fondo">
+        <button class="acc-head" onclick="toggleAcc('acc-fondo')">
+          <span>🎨 Fondo del Flyer</span>
+          <span class="acc-arrow">▼</span>
+        </button>
+        <div class="acc-body">
+          <div class="tool-row">
+            <button class="tool-btn-chip active">Verde Copihue</button>
+            <button class="tool-btn-chip">Violeta</button>
+            <button class="tool-btn-chip">Azul</button>
+            <button class="tool-btn-chip">Negro</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- BOTONES DE ACCIÓN FINAL -->
+    <div id="collage-actions">
+      <button id="btn-collage-dl">Descargar Imagen</button>
+      <button id="btn-collage-close" onclick="closeModal()">Cerrar</button>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  function toggleAcc(id) {
+    const el = document.getElementById(id);
+    if (el) {
+      el.classList.toggle('open');
+    }
+  }
+
+  function closeModal() {
+    document.getElementById('collage-modal').classList.remove('open');
+  }
+
+  function selectImage(index, btn) {
+    document.querySelectorAll('.single-thumb').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    drawCanvasPreview(index);
+  }
+
+  // Render inicial para garantizar que la imagen se acomode en el preview sin cortes
+  function drawCanvasPreview(index) {
+    const canvas = document.getElementById('collage-canvas');
+    const ctx = canvas.getContext('2d');
+    
+    ctx.fillStyle = "#2d5a22";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 40px Segoe UI";
+    ctx.textAlign = "center";
+    ctx.fillText("PREVIEW IMAGEN #" + (index + 1), canvas.width / 2, canvas.height / 2);
+  }
+
+  window.onload = function() {
+    drawCanvasPreview(0);
+  };
+</script>
+
+</body>
+</html>
