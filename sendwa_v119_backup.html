@@ -9,31 +9,26 @@
 <title>SendWA — Almacén Copihue</title>
 <!--
   CHANGELOG sendwa.html
-  v119: - REFACTOR (arquitectura de diseño, sin tocar lógica comercial) —
-          MODO (Collage / 1 Foto / Historia), ESTILO (Clásico / Expandido /
-          2 Horiz / 2 Vert) y FORMATO (1:1, 4:5, 9:16, ...) pasan a ser tres
-          decisiones INDEPENDIENTES guardadas en un único objeto de estado
-          (designState). _collageMode / _singleLayout / _singleFormat siguen
-          existiendo con el mismo nombre, pero ahora leen y escriben ese
-          estado (no son variables paralelas).
-        - FIX — Al abrir la configuración de diseño ya no hay ninguna
-          tarjeta preseleccionada: ni modo, ni estilo, ni formato. Antes se
-          entraba directo en Collage, y tocar "1 Foto" forzaba Clásico y
-          1:1 quedaba activo sin que nadie lo eligiera. Ahora "active" =
-          "el usuario lo eligió". Mientras falte una decisión, la preview
-          dice qué falta en vez de inventar un diseño.
-        - NUEVO — Bloque "Precios visibles": precio normal (precio de venta)
-          y precio actual (precio de oferta) se muestran/ocultan por
-          separado. Los 4 estados (ambos, solo normal, solo actual, ninguno)
-          funcionan en collage, 1 Foto, Historia, preview, exportación,
-          ZIP y formatos múltiples.
-        - FIX — El badge de precio ("Precio como badge") ya NO decide qué
-          precios se ven abajo de la foto. Eran dos conceptos mezclados:
-          ahora el badge es solo un elemento más y la visibilidad de
-          precios es del usuario.
-        - FIX — Guardar/cargar lista ahora guarda también modo, estilo,
-          formato, visibilidad de precios y toda la config de Estilo Promo
-          (antes se perdían y había que rearmar el diseño a mano).
+  v119: - FIX RAÍZ — "de pronto cambia a collage" / "no funciona el control de
+          precio actual": varios controles (Título, Fondo, Badges por tipo,
+          Precio como badge) ahora viven tanto en Collage como en "1 Foto"
+          desde v117, pero todos refrescaban la vista previa llamando a una
+          función que SIEMPRE dibujaba el collage de grilla en el mismo
+          canvas — sin importar en qué pestaña estuvieras. Si estabas en
+          "1 Foto" tocando cualquiera de esos controles, te pisaba la vista
+          con el collage de varias fotos. Ahora esa función revisa el modo
+          activo primero y delega en el refresco correcto si no es collage —
+          un solo arreglo, de raíz, en vez de parchar cada control por separado.
+        - NUEVO — "👁️ Mostrar/Ocultar precios": acordeón nuevo junto a
+          Precio como badge, con dos controles independientes — precio
+          "antes" (tachado) y precio final/actual — cada uno Mostrar/Ocultar,
+          apagado por default (se ven, como siempre). Aplicado en Collage y
+          "1 Foto" Clásico — mismo criterio en los dos tramos. Expandido/
+          2 Horiz/2 Vert quedan afuera de esta vuelta (ver resumen de tramos
+          en la respuesta para igualar el resto si se quiere).
+        - CONFIRMADO — Estilo Promo, Badges por tipo y Precio como badge ya
+          arrancaban "desactivados" por default (Normal / Ninguno) antes de
+          esta versión — no hacía falta tocar nada ahí, era correcto.
   v118: - FIX — "1 Foto" podía quedar pegado en 2 Horiz/2 Vert/Expandido de
           una sesión anterior (el "Estilo" es un control separado del tab
           principal, no se reseteaba solo) — daba la sensación de que
@@ -1398,7 +1393,7 @@
     <div id="collage-personal-banner" style="display:none;background:linear-gradient(135deg,#880e4f,#e91e63);color:#fff;font-weight:800;font-size:13px;padding:8px 12px;border-radius:10px;margin-bottom:8px;text-align:center;"></div>
     <!-- Selector de modo -->
     <div id="collage-mode-tabs" style="display:flex;gap:6px;margin-bottom:8px;">
-      <button class="collage-tab" data-cmode="collage">🖼️ Collage</button>
+      <button class="collage-tab active" data-cmode="collage">🖼️ Collage</button>
       <button class="collage-tab" data-cmode="single">📸 1 Foto</button>
       <button class="collage-tab" data-cmode="historia">📱 Historia</button>
     </div>
@@ -1527,22 +1522,6 @@
           </div>
         </div>
       </div>
-      <div id="precio-visib-block" class="acc">
-        <button type="button" class="acc-head">💵 Precios visibles <span class="acc-arrow">▾</span></button>
-        <div class="acc-body" style="display:none;">
-          <div style="font-size:10px;color:var(--text-muted);">Dos decisiones independientes: el <b>precio normal</b> (precio de venta) y el <b>precio actual</b> (precio de oferta). No dependen del badge de precio ni de si el producto tiene oferta activa.</div>
-          <div class="layout-section-label" style="margin-top:6px">Precio normal (el tachado, cuando hay oferta)</div>
-          <div class="layout-row" id="precio-visib-normal-row">
-            <button class="layout-btn active" data-pv-normal="1">👁️ Mostrar</button>
-            <button class="layout-btn" data-pv-normal="0">🚫 Ocultar</button>
-          </div>
-          <div class="layout-section-label" style="margin-top:6px">Precio actual (el precio de oferta)</div>
-          <div class="layout-row" id="precio-visib-actual-row">
-            <button class="layout-btn active" data-pv-actual="1">👁️ Mostrar</button>
-            <button class="layout-btn" data-pv-actual="0">🚫 Ocultar</button>
-          </div>
-        </div>
-      </div>
       <div id="precio-badge-block" class="acc">
         <button type="button" class="acc-head">💲 Precio como badge <span class="acc-arrow">▾</span></button>
         <div class="acc-body" style="display:none;">
@@ -1602,7 +1581,23 @@
             </div>
             <span id="pb-nudge-info" style="font-size:10px;color:var(--text-muted);">offset: 0, 0</span>
           </div>
-          <div style="font-size:10px;color:var(--text-muted);margin-top:6px;">💡 El badge de precio NO cambia los precios de abajo de la foto: eso se decide en "💵 Precios visibles". Si no querés que el precio se duplique, ocultá ahí el precio actual.</div>
+          <div style="font-size:10px;color:var(--text-muted);margin-top:6px;">💡 Cuando el badge de precio está activo, el precio "de fábrica" abajo de la foto se oculta automáticamente para no duplicarlo.</div>
+        </div>
+      </div>
+      <div id="precio-visibilidad-block" class="acc">
+        <button type="button" class="acc-head">👁️ Mostrar/Ocultar precios <span class="acc-arrow">▾</span></button>
+        <div class="acc-body" style="display:none;">
+          <div style="font-size:10px;color:var(--text-muted);">Aparte del badge de precio — esto tapa/muestra el precio de siempre, abajo de la foto. Apagado = se ve, como siempre.</div>
+          <div class="layout-row" id="pv-antes-row" style="margin-top:6px">
+            <span style="font-size:11px;font-weight:700;color:var(--text-muted);align-self:center;margin-right:4px;">Precio "antes" (tachado):</span>
+            <button class="layout-btn active" data-pv-antes="0">👁️ Mostrar</button>
+            <button class="layout-btn" data-pv-antes="1">🚫 Ocultar</button>
+          </div>
+          <div class="layout-row" id="pv-final-row" style="margin-top:6px">
+            <span style="font-size:11px;font-weight:700;color:var(--text-muted);align-self:center;margin-right:4px;">Precio final/actual:</span>
+            <button class="layout-btn active" data-pv-final="0">👁️ Mostrar</button>
+            <button class="layout-btn" data-pv-final="1">🚫 Ocultar</button>
+          </div>
         </div>
       </div>
       <div id="collage-page-nav" style="display:none;align-items:center;justify-content:center;gap:10px;">
@@ -1622,7 +1617,7 @@
         <button type="button" class="acc-head">📸 Estilo <span class="acc-arrow">▾</span></button>
         <div class="acc-body">
           <div class="layout-row" id="layout-estilo-row">
-            <button class="layout-btn" data-layout="clasico">📸 Clásico</button>
+            <button class="layout-btn active" data-layout="clasico">📸 Clásico</button>
             <button class="layout-btn" data-layout="expandido">🔲 Expandido</button>
             <button class="layout-btn" data-layout="h2">↔️ 2 Horiz</button>
             <button class="layout-btn" data-layout="v2">↕️ 2 Vert</button>
@@ -1635,7 +1630,7 @@
           <div class="layout-row" id="layout-format-row" style="flex-wrap:wrap;overflow-x:visible;">
             <span class="fmt-wrap" style="position:relative;display:inline-block;">
               <input type="checkbox" class="fmt-multi-chk" data-format="1080x1080" style="position:absolute;top:2px;left:2px;z-index:2;width:14px;height:14px;">
-              <button class="layout-btn" data-format="1080x1080">⬛ 1:1<br><small>WA/IG Feed</small></button>
+              <button class="layout-btn active" data-format="1080x1080">⬛ 1:1<br><small>WA/IG Feed</small></button>
             </span>
             <span class="fmt-wrap" style="position:relative;display:inline-block;">
               <input type="checkbox" class="fmt-multi-chk" data-format="1080x1350" style="position:absolute;top:2px;left:2px;z-index:2;width:14px;height:14px;">
@@ -1981,6 +1976,11 @@ let _mostrarStockEnLista = false;
 // Orden manual — anula temporalmente el orden automático de sortProducts()
 // (categoría/stock/ventas). '' = automático (comportamiento de siempre).
 let _ordenManual = '';
+// Ocultar precio "antes" (tachado) y/o precio final/actual del flyer —
+// apagado por default (los precios se muestran, como siempre). Un solo
+// control para Collage y "1 Foto" Clásico — mismo criterio en los dos.
+let _ocultarPrecioAntes = false;
+let _ocultarPrecioFinal = false;
 // IA Sugerencia: si agrupar los resultados por categoría o dejar el orden
 // puro del criterio (más vendidos/margen/stock) de punta a punta. Apagado
 // por default — agrupar rompía el orden real cuando se elegían todas las
@@ -2834,84 +2834,7 @@ on('btn-dl', async () => {
 // ============================================================
 // COLLAGE — modos: collage (multi), single (1 foto), historia
 // ============================================================
-// ══════════════════════════════════════════════════════════════
-// designState — FUENTE ÚNICA DE VERDAD DEL DISEÑO (v119)
-// Tres conceptos independientes: MODO de composición, ESTILO de
-// composición y FORMATO. null = el usuario todavía no eligió (no se
-// inventa ninguna selección para tapar ese estado).
-// Los controles escriben acá; los renderizadores (preview, collage,
-// 1 Foto, Historia) y los exportadores (JPG, ZIP, formatos múltiples)
-// leen de acá — una sola fuente para todas las salidas.
-// ══════════════════════════════════════════════════════════════
-const designState = {
-  modo:    null,   // 'collage' | 'single' | 'historia' | 'promo'
-  estilo:  null,   // 'clasico' | 'expandido' | 'h2' | 'v2'
-  formato: null,   // { w, h }
-  precioNormal: { visible: true },  // p.precioVenta  (precio de venta normal)
-  precioActual: { visible: true }   // oferta.precio  (precio de oferta)
-};
-// Cuando se restaura un diseño guardado, la próxima apertura del modal NO
-// debe limpiar las tarjetas (si no, cargar una lista no serviría de nada).
-let _disenoRestaurado = false;
-
-// Compatibilidad: _collageMode / _singleLayout / _singleFormat conservan el
-// mismo nombre que usaban las ~40 referencias del archivo, pero ahora son
-// accesos (get/set) a designState, no variables paralelas. Se definen como
-// propiedades globales en lugar de `let` justamente para que toda
-// lectura/escritura existente pase por el estado central.
-Object.defineProperty(window, '_collageMode', {
-  get() { return designState.modo; },
-  set(v) { designState.modo = v || null; },
-  configurable: true
-});
-
-// Visibilidad de precios — independientes entre sí e independientes del
-// badge de precio. Los usan TODOS los renderizadores.
-function _verPrecioNormal() { return designState.precioNormal.visible !== false; }
-function _verPrecioActual() { return designState.precioActual.visible !== false; }
-
-// Refleja designState en las tarjetas (clase .active = "el usuario eligió
-// esto"). No decide nada: solo muestra lo que ya está en el estado.
-function _sincronizarTarjetasDiseno() {
-  document.querySelectorAll('#collage-mode-tabs .collage-tab').forEach(t =>
-    t.classList.toggle('active', !!designState.modo && t.dataset.cmode === designState.modo));
-  document.querySelectorAll('#layout-estilo-row .layout-btn').forEach(b =>
-    b.classList.toggle('active', !!designState.estilo && b.dataset.layout === designState.estilo));
-  const fstr = designState.formato ? `${designState.formato.w}x${designState.formato.h}` : null;
-  document.querySelectorAll('#layout-format-row .layout-btn[data-format]').forEach(b =>
-    b.classList.toggle('active', !!fstr && b.dataset.format === fstr));
-  document.querySelectorAll('#precio-visib-normal-row .layout-btn').forEach(b =>
-    b.classList.toggle('active', (b.dataset.pvNormal === '1') === _verPrecioNormal()));
-  document.querySelectorAll('#precio-visib-actual-row .layout-btn').forEach(b =>
-    b.classList.toggle('active', (b.dataset.pvActual === '1') === _verPrecioActual()));
-}
-
-// Qué falta para poder dibujar "1 Foto" (null = no falta nada)
-function _faltaParaSingle() {
-  if (!designState.estilo && !designState.formato) return 'Elegí un Estilo y un Formato para ver la vista previa';
-  if (!designState.estilo)  return 'Elegí un Estilo (Clásico, Expandido, 2 Horiz o 2 Vert)';
-  if (!designState.formato) return 'Elegí un Formato (1:1, 4:5, 9:16, ...)';
-  return null;
-}
-
-// Mensaje en el canvas cuando todavía falta una decisión del usuario —
-// preferible a dibujar un diseño que nadie eligió.
-function _canvasPendiente(msg) {
-  const hist = document.getElementById('historia-canvas');
-  if (hist) hist.style.display = 'none';
-  const cvs = document.getElementById('collage-canvas');
-  if (!cvs) return;
-  cvs.width = 700; cvs.height = 360;
-  const ctx = cvs.getContext('2d');
-  ctx.fillStyle = '#f4f6f2'; ctx.fillRect(0, 0, 700, 360);
-  ctx.strokeStyle = '#c9d4c4'; ctx.lineWidth = 3; ctx.setLineDash([10, 8]);
-  ctx.strokeRect(14, 14, 700 - 28, 360 - 28); ctx.setLineDash([]);
-  ctx.fillStyle = '#7b8a76'; ctx.textAlign = 'center';
-  ctx.font = '54px Segoe UI'; ctx.fillText('🎨', 350, 150);
-  ctx.font = 'bold 22px Segoe UI'; ctx.fillStyle = '#2d5a22';
-  wrapText(ctx, msg, 350, 210, 600, 30, 3);
-}
-
+let _collageMode = 'collage';
 let _singleIdx   = 0;
 let _collageProds     = [];
 // Referencia al overlay "Revisión del flyer" mientras queda oculto detrás del
@@ -2974,6 +2897,15 @@ async function _getMaxRatioLote(prods) {
 }
 
 async function renderCollagePage() {
+  // FIX raíz: varios controles (Título, Fondo, Badges por tipo, Precio como
+  // badge, Mostrar/Ocultar precios) ahora viven tanto en Collage como en
+  // "1 Foto", y llaman a esta función para refrescar la vista previa en
+  // vivo. Pero esta función SIEMPRE dibujaba el collage de grilla en el
+  // canvas — si estabas en "1 Foto" ajustando cualquiera de esos controles,
+  // te pisaba la vista previa con el collage de varias fotos, dando la
+  // sensación de "se cambió solo a collage". Ahora, si el modo activo no es
+  // collage, delega en el refresco que corresponda a ese modo.
+  if (_collageMode !== 'collage') { await renderCollageMode(); return; }
   const total = collageTotalPages();
   _collagePage = Math.min(_collagePage, total - 1);
   const start = _collagePage * _collagePerPage;
@@ -3094,7 +3026,7 @@ on('btn-collage', () => {
       _collageProds = _agruparMulticompraParaFlyer(final);
       _collagePage  = 0;
       _singleIdx    = 0;
-      openCollageModal(null); // v119: se abre sin modo elegido — lo decide el usuario
+      openCollageModal('collage');
     };
     // Botón cancelar
     ov.querySelector('#_rev-cx').onclick = () => { document.body.removeChild(ov); _flyerRevisionOverlay = null; };
@@ -3379,6 +3311,20 @@ document.getElementById('collage-collage-controls')?.addEventListener('click', e
     renderCollagePage();
     return;
   }
+  const pvAntesBtn = e.target.closest('[data-pv-antes]');
+  if (pvAntesBtn) {
+    _ocultarPrecioAntes = pvAntesBtn.dataset.pvAntes === '1';
+    document.querySelectorAll('#pv-antes-row .layout-btn').forEach(b => b.classList.toggle('active', b === pvAntesBtn));
+    renderCollagePage();
+    return;
+  }
+  const pvFinalBtn = e.target.closest('[data-pv-final]');
+  if (pvFinalBtn) {
+    _ocultarPrecioFinal = pvFinalBtn.dataset.pvFinal === '1';
+    document.querySelectorAll('#pv-final-row .layout-btn').forEach(b => b.classList.toggle('active', b === pvFinalBtn));
+    renderCollagePage();
+    return;
+  }
   const pbPosBtn = e.target.closest('.pb-pos-btn');
   if (pbPosBtn) {
     _precioBadgePos = pbPosBtn.dataset.pos;
@@ -3450,27 +3396,13 @@ document.getElementById('collage-collage-controls')?.addEventListener('click', e
 document.getElementById('collage-mode-tabs').onclick = e => {
   const tab = e.target.closest('.collage-tab');
   if (!tab) return;
-  // Solo cambia el MODO. El .active lo pone _sincronizarTarjetasDiseno()
-  // leyendo el estado — y no se toca estilo, formato ni ningún elemento.
+  document.querySelectorAll('.collage-tab').forEach(t => t.classList.remove('active'));
+  tab.classList.add('active');
   openCollageModal(tab.dataset.cmode);
 };
 
 function openCollageModal(mode) {
-  // Sin modo (null/undefined) = entrada limpia a la configuración de diseño:
-  // ninguna tarjeta activa (modo, estilo y formato en null). La excepción es
-  // venir de restaurar un diseño guardado, que sí debe conservarse.
-  if (!mode) {
-    if (!_disenoRestaurado) {
-      designState.modo = null;
-      designState.estilo = null;
-      designState.formato = null;
-    }
-    _disenoRestaurado = false;
-  } else {
-    _collageMode = mode;
-  }
-  mode = designState.modo; // el resto de la función trabaja sobre el estado
-  _sincronizarTarjetasDiseno();
+  _collageMode = mode;
   document.getElementById('collage-modal').classList.add('open');
   const picker = document.getElementById('single-picker');
   const layoutBar = document.getElementById('single-layout-bar');
@@ -3509,9 +3441,11 @@ function openCollageModal(mode) {
   const btnZip = document.getElementById('btn-dl-zip');
 
   if (mode === 'single') {
-    // v119: acá NO se toca el estilo. Elegir "1 Foto" es elegir un modo de
-    // composición y nada más — el estilo lo elige el usuario en su propio
-    // grupo de tarjetas, y si todavía no eligió, la preview lo avisa.
+    // Siempre arranca en Clásico (una sola foto) — si quedaba pegado en
+    // 2 Horiz/2 Vert de una sesión anterior, "1 Foto" parecía estar
+    // renderizando varias fotos en vez de una sola, que es lo esperado acá.
+    _singleLayout = 'clasico';
+    document.querySelectorAll('#layout-estilo-row .layout-btn').forEach(b => b.classList.toggle('active', b.dataset.layout === 'clasico'));
     picker.style.display = 'block';
     layoutBar.classList.add('show');
     buildSinglePicker(_collageProds);
@@ -3560,14 +3494,7 @@ window.selectSingleProd = (i) => {
   renderCollageMode();
 };
 
-// ESTILO de composición — acceso a designState.estilo. null = sin elegir:
-// acá NO hay default 'clasico' (era una decisión de diseño tomada por el
-// código, no por el usuario).
-Object.defineProperty(window, '_singleLayout', {
-  get() { return designState.estilo; },
-  set(v) { designState.estilo = v || null; },
-  configurable: true
-});
+let _singleLayout = 'clasico'; // clasico | h2 | v2 | expandido
 
 async function renderCollageMode() {
   const ctrls = document.getElementById('collage-collage-controls');
@@ -3587,29 +3514,15 @@ async function renderCollageMode() {
   if (rlBlock) rlBlock.style.display = (_collageMode === 'collage' || _collageMode === 'single') ? 'block' : 'none';
   const pbBlock = document.getElementById('precio-badge-block');
   if (pbBlock) pbBlock.style.display = (_collageMode === 'collage' || _collageMode === 'single') ? 'block' : 'none';
-  // Visibilidad de precios: aplica a las tres salidas
-  const pvBlock = document.getElementById('precio-visib-block');
-  if (pvBlock) pvBlock.style.display = (_collageMode === 'collage' || _collageMode === 'single' || _collageMode === 'historia') ? 'block' : 'none';
-
-  // Nada elegido todavía → no se inventa un diseño, se avisa qué falta
-  if (!designState.modo) { _canvasPendiente('Elegí un modo de composición: Collage, 1 Foto o Historia'); return; }
+  const pvBlock = document.getElementById('precio-visibilidad-block');
+  if (pvBlock) pvBlock.style.display = (_collageMode === 'collage' || _collageMode === 'single') ? 'block' : 'none';
   if (_collageMode === 'historia') _historiaPage = 0;
   if (_collageMode === 'collage')  await renderCollagePage();
-  if (_collageMode === 'single') {
-    const falta = _faltaParaSingle();
-    if (falta) { _canvasPendiente(falta); return; }
-    await drawSingleLayout(_collageProds[_singleIdx], designState.estilo);
-  }
+  if (_collageMode === 'single')   await drawSingleLayout(_collageProds[_singleIdx], _singleLayout);
   if (_collageMode === 'historia') await drawHistoria(_collageProds);
 }
 
-// FORMATO — acceso a designState.formato. null = sin elegir; 1:1 ya no es
-// un default automático ni implica ninguna composición.
-Object.defineProperty(window, '_singleFormat', {
-  get() { return designState.formato; },
-  set(v) { designState.formato = v || null; },
-  configurable: true
-});
+let _singleFormat = { w: 1080, h: 1080 }; // formato activo
 
 // ── Badges por tipo de oferta — UN SOLO lugar de configuración (mostrar/
 // ocultar, color, tamaño) que alimenta TODAS las rutas de flyer: el collage
@@ -3785,23 +3698,6 @@ document.getElementById('layout-format-row').onclick = e => {
   renderCollageMode();
 };
 
-// ── Wiring PRECIOS VISIBLES (precio normal / precio actual) ──
-// Dos grupos independientes. No tocan modo, estilo, formato ni el badge.
-document.getElementById('precio-visib-normal-row').onclick = e => {
-  const btn = e.target.closest('.layout-btn');
-  if (!btn) return;
-  designState.precioNormal.visible = btn.dataset.pvNormal === '1';
-  document.querySelectorAll('#precio-visib-normal-row .layout-btn').forEach(b => b.classList.toggle('active', b === btn));
-  renderCollageMode();
-};
-document.getElementById('precio-visib-actual-row').onclick = e => {
-  const btn = e.target.closest('.layout-btn');
-  if (!btn) return;
-  designState.precioActual.visible = btn.dataset.pvActual === '1';
-  document.querySelectorAll('#precio-visib-actual-row .layout-btn').forEach(b => b.classList.toggle('active', b === btn));
-  renderCollageMode();
-};
-
 // ── Estilo Promo: wiring ──
 document.getElementById('promo-estilo-row').onclick = e => {
   const btn = e.target.closest('.layout-btn');
@@ -3956,7 +3852,6 @@ document.getElementById('layout-format-row').addEventListener('change', e => {
   btnMulti.style.display = _formatosMultiples.size >= 2 ? 'block' : 'none';
 });
 document.getElementById('btn-formatos-multiples').addEventListener('click', async () => {
-  if (_bloqueadoPorDisenoIncompleto()) return;
   if (typeof JSZip === 'undefined') { toast('❌ No se pudo cargar el empaquetador ZIP'); return; }
   const p = _collageProds[_singleIdx];
   if (!p) return;
@@ -3971,10 +3866,7 @@ document.getElementById('btn-formatos-multiples').addEventListener('click', asyn
     const blob = await new Promise(res => cvs.toBlob(res, 'image/jpeg', .92));
     zip.file(`copihue_${norm(p.nombre).slice(0,30)}_${fstr}.jpg`, blob);
   }
-  // Restaurar EXACTAMENTE el formato que tenía elegido el usuario (y su
-  // tarjeta activa) — el paseo por los formatos del ZIP es temporal.
   _singleFormat = savedFormat;
-  _sincronizarTarjetasDiseno();
   await drawSingleLayout(p, _singleLayout);
   const zipBlob = await zip.generateAsync({ type: 'blob' });
   const url = URL.createObjectURL(zipBlob);
@@ -3996,10 +3888,6 @@ async function drawMiniProductPanel(ctx, p, x, y, W, H) {
   const oferta = calcularOferta(p);
   const badgeColor = BADGE_COLORS[p.catOferta] || null;
   const tieneOfertaPrecio = oferta && oferta.precio;
-  // v119 — mismos estados de precio que el resto de los renderizadores
-  const showAntes = tieneOfertaPrecio && _verPrecioNormal();
-  const showAhora = tieneOfertaPrecio && _verPrecioActual();
-  const showSolo  = !tieneOfertaPrecio && _verPrecioNormal();
 
   ctx.save();
   ctx.shadowColor = 'rgba(0,0,0,.18)'; ctx.shadowBlur = 8;
@@ -4013,9 +3901,7 @@ async function drawMiniProductPanel(ctx, p, x, y, W, H) {
   const ofertaBadgeOn = oferta && cfgB.visible;
   const BADGEH = ofertaBadgeOn ? Math.round(H * 0.078 * (TIPO_BADGE_TAMS[cfgB.tam] || 1)) : 0;
   const NAMEH = Math.round(H * 0.11);
-  const PRICEH = (showAntes && showAhora) ? Math.round(H * 0.14)
-               : (showAntes || showAhora || showSolo) ? Math.round(H * 0.10)
-               : 0;
+  const PRICEH = tieneOfertaPrecio ? Math.round(H * 0.14) : Math.round(H * 0.10);
   const IMGH = H - BADGEH - NAMEH - PRICEH;
 
   let curY = y;
@@ -4052,39 +3938,28 @@ async function drawMiniProductPanel(ctx, p, x, y, W, H) {
   wrapText(ctx, p.nombre, x+W/2, curY+NAMEH*0.4, W-16, NAMEH*0.46, 2);
   curY += NAMEH;
 
-  if (PRICEH > 0) {
-    ctx.fillStyle = '#ffffff'; ctx.fillRect(x, curY, W, PRICEH);
-    const mx = x+W/2;
-    if (showAntes) {
-      const fsAntes = Math.round(PRICEH * (showAhora ? 0.26 : 0.42));
-      ctx.fillStyle='#888'; ctx.font=`${fsAntes}px Segoe UI`; ctx.textAlign='center';
-      const antes = fmt(p.precioVenta);
-      const ty_a = curY + PRICEH * (showAhora ? 0.3 : 0.62);
-      ctx.fillText(antes, mx, ty_a);
-      const tw = ctx.measureText(antes).width;
-      ctx.beginPath(); ctx.strokeStyle='#888'; ctx.lineWidth=2;
-      ctx.moveTo(mx-tw/2, ty_a-Math.round(fsAntes*0.32)); ctx.lineTo(mx+tw/2, ty_a-Math.round(fsAntes*0.32)); ctx.stroke();
-    }
-    if (showAhora) {
-      const ty_o = showAntes ? curY+PRICEH*0.75 : curY+PRICEH*0.68;
-      fillPriceCentered(ctx, oferta.precio, mx, ty_o, Math.round(PRICEH*(showAntes?0.46:0.52)), badgeColor||'#c0392b', oferta.psico);
-    }
-    if (showSolo) {
-      ctx.fillStyle='#2d5a22'; ctx.font=`bold ${Math.round(PRICEH*0.5)}px Segoe UI`; ctx.textAlign='center';
-      ctx.fillText(fmt(p.precioVenta), mx, curY+PRICEH*0.62);
-    }
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(x, curY, W, PRICEH);
+  const mx = x+W/2;
+  if (tieneOfertaPrecio) {
+    const fsAntes = Math.round(PRICEH*0.26);
+    ctx.fillStyle='#888'; ctx.font=`${fsAntes}px Segoe UI`; ctx.textAlign='center';
+    const antes = fmt(p.precioVenta);
+    const ty_a = curY + PRICEH*0.3;
+    ctx.fillText(antes, mx, ty_a);
+    const tw = ctx.measureText(antes).width;
+    ctx.beginPath(); ctx.strokeStyle='#888'; ctx.lineWidth=2;
+    ctx.moveTo(mx-tw/2, ty_a-8); ctx.lineTo(mx+tw/2, ty_a-8); ctx.stroke();
+    fillPriceCentered(ctx, oferta.precio, mx, curY+PRICEH*0.75, Math.round(PRICEH*0.46), badgeColor||'#c0392b', oferta.psico);
+  } else {
+    ctx.fillStyle='#2d5a22'; ctx.font=`bold ${Math.round(PRICEH*0.5)}px Segoe UI`; ctx.textAlign='center';
+    ctx.fillText(fmt(p.precioVenta), mx, curY+PRICEH*0.62);
   }
   ctx.restore();
 }
 
 async function drawSingleLayout(p, layout) {
   if (!p) return;
-  // v119: sin estilo o sin formato elegido no se dibuja nada — no se
-  // sustituye la decisión del usuario por un default silencioso.
-  const estilo = layout || designState.estilo;
-  const fmt_size = _singleFormat;
-  if (!estilo || !fmt_size) return;
-  layout = estilo;
+  const fmt_size = _singleFormat || { w:1080, h:1080 };
   if (layout === 'clasico')    return drawSingleFmt(p, fmt_size.w, fmt_size.h);
   if (layout === 'expandido')  return drawSingleExpandidoFmt(p, fmt_size.w, fmt_size.h);
   if (layout === 'h2')         return drawSingleH2Fmt(p, fmt_size.w, fmt_size.h);
@@ -4156,27 +4031,17 @@ async function drawSingleExpandidoFmt(p, W=1080, H=1080) {
   ctx.fillStyle='#fff'; ctx.font='bold 42px Segoe UI'; ctx.textAlign='center';
   wrapText(ctx, p.nombre, W/2, H-ovH+80, W-60, 48, 2);
 
-  // Precio — v119: normal y actual son visibilidades independientes
-  const _tieneOfertaPrecio = oferta && oferta.precio;
-  const _showAntes = _tieneOfertaPrecio && _verPrecioNormal();
-  const _showAhora = _tieneOfertaPrecio && _verPrecioActual();
-  const _showSolo  = !_tieneOfertaPrecio && _verPrecioNormal();
-  if (_showAntes) {
-    ctx.fillStyle='rgba(255,255,255,.6)';
-    ctx.font = _showAhora ? '28px Segoe UI' : '40px Segoe UI';
-    ctx.textAlign='center';
+  // Precio
+  if (oferta && oferta.precio) {
+    ctx.fillStyle='rgba(255,255,255,.6)'; ctx.font='28px Segoe UI';
     const antes=fmt(p.precioVenta);
-    const yA = _showAhora ? H-120 : H-56;
-    ctx.fillText(antes, W/2, yA);
+    ctx.fillText(antes, W/2, H-120);
     const tw=ctx.measureText(antes).width;
     ctx.beginPath(); ctx.strokeStyle='rgba(255,255,255,.6)'; ctx.lineWidth=2;
-    ctx.moveTo(W/2-tw/2, yA-12); ctx.lineTo(W/2+tw/2, yA-12); ctx.stroke();
-  }
-  if (_showAhora) {
-    ctx.fillStyle='#fff'; ctx.font='bold 64px Segoe UI'; ctx.textAlign='center';
+    ctx.moveTo(W/2-tw/2,H-132); ctx.lineTo(W/2+tw/2,H-132); ctx.stroke();
+    ctx.fillStyle='#fff'; ctx.font='bold 64px Segoe UI';
     fillPriceCentered(ctx, oferta.precio, W/2, H-52, 64, '#fff', oferta.psico);
-  }
-  if (_showSolo) {
+  } else {
     ctx.fillStyle='#fff'; ctx.font='bold 64px Segoe UI'; ctx.textAlign='center';
     ctx.fillText(fmt(p.precioVenta), W/2, H-52);
   }
@@ -4411,19 +4276,16 @@ async function drawProductCard(ctx, p, x, y, W, H, preloadedImg) {
   const FS_ANTES_SOLO = Math.max(W * 0.062, 11); // el "antes" tachado más grande cuando queda solo (el precio nuevo se fue al badge sobre la foto)
   const FS_OFERTA = Math.max(W * 0.068, 12);
   const FS_PRECIO = Math.max(W * 0.070, 12);
-  // v119 — Qué precios se ven lo decide el usuario (designState), NO el badge
-  // de precio ni la existencia de una oferta:
-  //   precio normal = p.precioVenta  (tachado cuando hay oferta activa)
-  //   precio actual = oferta.precio
-  const showAntes = tieneOfertaPrecio && _verPrecioNormal();
-  const showAhora = tieneOfertaPrecio && _verPrecioActual();
-  const showSolo  = !tieneOfertaPrecio && _verPrecioNormal(); // sin oferta, el de venta es el único precio
-  // Si el tachado queda solo (sin el precio actual al lado) se dibuja más grande
-  const FS_ANTES_USADO = showAhora ? FS_ANTES : FS_ANTES_SOLO;
-  let PRECIO_H = 0;
-  if (showAntes) PRECIO_H += FS_ANTES_USADO + 4;
-  if (showAhora) PRECIO_H += FS_OFERTA + 6;
-  if (showSolo)  PRECIO_H  = FS_PRECIO + 6;
+  // Si el badge de precio (sobre la foto) está activo, el precio nuevo/oferta
+  // queda redundante ahí abajo (ya se ve en el badge) y se oculta. El precio
+  // "antes" tachado SÍ se conserva (agrandado, ya que queda solo) — sirve
+  // como referencia de comparación con el precio del badge.
+  const _precioBadgeActivo = _precioBadgeEstilo !== 'ninguno';
+  const PRECIO_H  = _precioBadgeActivo
+    ? (tieneOfertaPrecio ? FS_ANTES_SOLO + 6 : 0)   // solo el tachado (si hay oferta); nada si no hay
+    : (tieneOfertaPrecio
+      ? FS_ANTES + 4 + FS_OFERTA + 6   // tachado + oferta
+      : FS_PRECIO + 6);                 // precio normal
   const PAD_V    = 8;
   const TEXTH    = PAD_V + NOMBRE_H + SABORES_H + PRECIO_H + PAD_V;
   const IMGH     = H - TEXTH;
@@ -4562,32 +4424,51 @@ async function drawProductCard(ctx, p, x, y, W, H, preloadedImg) {
     afterName += SABORES_H;
   }
 
-  // Precio — cada uno se dibuja solo si el usuario lo dejó visible. Los 4
-  // estados (ambos / solo normal / solo actual / ninguno) son válidos.
-  let _yPrecio = afterName;
-  if (showAntes) {
-    ctx.fillStyle = '#888888';
-    ctx.font = `${FS_ANTES_USADO}px Segoe UI`; ctx.textAlign = 'center';
-    const antesStr = fmt(p.precioVenta);
-    const ty_a = _yPrecio + FS_ANTES_USADO;
-    ctx.fillText(antesStr, mx, ty_a);
-    const tw = ctx.measureText(antesStr).width;
-    ctx.beginPath();
-    ctx.strokeStyle = '#777';
-    ctx.lineWidth = showAhora ? Math.max(W * 0.008, 1.5) : Math.max(W * 0.01, 1.8);
-    ctx.moveTo(mx - tw/2, ty_a - FS_ANTES_USADO*0.35);
-    ctx.lineTo(mx + tw/2, ty_a - FS_ANTES_USADO*0.35); ctx.stroke();
-    _yPrecio = ty_a + 2;
-  }
-  if (showAhora) {
-    ctx.fillStyle = badgeColor || '#c0392b';
-    ctx.font = `bold ${FS_OFERTA}px Segoe UI`;
-    fillPriceCentered(ctx, oferta.precio, mx, _yPrecio + FS_OFERTA, FS_OFERTA, badgeColor || '#c0392b', oferta.psico);
-  }
-  if (showSolo) {
-    ctx.fillStyle = '#2d5a22';
-    ctx.font = `bold ${FS_PRECIO}px Segoe UI`; ctx.textAlign = 'center';
-    ctx.fillText(fmt(p.precioVenta), mx, _yPrecio + FS_PRECIO);
+  // Precio — con el badge de precio activo, el precio nuevo/oferta ya se ve
+  // sobre la foto (badge explosivo/tarjeta/círculo), así que acá solo queda
+  // el "antes" tachado como referencia (más grande, ya que va solo). Si no
+  // hay oferta activa, no queda nada que mostrar acá (el precio normal
+  // también se fue al badge).
+  if (_precioBadgeActivo) {
+    if (tieneOfertaPrecio && !_ocultarPrecioAntes) {
+      ctx.fillStyle = '#888888';
+      ctx.font = `${FS_ANTES_SOLO}px Segoe UI`; ctx.textAlign = 'center';
+      const antesStr = fmt(p.precioVenta);
+      const ty_a = afterName + FS_ANTES_SOLO;
+      ctx.fillText(antesStr, mx, ty_a);
+      const tw = ctx.measureText(antesStr).width;
+      ctx.beginPath();
+      ctx.strokeStyle = '#777'; ctx.lineWidth = Math.max(W * 0.01, 1.8);
+      ctx.moveTo(mx - tw/2, ty_a - FS_ANTES_SOLO*0.35);
+      ctx.lineTo(mx + tw/2, ty_a - FS_ANTES_SOLO*0.35); ctx.stroke();
+    }
+  } else {
+    if (tieneOfertaPrecio) {
+      // Tachado
+      if (!_ocultarPrecioAntes) {
+        ctx.fillStyle = '#888888';
+        ctx.font = `${FS_ANTES}px Segoe UI`; ctx.textAlign = 'center';
+        const antesStr = fmt(p.precioVenta);
+        const ty_a = afterName + FS_ANTES;
+        ctx.fillText(antesStr, mx, ty_a);
+        const tw = ctx.measureText(antesStr).width;
+        ctx.beginPath();
+        ctx.strokeStyle = '#777'; ctx.lineWidth = Math.max(W * 0.008, 1.5);
+        ctx.moveTo(mx - tw/2, ty_a - FS_ANTES*0.35);
+        ctx.lineTo(mx + tw/2, ty_a - FS_ANTES*0.35); ctx.stroke();
+      }
+      // Precio oferta
+      if (!_ocultarPrecioFinal) {
+        const ty_a2 = afterName + FS_ANTES;
+        ctx.fillStyle = badgeColor || '#c0392b';
+        ctx.font = `bold ${FS_OFERTA}px Segoe UI`;
+        fillPriceCentered(ctx, oferta.precio, mx, ty_a2 + FS_OFERTA + 2, FS_OFERTA, badgeColor || '#c0392b', oferta.psico);
+      }
+    } else if (!_ocultarPrecioFinal) {
+      ctx.fillStyle = '#2d5a22';
+      ctx.font = `bold ${FS_PRECIO}px Segoe UI`; ctx.textAlign = 'center';
+      ctx.fillText(fmt(p.precioVenta), mx, afterName + FS_PRECIO);
+    }
   }
 }
 
@@ -4694,11 +4575,9 @@ async function drawSingleFmt(p, W=1080, H=1080) {
   const oferta = calcularOferta(p);
   const badgeColor = BADGE_COLORS[p.catOferta] || null;
   const tieneOfertaPrecio = oferta && oferta.precio;
-  // v119 — visibilidad de precios: decisión explícita del usuario,
-  // independiente del badge de precio y de si hay oferta.
-  const showAntes = tieneOfertaPrecio && _verPrecioNormal();
-  const showAhora = tieneOfertaPrecio && _verPrecioActual();
-  const showSolo  = !tieneOfertaPrecio && _verPrecioNormal();
+  // Si el badge de precio (sobre la foto) está activo, el precio de abajo
+  // queda redundante — mismo criterio que ya usa el collage.
+  const _precioBadgeActivo = _precioBadgeEstilo !== 'ninguno';
 
   // Fondo — se ve solo detrás del header/footer, ya no como marco alrededor
   // de la foto (eso era lo "ochentero": una franja de color rodeando una
@@ -4713,11 +4592,9 @@ async function drawSingleFmt(p, W=1080, H=1080) {
   const ofertaBadgeOn = oferta && cfgB3.visible;
   const BADGEH = ofertaBadgeOn ? Math.round(H * 0.078 * (TIPO_BADGE_TAMS[cfgB3.tam] || 1)) : 0;
   const NAMEH = Math.round(H * 0.07);
-  const PRICEH = (showAntes && showAhora) ? Math.round(H * 0.09)
-               : showAntes                 ? Math.round(H * 0.045)
-               : showAhora                 ? Math.round(H * 0.055)
-               : showSolo                  ? Math.round(H * 0.065)
-               : 0;
+  const PRICEH = _precioBadgeActivo
+    ? (tieneOfertaPrecio ? Math.round(H * 0.045) : 0)
+    : (tieneOfertaPrecio ? Math.round(H * 0.09) : Math.round(H * 0.065));
   const FTRH = Math.round(H * 0.04);
   const IMGH = H - HDRH - TITLE_H - BADGEH - NAMEH - PRICEH - FTRH;
 
@@ -4799,34 +4676,35 @@ async function drawSingleFmt(p, W=1080, H=1080) {
   if (PRICEH > 0) {
     ctx.fillStyle = '#ffffff'; ctx.fillRect(0, curY, W, PRICEH);
     const mx = W/2;
-    if (showAntes && !showAhora) {
-      // Solo el tachado — va más grande porque queda solo
-      const fsAntes = Math.round(PRICEH*0.5);
-      ctx.fillStyle='#888'; ctx.font=`${fsAntes}px Segoe UI`; ctx.textAlign='center';
-      const antes = fmt(p.precioVenta);
-      const ty_a = curY + PRICEH*0.62;
-      ctx.fillText(antes, mx, ty_a);
-      const tw = ctx.measureText(antes).width;
-      ctx.beginPath(); ctx.strokeStyle='#888'; ctx.lineWidth=2.5;
-      ctx.moveTo(mx-tw/2, ty_a-Math.round(fsAntes*0.35)); ctx.lineTo(mx+tw/2, ty_a-Math.round(fsAntes*0.35)); ctx.stroke();
-    } else if (showAntes && showAhora) {
+    if (_precioBadgeActivo && tieneOfertaPrecio) {
+      if (!_ocultarPrecioAntes) {
+        const fsAntes = Math.round(PRICEH*0.5);
+        ctx.fillStyle='#888'; ctx.font=`${fsAntes}px Segoe UI`; ctx.textAlign='center';
+        const antes = fmt(p.precioVenta);
+        const ty_a = curY + PRICEH*0.62;
+        ctx.fillText(antes, mx, ty_a);
+        const tw = ctx.measureText(antes).width;
+        ctx.beginPath(); ctx.strokeStyle='#888'; ctx.lineWidth=2.5;
+        ctx.moveTo(mx-tw/2, ty_a-Math.round(fsAntes*0.35)); ctx.lineTo(mx+tw/2, ty_a-Math.round(fsAntes*0.35)); ctx.stroke();
+      }
+    } else if (tieneOfertaPrecio) {
       // Precio anterior tachado
-      const fsAntes = Math.round(PRICEH*0.28);
-      ctx.fillStyle='#888'; ctx.font=`${fsAntes}px Segoe UI`; ctx.textAlign='center';
-      const antes = fmt(p.precioVenta);
-      const ty_a = curY + PRICEH*0.32;
-      ctx.fillText(antes, mx, ty_a);
-      const tw = ctx.measureText(antes).width;
-      ctx.beginPath(); ctx.strokeStyle='#888'; ctx.lineWidth=2.5;
-      ctx.moveTo(mx-tw/2, ty_a-10); ctx.lineTo(mx+tw/2, ty_a-10); ctx.stroke();
+      if (!_ocultarPrecioAntes) {
+        const fsAntes = Math.round(PRICEH*0.28);
+        ctx.fillStyle='#888'; ctx.font=`${fsAntes}px Segoe UI`; ctx.textAlign='center';
+        const antes = fmt(p.precioVenta);
+        const ty_a = curY + PRICEH*0.32;
+        ctx.fillText(antes, mx, ty_a);
+        const tw = ctx.measureText(antes).width;
+        ctx.beginPath(); ctx.strokeStyle='#888'; ctx.lineWidth=2.5;
+        ctx.moveTo(mx-tw/2, ty_a-10); ctx.lineTo(mx+tw/2, ty_a-10); ctx.stroke();
+      }
       // Precio oferta grande
-      const fsOferta = Math.round(PRICEH*0.5);
-      fillPriceCentered(ctx, oferta.precio, mx, curY+PRICEH*0.78, fsOferta, badgeColor||'#c0392b', oferta.psico);
-    } else if (showAhora) {
-      // Solo el precio actual (el normal lo ocultó el usuario)
-      const fsOferta = Math.round(PRICEH*0.6);
-      fillPriceCentered(ctx, oferta.precio, mx, curY+PRICEH*0.72, fsOferta, badgeColor||'#c0392b', oferta.psico);
-    } else if (showSolo) {
+      if (!_ocultarPrecioFinal) {
+        const fsOferta = Math.round(PRICEH*0.5);
+        fillPriceCentered(ctx, oferta.precio, mx, curY+PRICEH*0.78, fsOferta, badgeColor||'#c0392b', oferta.psico);
+      }
+    } else if (!_ocultarPrecioFinal) {
       const fsPrecio = Math.round(PRICEH*0.55);
       ctx.fillStyle='#2d5a22'; ctx.font=`bold ${fsPrecio}px Segoe UI`; ctx.textAlign='center';
       ctx.fillText(fmt(p.precioVenta), mx, curY+PRICEH*0.62);
@@ -4918,22 +4796,10 @@ async function drawHistoria(prodsAll) {
   if (info) info.textContent = `📷 ${_collageProds.length} fotos · ${total} pág${total>1?'s':''}`;
 }
 
-// Guarda común de exportación — no se exporta un diseño que el usuario
-// todavía no terminó de elegir (modo siempre; estilo y formato en "1 Foto").
-function _bloqueadoPorDisenoIncompleto() {
-  if (!designState.modo) { toast('⚠️ Elegí primero un modo: Collage, 1 Foto o Historia'); return true; }
-  if (designState.modo === 'single') {
-    const falta = _faltaParaSingle();
-    if (falta) { toast('⚠️ ' + falta); return true; }
-  }
-  return false;
-}
-
 // Descargar TODAS:
 //  - Modo "1 Foto": una imagen por producto (como antes)
 //  - Modo "Collage": una imagen por PÁGINA de la grilla paginada
 on('btn-dl-todas', async () => {
-  if (_bloqueadoPorDisenoIncompleto()) return;
   if (_collageMode === 'collage') {
     const totalPag = Math.max(1, Math.ceil(_collageProds.length / _collagePerPage));
     if (totalPag <= 1) { toast('Solo hay 1 página'); return; }
@@ -4976,7 +4842,6 @@ on('btn-dl-todas', async () => {
 });
 
 on('btn-dl-zip', async () => {
-  if (_bloqueadoPorDisenoIncompleto()) return;
   if (typeof JSZip === 'undefined') { toast('❌ No se pudo cargar el empaquetador ZIP'); return; }
   const zip = new JSZip();
   toast('📦 Generando ZIP, un momento…', 4000);
@@ -5019,7 +4884,6 @@ on('btn-dl-zip', async () => {
 });
 
 on('btn-collage-dl', () => {
-  if (_bloqueadoPorDisenoIncompleto()) return;
   const a = document.createElement('a');
   const isHistoria = _collageMode === 'historia';
   const src = isHistoria
@@ -5208,7 +5072,7 @@ on('btn-personal-aplicar', () => {
             _collageProds = prods;
             _collagePage  = 0;
             _singleIdx    = 0;
-            openCollageModal(null); // v119: se abre sin modo elegido — lo decide el usuario
+            openCollageModal('collage');
           }
         });
       } else {
@@ -5444,7 +5308,7 @@ on('btn-simple-aplicar', () => {
             _collageProds = prods;
             _collagePage  = 0;
             _singleIdx    = 0;
-            openCollageModal(null); // v119: se abre sin modo elegido — lo decide el usuario
+            openCollageModal('collage');
           }
         });
       } else {
@@ -5637,10 +5501,7 @@ async function drawPromoManual() {
     wrapText(ctx, pp.nombre, x+CARD_W/2, y+IMG_H+20, CARD_W-12, 16);
 
     const yPrecio = y + IMG_H + TEXT_H - 14;
-    // v119 — también acá manda la visibilidad elegida: "antes" es el precio
-    // normal, "hoy" el actual (si no hay rebaja, "hoy" ES el precio normal).
-    const _promoHayRebaja = pp.precioAntes > pp.precioHoy;
-    if (_promoHayRebaja && _verPrecioNormal()) {
+    if (pp.precioAntes > pp.precioHoy) {
       ctx.font = '13px Segoe UI'; ctx.fillStyle = '#999';
       const antesTxt = `$${pp.precioAntes.toLocaleString('es-AR')}`;
       ctx.fillText(antesTxt, x+CARD_W/2, yPrecio-18);
@@ -5648,10 +5509,8 @@ async function drawPromoManual() {
       ctx.strokeStyle = '#999'; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(x+CARD_W/2-tw/2, yPrecio-22); ctx.lineTo(x+CARD_W/2+tw/2, yPrecio-22); ctx.stroke();
     }
-    if (_promoHayRebaja ? _verPrecioActual() : _verPrecioNormal()) {
-      ctx.font = 'bold 20px Segoe UI'; ctx.fillStyle = '#43A047';
-      ctx.fillText(`$${pp.precioHoy.toLocaleString('es-AR')}`, x+CARD_W/2, yPrecio+4);
-    }
+    ctx.font = 'bold 20px Segoe UI'; ctx.fillStyle = '#43A047';
+    ctx.fillText(`$${pp.precioHoy.toLocaleString('es-AR')}`, x+CARD_W/2, yPrecio+4);
   }
 
   ctx.fillStyle = '#25D366'; ctx.fillRect(0, CH-FTRH, CW, FTRH);
@@ -5745,19 +5604,6 @@ function _overlayOfertas(html, onMounted) {
 // productos van, sino cómo se ve la campaña completa.
 function _capturarDiseno() {
   return {
-    // v119 — el diseño guardado incluye las tres decisiones de composición,
-    // la visibilidad de precios y la config completa de Estilo Promo.
-    modo:    designState.modo,
-    estilo:  designState.estilo,
-    formato: designState.formato ? { w: designState.formato.w, h: designState.formato.h } : null,
-    precioNormalVisible: _verPrecioNormal(),
-    precioActualVisible: _verPrecioActual(),
-    promoEstilo:    _promoEstilo,
-    promoBadgeTipo: _promoBadgeTipo,
-    promoTexto:     _promoTexto,
-    promoColor:     _promoColor,
-    promoTamano:    _promoTamano,
-    promoPosicion:  _promoPosicion,
     titulo: _collageTitulo,
     tituloColor: _collageTituloColor,
     tituloFuente: _collageTituloFuente,
@@ -5788,53 +5634,9 @@ function _aplicarDiseno(d) {
   if (d.precioBadgeOffX != null) _precioBadgeOffX = d.precioBadgeOffX;
   if (d.precioBadgeOffY != null) _precioBadgeOffY = d.precioBadgeOffY;
   if (d.badges) Object.keys(d.badges).forEach(t => { if (_badgeConfig[t]) Object.assign(_badgeConfig[t], d.badges[t]); });
-  // v119 — composición (modo/estilo/formato), precios y Estilo Promo
-  if ('modo' in d)    designState.modo   = d.modo   || null;
-  if ('estilo' in d)  designState.estilo = d.estilo || null;
-  if ('formato' in d) designState.formato = (d.formato && d.formato.w) ? { w: d.formato.w, h: d.formato.h } : null;
-  if (typeof d.precioNormalVisible === 'boolean') designState.precioNormal.visible = d.precioNormalVisible;
-  if (typeof d.precioActualVisible === 'boolean') designState.precioActual.visible = d.precioActualVisible;
-  if (d.promoEstilo)    _promoEstilo    = d.promoEstilo;
-  if (d.promoBadgeTipo) _promoBadgeTipo = d.promoBadgeTipo;
-  if (typeof d.promoTexto === 'string' && d.promoTexto) _promoTexto = d.promoTexto;
-  if (d.promoColor)     _promoColor     = d.promoColor;
-  if (d.promoTamano)    _promoTamano    = d.promoTamano;
-  if (d.promoPosicion)  _promoPosicion  = d.promoPosicion;
-  _disenoRestaurado = true; // la próxima apertura del modal NO limpia las tarjetas
   _sincronizarPanelBadgeTipo();
   _sincronizarPanelPrecioBadge();
-  _sincronizarPanelPromo();
-  _sincronizarTarjetasDiseno();
   _actualizarInfoNudgePb();
-}
-
-// Refleja la config de Estilo Promo en sus botones — necesario al restaurar
-// un diseño guardado (antes se restauraba el estado pero no los controles).
-function _sincronizarPanelPromo() {
-  document.querySelectorAll('#promo-estilo-row .layout-btn').forEach(b =>
-    b.classList.toggle('active', b.dataset.promoEstilo === _promoEstilo));
-  const opts = document.getElementById('promo-explosivo-opts');
-  if (opts) opts.style.display = _promoEstilo === 'explosivo' ? 'block' : 'none';
-  document.querySelectorAll('#promo-tipo-row .layout-btn').forEach(b =>
-    b.classList.toggle('active', b.dataset.promoTipo === _promoBadgeTipo));
-  const inp = document.getElementById('promo-texto-input');
-  if (inp) inp.value = _promoTexto || '';
-  document.querySelectorAll('.promo-color-sw').forEach(b => {
-    const on = (b.dataset.color || '').toLowerCase() === (_promoColor || '').toLowerCase();
-    b.classList.toggle('active', on);
-    b.style.boxShadow = on ? `0 0 0 1.5px ${b.dataset.color}` : '0 0 0 1.5px transparent';
-  });
-  const cc = document.getElementById('promo-color-custom');
-  if (cc) cc.value = _promoColor;
-  document.querySelectorAll('#promo-tam-row .layout-btn').forEach(b =>
-    b.classList.toggle('active', b.dataset.promoTam === _promoTamano));
-  document.querySelectorAll('.promo-pos-btn').forEach(b => {
-    const on = b.dataset.pos === _promoPosicion;
-    b.classList.toggle('active', on);
-    b.style.background = on ? 'var(--primary)' : 'var(--card-bg)';
-    b.style.borderColor = on ? 'var(--primary)' : 'var(--border)';
-    b.style.color = on ? '#fff' : 'var(--text)';
-  });
 }
 // Refleja _precioBadgeEstilo/Color/Tam/FontColor/Pos en los botones del panel
 // "Precio como badge" — necesario al restaurar una lista guardada.

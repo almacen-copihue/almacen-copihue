@@ -9,31 +9,26 @@
 <title>SendWA — Almacén Copihue</title>
 <!--
   CHANGELOG sendwa.html
-  v120: - FIX RAÍZ — en "1 Foto", tocar Título grande, Fondo del flyer,
-          Badges por tipo de oferta o Precio como badge hacía que la vista
-          previa saltara sola a Collage (grilla 3x2), aunque se estuviera
-          en "1 Foto". Causa: esos ~24 controles llamaban directo a
-          renderCollagePage() (que SOLO sabe dibujar collage) en vez de
-          renderCollageMode() (la función correcta, que ya existía y ya
-          usaba bien el selector de "Estilo" — por eso ESE control nunca
-          tuvo el problema). Reemplazados todos, sin tocar los 3 usos
-          legítimos de renderCollagePage() (paginado del collage y el
-          propio dispatcher interno de renderCollageMode()).
-        - FIX — el panel "Badges por tipo de oferta" también se trababa
-          apenas se tocaba color/tamaño/mostrar con 2x1 Real seleccionado:
-          faltaba su entrada en _badgeConfig (bug introducido al agregar
-          2x1 en v119, ya corregido acá mismo).
-  v119: - FIX CRÍTICO — API_URL apuntaba a un deployment viejo/incorrecto
-          (AKfycbzWZzDvdGfW8vd2...), la misma URL vieja que ya habíamos
-          encontrado y corregido en copihue-ingreso.html — nunca se había
-          actualizado acá. Corregida a la URL real de producción.
-        - NUEVO — Soporte para 2x1 REAL (columna AL de inventario, flag
-          producto.oferta2x1 desde Code.gs): máxima prioridad (por encima
-          de Personalizada, mismo criterio que seba21.html), sin precio
-          unitario fijo (mecánica "cada par, una gratis", igual patrón que
-          Relámpago NxM/Multicompra) — badge 🎁 2x1 REAL, color propio
-          (#FF1744), filtro y botón de layout junto a los demás tipos,
-          y su propia línea en el texto de WhatsApp.
+  v119: - FIX RAÍZ — "de pronto cambia a collage" / "no funciona el control de
+          precio actual": varios controles (Título, Fondo, Badges por tipo,
+          Precio como badge) ahora viven tanto en Collage como en "1 Foto"
+          desde v117, pero todos refrescaban la vista previa llamando a una
+          función que SIEMPRE dibujaba el collage de grilla en el mismo
+          canvas — sin importar en qué pestaña estuvieras. Si estabas en
+          "1 Foto" tocando cualquiera de esos controles, te pisaba la vista
+          con el collage de varias fotos. Ahora esa función revisa el modo
+          activo primero y delega en el refresco correcto si no es collage —
+          un solo arreglo, de raíz, en vez de parchar cada control por separado.
+        - NUEVO — "👁️ Mostrar/Ocultar precios": acordeón nuevo junto a
+          Precio como badge, con dos controles independientes — precio
+          "antes" (tachado) y precio final/actual — cada uno Mostrar/Ocultar,
+          apagado por default (se ven, como siempre). Aplicado en Collage y
+          "1 Foto" Clásico — mismo criterio en los dos tramos. Expandido/
+          2 Horiz/2 Vert quedan afuera de esta vuelta (ver resumen de tramos
+          en la respuesta para igualar el resto si se quiere).
+        - CONFIRMADO — Estilo Promo, Badges por tipo y Precio como badge ya
+          arrancaban "desactivados" por default (Normal / Ninguno) antes de
+          esta versión — no hacía falta tocar nada ahí, era correcto.
   v118: - FIX — "1 Foto" podía quedar pegado en 2 Horiz/2 Vert/Expandido de
           una sesión anterior (el "Estilo" es un control separado del tab
           principal, no se reseteaba solo) — daba la sensación de que
@@ -1277,7 +1272,6 @@
     <button class="filter-chip select-chip" data-filter="seleccionados" id="chip-seleccionados">✅ Solo seleccionados</button>
     <button class="filter-chip oferta-chip" data-filter="oferta">🔥 Pool</button>
     <button class="filter-chip oferta-chip" data-filter="activo">⏰ Activos ahora</button>
-    <button class="filter-chip oferta-chip" data-filter="2x1real">🎁 2x1 Real</button>
     <button class="filter-chip oferta-chip" data-filter="relampago">⚡ Relámpago</button>
     <button class="filter-chip oferta-chip" data-filter="destacado">🔥 Destacado</button>
     <button class="filter-chip oferta-chip" data-filter="especial">💜 Especial</button>
@@ -1464,7 +1458,6 @@
           <div style="font-size:10px;color:var(--text-muted);">Elegí el tipo, después ajustá mostrar/ocultar, color y tamaño — se aplica en TODAS las rutas de flyer (collage y 1 foto).</div>
           <div class="layout-row" id="badge-tipo-selector" style="flex-wrap:wrap;overflow-x:visible;">
             <button class="layout-btn active" data-tipo="relampago">⚡ Relámpago</button>
-            <button class="layout-btn" data-tipo="2x1real">🎁 2x1 Real</button>
             <button class="layout-btn" data-tipo="destacado">🔥 Destacada</button>
             <button class="layout-btn" data-tipo="especial">💜 Especial</button>
             <button class="layout-btn" data-tipo="multicompra">📦 Multicompra</button>
@@ -1589,6 +1582,22 @@
             <span id="pb-nudge-info" style="font-size:10px;color:var(--text-muted);">offset: 0, 0</span>
           </div>
           <div style="font-size:10px;color:var(--text-muted);margin-top:6px;">💡 Cuando el badge de precio está activo, el precio "de fábrica" abajo de la foto se oculta automáticamente para no duplicarlo.</div>
+        </div>
+      </div>
+      <div id="precio-visibilidad-block" class="acc">
+        <button type="button" class="acc-head">👁️ Mostrar/Ocultar precios <span class="acc-arrow">▾</span></button>
+        <div class="acc-body" style="display:none;">
+          <div style="font-size:10px;color:var(--text-muted);">Aparte del badge de precio — esto tapa/muestra el precio de siempre, abajo de la foto. Apagado = se ve, como siempre.</div>
+          <div class="layout-row" id="pv-antes-row" style="margin-top:6px">
+            <span style="font-size:11px;font-weight:700;color:var(--text-muted);align-self:center;margin-right:4px;">Precio "antes" (tachado):</span>
+            <button class="layout-btn active" data-pv-antes="0">👁️ Mostrar</button>
+            <button class="layout-btn" data-pv-antes="1">🚫 Ocultar</button>
+          </div>
+          <div class="layout-row" id="pv-final-row" style="margin-top:6px">
+            <span style="font-size:11px;font-weight:700;color:var(--text-muted);align-self:center;margin-right:4px;">Precio final/actual:</span>
+            <button class="layout-btn active" data-pv-final="0">👁️ Mostrar</button>
+            <button class="layout-btn" data-pv-final="1">🚫 Ocultar</button>
+          </div>
         </div>
       </div>
       <div id="collage-page-nav" style="display:none;align-items:center;justify-content:center;gap:10px;">
@@ -1797,7 +1806,7 @@
 // pestaña y el badge del header se arman solos a partir de esta constante
 // (ver aplicarVersionUI() más abajo, llamada al final de init()).
 // ============================================================
-const APP_VERSION = 120;
+const APP_VERSION = 119;
 function aplicarVersionUI() {
   document.title = `SendWA — Almacén Copihue ver.${APP_VERSION}`;
   const badge = document.getElementById('ver-badge');
@@ -1825,18 +1834,19 @@ if (window.history && window.history.pushState) {
 // ============================================================
 // CONFIG
 // ============================================================
-const API_URL = 'https://script.google.com/macros/s/AKfycbx-84yapENFqCNS1nfivFOR4P25l8U27gEoeWvVL6Nu5HmKr8e7m3KIJjshqtR_2brrHA/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbzWZzDvdGfW8vd2-FpQolT852cdPMeHbfKugn9DBOlju75bE1D0SUNB5EKEDOsI2vP4lA/exec';
 const WA_LIMIT_ESTADO = 30;
 const IMG_SIZE_MB = 0.15;
 
 // Priority map
-// Orden flyer: 2x1 Real → Promos → Combos → Multicompra → Especial → Destacada → Relámpago → Últimas → Recién llegado
-const PRIORITY_ORDER = { '2x1real': -1, personalizada: 0, promo: 1, combo: 2, multicompra: 3, especial: 4, destacado: 5, relampago: 6, ultimas: 7, recienllegado: 8, '': 9 };
+// Orden flyer: Promos → Combos → Multicompra → Especial → Destacada → Relámpago → Últimas
+// Orden flyer: Promos → Combos → Multicompra → Especial → Destacada → Relámpago → Últimas → Recién llegado
+const PRIORITY_ORDER = { personalizada: 0, promo: 1, combo: 2, multicompra: 3, especial: 4, destacado: 5, relampago: 6, ultimas: 7, recienllegado: 8, '': 9 };
 const BADGE_COLORS = {
   relampago: '#FF5722', destacado: '#FFC107', especial: '#00BCD4',
   multicompra: '#9C27B0', ultimas: '#E53935', promo: '#43A047',
   combo: '#6D4C41', jueves: '#1A237E', personalizada: '#E91E63',
-  recienllegado: '#00E676', '2x1real': '#FF1744'
+  recienllegado: '#00E676'
 };
 
 // Separadores automáticos por categoría
@@ -1877,13 +1887,6 @@ function calcularOferta(p) {
   const precio = p.precioVenta;
   const cat    = p.catOferta;
   if (!cat) return null;
-
-  // 2x1 REAL — v19/09/2026. Mecánica "cada par, una gratis", no un % fijo —
-  // mismo criterio que Relámpago NxM/Multicompra: sin precio unitario fijo,
-  // solo la etiqueta (esCantidad: true).
-  if (cat === '2x1real') {
-    return { precio: null, etiqueta: '🎁 2x1 REAL', esCantidad: true };
-  }
 
   // OFERTA PERSONALIZADA — texto + % manual elegido por el operador, máxima prioridad.
   // El precio final y la etiqueta ya vienen calculados desde Code.gs (fuente única de
@@ -1973,6 +1976,11 @@ let _mostrarStockEnLista = false;
 // Orden manual — anula temporalmente el orden automático de sortProducts()
 // (categoría/stock/ventas). '' = automático (comportamiento de siempre).
 let _ordenManual = '';
+// Ocultar precio "antes" (tachado) y/o precio final/actual del flyer —
+// apagado por default (los precios se muestran, como siempre). Un solo
+// control para Collage y "1 Foto" Clásico — mismo criterio en los dos.
+let _ocultarPrecioAntes = false;
+let _ocultarPrecioFinal = false;
 // IA Sugerencia: si agrupar los resultados por categoría o dejar el orden
 // puro del criterio (más vendidos/margen/stock) de punta a punta. Apagado
 // por default — agrupar rompía el orden real cuando se elegían todas las
@@ -2242,14 +2250,12 @@ function parseProducts(data) {
                           ? (isNaN(parseInt(r.relampago)) ? String(r.relampago).trim() : parseInt(r.relampago)) : 0;
       const destacada   = parseInt(r.destacada) || 0;
       const especial    = parseInt(r.especial)  || 0;
-      // v19/09/2026 — 2x1 REAL (columna AL de inventario, ver code.gs)
-      const oferta2x1   = !!r.oferta2x1;
       // col L: precio promo/combo (campo normal en la API = $promos/combos)
       const normal      = parseFloat(r.normal || r.precioNormal || r['$promos/combos'] || 0);
 
       // catOferta se resuelve en resolveOfertas() contra los pools activos
       return { id, nombre, precioVenta, categoria, stock, foto, vendidos,
-               relampago, destacada, especial, normal, costo, catOferta: '', oferta2x1,
+               relampago, destacada, especial, normal, costo, catOferta: '',
                ofertaPersonalizadaServer: r.ofertaPersonalizada || null,
                ofertaSimpleServer: r.ofertaSimple || null, _raw: r };
     })
@@ -2263,12 +2269,6 @@ function parseProducts(data) {
 function resolveOfertas(products, modo = 'pool') {
   return products.map(p => {
     const pid = Number(p.id);
-    // 2x1 REAL — v19/09/2026. Flag simple desde Code.gs (columna AL de
-    // inventario), sin horario ni pool — máxima prioridad, va antes incluso
-    // que Personalizada (mismo criterio confirmado en seba21.html).
-    if (p.oferta2x1) {
-      return { ...p, catOferta: '2x1real' };
-    }
     // Oferta personalizada: fuente de verdad = planilla (Code.gs), no un mapa local —
     // así seba21, index y sendwa muestran siempre lo mismo.
     const personalServer = p.ofertaPersonalizadaServer;
@@ -2329,7 +2329,7 @@ function applyUIColors(data) {
 function sortProducts(products, mode) {
   const sorted = [...products];
 
-  const esVistaCategoria = !['oferta','activo','relampago','destacado','especial','2x1real',
+  const esVistaCategoria = !['oferta','activo','relampago','destacado','especial',
     'promo','combo','ultimas','multicompra','recienllegado','sinoferta'].includes(currentFilter);
 
   if (esVistaCategoria) {
@@ -2413,7 +2413,6 @@ function applyFilter() {
         return !enPool;
       }
       case 'relampago': return p.catOferta === 'relampago';
-      case '2x1real':   return p.catOferta === '2x1real';
       case 'destacado': return p.catOferta === 'destacado';
       case 'especial':  return p.catOferta === 'especial';
       case 'ultimas':   return p.catOferta === 'ultimas';
@@ -2458,7 +2457,7 @@ function insertSeparators(products) {
   if (_ordenManual) return products;
 
   // Vista Ofertas estilo FLYER — sin separadores de categoría, un único header
-  const esVistaOfertaFlyer = ['oferta','activo','relampago','destacado','especial','2x1real',
+  const esVistaOfertaFlyer = ['oferta','activo','relampago','destacado','especial',
     'promo','combo','ultimas','multicompra','recienllegado'].includes(currentFilter);
   if (esVistaOfertaFlyer) {
     if (!products.length) return products;
@@ -2681,7 +2680,6 @@ function generateText(mode) {
   const conOferta = prods.filter(p => p.catOferta).length;
   const tiposPresentes = [...new Set(prods.map(p=>p.catOferta).filter(Boolean))];
   const tituloOferta = {
-    '2x1real':'🎁 2x1 REAL',
     relampago:'⚡ OFERTAS RELÁMPAGO', ultimas:'🏷️ ÚLTIMAS UNIDADES',
     destacado:'🔥 OFERTAS DESTACADAS', especial:'💜 PRECIOS ESPECIALES',
     promo:'🏷️ PROMOS DEL DÍA', combo:'🎯 COMBOS', multicompra:'📦 MULTICOMPRA',
@@ -2710,7 +2708,6 @@ ${tituloOferta[tiposPresentes[0]]}
   function labelOferta(p, of) {
     if (!of) return '';
     const cat = p.catOferta;
-    if (cat === '2x1real') return ' _(2x1 real — llevá 2, pagá 1)_';
     if (cat === 'relampago') {
       // NxM → explicar la promo
       const cfg = OFERTAS_RELAMPAGO[String(p.relampago)];
@@ -2900,6 +2897,15 @@ async function _getMaxRatioLote(prods) {
 }
 
 async function renderCollagePage() {
+  // FIX raíz: varios controles (Título, Fondo, Badges por tipo, Precio como
+  // badge, Mostrar/Ocultar precios) ahora viven tanto en Collage como en
+  // "1 Foto", y llaman a esta función para refrescar la vista previa en
+  // vivo. Pero esta función SIEMPRE dibujaba el collage de grilla en el
+  // canvas — si estabas en "1 Foto" ajustando cualquiera de esos controles,
+  // te pisaba la vista previa con el collage de varias fotos, dando la
+  // sensación de "se cambió solo a collage". Ahora, si el modo activo no es
+  // collage, delega en el refresco que corresponda a ese modo.
+  if (_collageMode !== 'collage') { await renderCollageMode(); return; }
   const total = collageTotalPages();
   _collagePage = Math.min(_collagePage, total - 1);
   const start = _collagePage * _collagePerPage;
@@ -3128,11 +3134,11 @@ document.getElementById('collage-titulo-sugerencias')?.addEventListener('click',
   if (input) input.value = val;
   _collageTitulo = val;
   document.getElementById('collage-titulo-sugerencias').style.display = 'none';
-  renderCollageMode();
+  renderCollagePage();
 });
 document.getElementById('collage-titulo-fuente')?.addEventListener('change', e => {
   _collageTituloFuente = e.target.value;
-  if (_collageTitulo.trim()) renderCollageMode();
+  if (_collageTitulo.trim()) renderCollagePage();
 });
 
 // ── Acordeón de opciones (Título, Fondo, Grilla, Estilo, Formato, Badge de
@@ -3170,7 +3176,7 @@ document.getElementById('collage-collage-controls')?.addEventListener('click', e
       b.classList.toggle('active', b === colorBtn);
       b.style.boxShadow = b === colorBtn ? `0 0 0 1.5px ${b.dataset.color}` : '0 0 0 1.5px transparent';
     });
-    if (_collageTitulo.trim()) renderCollageMode();
+    if (_collageTitulo.trim()) renderCollagePage();
     return;
   }
   const fondoBtn = e.target.closest('.fondo-color-btn');
@@ -3180,7 +3186,7 @@ document.getElementById('collage-collage-controls')?.addEventListener('click', e
       b.classList.toggle('active', b === fondoBtn);
       b.style.boxShadow = b === fondoBtn ? `0 0 0 1.5px ${b.dataset.color}` : '0 0 0 1.5px transparent';
     });
-    renderCollageMode();
+    renderCollagePage();
     return;
   }
   const tipoBtn = e.target.closest('#badge-tipo-selector .layout-btn');
@@ -3204,21 +3210,21 @@ document.getElementById('collage-collage-controls')?.addEventListener('click', e
       b.style.boxShadow = b === rlColorBtn ? `0 0 0 1.5px ${b.dataset.color}` : '0 0 0 1.5px transparent';
     });
     document.getElementById('rl-color-custom').value = _badgeConfig[_badgeTipoActivo].color;
-    renderCollageMode();
+    renderCollagePage();
     return;
   }
   const rlVisBtn = e.target.closest('[data-rl-vis]');
   if (rlVisBtn) {
     _badgeTiposSel.forEach(t => { _badgeConfig[t].visible = rlVisBtn.dataset.rlVis === '1'; });
     document.querySelectorAll('#rl-badge-visible-row .layout-btn').forEach(b => b.classList.toggle('active', b === rlVisBtn));
-    renderCollageMode();
+    renderCollagePage();
     return;
   }
   const rlTamBtn = e.target.closest('[data-rl-tam]');
   if (rlTamBtn) {
     _badgeTiposSel.forEach(t => { _badgeConfig[t].tam = Number(rlTamBtn.dataset.rlTam); });
     document.querySelectorAll('#rl-badge-tam-row .layout-btn').forEach(b => b.classList.toggle('active', b === rlTamBtn));
-    renderCollageMode();
+    renderCollagePage();
     return;
   }
   const rlFontColorBtn = e.target.closest('.rl-fontcolor-btn');
@@ -3229,7 +3235,7 @@ document.getElementById('collage-collage-controls')?.addEventListener('click', e
       b.style.boxShadow = b === rlFontColorBtn ? `0 0 0 1.5px ${b.dataset.color}` : '0 0 0 1.5px transparent';
     });
     document.getElementById('rl-fontcolor-custom').value = _badgeConfig[_badgeTipoActivo].fontColor;
-    renderCollageMode();
+    renderCollagePage();
     return;
   }
   const rlPosBtn = e.target.closest('.rl-pos-btn');
@@ -3243,7 +3249,7 @@ document.getElementById('collage-collage-controls')?.addEventListener('click', e
       b.style.color = on ? '#fff' : 'var(--text)';
     });
     _actualizarInfoNudge();
-    renderCollageMode();
+    renderCollagePage();
     return;
   }
   const rlNudgeBtn = e.target.closest('.rl-nudge-btn');
@@ -3259,21 +3265,21 @@ document.getElementById('collage-collage-controls')?.addEventListener('click', e
       _badgeConfig[t].offY = Math.max(-LIMITE, Math.min(LIMITE, (_badgeConfig[t].offY || 0) + dy));
     });
     _actualizarInfoNudge();
-    renderCollageMode();
+    renderCollagePage();
     return;
   }
   const rlNudgeReset = e.target.closest('#rl-nudge-reset');
   if (rlNudgeReset) {
     _badgeTiposSel.forEach(t => { _badgeConfig[t].offX = 0; _badgeConfig[t].offY = 0; });
     _actualizarInfoNudge();
-    renderCollageMode();
+    renderCollagePage();
     return;
   }
   const pbEstiloBtn = e.target.closest('[data-pb-estilo]');
   if (pbEstiloBtn) {
     _precioBadgeEstilo = pbEstiloBtn.dataset.pbEstilo;
     document.querySelectorAll('#precio-badge-estilo-row .layout-btn').forEach(b => b.classList.toggle('active', b === pbEstiloBtn));
-    renderCollageMode();
+    renderCollagePage();
     return;
   }
   const pbColorBtn = e.target.closest('.pb-color-btn');
@@ -3284,14 +3290,14 @@ document.getElementById('collage-collage-controls')?.addEventListener('click', e
       b.style.boxShadow = b === pbColorBtn ? `0 0 0 1.5px ${b.dataset.color}` : '0 0 0 1.5px transparent';
     });
     document.getElementById('pb-color-custom').value = _precioBadgeColor;
-    renderCollageMode();
+    renderCollagePage();
     return;
   }
   const pbTamBtn = e.target.closest('[data-pb-tam]');
   if (pbTamBtn) {
     _precioBadgeTam = Number(pbTamBtn.dataset.pbTam);
     document.querySelectorAll('#pb-tam-row .layout-btn').forEach(b => b.classList.toggle('active', b === pbTamBtn));
-    renderCollageMode();
+    renderCollagePage();
     return;
   }
   const pbFontColorBtn = e.target.closest('.pb-fontcolor-btn');
@@ -3302,7 +3308,21 @@ document.getElementById('collage-collage-controls')?.addEventListener('click', e
       b.style.boxShadow = b === pbFontColorBtn ? `0 0 0 1.5px ${b.dataset.color}` : '0 0 0 1.5px transparent';
     });
     document.getElementById('pb-fontcolor-custom').value = _precioBadgeFontColor;
-    renderCollageMode();
+    renderCollagePage();
+    return;
+  }
+  const pvAntesBtn = e.target.closest('[data-pv-antes]');
+  if (pvAntesBtn) {
+    _ocultarPrecioAntes = pvAntesBtn.dataset.pvAntes === '1';
+    document.querySelectorAll('#pv-antes-row .layout-btn').forEach(b => b.classList.toggle('active', b === pvAntesBtn));
+    renderCollagePage();
+    return;
+  }
+  const pvFinalBtn = e.target.closest('[data-pv-final]');
+  if (pvFinalBtn) {
+    _ocultarPrecioFinal = pvFinalBtn.dataset.pvFinal === '1';
+    document.querySelectorAll('#pv-final-row .layout-btn').forEach(b => b.classList.toggle('active', b === pvFinalBtn));
+    renderCollagePage();
     return;
   }
   const pbPosBtn = e.target.closest('.pb-pos-btn');
@@ -3317,7 +3337,7 @@ document.getElementById('collage-collage-controls')?.addEventListener('click', e
       b.style.color = on ? '#fff' : 'var(--text)';
     });
     _actualizarInfoNudgePb();
-    renderCollageMode();
+    renderCollagePage();
     return;
   }
   const pbNudgeBtn = e.target.closest('.pb-nudge-btn');
@@ -3327,14 +3347,14 @@ document.getElementById('collage-collage-controls')?.addEventListener('click', e
     _precioBadgeOffX = Math.max(-LIMITE, Math.min(LIMITE, _precioBadgeOffX + Number(pbNudgeBtn.dataset.dx) * PASO));
     _precioBadgeOffY = Math.max(-LIMITE, Math.min(LIMITE, _precioBadgeOffY + Number(pbNudgeBtn.dataset.dy) * PASO));
     _actualizarInfoNudgePb();
-    renderCollageMode();
+    renderCollagePage();
     return;
   }
   const pbNudgeReset = e.target.closest('#pb-nudge-reset');
   if (pbNudgeReset) {
     _precioBadgeOffX = 0; _precioBadgeOffY = 0;
     _actualizarInfoNudgePb();
-    renderCollageMode();
+    renderCollagePage();
     return;
   }
   const azarBtn = e.target.closest('#btn-fondo-azar');
@@ -3342,7 +3362,7 @@ document.getElementById('collage-collage-controls')?.addEventListener('click', e
     _collageFondoColor = _randomFondoColor();
     // Ningún swatch fijo queda "activo" cuando el color es al azar
     document.querySelectorAll('.fondo-color-btn').forEach(b => { b.classList.remove('active'); b.style.boxShadow = '0 0 0 1.5px transparent'; });
-    renderCollageMode();
+    renderCollagePage();
     return;
   }
   const btn = e.target.closest('.grid-btn');
@@ -3355,7 +3375,7 @@ document.getElementById('collage-collage-controls')?.addEventListener('click', e
     b.style.color       = on ? '#fff' : 'var(--text-muted)';
   });
   _collagePage = 0;
-  renderCollageMode();
+  renderCollagePage();
   // Refrescar visibilidad/texto de "Descargar TODAS" / ZIP según la nueva paginación
   const btnTodas = document.getElementById('btn-dl-todas');
   const btnZip   = document.getElementById('btn-dl-zip');
@@ -3494,6 +3514,8 @@ async function renderCollageMode() {
   if (rlBlock) rlBlock.style.display = (_collageMode === 'collage' || _collageMode === 'single') ? 'block' : 'none';
   const pbBlock = document.getElementById('precio-badge-block');
   if (pbBlock) pbBlock.style.display = (_collageMode === 'collage' || _collageMode === 'single') ? 'block' : 'none';
+  const pvBlock = document.getElementById('precio-visibilidad-block');
+  if (pvBlock) pvBlock.style.display = (_collageMode === 'collage' || _collageMode === 'single') ? 'block' : 'none';
   if (_collageMode === 'historia') _historiaPage = 0;
   if (_collageMode === 'collage')  await renderCollagePage();
   if (_collageMode === 'single')   await drawSingleLayout(_collageProds[_singleIdx], _singleLayout);
@@ -3510,7 +3532,6 @@ let _singleFormat = { w: 1080, h: 1080 }; // formato activo
 // — ahora es un solo sistema, con el mismo resultado en cualquier ruta.
 const TIPO_BADGE_TAMS = { 1: 0.7, 2: 1, 3: 1.3, 4: 1.6 }; // multiplicador sobre el alto base
 const _badgeConfig = {
-  '2x1real':     { visible: true, color: '#FF1744', tam: 2, fontColor: '#ffffff', pos: 'br', offX: 0, offY: 0 },
   relampago:     { visible: true, color: '#FF5722', tam: 2, fontColor: '#ffffff', pos: 'br', offX: 0, offY: 0 },
   destacado:     { visible: true, color: '#FFC107', tam: 2, fontColor: '#ffffff', pos: 'br', offX: 0, offY: 0 },
   especial:      { visible: true, color: '#00BCD4', tam: 2, fontColor: '#ffffff', pos: 'br', offX: 0, offY: 0 },
@@ -3724,22 +3745,22 @@ document.getElementById('promo-color-custom').addEventListener('input', e => {
 document.getElementById('rl-color-custom').addEventListener('input', e => {
   _badgeConfig[_badgeTipoActivo].color = e.target.value;
   document.querySelectorAll('.rl-color-btn').forEach(b => { b.classList.remove('active'); b.style.boxShadow = '0 0 0 1.5px transparent'; });
-  renderCollageMode();
+  renderCollagePage();
 });
 document.getElementById('pb-color-custom').addEventListener('input', e => {
   _precioBadgeColor = e.target.value;
   document.querySelectorAll('.pb-color-btn').forEach(b => { b.classList.remove('active'); b.style.boxShadow = '0 0 0 1.5px transparent'; });
-  renderCollageMode();
+  renderCollagePage();
 });
 document.getElementById('rl-fontcolor-custom').addEventListener('input', e => {
   _badgeConfig[_badgeTipoActivo].fontColor = e.target.value;
   document.querySelectorAll('.rl-fontcolor-btn').forEach(b => { b.classList.remove('active'); b.style.boxShadow = '0 0 0 1.5px transparent'; });
-  renderCollageMode();
+  renderCollagePage();
 });
 document.getElementById('pb-fontcolor-custom').addEventListener('input', e => {
   _precioBadgeFontColor = e.target.value;
   document.querySelectorAll('.pb-fontcolor-btn').forEach(b => { b.classList.remove('active'); b.style.boxShadow = '0 0 0 1.5px transparent'; });
-  renderCollageMode();
+  renderCollagePage();
 });
 // Al cambiar el tipo seleccionado en el panel, reflejar SU config actual en
 // los sub-controles (mostrar/ocultar, color, tamaño, color de texto, posición)
@@ -4409,7 +4430,7 @@ async function drawProductCard(ctx, p, x, y, W, H, preloadedImg) {
   // hay oferta activa, no queda nada que mostrar acá (el precio normal
   // también se fue al badge).
   if (_precioBadgeActivo) {
-    if (tieneOfertaPrecio) {
+    if (tieneOfertaPrecio && !_ocultarPrecioAntes) {
       ctx.fillStyle = '#888888';
       ctx.font = `${FS_ANTES_SOLO}px Segoe UI`; ctx.textAlign = 'center';
       const antesStr = fmt(p.precioVenta);
@@ -4424,21 +4445,26 @@ async function drawProductCard(ctx, p, x, y, W, H, preloadedImg) {
   } else {
     if (tieneOfertaPrecio) {
       // Tachado
-      ctx.fillStyle = '#888888';
-      ctx.font = `${FS_ANTES}px Segoe UI`; ctx.textAlign = 'center';
-      const antesStr = fmt(p.precioVenta);
-      const ty_a = afterName + FS_ANTES;
-      ctx.fillText(antesStr, mx, ty_a);
-      const tw = ctx.measureText(antesStr).width;
-      ctx.beginPath();
-      ctx.strokeStyle = '#777'; ctx.lineWidth = Math.max(W * 0.008, 1.5);
-      ctx.moveTo(mx - tw/2, ty_a - FS_ANTES*0.35);
-      ctx.lineTo(mx + tw/2, ty_a - FS_ANTES*0.35); ctx.stroke();
+      if (!_ocultarPrecioAntes) {
+        ctx.fillStyle = '#888888';
+        ctx.font = `${FS_ANTES}px Segoe UI`; ctx.textAlign = 'center';
+        const antesStr = fmt(p.precioVenta);
+        const ty_a = afterName + FS_ANTES;
+        ctx.fillText(antesStr, mx, ty_a);
+        const tw = ctx.measureText(antesStr).width;
+        ctx.beginPath();
+        ctx.strokeStyle = '#777'; ctx.lineWidth = Math.max(W * 0.008, 1.5);
+        ctx.moveTo(mx - tw/2, ty_a - FS_ANTES*0.35);
+        ctx.lineTo(mx + tw/2, ty_a - FS_ANTES*0.35); ctx.stroke();
+      }
       // Precio oferta
-      ctx.fillStyle = badgeColor || '#c0392b';
-      ctx.font = `bold ${FS_OFERTA}px Segoe UI`;
-      fillPriceCentered(ctx, oferta.precio, mx, ty_a + FS_OFERTA + 2, FS_OFERTA, badgeColor || '#c0392b', oferta.psico);
-    } else {
+      if (!_ocultarPrecioFinal) {
+        const ty_a2 = afterName + FS_ANTES;
+        ctx.fillStyle = badgeColor || '#c0392b';
+        ctx.font = `bold ${FS_OFERTA}px Segoe UI`;
+        fillPriceCentered(ctx, oferta.precio, mx, ty_a2 + FS_OFERTA + 2, FS_OFERTA, badgeColor || '#c0392b', oferta.psico);
+      }
+    } else if (!_ocultarPrecioFinal) {
       ctx.fillStyle = '#2d5a22';
       ctx.font = `bold ${FS_PRECIO}px Segoe UI`; ctx.textAlign = 'center';
       ctx.fillText(fmt(p.precioVenta), mx, afterName + FS_PRECIO);
@@ -4651,28 +4677,34 @@ async function drawSingleFmt(p, W=1080, H=1080) {
     ctx.fillStyle = '#ffffff'; ctx.fillRect(0, curY, W, PRICEH);
     const mx = W/2;
     if (_precioBadgeActivo && tieneOfertaPrecio) {
-      const fsAntes = Math.round(PRICEH*0.5);
-      ctx.fillStyle='#888'; ctx.font=`${fsAntes}px Segoe UI`; ctx.textAlign='center';
-      const antes = fmt(p.precioVenta);
-      const ty_a = curY + PRICEH*0.62;
-      ctx.fillText(antes, mx, ty_a);
-      const tw = ctx.measureText(antes).width;
-      ctx.beginPath(); ctx.strokeStyle='#888'; ctx.lineWidth=2.5;
-      ctx.moveTo(mx-tw/2, ty_a-Math.round(fsAntes*0.35)); ctx.lineTo(mx+tw/2, ty_a-Math.round(fsAntes*0.35)); ctx.stroke();
+      if (!_ocultarPrecioAntes) {
+        const fsAntes = Math.round(PRICEH*0.5);
+        ctx.fillStyle='#888'; ctx.font=`${fsAntes}px Segoe UI`; ctx.textAlign='center';
+        const antes = fmt(p.precioVenta);
+        const ty_a = curY + PRICEH*0.62;
+        ctx.fillText(antes, mx, ty_a);
+        const tw = ctx.measureText(antes).width;
+        ctx.beginPath(); ctx.strokeStyle='#888'; ctx.lineWidth=2.5;
+        ctx.moveTo(mx-tw/2, ty_a-Math.round(fsAntes*0.35)); ctx.lineTo(mx+tw/2, ty_a-Math.round(fsAntes*0.35)); ctx.stroke();
+      }
     } else if (tieneOfertaPrecio) {
       // Precio anterior tachado
-      const fsAntes = Math.round(PRICEH*0.28);
-      ctx.fillStyle='#888'; ctx.font=`${fsAntes}px Segoe UI`; ctx.textAlign='center';
-      const antes = fmt(p.precioVenta);
-      const ty_a = curY + PRICEH*0.32;
-      ctx.fillText(antes, mx, ty_a);
-      const tw = ctx.measureText(antes).width;
-      ctx.beginPath(); ctx.strokeStyle='#888'; ctx.lineWidth=2.5;
-      ctx.moveTo(mx-tw/2, ty_a-10); ctx.lineTo(mx+tw/2, ty_a-10); ctx.stroke();
+      if (!_ocultarPrecioAntes) {
+        const fsAntes = Math.round(PRICEH*0.28);
+        ctx.fillStyle='#888'; ctx.font=`${fsAntes}px Segoe UI`; ctx.textAlign='center';
+        const antes = fmt(p.precioVenta);
+        const ty_a = curY + PRICEH*0.32;
+        ctx.fillText(antes, mx, ty_a);
+        const tw = ctx.measureText(antes).width;
+        ctx.beginPath(); ctx.strokeStyle='#888'; ctx.lineWidth=2.5;
+        ctx.moveTo(mx-tw/2, ty_a-10); ctx.lineTo(mx+tw/2, ty_a-10); ctx.stroke();
+      }
       // Precio oferta grande
-      const fsOferta = Math.round(PRICEH*0.5);
-      fillPriceCentered(ctx, oferta.precio, mx, curY+PRICEH*0.78, fsOferta, badgeColor||'#c0392b', oferta.psico);
-    } else {
+      if (!_ocultarPrecioFinal) {
+        const fsOferta = Math.round(PRICEH*0.5);
+        fillPriceCentered(ctx, oferta.precio, mx, curY+PRICEH*0.78, fsOferta, badgeColor||'#c0392b', oferta.psico);
+      }
+    } else if (!_ocultarPrecioFinal) {
       const fsPrecio = Math.round(PRICEH*0.55);
       ctx.fillStyle='#2d5a22'; ctx.font=`bold ${fsPrecio}px Segoe UI`; ctx.textAlign='center';
       ctx.fillText(fmt(p.precioVenta), mx, curY+PRICEH*0.62);
@@ -4775,7 +4807,7 @@ on('btn-dl-todas', async () => {
     const savedPage = _collagePage;
     for (let pg = 0; pg < totalPag; pg++) {
       _collagePage = pg;
-      await renderCollageMode();
+      await renderCollagePage();
       const cvs = document.getElementById('collage-canvas');
       const a = document.createElement('a');
       a.href = cvs.toDataURL('image/jpeg', .92);
@@ -4784,7 +4816,7 @@ on('btn-dl-todas', async () => {
       await new Promise(r => setTimeout(r, 600));
     }
     _collagePage = savedPage;
-    await renderCollageMode();
+    await renderCollagePage();
     toast(`✅ ${totalPag} páginas descargadas`);
     return;
   }
@@ -4819,13 +4851,13 @@ on('btn-dl-zip', async () => {
     const savedPage = _collagePage;
     for (let pg = 0; pg < totalPag; pg++) {
       _collagePage = pg;
-      await renderCollageMode();
+      await renderCollagePage();
       const cvs = document.getElementById('collage-canvas');
       const blob = await new Promise(res => cvs.toBlob(res, 'image/jpeg', .92));
       zip.file(`copihue_collage_pag${pg+1}de${totalPag}.jpg`, blob);
     }
     _collagePage = savedPage;
-    await renderCollageMode();
+    await renderCollagePage();
   } else {
     // Modo single — un jpg por producto
     const prods = _collageProds;
