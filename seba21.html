@@ -1878,7 +1878,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>🛒 POS · Copihue v501</title>
+    <title>🛒 POS · Copihue v504</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2814,6 +2814,9 @@
 </head>
 <body>
 
+<!-- v502 ETAPA 2: el botón «Pagos pendientes» se oculta en pantallas < 768 px (celular no cambia) -->
+<style>@media (max-width: 767px) { #btnPagosPendientes { display: none !important; } }
+@media (min-width: 768px) { #chipOpsPgp { display: none !important; } }</style>
 <!-- HEADER -->
 <div class="header" id="headerPrincipal" style="flex-direction:column;gap:6px;padding:8px 16px;">
     <!-- Fila título — siempre visible -->
@@ -2827,12 +2830,18 @@
             <button id="btnToggleHeader" onclick="toggleHeader()" style="display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);border-radius:20px;padding:4px 12px;color:white;font-size:1rem;font-weight:700;cursor:pointer;">⚙️</button>
         </div>
         <div style="display:flex;gap:4px;align-items:center;">
+            <button id="btnPagosPendientes" onclick="_pgpAbrir()" title="Pagos pendientes (solo consulta)"
+                    style="background:#ffb300;border:1px solid #ff8f00;border-radius:12px;padding:6px 10px;color:#3e2723;font-size:0.8rem;font-weight:700;cursor:pointer;line-height:1;white-space:nowrap;">Pagos pendientes (?)</button>
             <button onclick="limpiarVenta()" title="Limpiar venta"
                     style="background:rgba(183,28,28,0.35);border:1.5px solid rgba(183,28,28,0.7);border-radius:12px;padding:6px 10px;color:#ffcdd2;font-size:1rem;cursor:pointer;line-height:1;">🗑</button>
             <button class="btn-resumen" onclick="cambiarVendedor()" id="vendedorBadge"
                     style="background:rgba(255,255,255,0.15);border-color:rgba(255,255,255,0.4);">👤 Víctor</button>
         </div>
     </div>
+
+    <!-- v504: fila SOLO celular = el MISMO aviso «Pagos pendientes (N)» que el botón de PC (N = antiguos + operaciones nuevas sin completar + registros a revisar). Aparece con N>0 o «?» y desaparece con 0. Abre SOLO el panel de solo lectura. -->
+    <button id="chipOpsPgp" onclick="_pgpAbrir()" title="Pagos pendientes (solo consulta)"
+            style="display:none;width:100%;background:#ffb300;border:1px solid #ff8f00;border-radius:12px;padding:8px 10px;color:#3e2723;font-size:0.85rem;font-weight:800;cursor:pointer;line-height:1.1;">Pagos pendientes (?)</button>
 
     <!-- FILAS COLAPSABLES -->
     <div id="headerFilas" style="width:100%;display:flex;flex-direction:column;gap:6px;overflow:hidden;transition:max-height 0.3s ease,opacity 0.3s ease;max-height:0px;opacity:0;pointer-events:none;">
@@ -3000,7 +3009,7 @@
 
         <!-- Cobrar -->
         <div id="fabCobrar" style="position:relative;">
-            <div id="badgePendientes" onclick="_abrirPanelPendientes()"
+            <div id="badgePendientes" onclick="_pgpAbrir()"
                  style="display:none;position:absolute;top:-4px;right:-4px;
                  background:#e53935;color:white;border-radius:50%;width:20px;height:20px;
                  font-size:0.65rem;font-weight:900;display:none;align-items:center;
@@ -7423,6 +7432,7 @@ function _actualizarBadgePendientes() {
         const banner = document.getElementById('bannerPendientes');
         if (banner) banner.style.display = 'none';
         document.body.style.paddingTop = '';
+        try { _pgpActualizarContador(); } catch(_e) {} // v502 Etapa 2: botón «Pagos pendientes» (aislado)
     } catch(e) {}
 }
 
@@ -7489,6 +7499,701 @@ function _cancelarVentasPendientes() {
         console.log(`ventas_pendientes limpiado manualmente (${n} entradas)`);
     });
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v502 (08/10/2026) — ETAPA 2: panel «Pagos pendientes» — SOLO CONSULTA.
+//
+// Este bloque NO vende, NO reintenta, NO cancela, NO borra y NO repara nada.
+// Solo LEE la cola de pendientes del navegador (lectura simple, sin guardar
+// nada) y, si la persona lo pide con un botón, hace consultas de lectura al
+// endpoint consultarEstadoOperacion (que no escribe en la planilla ni autoriza
+// reintentos). Los resultados viven solo en memoria de esta página.
+// Los pendientes son del navegador donde se crearon: este panel de la PC solo
+// ve los pendientes de esta PC.
+// No hay temporizadores ni consultas periódicas.
+// Todo va envuelto en try/catch: un error acá no puede frenar el POS.
+// ═══════════════════════════════════════════════════════════════════════════
+const _PGP_CLAVE = 'ventas_pendientes';
+const _PGP_ESTADOS_VENTA = ['REGISTRADA', 'EN_PROCESO', 'INCOMPLETA', 'INCIERTA', 'ERROR_CONSULTA'];
+const _PGP_ESTADOS_FIADO = ['EXISTE_CON_TICKET', 'EXISTE_SIN_TICKET', 'NO_EXISTE', 'DUPLICADO_EN_HOJA', 'ERROR_CONSULTA'];
+const _PGP_VENTANA_RELACION_MS = 120000; // 2 min: solo para sugerir revisión manual
+const _PGP = { resultados: {}, ocupado: false };
+
+// ── C1 (v503) — formato NUEVO de operaciones FIADO SOLO. SOLO LECTURA ACÁ. ──
+// Una clave por operación: 'fiado_op_v1:' + idFiado. Todavía NADIE las escribe
+// (eso llega recién en C2/C3): este bloque solo sabe leerlas y mostrarlas.
+// Formato v1: { v:1, tipo:'FIADO_SOLO', idFiado, idVenta (= idFiado+'_v'),
+//   creadoTs, actualizadoTs, vendedor, items:[…], importeCarrito, importeItems,
+//   datosFiado:{cliente,telefono,total,vencimiento,obs,cantItems,descripcion},
+//   venta:{estado,ticket,motivo}, deuda:{estado,ticket,motivo} }
+// Un registro que no cumple el formato NUNCA se ignora: se muestra como
+// «Requiere revisión» y cuenta en el contador.
+const _PGP_PREFIJO_OP = 'fiado_op_v1:';
+const _PGP_OP_ESTADOS_VENTA = ['SIN_ENVIAR', 'ENVIANDO', 'CONFIRMADA', 'PARCIAL', 'INCIERTA'];
+const _PGP_OP_ESTADOS_DEUDA = ['SIN_ENVIAR', 'ENVIANDO', 'CONFIRMADA', 'CONFLICTO', 'INCIERTA'];
+const _PGP_OP_ROTULO = {
+    SIN_ENVIAR: 'Guardada en este dispositivo antes de enviar',
+    ENVIANDO: 'Incierta (pudo haber salido)',
+    INCIERTA: 'Incierta',
+    CONFIRMADA: 'Confirmada',
+    PARCIAL: 'Parcial (el servidor omitió ítems)',
+    CONFLICTO: 'Conflicto (requiere revisión)'
+};
+
+// Lee la cola. Devuelve { ok, lista, crudo }. Nunca escribe.
+function _pgpLeer() {
+    let crudo = null;
+    try { crudo = localStorage.getItem(_PGP_CLAVE); } catch (e) { return { ok: false, lista: [], crudo: null }; }
+    if (crudo === null || crudo === '') return { ok: true, lista: [], crudo: crudo };
+    try {
+        const l = JSON.parse(crudo);
+        if (!Array.isArray(l)) return { ok: false, lista: [], crudo: crudo };
+        return { ok: true, lista: l, crudo: crudo };
+    } catch (e) { return { ok: false, lista: [], crudo: crudo }; }
+}
+
+// Huella corta (FNV-1a) del texto exacto de la cola: sirve para comprobar que
+// no cambió nada entre antes y después de usar el panel.
+function _pgpHuella(crudo) {
+    if (crudo === null || crudo === undefined) return 'sin datos';
+    let h = 0x811c9dc5;
+    for (let i = 0; i < crudo.length; i++) {
+        h ^= crudo.charCodeAt(i);
+        h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h.toString(16).padStart(8, '0');
+}
+
+function _pgpEsc(s) {
+    return String(s === null || s === undefined ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function _pgpMoneda(n) {
+    if (typeof n !== 'number' || !isFinite(n)) return '—';
+    return '$' + n.toLocaleString('es-AR', { maximumFractionDigits: 2 });
+}
+
+// Botón del encabezado (PC): siempre visible. Gris con 0, ámbar con N.
+// Aislado: nunca lanza error hacia afuera.
+// Valida el formato v1 de una operación. Devuelve '' si es válida, o el motivo.
+function _pgpOpValidar(op, clave) {
+    if (!op || typeof op !== 'object' || Array.isArray(op)) return 'el registro no es un objeto';
+    if (op.v !== 1) return 'versión de formato desconocida (' + String(op.v) + ')';
+    if (op.tipo !== 'FIADO_SOLO') return 'tipo desconocido';
+    if (typeof op.idFiado !== 'string' || !op.idFiado) return 'falta idFiado';
+    if (_PGP_PREFIJO_OP + op.idFiado !== clave) return 'la clave no coincide con idFiado';
+    if (op.idVenta !== op.idFiado + '_v') return 'idVenta no corresponde a idFiado';
+    if (!Array.isArray(op.items) || !op.items.length) return 'sin ítems';
+    if (!op.venta || typeof op.venta !== 'object' || _PGP_OP_ESTADOS_VENTA.indexOf(op.venta.estado) === -1) return 'estado de VENTA inválido';
+    if (!op.deuda || typeof op.deuda !== 'object' || _PGP_OP_ESTADOS_DEUDA.indexOf(op.deuda.estado) === -1) return 'estado de DEUDA inválido';
+    if (op.venta.estado === 'CONFIRMADA' && (op.venta.ticket === null || op.venta.ticket === undefined || String(op.venta.ticket).trim() === '')) return 'venta confirmada sin ticket';
+    return '';
+}
+
+// COMPLETA solo si venta y deuda están confirmadas Y hay ticket. Nada más cuenta como completo.
+function _pgpOpEstadoGeneral(op) {
+    const v = op.venta.estado, d = op.deuda.estado;
+    const hayTicket = op.venta.ticket !== null && op.venta.ticket !== undefined && String(op.venta.ticket).trim() !== '';
+    if (v === 'CONFIRMADA' && d === 'CONFIRMADA' && hayTicket) return 'COMPLETA';
+    if (v === 'CONFIRMADA' || d === 'CONFIRMADA') return 'PARCIAL';
+    return 'INCIERTA';
+}
+
+// Lee TODAS las operaciones nuevas (solo lectura: length / key / getItem).
+// Devuelve { ok, items:[{clave, crudo, op|null, motivo, general}] }.
+function _pgpLeerOperaciones() {
+    const claves = [];
+    try {
+        const n = localStorage.length;
+        for (let i = 0; i < n; i++) {
+            const k = localStorage.key(i);
+            if (typeof k === 'string' && k.indexOf(_PGP_PREFIJO_OP) === 0) claves.push(k);
+        }
+    } catch (e) { return { ok: false, items: [] }; }
+    claves.sort();
+    const out = { ok: true, items: [] };
+    for (const k of claves) {
+        let crudo = null;
+        try { crudo = localStorage.getItem(k); } catch (e) { out.ok = false; continue; }
+        let op = null, motivo = '';
+        try { op = JSON.parse(crudo); motivo = _pgpOpValidar(op, k); } catch (e) { motivo = 'JSON ilegible'; }
+        if (motivo) out.items.push({ clave: k, crudo: crudo, op: null, motivo: motivo, general: 'ILEGIBLE' });
+        else out.items.push({ clave: k, crudo: crudo, op: op, motivo: '', general: _pgpOpEstadoGeneral(op) });
+    }
+    return out;
+}
+
+// Resumen único para contador y panel: pendientes antiguos + operaciones nuevas sin completar.
+function _pgpResumen() {
+    const r = _pgpLeer();
+    const o = _pgpLeerOperaciones();
+    const sinCompletar = o.items.filter(x => x.general !== 'COMPLETA');
+    const completadas = o.items.filter(x => x.general === 'COMPLETA');
+    const nViejos = r.ok ? r.lista.length : null;
+    const nOps = o.ok ? sinCompletar.length : null;
+    const total = (nViejos === null || nOps === null) ? null : nViejos + nOps;
+    return { r: r, o: o, sinCompletar: sinCompletar, completadas: completadas, nViejos: nViejos, nOps: nOps, total: total };
+}
+
+// ÚNICO aviso «Pagos pendientes (N)». N = pendientes antiguos + operaciones nuevas
+// sin completar + registros que requieren revisión. Si algo no se puede leer: «?».
+// PC: botón del encabezado (siempre visible; gris con 0, ámbar con N o «?»).
+// Celular: fila ancha (visible solo con N>0 o «?»; oculta con 0).
+// Ambos abren SOLO el panel de solo lectura. Aislado: nunca lanza error hacia afuera.
+function _pgpActualizarContador() {
+    let s = null;
+    try { s = _pgpResumen(); } catch (e) { s = null; }
+    const n = s ? s.total : null; // null = no se pudo calcular → «?» (nunca un 0 falso)
+    const texto = 'Pagos pendientes (' + (n === null ? '?' : n) + ')';
+    try {
+        const btn = document.getElementById('btnPagosPendientes');
+        if (btn) {
+            btn.textContent = texto;
+            const activo = (n === null || n > 0);
+            btn.style.background = activo ? '#ffb300' : '#9e9e9e';
+            btn.style.borderColor = activo ? '#ff8f00' : '#757575';
+            btn.style.color = activo ? '#3e2723' : '#ffffff';
+        }
+    } catch (e) {}
+    try {
+        const chip = document.getElementById('chipOpsPgp');
+        if (chip) {
+            chip.textContent = texto;
+            chip.style.display = (n === null || n > 0) ? 'block' : 'none';
+        }
+    } catch (e) {}
+}
+
+// Clasifica una entrada de la cola sin modificarla.
+function _pgpClasificar(e) {
+    if (e && e.tipo === 'fiadoPendiente' && e.datosFiado && typeof e.datosFiado.idFiado === 'string' && e.datosFiado.idFiado) {
+        return { tipo: 'FIADO_PENDIENTE', titulo: 'FIADO pendiente', idVenta: '', idFiado: e.datosFiado.idFiado };
+    }
+    if (e && Array.isArray(e.items) && typeof e.idVenta === 'string' && e.idVenta) {
+        const idFiado = (typeof e.idFiado === 'string' && e.idFiado) ? e.idFiado : '';
+        if (idFiado) return { tipo: 'VENTA_FIADO_SOLO', titulo: 'Venta de FIADO SOLO', idVenta: e.idVenta, idFiado: idFiado };
+        if (e.metodoPago === 'MIXTO') return { tipo: 'VENTA_MIXTA', titulo: 'Venta de pago MIXTO', idVenta: e.idVenta, idFiado: '' };
+        return { tipo: 'VENTA', titulo: 'Venta', idVenta: e.idVenta, idFiado: '' };
+    }
+    return { tipo: 'DESCONOCIDO', titulo: 'Entrada no reconocida', idVenta: '', idFiado: '' };
+}
+
+// Cálculo local con el mismo criterio que el backend: una fila por ítem;
+// unidades = cantidad (ítem por peso cuenta 1); total = precioVenta × cantidad
+// (ítem por peso: precioVenta). Devuelve null si algún dato no es confiable.
+function _pgpCalcLocal(items) {
+    if (!Array.isArray(items) || !items.length) return null;
+    let unidades = 0, total = 0;
+    for (const it of items) {
+        if (!it || typeof it !== 'object') return null;
+        const precio = Number(it.precioVenta);
+        if (!isFinite(precio)) return null;
+        if (it.esPeso) {
+            unidades += 1;
+            total += precio;
+        } else {
+            const q = Number(it.qty);
+            if (!isFinite(q) || q <= 0) return null;
+            unidades += q;
+            total += precio * q;
+        }
+    }
+    return { filas: items.length, unidades: Math.round(unidades * 1000) / 1000, total: Math.round(total * 100) / 100 };
+}
+
+function _pgpIgual(a, b, tol) {
+    return typeof a === 'number' && typeof b === 'number' && isFinite(a) && isFinite(b) && Math.abs(a - b) <= tol;
+}
+
+// Validador estricto (se niega por defecto): si algo no es exactamente lo
+// esperado, la consulta se considera NO verificada.
+function _pgpValidarRespuesta(r, idVenta, idFiado) {
+    if (!r || typeof r !== 'object') return { ok: false, motivo: 'respuesta vacía o ilegible' };
+    if (r.success !== true) return { ok: false, motivo: 'la consulta no fue exitosa' };
+    if (r.lecturaCompleta !== true) return { ok: false, motivo: 'lectura incompleta' };
+    if (r.autorizaReintento !== false) return { ok: false, motivo: 'campo autorizaReintento inesperado' };
+    if (r.soloLectura !== true) return { ok: false, motivo: 'campo soloLectura inesperado' };
+    if (idVenta) {
+        const v = r.venta;
+        if (!v || typeof v !== 'object') return { ok: false, motivo: 'falta el resultado de la venta' };
+        if (v.idVenta !== idVenta) return { ok: false, motivo: 'la respuesta no corresponde a este idVenta' };
+        if (_PGP_ESTADOS_VENTA.indexOf(v.estado) === -1) return { ok: false, motivo: 'estado de venta desconocido' };
+        if (v.estado === 'ERROR_CONSULTA') return { ok: false, motivo: 'error al leer la venta' };
+        if (v.estado === 'REGISTRADA') {
+            if (v.ticket === null || v.ticket === undefined || String(v.ticket).trim() === '') return { ok: false, motivo: 'venta registrada sin ticket (respuesta inconsistente)' };
+            if (!v.ventas || v.ventas.filasTotal !== 1) return { ok: false, motivo: 'venta registrada sin una fila TOTAL única (respuesta inconsistente)' };
+        }
+    }
+    if (idFiado) {
+        const f = r.fiado;
+        if (!f || typeof f !== 'object') return { ok: false, motivo: 'falta el resultado del FIADO' };
+        if (f.idFiado !== idFiado) return { ok: false, motivo: 'la respuesta no corresponde a este idFiado' };
+        if (_PGP_ESTADOS_FIADO.indexOf(f.estado) === -1) return { ok: false, motivo: 'estado de FIADO desconocido' };
+        if (f.estado === 'ERROR_CONSULTA') return { ok: false, motivo: 'error al leer FIADOS' };
+        if (f.estado === 'EXISTE_CON_TICKET' && (f.ticket === null || f.ticket === undefined || String(f.ticket).trim() === '')) return { ok: false, motivo: 'FIADO con ticket sin número (respuesta inconsistente)' };
+    }
+    return { ok: true, motivo: '' };
+}
+
+// Interpreta el estado de VENTA. nivel: ok | warn | bad
+function _pgpEvaluarVenta(local, v) {
+    const adv = Array.isArray(v.advertencias) ? v.advertencias.map(a => 'Aviso del servidor: ' + a) : [];
+    if (v.estado === 'REGISTRADA') {
+        const w = v.ventas || {};
+        const dif = [];
+        if (!local) {
+            dif.push('No se pudo calcular el contenido local para comparar.');
+        } else {
+            if (w.filasProducto !== local.filas) dif.push('Filas de producto: pendiente ' + local.filas + ' / planilla ' + w.filasProducto);
+            if (!_pgpIgual(w.unidades, local.unidades, 0.0005)) dif.push('Unidades: pendiente ' + local.unidades + ' / planilla ' + (w.unidades === null || w.unidades === undefined ? 'sin dato' : w.unidades));
+            if (!_pgpIgual(w.importeTotal, local.total, 0.01)) dif.push('Total: pendiente ' + _pgpMoneda(local.total) + ' / planilla ' + (typeof w.importeTotal === 'number' ? _pgpMoneda(w.importeTotal) : 'sin dato'));
+        }
+        if (dif.length || adv.length) {
+            return { nivel: 'warn', titulo: 'Requiere revisión',
+                det: ['La planilla tiene el ticket ' + v.ticket + ' ligado a este idVenta, pero hay diferencias o avisos:'].concat(dif, adv) };
+        }
+        return { nivel: 'ok', titulo: 'Registrada en la planilla — ticket ' + v.ticket,
+            det: ['Coincide con lo pendiente en filas (' + local.filas + '), unidades (' + local.unidades + ') y total (' + _pgpMoneda(local.total) + ').',
+                  'Ojo: coincidir en esos tres números no demuestra que el contenido sea idéntico.'] };
+    }
+    if (v.estado === 'EN_PROCESO') {
+        return { nivel: 'warn', titulo: 'En proceso (operación reciente)',
+            det: ['Es muy reciente y puede estar terminando de registrarse. Volvé a consultar en unos minutos.'].concat(adv) };
+    }
+    if (v.estado === 'INCOMPLETA') {
+        return { nivel: 'bad', titulo: 'Requiere revisión: rastro incompleto',
+            det: ['La planilla tiene rastro de esta venta pero no las filas completas. Revisión manual.'].concat(adv) };
+    }
+    // INCIERTA
+    return { nivel: 'warn', titulo: 'Requiere revisión: sin datos concluyentes',
+        det: ['No hay datos suficientes para concluir. Que no haya rastro NO significa que la venta no ocurrió.'].concat(adv) };
+}
+
+function _pgpEvaluarFiado(f) {
+    if (f.estado === 'EXISTE_CON_TICKET') {
+        return { nivel: 'ok', titulo: 'FIADO existente con ticket ' + f.ticket, det: ['Hay una sola fila en FIADOS con ese idFiado.'] };
+    }
+    if (f.estado === 'EXISTE_SIN_TICKET') {
+        return { nivel: 'warn', titulo: 'FIADO existente sin ticket',
+            det: ['Hay una sola fila en FIADOS, pero sin número de ticket. Este panel no la completa ni la une a ninguna venta.'] };
+    }
+    if (f.estado === 'NO_EXISTE') {
+        return { nivel: 'warn', titulo: 'Requiere revisión: sin fila en FIADOS',
+            det: [f.reciente ? 'Es una operación muy reciente: puede estar en curso. Volvé a consultar en unos minutos.' : 'No se encontró la fila. Esto no autoriza a reenviar nada.'] };
+    }
+    // DUPLICADO_EN_HOJA
+    return { nivel: 'bad', titulo: 'Requiere revisión: más de una fila en FIADOS', det: ['Hay más de una fila con ese idFiado. Revisión manual.'] };
+}
+
+// Consulta de SOLO LECTURA. Usa únicamente la acción consultarEstadoOperacion.
+// El resultado queda en memoria (_PGP.resultados), nunca en el navegador.
+async function _pgpConsultar(cls, entrada, huella) {
+    const clave = cls.idVenta || cls.idFiado;
+    const datos = {};
+    if (cls.idVenta) datos.idVenta = cls.idVenta;
+    if (cls.idFiado) datos.idFiado = cls.idFiado;
+    let res;
+    try {
+        const url = API_URL + '?action=consultarEstadoOperacion&data=' + encodeURIComponent(JSON.stringify(datos));
+        const resp = await _apiFetchUrl('consultarEstadoOperacion', url);
+        const val = _pgpValidarRespuesta(resp, cls.idVenta, cls.idFiado);
+        if (!val.ok) {
+            res = { verificado: false, motivo: val.motivo, hora: Date.now() };
+        } else {
+            const local = cls.idVenta ? _pgpCalcLocal(entrada.items) : null;
+            const out = { verificado: true, hora: Date.now(), venta: null, fiado: null, coherencia: null };
+            if (cls.idVenta) out.venta = _pgpEvaluarVenta(local, resp.venta);
+            if (cls.idFiado) out.fiado = _pgpEvaluarFiado(resp.fiado);
+            if (cls.idVenta) { out.vestado = resp.venta.estado; out.vticket = resp.venta.ticket; }
+            if (cls.idFiado) { out.fiestado = resp.fiado.estado; out.fiticket = resp.fiado.ticket; }
+            if (cls.idVenta && cls.idFiado && resp.coherencia && typeof resp.coherencia.estado === 'string') {
+                const c = resp.coherencia;
+                if (c.estado === 'VENTA_REGISTRADA_CON_TICKET_Y_FIADO_SIN_TICKET') out.coherencia = 'La venta tiene ticket ' + c.ticketVenta + ' y el FIADO no tiene ticket. Solo informativo: no se completa nada.';
+                else if (c.estado === 'OK') out.coherencia = 'La venta y el FIADO tienen el mismo ticket (' + c.ticketVenta + ').';
+                else if (c.estado === 'TICKET_DISTINTO') out.coherencia = 'Requiere revisión: ticket de la venta (' + c.ticketVenta + ') distinto al del FIADO (' + c.ticketFiado + ').';
+                else out.coherencia = 'Cruce venta/FIADO: sin datos suficientes para concluir.';
+            }
+            res = out;
+        }
+    } catch (e) {
+        res = { verificado: false, motivo: (e && e.message) ? e.message : 'error desconocido', hora: Date.now() };
+    }
+    if (huella) res.huella = huella;
+    _PGP.resultados[clave] = res;
+}
+
+// Pares «posible relación» (solo ayuda visual para revisión manual).
+function _pgpRelaciones(lista, clasif) {
+    const rel = {};
+    for (let i = 0; i < lista.length; i++) {
+        for (let j = i + 1; j < lista.length; j++) {
+            const a = clasif[i], b = clasif[j];
+            const par = (a.tipo === 'VENTA_MIXTA' && b.tipo === 'FIADO_PENDIENTE') || (a.tipo === 'FIADO_PENDIENTE' && b.tipo === 'VENTA_MIXTA');
+            if (!par) continue;
+            const ta = Number(lista[i] && lista[i].ts), tb = Number(lista[j] && lista[j].ts);
+            if (!isFinite(ta) || !isFinite(tb)) continue;
+            const dif = Math.abs(ta - tb);
+            if (dif <= _PGP_VENTANA_RELACION_MS) {
+                (rel[i] = rel[i] || []).push({ con: j + 1, seg: Math.round(dif / 1000) });
+                (rel[j] = rel[j] || []).push({ con: i + 1, seg: Math.round(dif / 1000) });
+            }
+        }
+    }
+    return rel;
+}
+
+function _pgpColor(nivel) {
+    return nivel === 'ok' ? '#2e7d32' : nivel === 'bad' ? '#c62828' : nivel === 'warn' ? '#e65100' : '#616161';
+}
+
+function _pgpBloqueVeredicto(rotulo, v) {
+    return '<div style="margin-top:8px;padding:8px 10px;border-left:4px solid ' + _pgpColor(v.nivel) + ';background:#fafafa;border-radius:6px;">' +
+        '<div style="font-size:0.72rem;color:#757575;font-weight:700;">' + _pgpEsc(rotulo) + '</div>' +
+        '<div style="font-weight:800;color:' + _pgpColor(v.nivel) + ';">' + _pgpEsc(v.titulo) + '</div>' +
+        v.det.map(d => '<div style="font-size:0.8rem;color:#444;margin-top:2px;">' + _pgpEsc(d) + '</div>').join('') +
+        '</div>';
+}
+
+function _pgpHtmlTarjeta(i, entrada, cls, rel) {
+    const clave = cls.idVenta || cls.idFiado;
+    let h = '<div style="border:1px solid #ddd;border-radius:12px;padding:12px;margin-bottom:10px;background:white;">';
+    h += '<div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline;">' +
+         '<div style="font-weight:800;color:#222;">#' + (i + 1) + ' · ' + _pgpEsc(cls.titulo) + '</div>' +
+         '<div style="font-size:0.72rem;color:#757575;">' + (isFinite(Number(entrada && entrada.ts)) ? _pgpEsc(new Date(Number(entrada.ts)).toLocaleString('es-AR')) : '') + '</div></div>';
+    if (cls.tipo === 'FIADO_PENDIENTE') {
+        const d = entrada.datosFiado || {};
+        h += '<div style="font-size:0.82rem;color:#333;margin-top:4px;">Cliente: <b>' + _pgpEsc(d.cliente || '—') + '</b> · Saldo a FIADO: <b>' + _pgpMoneda(Number(d.total)) + '</b></div>';
+        h += '<div style="font-size:0.78rem;color:#666;">Ticket guardado en el pendiente: ' + _pgpEsc(d.ticket === null || d.ticket === undefined || d.ticket === '' ? 'ninguno' : d.ticket) + '</div>';
+        h += '<div style="font-size:0.72rem;color:#888;font-family:monospace;word-break:break-all;">idFiado: ' + _pgpEsc(cls.idFiado) + '</div>';
+    } else if (cls.tipo === 'DESCONOCIDO') {
+        h += '<div style="margin-top:6px;color:#c62828;font-weight:700;">Requiere revisión: la entrada no tiene el formato esperado. No se consulta.</div>';
+    } else {
+        const loc = _pgpCalcLocal(entrada.items);
+        h += '<div style="font-size:0.82rem;color:#333;margin-top:4px;">Vendedor: <b>' + _pgpEsc(entrada.vendedor || '—') + '</b> · Método: <b>' + _pgpEsc(entrada.metodoPago || '—') + '</b></div>';
+        h += loc
+            ? '<div style="font-size:0.82rem;color:#333;">' + loc.filas + ' fila' + (loc.filas === 1 ? '' : 's') + ' · ' + loc.unidades + ' unidad' + (loc.unidades === 1 ? '' : 'es') + ' · Total <b>' + _pgpMoneda(loc.total) + '</b></div>'
+            : '<div style="font-size:0.82rem;color:#c62828;">No se pudo calcular el contenido local.</div>';
+        const nombres = entrada.items.slice(0, 8).map(it => _pgpEsc((it && it.name) || '?') + ' ×' + _pgpEsc(it && it.esPeso ? ((it.gramos || 0) + ' g') : (it && it.qty))).join(', ');
+        h += '<div style="font-size:0.76rem;color:#666;margin-top:2px;">' + nombres + (entrada.items.length > 8 ? ' …' : '') + '</div>';
+        h += '<div style="font-size:0.72rem;color:#888;font-family:monospace;word-break:break-all;">idVenta: ' + _pgpEsc(cls.idVenta) + (cls.idFiado ? '<br>idFiado: ' + _pgpEsc(cls.idFiado) : '') + '</div>';
+    }
+    if (rel && rel.length) {
+        h += '<div style="margin-top:6px;font-size:0.78rem;color:#6a1b9a;">Posible relación (solo para revisión manual) con la tarjeta ' +
+             rel.map(r => '#' + r.con + ' (creadas con ' + r.seg + ' s de diferencia)').join(', ') +
+             '. Son operaciones independientes: no se unen ni se copian tickets.</div>';
+    }
+    if (cls.tipo !== 'DESCONOCIDO') {
+        const r = _PGP.resultados[clave];
+        if (!r) {
+            h += '<div style="margin-top:8px;font-size:0.8rem;color:#616161;">Sin consultar todavía.</div>';
+        } else if (!r.verificado) {
+            h += _pgpBloqueVeredicto('Resultado de la consulta', { nivel: 'bad', titulo: 'No se pudo verificar', det: [r.motivo || 'sin detalle', 'No se concluye nada de esta operación. No autoriza reenviar.'] });
+        } else {
+            if (r.venta) h += _pgpBloqueVeredicto('Venta (hoja Ventas)', r.venta);
+            if (r.fiado) h += _pgpBloqueVeredicto('FIADO (hoja FIADOS)', r.fiado);
+            if (r.coherencia) h += '<div style="margin-top:6px;font-size:0.78rem;color:#444;">' + _pgpEsc(r.coherencia) + '</div>';
+        }
+        h += '<div style="margin-top:8px;font-size:0.78rem;font-weight:700;color:#b71c1c;">' + _PGP_NO_HACER + '</div>';
+        h += '<div style="margin-top:8px;"><button data-pgp-consultar="' + i + '" style="padding:8px 12px;border-radius:8px;border:1px solid #1565c0;background:white;color:#1565c0;font-weight:700;cursor:pointer;">🔎 Consultar en la planilla</button></div>';
+    }
+    h += '</div>';
+    return h;
+}
+
+// ── v504: tarjeta de una operación FIADO SOLO (formato nuevo). Solo muestra. ──
+// Tres capas que NUNCA se mezclan:
+//   A = estado guardado en ESTE dispositivo   (lo que el navegador anotó)
+//   B = hallazgo en la planilla               (consulta de solo lectura, con hora)
+//   C = identidad: este panel NO la verifica  (coincidir no es confirmar)
+const _PGP_NO_HACER = 'No hagas nada: no vuelvas a cargar la venta ni uses «Reintentar». Mostrale esta pantalla a Víctor.';
+
+function _pgpHace(ms) {
+    const d = Date.now() - Number(ms);
+    if (!isFinite(d) || d < 0) return 'hace un momento';
+    if (d < 60000) return 'hace menos de 1 min';
+    if (d < 3600000) return 'hace ' + Math.floor(d / 60000) + ' min';
+    return 'hace ' + Math.floor(d / 3600000) + ' h';
+}
+
+function _pgpHayTicket(t) { return !(t === null || t === undefined || String(t).trim() === ''); }
+
+// Contradicciones entre A (local) y B (servidor). Solo informan: no autorizan nada.
+function _pgpContradicciones(op, r) {
+    const c = [];
+    const ve = op.venta.estado, de = op.deuda.estado;
+    if (r.vestado) {
+        const sinConf = (ve === 'SIN_ENVIAR' || ve === 'ENVIANDO' || ve === 'INCIERTA');
+        if (sinConf && (r.vestado === 'REGISTRADA' || r.vestado === 'INCOMPLETA')) {
+            c.push('Este dispositivo NO tiene la VENTA confirmada, pero la planilla ' + (r.vestado === 'REGISTRADA' ? 'tiene el ticket ' + r.vticket + ' ligado a este idVenta' : 'tiene rastro de esta venta') + '. Es probable que la venta SÍ haya salido. NO la vuelvas a cargar.');
+        }
+        if (ve === 'CONFIRMADA' && r.vestado !== 'REGISTRADA') {
+            c.push('Este dispositivo dice VENTA confirmada, pero la planilla no la muestra registrada (estado: ' + r.vestado + ').');
+        }
+        if (ve === 'CONFIRMADA' && r.vestado === 'REGISTRADA' && _pgpHayTicket(op.venta.ticket) && _pgpHayTicket(r.vticket) && String(op.venta.ticket).trim() !== String(r.vticket).trim()) {
+            c.push('Ticket de la VENTA distinto: este dispositivo ' + op.venta.ticket + ' / planilla ' + r.vticket + '.');
+        }
+    }
+    if (r.fiestado) {
+        const dSinConf = (de === 'SIN_ENVIAR' || de === 'ENVIANDO' || de === 'INCIERTA' || de === 'CONFLICTO');
+        const hayFila = (r.fiestado === 'EXISTE_CON_TICKET' || r.fiestado === 'EXISTE_SIN_TICKET' || r.fiestado === 'DUPLICADO_EN_HOJA');
+        if (dSinConf && hayFila) {
+            c.push('Este dispositivo NO tiene la DEUDA confirmada, pero la planilla tiene una fila en FIADOS con este idFiado. Es probable que la deuda SÍ haya salido. NO la vuelvas a cargar.');
+        }
+        if (de === 'CONFIRMADA' && r.fiestado === 'NO_EXISTE') {
+            c.push('Este dispositivo dice DEUDA confirmada, pero la planilla no tiene fila en FIADOS con este idFiado.');
+        }
+        if (de === 'CONFIRMADA' && r.fiestado === 'EXISTE_CON_TICKET' && _pgpHayTicket(op.deuda.ticket) && _pgpHayTicket(r.fiticket) && String(op.deuda.ticket).trim() !== String(r.fiticket).trim()) {
+            c.push('Ticket de la DEUDA distinto: este dispositivo ' + op.deuda.ticket + ' / planilla ' + r.fiticket + '.');
+        }
+    }
+    return c;
+}
+
+// Capa B: el hallazgo se muestra en gris neutro (nunca en verde) y sin la palabra «Registrada».
+function _pgpNeutroVenta(v, r) {
+    if (v.nivel === 'ok' && r.vestado === 'REGISTRADA') return { nivel: 'info', titulo: 'La planilla tiene el ticket ' + r.vticket + ' ligado a este idVenta', det: v.det };
+    return { nivel: v.nivel === 'ok' ? 'info' : v.nivel, titulo: v.titulo, det: v.det };
+}
+function _pgpNeutroFiado(f, r) {
+    if (f.nivel === 'ok' && r.fiestado === 'EXISTE_CON_TICKET') return { nivel: 'info', titulo: 'La planilla tiene una fila en FIADOS con ticket ' + r.fiticket, det: f.det };
+    return { nivel: f.nivel === 'ok' ? 'info' : f.nivel, titulo: f.titulo, det: f.det };
+}
+
+function _pgpHtmlOperacion(x, idsViejos) {
+    if (!x.op) {
+        return '<div style="border:2px solid #c62828;border-radius:12px;padding:12px;margin-bottom:10px;background:#fff5f5;">' +
+            '<div style="font-weight:800;color:#c62828;">Registro ilegible — Requiere revisión</div>' +
+            '<div style="font-size:0.8rem;color:#444;margin-top:4px;">Motivo: ' + _pgpEsc(x.motivo) + '</div>' +
+            '<div style="font-size:0.72rem;color:#888;font-family:monospace;word-break:break-all;">' + _pgpEsc(x.clave) + ' · ' + (x.crudo === null ? 'sin datos' : x.crudo.length + ' caracteres') + '</div>' +
+            '<div style="font-size:0.78rem;color:#666;margin-top:4px;">No se consulta ni se modifica. Se conserva tal cual.</div>' +
+            '<div style="margin-top:8px;font-size:0.78rem;font-weight:700;color:#b71c1c;">' + _pgpEsc(_PGP_NO_HACER) + '</div></div>';
+    }
+    const op = x.op;
+    const completa = x.general === 'COMPLETA';
+    const colorG = completa ? '#2e7d32' : (x.general === 'PARCIAL' ? '#e65100' : '#c62828');
+    const rotG = completa ? 'Completa' : (x.general === 'PARCIAL' ? 'Parcial' : 'Sin confirmar');
+    const df = op.datosFiado && typeof op.datosFiado === 'object' ? op.datosFiado : {};
+    const loc = _pgpCalcLocal(op.items);
+    const tk = t => _pgpHayTicket(t) ? 'ticket ' + _pgpEsc(t) : 'sin ticket';
+    const r = _PGP.resultados[op.idVenta];
+    const huellaActual = _pgpHuella(x.crudo);
+    const vigente = !!(r && r.huella === huellaActual);
+    const contr = (vigente && r.verificado) ? _pgpContradicciones(op, r) : [];
+    const compart = !!(idsViejos && (idsViejos.has(op.idVenta) || idsViejos.has(op.idFiado)));
+
+    let h = '<div style="border:1px solid #ddd;border-left:6px solid ' + colorG + ';border-radius:12px;padding:12px;margin-bottom:10px;background:white;">';
+    h += '<div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline;">' +
+         '<div style="font-weight:800;color:#222;">Operación FIADO SOLO · <span style="color:' + colorG + ';">' + rotG + '</span></div>' +
+         '<div style="font-size:0.72rem;color:#757575;">' + (isFinite(Number(op.creadoTs)) ? _pgpEsc(new Date(Number(op.creadoTs)).toLocaleString('es-AR')) : '') + '</div></div>';
+    h += '<div style="font-size:0.82rem;color:#333;margin-top:4px;">Cliente: <b>' + _pgpEsc(df.cliente || '—') + '</b> · Deuda a registrar: <b>' + _pgpMoneda(Number(df.total)) + '</b> · Vendedor: <b>' + _pgpEsc(op.vendedor || '—') + '</b></div>';
+    if (!completa) h += '<div style="margin-top:8px;padding:6px 8px;background:#ffebee;border-radius:6px;font-size:0.8rem;font-weight:700;color:#b71c1c;">' + _pgpEsc(_PGP_NO_HACER) + '</div>';
+    if (compart) h += '<div style="margin-top:6px;padding:6px 8px;background:#f3e5f5;border-radius:6px;font-size:0.78rem;color:#6a1b9a;">Este idVenta/idFiado aparece también en un pendiente antiguo de este dispositivo. Puede ser la MISMA operación: no las trates por separado ni cargues nada de nuevo.</div>';
+    if (contr.length) {
+        h += '<div style="margin-top:6px;padding:8px 10px;background:#c62828;color:white;border-radius:6px;font-size:0.8rem;"><b>CONTRADICCIÓN entre este dispositivo y la planilla</b>' +
+             contr.map(t => '<div style="margin-top:3px;">' + _pgpEsc(t) + '</div>').join('') + '</div>';
+    }
+
+    // CAPA A — estado guardado en este dispositivo
+    h += '<div style="margin-top:8px;padding:8px 10px;border:1px solid #e0e0e0;border-radius:8px;background:#fafafa;">';
+    h += '<div style="font-size:0.72rem;color:#757575;font-weight:700;">A · ESTADO GUARDADO EN ESTE DISPOSITIVO</div>';
+    h += '<div style="margin-top:4px;font-size:0.82rem;"><b>VENTA:</b> ' + _pgpEsc(_PGP_OP_ROTULO[op.venta.estado] || op.venta.estado) + ' · ' + tk(op.venta.ticket) + (op.venta.motivo ? ' · ' + _pgpEsc(op.venta.motivo) : '') + '</div>';
+    h += '<div style="font-size:0.82rem;"><b>DEUDA:</b> ' + _pgpEsc(_PGP_OP_ROTULO[op.deuda.estado] || op.deuda.estado) + ' · ' + tk(op.deuda.ticket) + (op.deuda.motivo ? ' · ' + _pgpEsc(op.deuda.motivo) : '') + '</div>';
+    h += loc
+        ? '<div style="font-size:0.82rem;color:#333;margin-top:4px;">' + loc.filas + ' fila' + (loc.filas === 1 ? '' : 's') + ' · ' + loc.unidades + ' unidad' + (loc.unidades === 1 ? '' : 'es') + ' · Total ítems <b>' + _pgpMoneda(loc.total) + '</b></div>'
+        : '<div style="font-size:0.82rem;color:#c62828;">No se pudo calcular el contenido guardado.</div>';
+    if (loc && typeof op.importeItems === 'number' && !_pgpIgual(op.importeItems, loc.total, 0.01)) {
+        h += '<div style="font-size:0.78rem;color:#e65100;">Requiere revisión: el importe guardado (' + _pgpMoneda(op.importeItems) + ') no coincide con la suma de los ítems (' + _pgpMoneda(loc.total) + ').</div>';
+    }
+    const nombres = op.items.slice(0, 8).map(it => _pgpEsc((it && it.name) || '?') + ' ×' + _pgpEsc(it && it.esPeso ? ((it.gramos || 0) + ' g') : (it && it.qty))).join(', ');
+    h += '<div style="font-size:0.76rem;color:#666;margin-top:2px;">' + nombres + (op.items.length > 8 ? ' …' : '') + '</div>';
+    h += '<div style="font-size:0.72rem;color:#888;font-family:monospace;word-break:break-all;">idVenta: ' + _pgpEsc(op.idVenta) + '<br>idFiado: ' + _pgpEsc(op.idFiado) + '</div>';
+    h += '</div>';
+
+    // CAPA B — hallazgo en la planilla (consulta de solo lectura)
+    h += '<div style="margin-top:8px;padding:8px 10px;border:1px solid #e0e0e0;border-radius:8px;background:#fafafa;">';
+    if (!r) {
+        h += '<div style="font-size:0.72rem;color:#757575;font-weight:700;">B · HALLAZGO EN LA PLANILLA</div><div style="margin-top:4px;font-size:0.8rem;color:#616161;">Sin consultar todavía.</div>';
+    } else if (!r.verificado) {
+        h += '<div style="font-size:0.72rem;color:#757575;font-weight:700;">B · HALLAZGO EN LA PLANILLA — consulta de solo lectura, ' + _pgpEsc(_pgpHace(r.hora)) + '</div>';
+        h += _pgpBloqueVeredicto('Resultado de la consulta', { nivel: 'bad', titulo: 'No se pudo verificar', det: [r.motivo || 'sin detalle', 'No se concluye nada de esta operación. No autoriza reenviar.'] });
+    } else if (!vigente) {
+        h += '<div style="font-size:0.72rem;color:#757575;font-weight:700;">B · HALLAZGO EN LA PLANILLA</div>';
+        h += '<div style="margin-top:4px;font-size:0.8rem;color:#e65100;font-weight:700;">Resultado desactualizado (consultado ' + _pgpEsc(_pgpHace(r.hora)) + '): el registro de este dispositivo cambió o el resultado viene de otra consulta. No se muestra. Consultá de nuevo.</div>';
+    } else {
+        h += '<div style="font-size:0.72rem;color:#757575;font-weight:700;">B · HALLAZGO EN LA PLANILLA — consulta de solo lectura, ' + _pgpEsc(_pgpHace(r.hora)) + '</div>';
+        if (r.venta) h += _pgpBloqueVeredicto('Venta (hoja Ventas)', _pgpNeutroVenta(r.venta, r));
+        if (r.fiado) h += _pgpBloqueVeredicto('FIADO (hoja FIADOS)', _pgpNeutroFiado(r.fiado, r));
+        if (r.coherencia) h += '<div style="margin-top:6px;font-size:0.78rem;color:#444;">' + _pgpEsc(r.coherencia) + '</div>';
+    }
+    h += '</div>';
+
+    // CAPA C — identidad
+    h += '<div style="margin-top:8px;padding:8px 10px;border:1px dashed #9e9e9e;border-radius:8px;font-size:0.78rem;color:#555;">' +
+         '<b>C · IDENTIDAD: NO VERIFICADA por este panel.</b> Que coincidan el ticket, las filas, las unidades o el total no confirma que sea esta operación ni autoriza reenviar, reparar o borrar nada.</div>';
+
+    h += '<div style="margin-top:8px;"><button data-pgp-consultar-op="' + _pgpEsc(x.clave) + '" style="padding:8px 12px;border-radius:8px;border:1px solid #1565c0;background:white;color:#1565c0;font-weight:700;cursor:pointer;">🔎 Consultar en la planilla</button></div>';
+    h += '</div>';
+    return h;
+}
+
+// Sección «Operaciones FIADO SOLO». Vacía ('') si no hay ninguna (así, hoy, el panel se ve igual que en v502).
+function _pgpHtmlSeccionOps(s, idsViejos) {
+    const o = s.o;
+    if (o.ok && !o.items.length) return '';
+    let h = '';
+    if (!o.ok) h += '<div style="margin-top:10px;padding:10px;background:#ffebee;color:#b71c1c;border-radius:8px;font-weight:700;">Requiere revisión: no se pudieron leer por completo las operaciones FIADO SOLO de este navegador.</div>';
+    h += '<div style="margin-top:12px;font-weight:800;color:#222;">Operaciones FIADO SOLO sin completar (' + s.sinCompletar.length + ')</div>';
+    if (!s.sinCompletar.length) h += '<div style="margin:6px 0 10px;font-size:0.82rem;color:#2e7d32;">Ninguna sin completar.</div>';
+    for (const x of s.sinCompletar) h += _pgpHtmlOperacion(x, idsViejos);
+    if (s.completadas.length) {
+        h += '<details style="margin:8px 0 10px;"><summary style="cursor:pointer;font-weight:700;color:#2e7d32;">Completadas (' + s.completadas.length + ') — se conservan, no se borran</summary>' +
+             s.completadas.map(c => _pgpHtmlOperacion(c, idsViejos)).join('') + '</details>';
+    }
+    return h;
+}
+
+async function _pgpConsultarOp(op, crudo) {
+    await _pgpConsultar({ tipo: 'OPERACION_FIADO_SOLO', idVenta: op.idVenta, idFiado: op.idFiado }, { items: op.items }, _pgpHuella(crudo));
+}
+
+function _pgpDibujar() {
+    const overlay = document.getElementById('pgpOverlay');
+    if (!overlay) return;
+    const s = _pgpResumen();
+    const r = s.r;
+    const lista = r.lista;
+    const clasif = lista.map(_pgpClasificar);
+    const rel = _pgpRelaciones(lista, clasif);
+    let h = '<div style="background:#f5f5f5;border-radius:16px;padding:16px;max-width:720px;width:100%;max-height:88vh;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,0.35);">';
+    h += '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
+         '<div style="font-weight:900;font-size:1.1rem;color:#222;">Pagos pendientes (' + (s.total === null ? '?' : s.total) + ')</div>' +
+         '<button id="pgpCerrar" style="padding:8px 14px;border-radius:8px;border:none;background:#424242;color:white;font-weight:700;cursor:pointer;">Cerrar</button></div>';
+    h += '<div style="margin-top:8px;padding:8px 10px;background:#e3f2fd;border-radius:8px;font-size:0.8rem;color:#0d47a1;">' +
+         '<b>Solo consulta.</b> Este panel no reenvía, no cancela, no borra ni repara nada. Los pendientes son del navegador donde se crearon: acá solo ves los de este dispositivo.</div>';
+    {
+        const nNuevas = s.sinCompletar.filter(x => x.op).length;
+        const nRevisar = s.sinCompletar.filter(x => !x.op).length;
+        h += '<div style="margin-top:6px;font-size:0.78rem;color:#444;">' + (s.total === null ? '<b>No se pudo calcular el total: falló una lectura.</b> ' : '') +
+             'Desglose: <b>' + (s.nViejos === null ? '?' : s.nViejos) + '</b> pendientes antiguos · <b>' + (s.o.ok ? nNuevas : '?') + '</b> operaciones nuevas sin completar · <b>' + (s.o.ok ? nRevisar : '?') + '</b> registros a revisar.</div>';
+    }
+    const idsViejos = new Set();
+    clasif.forEach(c => { if (c.idVenta) idsViejos.add(c.idVenta); if (c.idFiado) idsViejos.add(c.idFiado); });
+    const hayOpsConsultables = s.sinCompletar.some(x => x.op);
+    if ((r.ok && lista.length) || hayOpsConsultables) {
+        h += '<div style="margin:10px 0;"><button id="pgpTodos" style="padding:8px 12px;border-radius:8px;border:none;background:#1565c0;color:white;font-weight:700;cursor:pointer;">🔎 Consultar todos</button></div>';
+    }
+    h += _pgpHtmlSeccionOps(s, idsViejos);
+    const hayOps = !(s.o.ok && !s.o.items.length);
+    if (!r.ok) {
+        h += '<div style="margin-top:10px;padding:10px;background:#ffebee;color:#b71c1c;border-radius:8px;font-weight:700;">Requiere revisión: no se pudo leer la lista de pendientes de este navegador.</div>';
+    } else if (!lista.length) {
+        if (!hayOps) h += '<div style="margin-top:12px;padding:14px;background:white;border-radius:10px;color:#2e7d32;font-weight:700;">No hay pagos pendientes en este navegador.</div>';
+    } else {
+        if (hayOps) h += '<div style="margin-top:12px;font-weight:800;color:#222;">Pendientes antiguos (' + lista.length + ')</div>';
+        for (let i = 0; i < lista.length; i++) h += _pgpHtmlTarjeta(i, lista[i], clasif[i], rel[i]);
+    }
+    h += '<div style="margin-top:6px;font-size:0.72rem;color:#757575;font-family:monospace;">Lista leída: ' + (r.crudo === null ? 'sin datos' : r.crudo.length + ' caracteres') + ' · huella ' + _pgpHuella(r.crudo) + '</div>';
+    h += '<div style="font-size:0.72rem;color:#757575;font-family:monospace;">Operaciones nuevas: ' + s.o.items.length + ' registro' + (s.o.items.length === 1 ? '' : 's') + ' · huella ' + _pgpHuella(s.o.items.length ? s.o.items.map(x => x.clave + '=' + x.crudo).join('\n') : null) + '</div>';
+    h += '<div style="margin-top:6px;"><button id="pgpActualizar" style="padding:6px 10px;border-radius:8px;border:1px solid #bdbdbd;background:white;color:#444;cursor:pointer;">↻ Releer lista (sin consultar)</button></div>';
+    h += '</div>';
+    overlay.innerHTML = h;
+
+    const cerrar = document.getElementById('pgpCerrar');
+    if (cerrar) cerrar.onclick = _pgpCerrar;
+    const act = document.getElementById('pgpActualizar');
+    if (act) act.onclick = () => { _pgpActualizarContador(); _pgpDibujar(); };
+    const todos = document.getElementById('pgpTodos');
+    if (todos) todos.onclick = async () => {
+        if (_PGP.ocupado) return;
+        _PGP.ocupado = true;
+        try {
+            const l2 = _pgpLeer().lista;
+            for (let i = 0; i < l2.length; i++) {
+                const c = _pgpClasificar(l2[i]);
+                if (c.tipo === 'DESCONOCIDO') continue;
+                await _pgpConsultar(c, l2[i]);
+                if (!document.getElementById('pgpOverlay')) return;
+                _pgpDibujar();
+            }
+            for (const x of _pgpLeerOperaciones().items) {
+                if (!x.op || x.general === 'COMPLETA') continue;
+                await _pgpConsultarOp(x.op, x.crudo);
+                if (!document.getElementById('pgpOverlay')) return;
+                _pgpDibujar();
+            }
+        } catch (e) {} finally { _PGP.ocupado = false; }
+    };
+    overlay.querySelectorAll('[data-pgp-consultar-op]').forEach(b => {
+        b.onclick = async () => {
+            if (_PGP.ocupado) return;
+            _PGP.ocupado = true;
+            try {
+                const clave = b.getAttribute('data-pgp-consultar-op');
+                const x = _pgpLeerOperaciones().items.find(i => i.clave === clave);
+                if (x && x.op) {
+                    b.textContent = 'Consultando…';
+                    await _pgpConsultarOp(x.op, x.crudo);
+                }
+            } catch (e) {} finally {
+                _PGP.ocupado = false;
+                if (document.getElementById('pgpOverlay')) _pgpDibujar();
+            }
+        };
+    });
+    overlay.querySelectorAll('[data-pgp-consultar]').forEach(b => {
+        b.onclick = async () => {
+            if (_PGP.ocupado) return;
+            _PGP.ocupado = true;
+            try {
+                const idx = Number(b.getAttribute('data-pgp-consultar'));
+                const l2 = _pgpLeer().lista;
+                const e2 = l2[idx];
+                const c = _pgpClasificar(e2);
+                if (c.tipo !== 'DESCONOCIDO') {
+                    b.textContent = 'Consultando…';
+                    await _pgpConsultar(c, e2);
+                }
+            } catch (e) {} finally {
+                _PGP.ocupado = false;
+                if (document.getElementById('pgpOverlay')) _pgpDibujar();
+            }
+        };
+    });
+}
+
+function _pgpCerrar() {
+    try {
+        const o = document.getElementById('pgpOverlay');
+        if (o) o.remove();
+        _pgpActualizarContador();
+    } catch (e) {}
+}
+
+function _pgpAbrir() {
+    try {
+        if (document.getElementById('pgpOverlay')) return;
+        _pgpActualizarContador();
+        const overlay = document.createElement('div');
+        overlay.id = 'pgpOverlay';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:100000;display:flex;align-items:center;justify-content:center;padding:16px;';
+        overlay.addEventListener('click', ev => { if (ev.target === overlay) _pgpCerrar(); });
+        document.body.appendChild(overlay);
+        _pgpDibujar();
+    } catch (e) { console.warn('⚠️ Panel Pagos pendientes:', e); }
+}
+
+// Actualización del contador SIN temporizadores: al volver a la pestaña, al
+// enfocar la ventana y cuando otra pestaña cambia la cola. (El aviso inmediato
+// al encolar en esta misma pestaña lo da la línea agregada en
+// _actualizarBadgePendientes.)
+try {
+    window.addEventListener('storage', ev => { try { if (!ev.key || ev.key === _PGP_CLAVE || ev.key.indexOf(_PGP_PREFIJO_OP) === 0) _pgpActualizarContador(); } catch (e) {} });
+    document.addEventListener('visibilitychange', () => { try { if (!document.hidden) _pgpActualizarContador(); } catch (e) {} });
+    window.addEventListener('focus', () => { try { _pgpActualizarContador(); } catch (e) {} });
+    _pgpActualizarContador();
+} catch (e) {}
 
 // v14/09/2026 — blindado tras auditoría cruzada (informe externo + Claude +
 // Lovable, ver CHANCE_LOG.md sesión correspondiente). Dos bugs reales
