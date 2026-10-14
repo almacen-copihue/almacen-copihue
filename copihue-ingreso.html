@@ -481,6 +481,18 @@
       .card { padding: 16px; }
       h3 { font-size: 19px; }
     }
+
+    /* v26 — cola de ingresos por confirmar */
+    .cola-wrap { display:none; margin-top:14px; border:2px solid #f0b34a; background:#fff8e6; border-radius:12px; padding:10px 12px; font-size:0.88rem; color:#6b4a00; }
+    .cola-wrap.visible { display:block; }
+    .cola-head { display:flex; align-items:center; justify-content:space-between; gap:8px; font-weight:700; }
+    .cola-head button { border:none; background:#f0b34a; color:#3b2800; font-weight:700; border-radius:8px; padding:6px 10px; cursor:pointer; font-size:0.82rem; }
+    .cola-head button:disabled { opacity:0.6; cursor:not-allowed; }
+    .cola-item { margin-top:8px; padding-top:8px; border-top:1px dashed #e0c27a; display:flex; justify-content:space-between; gap:8px; align-items:flex-start; }
+    .cola-item small { display:block; color:#8a6a1f; }
+    .cola-item.rechazada { color:#a12a1f; }
+    .cola-item.rechazada small { color:#a12a1f; }
+    .cola-item button { border:1px solid #c9a24a; background:#fff; border-radius:8px; padding:4px 8px; cursor:pointer; font-size:0.78rem; }
   </style>
 </head>
 <body>
@@ -573,6 +585,12 @@
   <div class="aviso-valor-raro" id="avisoValorRaro"></div>
 
   <button class="btn-guardar" id="btnGuardar" onclick="guardar()">✅ Guardar Ingreso</button>
+
+  <!-- v26 — ingresos que no recibieron confirmación: se reintentan solos con el mismo idOperacion -->
+  <div class="cola-wrap" id="colaWrap">
+    <div class="cola-head"><span id="colaTitulo">⏳ Ingresos por confirmar</span><button id="colaBtn" onclick="_colaReintentarYa()">Reintentar ahora</button></div>
+    <div id="colaLista"></div>
+  </div>
 
   <!-- Panel de últimos ingresos con opción de deshacer cada uno -->
   <div class="historial-wrap">
@@ -726,7 +744,30 @@
 // v2 — (base recibida)
 // ──────────────────────────────────────────────────────────────────────────────
 
-const APP_VERSION = 'v25';
+// v26 — Ingreso a prueba de mala señal (misma idea que el ingreso de seba21):
+//       (1) COLA de ingresos "por confirmar" guardada en el celular
+//       (localStorage): si un guardado no recibe respuesta (timeout, sin red,
+//       servidor ocupado), el ingreso queda en la cola CON SU idOperacion, el
+//       formulario se limpia y se puede seguir cargando; la página reintenta
+//       sola con el MISMO idOperacion y el servidor (ingresarMercaderia →
+//       buscarPorIdOperacion) lo reconoce sin sumar stock de nuevo. Antes se
+//       generaba un idOperacion NUEVO en cada click de Guardar, por lo que un
+//       reintento tras un timeout podía duplicar el stock. (2) CATÁLOGO
+//       guardado en el celular: al abrir, el autocompletado funciona al
+//       instante aunque el servidor esté lento o sin conexión; se actualiza en
+//       segundo plano (45 s de espera + reintentos). (3) Menos carga: tras
+//       guardar ya no se pide el catálogo completo (se actualiza el stock
+//       local con la respuesta); la sincronización periódica pasa de 3 a 10
+//       min y se salta si la pantalla está oculta. (4) Cartel de producto
+//       nuevo: se quitó el ✅ duplicado. NO cambia Code.gs.
+
+// v27 — Sugerencia de proveedor: además de los proveedores de los productos
+//       del Inventario, suma los de la hoja "Proveedores" (acción existente
+//       getProveedores, guardada en el celular). La búsqueda ignora espacios,
+//       guiones y puntos ("maxi", "maxiconsumo" y "maxi consumo" encuentran lo
+//       mismo), los que EMPIEZAN igual van primero y se muestran hasta 8. El
+//       clic en una sugerencia ya no se rompe con nombres con apóstrofo.
+const APP_VERSION = 'v27';
 document.title = '📥 Ingreso · Copihue ' + APP_VERSION;
 document.getElementById('versionBadge').textContent = APP_VERSION;
 
@@ -808,68 +849,154 @@ let _infoTimer    = null;
 let _catAbierta   = false;
 
 // ── INIT ───────────────────────────────────────────────────────────────────────
+// ── v27: PROVEEDORES (Inventario + hoja "Proveedores") ───────────────────────
+const PROV_CACHE_KEY = 'ingreso_proveedores_v1';
+let _provHoja = [];   // nombres que vienen de la hoja "Proveedores"
+try {
+  const c = JSON.parse(localStorage.getItem(PROV_CACHE_KEY) || 'null');
+  if (c && Array.isArray(c.nombres)) _provHoja = c.nombres.map(n => normalizarTexto(String(n)).trim()).filter(Boolean);
+} catch (e) {}
+
+function _reconstruirProveedores() {
+  const set = new Set();
+  Object.keys(_productosMap).forEach(k => {
+    const p = _productosMap[k];
+    if (p && p.proveedor) set.add(normalizarTexto(String(p.proveedor)).trim());
+  });
+  _provHoja.forEach(n => set.add(n));
+  _proveedores = [...set].filter(Boolean).sort();
+}
+
+async function _traerProveedores() {
+  try {
+    const r = await fetch(API_URL + '?action=getProveedores&t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(30000) });
+    if (!r.ok) return;
+    const data = await r.json();
+    if (!data || data.success !== true || !Array.isArray(data.proveedores)) return;
+    _provHoja = data.proveedores.map(p => normalizarTexto(String((p && (p.nombre || p.name)) || p || '')).trim()).filter(Boolean);
+    try { localStorage.setItem(PROV_CACHE_KEY, JSON.stringify({ ts: Date.now(), nombres: _provHoja })); } catch (e) {}
+    _reconstruirProveedores();
+  } catch (e) { console.warn('Proveedores (hoja) no disponibles por ahora:', e); }
+}
+
+// v26 — catálogo: caché local + red con más tiempo de espera y reintentos.
+const CATALOGO_CACHE_KEY = 'ingreso_catalogo_v1';
+let _catalogoCompleto = false;  // ya hay un catálogo completo aplicado (de caché o de red)
+let _catalogoDe = 0;            // ts del catálogo que se está usando
+let _catReintentos = 0;
+
+function _leerCatalogoCache() {
+  try {
+    const c = JSON.parse(localStorage.getItem(CATALOGO_CACHE_KEY) || 'null');
+    if (c && c.data && Array.isArray(c.data.productos) && c.data.productos.length) return c;
+  } catch (e) {}
+  return null;
+}
+function _guardarCatalogoCache(data) {
+  try {
+    const slim = (data.productos || []).map(p => {
+      if (!p || typeof p !== 'object') return p;
+      return { name: p.name, nombre: p.nombre, category: p.category, categoria: p.categoria,
+               precioCosto: p.precioCosto, precioVenta: p.precioVenta, price: p.price,
+               proveedor: p.proveedor, stock: p.stock };
+    });
+    localStorage.setItem(CATALOGO_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: { productos: slim, categorias: data.categorias } }));
+  } catch (e) { /* sin espacio o sin storage: se sigue sin caché */ }
+}
+function _horaTxt(ts) { try { return new Date(ts).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }); } catch (e) { return ''; } }
+
+// Categorías: mismo criterio que tenía init() (GAS → productos → fallback).
+function _categoriasDesde(data, rawProductos) {
+  if (data && data.categorias && data.categorias.length) {
+    return data.categorias.map(c => {
+      if (typeof c === 'string') return { value: c.trim().toUpperCase(), label: c.trim(), emoji: '' };
+      return {
+        value: (c.value || c.nombre || c).trim().toUpperCase(),
+        label: (c.label || c.nombre || c.value || c).trim(),
+        emoji: c.emoji || ''
+      };
+    });
+  }
+  const catSet = new Set();
+  rawProductos.forEach(p => {
+    const cat = p && (p.category || p.categoria);
+    if (cat) catSet.add(cat.trim().toUpperCase());
+  });
+  if (catSet.size > 0) {
+    return [...catSet].filter(Boolean).sort().map(c => {
+      const fb = CATS_FALLBACK.find(f => f.value === c);
+      return fb || { value: c, label: c, emoji: '' };
+    });
+  }
+  return CATS_FALLBACK;
+}
+
+// completo=true: reemplaza todo (carga inicial). completo=false: mezcla (solo agrega/actualiza).
+function _aplicarCatalogo(data, completo) {
+  const rawProductos = (data && data.productos) || [];
+  if (completo) {
+    _productos.length = 0;
+    Object.keys(_productosMap).forEach(k => { delete _productosMap[k]; });
+  }
+  const yaEstan = new Set(_productos);
+  rawProductos.forEach(p => {
+    if (!p) return;
+    const nombreRaw = typeof p === 'string' ? p : (p.name || p.nombre || '');
+    if (!nombreRaw) return;
+    const nombre = normalizarTexto(nombreRaw);
+    if (!yaEstan.has(nombre)) { _productos.push(nombre); yaEstan.add(nombre); }
+    if (typeof p === 'object') _productosMap[nombre] = p;
+  });
+  _reconstruirProveedores();
+  const cats = _categoriasDesde(data, rawProductos);
+  if (completo || JSON.stringify(cats) !== JSON.stringify(_categorias)) {
+    _categorias = cats;
+    buildCategoriaWidget();
+  }
+}
+
 async function init() {
   setConnStatus('conectando');
+  const cache = _leerCatalogoCache();
+  if (cache) {
+    try {
+      _aplicarCatalogo(cache.data, true);
+      _catalogoCompleto = true;
+      _catalogoDe = cache.ts;
+    } catch (e) { console.warn('Caché de catálogo ilegible:', e); }
+  }
+  await _traerCatalogo();
+  _traerProveedores(); // v27: en segundo plano, después del catálogo (no compite con él)
+}
+
+// Trae el catálogo completo (llamada pesada). 45 s de espera; si falla, la
+// página sigue usable con el catálogo guardado y reintenta a los 20 s, 1 min y 3 min.
+async function _traerCatalogo() {
   try {
-    const r    = await fetch(API_URL + '?t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(12000) });
+    const r = await fetch(API_URL + '?t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(45000) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();
+    if (!data || !Array.isArray(data.productos)) throw new Error('catálogo ilegible');
+    _aplicarCatalogo(data, !_catalogoCompleto);
+    _catalogoCompleto = true;
+    _catalogoDe = Date.now();
+    _guardarCatalogoCache(data);
+    _catReintentos = 0;
     setConnStatus('online');
-
-    // Productos
-    const rawProductos = data.productos || [];
-    rawProductos.forEach(p => {
-      if (!p) return;
-      const nombreRaw = typeof p === 'string' ? p : (p.name || p.nombre || '');
-      if (!nombreRaw) return;
-      const nombre = normalizarTexto(nombreRaw);
-      _productos.push(nombre);
-      if (typeof p === 'object') _productosMap[nombre] = p;
-    });
-
-    // Proveedores únicos
-    const provSet = new Set();
-    rawProductos.forEach(p => { if (p && p.proveedor) provSet.add(normalizarTexto(p.proveedor)); });
-    _proveedores = [...provSet].filter(Boolean).sort();
-
-    // Categorías desde GAS
-    // Formato esperado: data.categorias = ['ALMACEN','BEBIDAS',...] o [{value,label,emoji}]
-    if (data.categorias && data.categorias.length) {
-      _categorias = data.categorias.map(c => {
-        if (typeof c === 'string') return { value: c.trim().toUpperCase(), label: c.trim(), emoji: '' };
-        return {
-          value: (c.value || c.nombre || c).trim().toUpperCase(),
-          label: (c.label || c.nombre || c.value || c).trim(),
-          emoji: c.emoji || ''
-        };
-      });
-    } else {
-      // Intentar extraer de los productos mismos
-      // NOTA: el GAS devuelve el campo como 'category' (inglés)
-      const catSet = new Set();
-      rawProductos.forEach(p => {
-        const cat = p && (p.category || p.categoria);
-        if (cat) catSet.add(cat.trim().toUpperCase());
-      });
-      if (catSet.size > 0) {
-        _categorias = [...catSet].filter(Boolean).sort().map(c => {
-          // Intentar enriquecer con emoji del fallback
-          const fb = CATS_FALLBACK.find(f => f.value === c);
-          return fb || { value: c, label: c, emoji: '' };
-        });
-      } else {
-        // Sin datos del GAS: mantener fallback ya cargado
-        _categorias = CATS_FALLBACK;
-      }
-    }
-
-    buildCategoriaWidget();
-
-  } catch(e) {
-    console.warn('Error cargando datos:', e);
+    return true;
+  } catch (e) {
+    console.warn('Catálogo no disponible por ahora:', e);
     setConnStatus('offline');
-    // Usar fallback para no bloquear al usuario
-    _categorias = CATS_FALLBACK;
-    buildCategoriaWidget();
+    if (_catalogoCompleto) {
+      const el = document.getElementById('connStatus');
+      if (el) el.title = 'Sin conexión con el servidor. Se usa el catálogo guardado a las ' + _horaTxt(_catalogoDe) + '. Los ingresos se guardan en cola y se confirman solos.';
+    } else {
+      _categorias = CATS_FALLBACK;
+      buildCategoriaWidget();
+    }
+    const d = [20000, 60000, 180000][_catReintentos];
+    if (d !== undefined) { _catReintentos++; setTimeout(_traerCatalogo, d); }
+    return false;
   }
 }
 
@@ -948,26 +1075,158 @@ window.addEventListener('offline', () => { setConnStatus('offline'); });
 // y apenas se guarda un ingreso con éxito (ahí es cuando más cambia el stock
 // por acción propia).
 async function sincronizarCatalogo() {
+  if (!_catalogoCompleto) { return _traerCatalogo(); } // todavía no hay catálogo: usar la carga completa
   try {
-    const r = await fetch(API_URL + '?t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(20000) });
+    const r = await fetch(API_URL + '?t=' + Date.now(), { redirect: 'follow', signal: AbortSignal.timeout(45000) });
     if (!r.ok) return;
     const data = await r.json();
-    const rawProductos = data.productos || [];
-    rawProductos.forEach(p => {
-      if (!p) return;
-      const nombreRaw = typeof p === 'string' ? p : (p.name || p.nombre || '');
-      if (!nombreRaw) return;
-      const nombre = normalizarTexto(nombreRaw);
-      if (!(nombre in _productosMap) && !_productos.includes(nombre)) {
-        _productos.push(nombre); // producto nuevo cargado por otra caja mientras tanto
-      }
-      if (typeof p === 'object') _productosMap[nombre] = p;
-    });
+    if (!data || !Array.isArray(data.productos)) return;
+    _aplicarCatalogo(data, false); // mezcla: producto nuevo cargado por otra caja, stock/precios al día
+    _catalogoDe = Date.now();
+    _guardarCatalogoCache(data);
+    _traerProveedores();
   } catch(e) {
     console.warn('Error sincronizando catálogo:', e);
   }
 }
-setInterval(sincronizarCatalogo, 180000); // cada 3 minutos
+// v26: cada 10 min (antes 3) y solo si la pantalla está visible — la llamada es pesada.
+setInterval(() => { if (!document.hidden) sincronizarCatalogo(); }, 600000);
+
+// ── v26: COLA DE INGRESOS POR CONFIRMAR ─────────────────────────────────────
+// Cada ingreso se guarda acá ANTES de enviarse y se borra recién cuando el
+// servidor confirma (success:true, incluido "yaExistia"). Los reintentos usan
+// SIEMPRE el mismo idOperacion → el servidor no suma el stock dos veces.
+// Un rechazo de negocio (success:false que no sea "ocupado") NO se reintenta.
+const COLA_KEY = 'ingresos_pendientes_v1';
+let _colaMem = null;            // respaldo si localStorage no está disponible
+let _colaEnVuelo = new Set();   // ids que se están enviando ahora mismo
+let _colaOcupada = false;
+let _colaTimer = null;
+let _colaFallos = 0;
+
+function _colaLeer() {
+  try { const a = JSON.parse(localStorage.getItem(COLA_KEY) || '[]'); return Array.isArray(a) ? a : []; }
+  catch (e) { return _colaMem ? _colaMem.slice() : []; }
+}
+function _colaEscribir(a) {
+  _colaMem = a.slice();
+  try { localStorage.setItem(COLA_KEY, JSON.stringify(a)); } catch (e) {}
+}
+function _colaAgregar(op) { const a = _colaLeer(); a.push(op); _colaEscribir(a); _colaActualizarUI(); }
+function _colaQuitar(id) { _colaEscribir(_colaLeer().filter(o => o.id !== id)); _colaActualizarUI(); }
+function _colaMarcar(id, cambios) { _colaEscribir(_colaLeer().map(o => o.id === id ? Object.assign({}, o, cambios) : o)); }
+
+function _msgSinCheck(m, porDefecto) { return String(m || porDefecto || '').replace(/^\s*✅\s*/, ''); }
+
+// Envía UNA operación. Devuelve {tipo:'ok'|'negocio'|'red', res?, error?}.
+async function _enviarOp(op, timeoutMs) {
+  _colaEnVuelo.add(op.id);
+  try {
+    const url = API_URL + '?action=ingresar&data=' + encodeURIComponent(JSON.stringify(op.datos));
+    const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(timeoutMs) });
+    const res = await r.json();
+    if (res && res.success === true) return { tipo: 'ok', res };
+    const m = String((res && res.mensaje) || '');
+    if (/procesando otro ingreso|intent[aá] nuevamente|ocupad/i.test(m)) return { tipo: 'red', error: m }; // servidor ocupado: reintentar
+    return { tipo: 'negocio', res: res || {} };
+  } catch (e) {
+    return { tipo: 'red', error: (e && e.name) || String(e) };
+  } finally {
+    _colaEnVuelo.delete(op.id);
+  }
+}
+
+function _actualizarLocalTrasIngreso(datos, res) {
+  try {
+    const nombre = normalizarTexto(datos.producto);
+    let p = _productosMap[nombre];
+    const stock = (res && res.nuevoStock !== undefined && res.nuevoStock !== null) ? res.nuevoStock : (res && res.stockActual);
+    if (!p) {
+      p = { name: nombre, category: datos.categoria };
+      _productosMap[nombre] = p;
+      if (!_productos.includes(nombre)) _productos.push(nombre);
+    }
+    if (stock !== undefined && stock !== null) p.stock = stock;
+    if (datos.precioCosto) p.precioCosto = datos.precioCosto;
+    if (datos.precioVenta) { p.precioVenta = datos.precioVenta; p.price = datos.precioVenta; }
+    if (datos.proveedor) p.proveedor = datos.proveedor;
+  } catch (e) {}
+}
+
+async function _colaProcesar() {
+  if (_colaOcupada) return;
+  _colaOcupada = true;
+  const btn = document.getElementById('colaBtn');
+  if (btn) btn.disabled = true;
+  let huboRed = false, confirmados = 0;
+  try {
+    const lista = _colaLeer().filter(o => o.estado !== 'rechazada');
+    for (const op of lista) {
+      if (_colaEnVuelo.has(op.id)) continue;           // lo está enviando guardar() ahora mismo
+      _colaMarcar(op.id, { intentos: (op.intentos || 0) + 1 });
+      const r = await _enviarOp(op, 45000);
+      if (r.tipo === 'ok') {
+        _colaQuitar(op.id); confirmados++;
+        _actualizarLocalTrasIngreso(op.datos, r.res);
+      } else if (r.tipo === 'negocio') {
+        _colaMarcar(op.id, { estado: 'rechazada', msg: String((r.res && r.res.mensaje) || 'El servidor no lo aceptó') });
+      } else {
+        huboRed = true; break;                           // se mantiene el orden: se reintenta todo más tarde
+      }
+    }
+  } catch (e) { console.warn('Cola de ingresos:', e); }
+  finally { _colaOcupada = false; if (btn) btn.disabled = false; }
+  _colaActualizarUI();
+  if (confirmados) {
+    setConnStatus('online');
+    if (_historialAbierto) cargarHistorial();
+    if (!_colaLeer().some(o => o.estado !== 'rechazada')) toast('✅ Ingresos pendientes confirmados');
+  }
+  if (huboRed) {
+    _colaFallos++;
+    _colaProgramar([15000, 30000, 60000, 120000, 300000][Math.min(_colaFallos - 1, 4)]);
+  } else { _colaFallos = 0; }
+}
+
+function _colaProgramar(ms) {
+  clearTimeout(_colaTimer);
+  if (!_colaLeer().some(o => o.estado !== 'rechazada')) return;
+  _colaTimer = setTimeout(_colaProcesar, ms);
+}
+function _colaReintentarYa() { _colaFallos = 0; clearTimeout(_colaTimer); _colaProcesar(); }
+function _colaDescartar(id) {
+  const op = _colaLeer().find(o => o.id === id);
+  if (op && confirm('¿Descartar este ingreso rechazado?\n' + op.datos.producto + ' ×' + op.datos.cantidad + '\nNo se va a enviar de nuevo.')) _colaQuitar(id);
+}
+
+function _colaActualizarUI() {
+  const wrap = document.getElementById('colaWrap');
+  if (!wrap) return;
+  const lista = _colaLeer();
+  const esperando = lista.filter(o => o.estado !== 'rechazada').length;
+  const rech = lista.length - esperando;
+  wrap.classList.toggle('visible', lista.length > 0);
+  const t = document.getElementById('colaTitulo');
+  if (t) t.textContent = esperando ? ('⏳ ' + esperando + ' ingreso' + (esperando > 1 ? 's' : '') + ' por confirmar') + (rech ? ' · ' + rech + ' rechazado' + (rech > 1 ? 's' : '') : '') : (rech + ' ingreso' + (rech > 1 ? 's' : '') + ' rechazado' + (rech > 1 ? 's' : ''));
+  const b = document.getElementById('colaBtn');
+  if (b) b.style.display = esperando ? '' : 'none';
+  const l = document.getElementById('colaLista');
+  if (!l) return;
+  l.innerHTML = lista.map(o => {
+    const esc = x => String(x).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    const det = o.estado === 'rechazada'
+      ? '❌ ' + esc(o.msg)
+      : 'Esperando confirmación del servidor' + (o.intentos ? ' · intento ' + o.intentos : '');
+    return '<div class="cola-item' + (o.estado === 'rechazada' ? ' rechazada' : '') + '"><div><b>' + esc(o.datos.producto) + '</b> ×' + esc(o.datos.cantidad) + '<small>' + det + '</small></div>' +
+      (o.estado === 'rechazada' ? '<button onclick="_colaDescartar(\'' + o.id + '\')">Descartar</button>' : '') + '</div>';
+  }).join('');
+}
+
+// Arranque: mostrar lo que haya quedado de antes y reintentar a los pocos segundos.
+_colaActualizarUI();
+setTimeout(_colaProcesar, 3000);
+window.addEventListener('online', () => { _colaFallos = 0; _colaProcesar(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && _colaLeer().some(o => o.estado !== 'rechazada')) _colaProgramar(1500); });
 
 // ── PROTECCIÓN DE SALIDA SIN CONFIRMAR (regla de oro 3) ─────────────────────
 // Cubre: cerrar/recargar la pestaña, navegar a otra URL (beforeunload) y el
@@ -1278,18 +1537,30 @@ function calcularSugerido() {
 }
 
 // ── AUTOCOMPLETE PROVEEDOR ─────────────────────────────────────────────────────
+function _claveProv(t) { return normalizarTexto(String(t || '')).replace(/[^A-Z0-9]/g, ''); }
+
 function filtrarProveedores() {
   const val  = normalizarInput(document.getElementById('proveedor')).trim();
   const list = document.getElementById('autoListProv');
-  if (val.length < 1) { list.classList.remove('open'); return; }
+  const k = _claveProv(val);
+  if (!k) { list.classList.remove('open'); return; }
 
-  const matches = _proveedores.filter(p => p.toUpperCase().includes(val)).slice(0, 6);
+  const conClave = _proveedores.map(p => ({ p, c: _claveProv(p) })).filter(x => x.c.includes(k));
+  conClave.sort((a, b) => (b.c.startsWith(k) - a.c.startsWith(k)) || a.p.localeCompare(b.p)); // los que empiezan igual, primero
+  const matches = conClave.slice(0, 8).map(x => x.p);
   if (!matches.length) { list.classList.remove('open'); return; }
 
+  const esc = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   list.innerHTML = matches.map(p =>
-    `<div class="autocomplete-item" onclick="document.getElementById('proveedor').value='${p}';document.getElementById('autoListProv').classList.remove('open');">${p}</div>`
+    `<div class="autocomplete-item" data-n="${esc(p)}" onclick="elegirProveedor(this.dataset.n)">${esc(p)}</div>`
   ).join('');
   list.classList.add('open');
+}
+
+function elegirProveedor(nombre) {
+  document.getElementById('proveedor').value = nombre;
+  document.getElementById('autoListProv').classList.remove('open');
+  toggleClear('proveedor');
 }
 
 // ── HELPERS X LIMPIAR ─────────────────────────────────────────────────────────
@@ -1519,52 +1790,46 @@ async function guardar() {
   btn.disabled    = true;
   btn.textContent = '⏳ Guardando...';
 
-  // ID único de esta operación — el GAS lo puede usar para detectar
-  // si esta misma request ya fue procesada (evita duplicados por reintento)
+  // v26 — idOperacion único de ESTA operación. Se guarda en la cola ANTES de
+  // enviar y se reutiliza en todos los reintentos: el servidor lo reconoce y no
+  // suma el stock dos veces.
   const idOperacion = 'ing_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  const op = {
+    id: idOperacion, ts: Date.now(), estado: 'pendiente', intentos: 0, msg: '',
+    datos: { producto: nombre, cantidad, categoria, precioCosto, precioVenta, proveedor, fechaVencimiento, idOperacion }
+  };
+  _colaAgregar(op);
 
-  try {
-    const datos = { producto: nombre, cantidad, categoria, precioCosto, precioVenta, proveedor, fechaVencimiento, idOperacion };
-    const url   = API_URL + '?action=ingresar&data=' + encodeURIComponent(JSON.stringify(datos));
-    // Timeout más generoso: conexión en Patagonia puede ser lenta, no confundir lentitud con falla
-    const r     = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(30000) });
-    const res   = await r.json();
+  let r;
+  if (navigator.onLine === false) r = { tipo: 'red', error: 'sin red' };   // sin red: directo a la cola
+  else r = await _enviarOp(op, 30000);
 
-    btn.disabled    = false;
-    btn.textContent = '✅ Guardar Ingreso';
-    _guardando = false;
+  btn.disabled    = false;
+  btn.textContent = '✅ Guardar Ingreso';
+  _guardando = false;
+
+  if (r.tipo === 'ok') {
     setConnStatus('online');
-
-    if (res.success) {
-      toast('✅ ' + res.mensaje);
-      // Guardar referencia informativa del último ingreso
-      _ultimoIngreso = { idOperacion, producto: nombre, cantidad };
-      // Abrir (o refrescar) el panel de historial para que el botón de
-      // deshacer quede visible de inmediato si el operador se equivocó
-      if (!_historialAbierto) toggleHistorial(); else cargarHistorial();
-      // Refrescar en segundo plano el stock/precio/costo de _productosMap
-      // con lo que quedó guardado en la planilla — así, si volvés a elegir
-      // este mismo producto (o cualquier otro) enseguida, ves el stock real
-      // y no el de antes de este ingreso. No bloquea la pantalla ni el
-      // "Guardando..." — se dispara y sigue en paralelo.
-      sincronizarCatalogo();
-      limpiar();
-    } else {
-      toast('❌ ' + (res.mensaje || 'Error al guardar'), true);
-    }
-  } catch(e) {
-    btn.disabled    = false;
-    btn.textContent = '✅ Guardar Ingreso';
-    _guardando = false;
+    _colaQuitar(op.id);
+    toast('✅ ' + _msgSinCheck(r.res.mensaje, 'Ingreso guardado'));
+    _ultimoIngreso = { idOperacion, producto: nombre, cantidad };
+    // Abrir (o refrescar) el panel de historial para que el botón de deshacer
+    // quede visible de inmediato si el operador se equivocó
+    if (!_historialAbierto) toggleHistorial(); else cargarHistorial();
+    // v26: sin pedir el catálogo completo — se actualiza el stock local con la respuesta.
+    _actualizarLocalTrasIngreso(op.datos, r.res);
+    limpiar();
+  } else if (r.tipo === 'negocio') {
+    // El servidor rechazó la operación (no es un problema de conexión): no se reintenta.
+    _colaQuitar(op.id);
+    toast('❌ ' + (r.res.mensaje || 'Error al guardar'), true);
+  } else {
+    // Sin respuesta / sin red / servidor ocupado: queda en la cola y se confirma sola.
     setConnStatus('offline');
-    // Aviso explícito: si fue timeout, puede que el GAS SÍ haya guardado.
-    // No reintentar a ciegas — revisar el historial antes de volver a tocar "Guardar".
-    if (e.name === 'TimeoutError' || e.name === 'AbortError') {
-      toast('⚠️ Sin respuesta del servidor. Revisá el Historial antes de reintentar — puede que sí se haya guardado.', true);
-    } else {
-      toast('❌ Error de conexión — revisá el Historial antes de reintentar', true);
-    }
-    console.error(e);
+    _colaActualizarUI();
+    toast('⏳ Sin respuesta del servidor. El ingreso quedó en cola y se confirma solo — no lo cargues de nuevo.', true);
+    limpiar();
+    _colaProgramar(15000);
   }
 }
 
