@@ -208,6 +208,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
   <div class="modal-sh">
     <div class="modal-tit">📋 Recordatorio <button onclick="cerrarRec()">✕</button></div>
     <div class="rec-pre" id="recPrev"></div>
+    <button class="btn-compartir" id="btnRecWA" style="display:none;background:#25D366" onclick="enviarRecWA()">📲 Enviar por WhatsApp al cliente</button>
     <button class="btn-compartir" onclick="compartir()">📤 Compartir</button>
     <button class="btn-copiar" onclick="copiar()">📋 Copiar texto</button>
     <div class="copiado" id="copMsg">✅ Copiado al portapapeles</div>
@@ -235,7 +236,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
 <div id="toast"></div>
 
 <script>
-const APP_VERSION=37;
+const APP_VERSION=38;
 const API_URL='https://script.google.com/macros/s/AKfycbx-84yapENFqCNS1nfivFOR4P25l8U27gEoeWvVL6Nu5HmKr8e7m3KIJjshqtR_2brrHA/exec';
 
 // ── Estado ─────────────────────────────────────────
@@ -523,13 +524,15 @@ function renderFiados(){
         (f.abonos?`<div class="fc-pago" style="color:#000;font-size:.66rem;font-weight:400">🗓️ ${f.abonos}</div>`:'')
       :'';
     const dot=selec?`<div class="sel-dot">✓</div>`:'';
+    // v38 — reenviar comprobante en TODOS los estados (pendiente, abonado, pagado, con o sin ticket)
+    const btnReenv=`<button data-rec="${f.idFiado}" style="margin-top:6px;background:#fff;border:1px solid var(--vd);color:var(--vd);border-radius:8px;padding:4px 10px;font-size:.68rem;font-weight:700;cursor:pointer;font-family:inherit">📲 Reenviar comprobante</button>`;
     // Sin botones en la tarjeta — se usa el flujo original: seleccionar → botones del header
     const btnAbono='';
     return`<div class="${cls}" id="fc-${f.idFiado}" data-id="${f.idFiado}" data-tkt="${f.ticket||''}" data-espend="${esPend?'1':'0'}">${dot}
       <div class="fc-top">
         <div><div class="fc-fecha">📅 ${_fmt(f.fecha)}</div><div class="fc-id">${f.idFiado}</div></div>
         <div style="text-align:right"><div class="fc-monto" style="color:${esPend?'var(--rojo)':'var(--verde)'}">${fmt(f.total)}</div>${bdgEstado(f)}</div>
-      </div>${descLine}${pagoLine}${abonoLine}${btnAbono}</div>`;
+      </div>${descLine}${pagoLine}${abonoLine}${btnAbono}<div>${btnReenv}</div></div>`;
   }
 
   let html='';
@@ -561,6 +564,12 @@ function renderFiados(){
   document.querySelectorAll('#cuerpoFiados .fc').forEach(el=>{
     el.addEventListener('click', e=>{
       if(e.target.closest('[data-det]'))return;
+      // v38 — Reenviar comprobante (no selecciona la tarjeta)
+      if(e.target.closest('[data-rec]')){
+        e.stopPropagation();
+        reenviarComprobante(e.target.closest('[data-rec]').dataset.rec);
+        return;
+      }
       // Botón abono rápido
       if(e.target.closest('[data-abono]')){
         e.stopPropagation();
@@ -694,7 +703,8 @@ async function abrirDet(ticket,idFiado){
       </div>
       ${itemsHtml}
       <div class="total-row"><span class="tl">💰 Total</span><span class="tm">${fmt(d.total)}</span></div>
-      <button class="btn-enviar-ticket" onclick="window.location.href='${waHref}'">📲 Enviar copia al cliente</button>`;
+      <button class="btn-enviar-ticket" onclick="window.location.href='${waHref}'">📲 Enviar copia al cliente</button>
+      ${fiad&&(fiad.estado==='PAGADO'||fiad.totalAbonado>0)?`<button class="btn-enviar-ticket" style="background:#fff;color:var(--vd);border:2px solid var(--vd)" onclick="reenviarComprobante('${String(idFiado).replace(/'/g,"\\'")}')">💳 Reenviar comprobante de ${fiad.estado==='PAGADO'?'pago':'abono'}</button>`:''}`;
   }catch(e){
     document.getElementById('detContenido').innerHTML=`<div class="empty"><div class="icon">❌</div>${e.message}</div>`;
   }
@@ -848,6 +858,53 @@ async function confirmarCob(){
   }
 }
 
+// ── v38 — REENVIAR COMPROBANTE ─────────────────────
+// Reconstruye el texto SOLO con datos ya guardados en la planilla (fecha real de
+// pago, método, importes y detalle de abonos de la columna N). No inventa saldos
+// históricos ni usa la fecha de hoy para representar un pago pasado.
+function _txtComprobante(f){
+  const ref=f.ticket&&String(f.ticket).trim()!==''?'Ticket #'+f.ticket:f.idFiado;
+  const orig=parseFloat(f.totalOriginal)||parseFloat(f.total)||0;
+  const abonosTxt=String(f.abonos||'').replace(/\s*\[[^\]]*\]/g,'').split('|').map(x=>x.trim()).filter(Boolean);
+  const detAb=abonosTxt.length?['','🗓️ Pagos registrados:'].concat(abonosTxt.map(x=>'  • '+x)):[];
+  if(f.estado==='PAGADO'){
+    return ['✅ *PAGO RECIBIDO — Almacén Copihue* (copia)','',
+      `📅 Fecha de pago: ${_fmt(f.fechaPago)}`,
+      `👤 Cliente: ${_cliNom}`,'',
+      `  🧾 ${ref} · ${fmt(orig)} ✅ Pagado`].concat(detAb,['',
+      `💰 *Total de la compra: ${fmt(orig)}*`,
+      f.metodoPago?`💳 Método: ${f.metodoPago}`:'',
+      '','✅ ¡Gracias por saldar tu deuda! 🙌','📍 Almacén Copihue']).filter((l,i,a)=>l!==''||a[i-1]!=='').join('\n');
+  }
+  if(parseFloat(f.totalAbonado)>0){
+    return ['📋 *ABONO RECIBIDO — Almacén Copihue* (copia)','',
+      `👤 Cliente: ${_cliNom}`,'',
+      `  🧾 ${ref} · compra ${fmt(orig)}`].concat(detAb,['',
+      `💵 Abonado hasta ahora: ${fmt(f.totalAbonado)}`,
+      `💰 *Saldo pendiente: ${fmt(f.total)}*`,
+      '','📍 Almacén Copihue']).join('\n');
+  }
+  return ['🧾 *COMPROBANTE DE FIADO — Almacén Copihue* (copia)','',
+    `📅 Fecha: ${_fmt(f.fecha)}`,
+    `👤 Cliente: ${_cliNom}`,
+    `🎫 ${ref}`,
+    f.descripcion?`📦 ${f.descripcion}`:'',
+    `💰 *Total fiado: ${fmt(f.total)}*`,
+    f.fechaVencimiento?`⏰ Vence: ${_fmt(f.fechaVencimiento)}`:'',
+    '','📍 Almacén Copihue'].filter(l=>l!=='').join('\n');
+}
+function reenviarComprobante(idFiado){
+  const f=_cliData.find(x=>String(x.idFiado)===String(idFiado));
+  if(!f){toast('❌ No se encontró el fiado','r');return;}
+  _recTxt=_txtComprobante(f);
+  abrirRec();
+}
+function enviarRecWA(){
+  if(!_recTxt)return;
+  const t=normTel(_cliTel);
+  window.location.href=(t?'whatsapp://send?phone='+t+'&text=':'whatsapp://send?text=')+safeEnc(_recTxt);
+}
+
 // ── RECORDATORIO ───────────────────────────────────
 function abrirRec(){
   if(!_recTxt&&_sel.size===0)return;
@@ -867,6 +924,7 @@ function abrirRec(){
       'Por favor acercate a regularizar tu cuenta.','📍 Almacén Copihue'].join('\n');
   }
   document.getElementById('recPrev').textContent=_recTxt;
+  { const bw=document.getElementById('btnRecWA'); if(bw) bw.style.display=normTel(_cliTel)?'block':'none'; }
   document.getElementById('copMsg').style.display='none';
   document.getElementById('modalRec').classList.add('open');
 }
