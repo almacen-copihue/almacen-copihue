@@ -236,7 +236,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
 <div id="toast"></div>
 
 <script>
-const APP_VERSION=39;
+const APP_VERSION=38;
 const API_URL='https://script.google.com/macros/s/AKfycbx-84yapENFqCNS1nfivFOR4P25l8U27gEoeWvVL6Nu5HmKr8e7m3KIJjshqtR_2brrHA/exec';
 
 // ── Estado ─────────────────────────────────────────
@@ -516,7 +516,7 @@ function renderFiados(){
     if(selec)cls+=' sel';
     const tkt=f.ticket&&f.ticket.trim()!=='';
     const descLine=tkt
-      ?`<div class="fc-desc">🎫 Ticket #${f.ticket}</div>`
+      ?`<div class="fc-desc" style="cursor:pointer" data-det="1" data-tkt="${f.ticket}" data-id="${f.idFiado}">🎫 Ticket #${f.ticket} <span style="color:var(--vd);font-weight:700">· Ver venta →</span></div>`
       :(f.descripcion?`<div class="fc-desc">📦 ${f.descripcion}</div>`:'');
     const pagoLine=!esPend?`<div class="fc-pago">✅ Cobrado el ${_fmt(f.fechaPago)}${f.metodoPago?' · '+f.metodoPago:''}</div>`:'';
     const abonoLine=(esPend&&f.totalAbonado>0)
@@ -525,17 +525,14 @@ function renderFiados(){
       :'';
     const dot=selec?`<div class="sel-dot">✓</div>`:'';
     // v38 — reenviar comprobante en TODOS los estados (pendiente, abonado, pagado, con o sin ticket)
-    const _bs='flex:1;border-radius:10px;padding:10px 6px;font-size:.78rem;font-weight:800;cursor:pointer;font-family:inherit;border:2px solid var(--vd);';
-    const btnReenv=`<div style="display:flex;gap:8px;margin-top:10px">`+
-      (tkt?`<button data-det="1" data-tkt="${f.ticket}" data-id="${f.idFiado}" style="${_bs}background:#fff;color:var(--vd)">🎫 Ver venta</button>`:'')+
-      `<button data-rec="${f.idFiado}" style="${_bs}background:var(--vd);color:#fff">📲 Reenviar comprobante</button></div>`;
+    const btnReenv=`<button data-rec="${f.idFiado}" style="margin-top:6px;background:#fff;border:1px solid var(--vd);color:var(--vd);border-radius:8px;padding:4px 10px;font-size:.68rem;font-weight:700;cursor:pointer;font-family:inherit">📲 Reenviar comprobante</button>`;
     // Sin botones en la tarjeta — se usa el flujo original: seleccionar → botones del header
     const btnAbono='';
     return`<div class="${cls}" id="fc-${f.idFiado}" data-id="${f.idFiado}" data-tkt="${f.ticket||''}" data-espend="${esPend?'1':'0'}">${dot}
       <div class="fc-top">
         <div><div class="fc-fecha">📅 ${_fmt(f.fecha)}</div><div class="fc-id">${f.idFiado}</div></div>
         <div style="text-align:right"><div class="fc-monto" style="color:${esPend?'var(--rojo)':'var(--verde)'}">${fmt(f.total)}</div>${bdgEstado(f)}</div>
-      </div>${descLine}${pagoLine}${abonoLine}${btnAbono}${btnReenv}</div>`;
+      </div>${descLine}${pagoLine}${abonoLine}${btnAbono}<div>${btnReenv}</div></div>`;
   }
 
   let html='';
@@ -632,17 +629,11 @@ async function abrirDet(ticket,idFiado){
       ?`<div class="det-pagado" style="background:#fff8e1;color:#e65100;border-color:#ffe082">💵 Abonado: ${fmt(fiad.totalAbonado)} · Saldo pendiente: ${fmt(fiad.total)}</div>`+
         (fiad.abonos?`<div style="font-size:.7rem;color:#000;padding:2px 0 0 2px">🗓️ ${fiad.abonos}</div>`:'')
       :'';
-    // Descuento multicompra: si el total de Ventas supera lo que se fio, la diferencia es el descuento
-    // que ese ticket no registro (ventas anteriores a seba21 v518). Solo se muestra; no se modifica nada.
-    const _totFiado=fiad?(parseFloat(fiad.totalOriginal)||0):0;
-    const _desc=(_totFiado>0&&(d.total-_totFiado)>=1)?Math.round(d.total-_totFiado):0;
-    const totalFinal=_desc?d.total-_desc:d.total;
     let itemsHtml='';
     (d.items||[]).forEach(it=>{
       const cant=String(it.cantidad||'').replace(/\.0$/,'');
       itemsHtml+=`<div class="item-row"><div class="item-nom">${it.nombre}</div><div class="item-cant">${cant}</div><div class="item-precio">${fmt(it.subtotal)}</div></div>`;
     });
-    if(_desc)itemsHtml+=`<div class="item-row"><div class="item-nom">🏷️ Descuento multicompra</div><div class="item-cant"></div><div class="item-precio" style="color:#c62828">-${fmt(_desc)}</div></div>`;
 
     // Armar mensaje WA igual que copihue-reportes
     const MESES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
@@ -694,8 +685,7 @@ async function abrirDet(ticket,idFiado){
       '📅 '+fLabel+(hLabel?' · '+hLabel+'hs':'')+'\n\n'+
       (d.items||[]).map(p=>String(p.cantidad||'').replace(/\.0$/,'')+'× '+p.nombre.substring(0,22)+'  '+fmt(p.subtotal)).join('\n')+
       '\n─────────────────\n'+
-      (_desc?'🏷️ Descuento multicompra  -'+fmt(_desc)+'\n':'')+
-      '*💰 Total: '+fmt(totalFinal)+'*\n'+
+      '*💰 Total: '+fmt(d.total)+'*\n'+
       (d.metodoPago?sanitizeWA(d.metodoPago)+'\n':'')+
       '👤 '+_cliNom+'\n\n'+
       '¡Gracias por tu compra! 🙏'
@@ -712,7 +702,7 @@ async function abrirDet(ticket,idFiado){
         ${pagoInfo}${abonoInfo}
       </div>
       ${itemsHtml}
-      <div class="total-row"><span class="tl">💰 Total</span><span class="tm">${fmt(totalFinal)}</span></div>
+      <div class="total-row"><span class="tl">💰 Total</span><span class="tm">${fmt(d.total)}</span></div>
       <button class="btn-enviar-ticket" onclick="window.location.href='${waHref}'">📲 Enviar copia al cliente</button>
       ${fiad&&(fiad.estado==='PAGADO'||fiad.totalAbonado>0)?`<button class="btn-enviar-ticket" style="background:#fff;color:var(--vd);border:2px solid var(--vd)" onclick="reenviarComprobante('${String(idFiado).replace(/'/g,"\\'")}')">💳 Reenviar comprobante de ${fiad.estado==='PAGADO'?'pago':'abono'}</button>`:''}`;
   }catch(e){
