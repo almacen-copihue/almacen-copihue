@@ -208,6 +208,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
   <div class="modal-sh">
     <div class="modal-tit">📋 Recordatorio <button onclick="cerrarRec()">✕</button></div>
     <div class="rec-pre" id="recPrev"></div>
+    <div id="recAvisoTel" style="display:none;margin:8px 0;padding:8px 10px;background:#ffebee;border:2px solid #c62828;border-radius:8px;font-size:.78rem;font-weight:700;color:#b71c1c"></div>
     <button class="btn-compartir" id="btnRecWA" style="display:none;background:#25D366" onclick="enviarRecWA()">📲 Enviar por WhatsApp al cliente</button>
     <button class="btn-compartir" onclick="compartir()">📤 Compartir</button>
     <button class="btn-copiar" onclick="copiar()">📋 Copiar texto</button>
@@ -236,12 +237,12 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
 <div id="toast"></div>
 
 <script>
-const APP_VERSION=38;
+const APP_VERSION=41;
 const API_URL='https://script.google.com/macros/s/AKfycbx-84yapENFqCNS1nfivFOR4P25l8U27gEoeWvVL6Nu5HmKr8e7m3KIJjshqtR_2brrHA/exec';
 
 // ── Estado ─────────────────────────────────────────
 let _todos=[], _cliNom='', _cliTel='', _cliData=[];
-let _sel=new Set(), _met='EFECTIVO', _recTxt='', _montoFull=0;
+let _sel=new Set(), _met='EFECTIVO', _recTxt='', _montoFull=0, _recIds=[];
 let _todosClientes=[]; // todos los clientes de hoja Clientes
 let _showSinDeuda=false; // toggle sección sin deuda
 let _busqCliente=''; // búsqueda unificada
@@ -450,7 +451,7 @@ function renderClientesLista(clis,sinDeuda,pend,totG,q){
     } else {
       sinDeuda.forEach((c,idx)=>{
         const nom=c.nombre||'';const tel=c.telefono||'';
-        html+=`<div class="cli-card" style="opacity:.75" data-sin="${idx}"><div><div class="cli-nombre">${nom}</div><div class="cli-tel">${tel?'📞 '+tel:'Sin teléfono'} <button onclick="event.stopPropagation();abrirEditCli('${safeEnc(nom)}','${tel}')" style="background:none;border:none;cursor:pointer;font-size:.8rem;padding:0 4px;color:var(--vd)">✏️</button></div></div><div style="font-size:.72rem;color:#aaa">Sin deuda</div></div>`;
+        html+=`<div class="cli-card" style="opacity:.9;cursor:pointer" data-sin="${idx}"><div><div class="cli-nombre">${nom}</div><div class="cli-tel">${tel?'📞 '+tel:'Sin teléfono'} <button onclick="event.stopPropagation();abrirEditCli('${safeEnc(nom)}','${tel}')" style="background:none;border:none;cursor:pointer;font-size:.8rem;padding:0 4px;color:var(--vd)">✏️</button></div></div><div style="font-size:.72rem;color:#aaa;text-align:right">Sin deuda<div style="color:var(--vd);font-weight:800;margin-top:2px">🎫 Ver ventas ›</div></div></div>`;
       });
     }
   }
@@ -460,7 +461,25 @@ function renderClientesLista(clis,sinDeuda,pend,totG,q){
   document.querySelectorAll('.cli-card[data-idx]').forEach(el=>{
     el.addEventListener('click',()=>abrirCli(clis[parseInt(el.dataset.idx)].nom));
   });
-  // Tarjetas sin deuda no abren fiados (sin historial pendiente)
+  // v41 — Tarjetas SIN DEUDA: abren sus ventas de los últimos 30 días (para reenviar comprobantes)
+  document.querySelectorAll('.cli-card[data-sin]').forEach(el=>{
+    el.addEventListener('click',()=>abrirCliSinDeuda(sinDeuda[parseInt(el.dataset.sin)].nombre||''));
+  });
+}
+
+// ── v41 — ABRIR CLIENTE SIN DEUDA ──────────────────
+// No cambia abrirCli. Busca por nombre normalizado (sin tildes, mayúsculas ni espacios de más).
+// Solo lee lo que ya está cargado en _todos (listarFiados: pendientes + pagados de los últimos 30 días).
+function _normNomCli(n){return String(n||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim().toUpperCase();}
+function abrirCliSinDeuda(nom){
+  _sel.clear();_recTxt='';
+  _cliNom=nom;
+  const k=_normNomCli(nom);
+  _cliData=_todos.filter(f=>_normNomCli(f.cliente)===k);
+  const cl=(_todosClientes||[]).find(c=>_normNomCli(c.nombre)===k);
+  _cliTel=_cliData[0]?.telefono||(cl&&cl.telefono)||'';
+  renderFiados();
+  ir('fiados',nom);
 }
 
 // ── ABRIR CLIENTE ──────────────────────────────────
@@ -516,7 +535,7 @@ function renderFiados(){
     if(selec)cls+=' sel';
     const tkt=f.ticket&&f.ticket.trim()!=='';
     const descLine=tkt
-      ?`<div class="fc-desc" style="cursor:pointer" data-det="1" data-tkt="${f.ticket}" data-id="${f.idFiado}">🎫 Ticket #${f.ticket} <span style="color:var(--vd);font-weight:700">· Ver venta →</span></div>`
+      ?`<div class="fc-desc">🎫 Ticket #${f.ticket}</div>`
       :(f.descripcion?`<div class="fc-desc">📦 ${f.descripcion}</div>`:'');
     const pagoLine=!esPend?`<div class="fc-pago">✅ Cobrado el ${_fmt(f.fechaPago)}${f.metodoPago?' · '+f.metodoPago:''}</div>`:'';
     const abonoLine=(esPend&&f.totalAbonado>0)
@@ -525,14 +544,17 @@ function renderFiados(){
       :'';
     const dot=selec?`<div class="sel-dot">✓</div>`:'';
     // v38 — reenviar comprobante en TODOS los estados (pendiente, abonado, pagado, con o sin ticket)
-    const btnReenv=`<button data-rec="${f.idFiado}" style="margin-top:6px;background:#fff;border:1px solid var(--vd);color:var(--vd);border-radius:8px;padding:4px 10px;font-size:.68rem;font-weight:700;cursor:pointer;font-family:inherit">📲 Reenviar comprobante</button>`;
+    const _bs='flex:1;border-radius:10px;padding:10px 6px;font-size:.78rem;font-weight:800;cursor:pointer;font-family:inherit;border:2px solid var(--vd);';
+    const btnReenv=`<div style="display:flex;gap:8px;margin-top:10px">`+
+      (tkt?`<button data-det="1" data-tkt="${f.ticket}" data-id="${f.idFiado}" style="${_bs}background:#fff;color:var(--vd)">🎫 Ver venta</button>`:'')+
+      `<button data-rec="${f.idFiado}" style="${_bs}background:var(--vd);color:#fff">📲 Reenviar comprobante</button></div>`;
     // Sin botones en la tarjeta — se usa el flujo original: seleccionar → botones del header
     const btnAbono='';
     return`<div class="${cls}" id="fc-${f.idFiado}" data-id="${f.idFiado}" data-tkt="${f.ticket||''}" data-espend="${esPend?'1':'0'}">${dot}
       <div class="fc-top">
         <div><div class="fc-fecha">📅 ${_fmt(f.fecha)}</div><div class="fc-id">${f.idFiado}</div></div>
         <div style="text-align:right"><div class="fc-monto" style="color:${esPend?'var(--rojo)':'var(--verde)'}">${fmt(f.total)}</div>${bdgEstado(f)}</div>
-      </div>${descLine}${pagoLine}${abonoLine}${btnAbono}<div>${btnReenv}</div></div>`;
+      </div>${descLine}${pagoLine}${abonoLine}${btnAbono}${btnReenv}</div>`;
   }
 
   let html='';
@@ -559,6 +581,7 @@ function renderFiados(){
     });
   }
   if(!html)html='<div class="empty"><div class="icon">✅</div>Sin fiados registrados</div>';
+  if(!pend.length&&!pagados.length) html+='<div class="empty" style="font-size:.8rem"><div class="icon">🧾</div>Sin fiados pendientes ni cobrados en los últimos 30 días.<br>Las compras más viejas no aparecen acá.</div>';
   document.getElementById('cuerpoFiados').innerHTML=html;
   // Event delegation — evita problemas con IDs especiales en onclick inline
   document.querySelectorAll('#cuerpoFiados .fc').forEach(el=>{
@@ -629,11 +652,17 @@ async function abrirDet(ticket,idFiado){
       ?`<div class="det-pagado" style="background:#fff8e1;color:#e65100;border-color:#ffe082">💵 Abonado: ${fmt(fiad.totalAbonado)} · Saldo pendiente: ${fmt(fiad.total)}</div>`+
         (fiad.abonos?`<div style="font-size:.7rem;color:#000;padding:2px 0 0 2px">🗓️ ${fiad.abonos}</div>`:'')
       :'';
+    // Descuento multicompra: si el total de Ventas supera lo que se fio, la diferencia es el descuento
+    // que ese ticket no registro (ventas anteriores a seba21 v518). Solo se muestra; no se modifica nada.
+    const _totFiado=fiad?(parseFloat(fiad.totalOriginal)||0):0;
+    const _desc=(_totFiado>0&&(d.total-_totFiado)>=1)?Math.round(d.total-_totFiado):0;
+    const totalFinal=_desc?d.total-_desc:d.total;
     let itemsHtml='';
     (d.items||[]).forEach(it=>{
       const cant=String(it.cantidad||'').replace(/\.0$/,'');
       itemsHtml+=`<div class="item-row"><div class="item-nom">${it.nombre}</div><div class="item-cant">${cant}</div><div class="item-precio">${fmt(it.subtotal)}</div></div>`;
     });
+    if(_desc)itemsHtml+=`<div class="item-row"><div class="item-nom">🏷️ Descuento multicompra</div><div class="item-cant"></div><div class="item-precio" style="color:#c62828">-${fmt(_desc)}</div></div>`;
 
     // Armar mensaje WA igual que copihue-reportes
     const MESES=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
@@ -685,12 +714,14 @@ async function abrirDet(ticket,idFiado){
       '📅 '+fLabel+(hLabel?' · '+hLabel+'hs':'')+'\n\n'+
       (d.items||[]).map(p=>String(p.cantidad||'').replace(/\.0$/,'')+'× '+p.nombre.substring(0,22)+'  '+fmt(p.subtotal)).join('\n')+
       '\n─────────────────\n'+
-      '*💰 Total: '+fmt(d.total)+'*\n'+
+      (_desc?'🏷️ Descuento multicompra  -'+fmt(_desc)+'\n':'')+
+      '*💰 Total: '+fmt(totalFinal)+'*\n'+
       (d.metodoPago?sanitizeWA(d.metodoPago)+'\n':'')+
       '👤 '+_cliNom+'\n\n'+
       '¡Gracias por tu compra! 🙏'
     );
-    const telNum=normTel(_cliTel);
+    const _telF=(fiad&&_tel10(fiad.telefono))?String(fiad.telefono).trim():'';   // v40: teléfono de ESTE fiado (no el de la primera fila)
+    const telNum=_telF?normTel(_telF):'';
     const waHref=telNum
       ?'whatsapp://send?phone='+telNum+'&text='+waTxt
       :'whatsapp://send?text='+waTxt;
@@ -702,8 +733,8 @@ async function abrirDet(ticket,idFiado){
         ${pagoInfo}${abonoInfo}
       </div>
       ${itemsHtml}
-      <div class="total-row"><span class="tl">💰 Total</span><span class="tm">${fmt(d.total)}</span></div>
-      <button class="btn-enviar-ticket" onclick="window.location.href='${waHref}'">📲 Enviar copia al cliente</button>
+      <div class="total-row"><span class="tl">💰 Total</span><span class="tm">${fmt(totalFinal)}</span></div>
+      <button class="btn-enviar-ticket" onclick="window.location.href='${waHref}'">📲 Enviar copia ${telNum?'a '+_cliNom+' · '+_telF:'(elegir contacto)'}</button>
       ${fiad&&(fiad.estado==='PAGADO'||fiad.totalAbonado>0)?`<button class="btn-enviar-ticket" style="background:#fff;color:var(--vd);border:2px solid var(--vd)" onclick="reenviarComprobante('${String(idFiado).replace(/'/g,"\\'")}')">💳 Reenviar comprobante de ${fiad.estado==='PAGADO'?'pago':'abono'}</button>`:''}`;
   }catch(e){
     document.getElementById('detContenido').innerHTML=`<div class="empty"><div class="icon">❌</div>${e.message}</div>`;
@@ -765,6 +796,7 @@ async function confirmarCob(){
   if(montoIngresado<=0){toast('⚠️ Ingresá un monto','r');return;}
   const esAbono=montoIngresado<_montoFull-0.5;
   const selArr=[..._sel];
+  _recIds=selArr.slice();   // v40: a qué fiados corresponde el comprobante (para elegir el teléfono correcto)
   const btn=document.getElementById('btnConf');
   btn.disabled=true;btn.textContent='⏳ Guardando...';
 
@@ -897,18 +929,40 @@ function reenviarComprobante(idFiado){
   const f=_cliData.find(x=>String(x.idFiado)===String(idFiado));
   if(!f){toast('❌ No se encontró el fiado','r');return;}
   _recTxt=_txtComprobante(f);
+  _recIds=[String(f.idFiado)];
   abrirRec();
+}
+// v40 — DESTINO DEL WHATSAPP: ya no se usa el teléfono de la primera fila del cliente (_cliTel).
+// Se toma el teléfono de los fiados A LOS QUE CORRESPONDE este comprobante, y solo se ofrece el envío directo
+// si hay UN solo teléfono (tanto en esos fiados como en todos los del cliente). Si no, queda solo «Compartir».
+function _tel10(t){const d=String(t||'').replace(/\D/g,'');return d.length>=6?d.slice(-10):'';}
+function _recDestino(){
+  const ids=(_recIds||[]).map(String);
+  const fil=_cliData.filter(f=>ids.includes(String(f.idFiado)));
+  if(!fil.length)return{ok:false,motivo:'no se sabe a qué fiado corresponde este comprobante'};
+  const kSel=[...new Set(fil.map(f=>_tel10(f.telefono)).filter(Boolean))];
+  const kAll=[...new Set(_cliData.map(f=>_tel10(f.telefono)).filter(Boolean))];
+  if(!kSel.length)return{ok:false,motivo:'estos fiados no tienen teléfono'};
+  if(kSel.length>1||kAll.length>1){
+    const vis=[...new Set(_cliData.map(f=>String(f.telefono||'').trim()).filter(Boolean))];
+    return{ok:false,multi:true,motivo:'este cliente tiene más de un teléfono en FIADOS ('+vis.join(' / ')+')'};
+  }
+  const raw=String(fil.find(f=>_tel10(f.telefono)===kSel[0]).telefono).trim();
+  const tel=normTel(raw);
+  return tel?{ok:true,tel:tel,visible:raw}:{ok:false,motivo:'teléfono incompleto ('+raw+')'};
 }
 function enviarRecWA(){
   if(!_recTxt)return;
-  const t=normTel(_cliTel);
-  window.location.href=(t?'whatsapp://send?phone='+t+'&text=':'whatsapp://send?text=')+safeEnc(_recTxt);
+  const d=_recDestino();
+  if(!d.ok){toast('⚠️ No se envía directo: '+d.motivo+'. Usá «Compartir» y elegí el contacto.','r');return;}
+  window.location.href='whatsapp://send?phone='+d.tel+'&text='+safeEnc(_recTxt);
 }
 
 // ── RECORDATORIO ───────────────────────────────────
 function abrirRec(){
   if(!_recTxt&&_sel.size===0)return;
   if(!_recTxt){
+    _recIds=[..._sel].map(String);
     const selF=[..._sel].map(id=>_cliData.find(f=>f.idFiado===id)).filter(Boolean);
     const tot=selF.reduce((s,f)=>s+parseFloat(f.total||0),0);
     // Mismo enfoque que cobrar — usa descripcion guardada, funciona para todos los fiados
@@ -924,11 +978,13 @@ function abrirRec(){
       'Por favor acercate a regularizar tu cuenta.','📍 Almacén Copihue'].join('\n');
   }
   document.getElementById('recPrev').textContent=_recTxt;
-  { const bw=document.getElementById('btnRecWA'); if(bw) bw.style.display=normTel(_cliTel)?'block':'none'; }
+  { const bw=document.getElementById('btnRecWA'), av=document.getElementById('recAvisoTel'), d=_recDestino();
+    if(bw){ bw.style.display=d.ok?'block':'none'; if(d.ok) bw.textContent='📲 Enviar a '+_cliNom+' · '+d.visible; }
+    if(av){ av.style.display=d.multi?'block':'none'; if(d.multi) av.textContent='⚠️ '+d.motivo+'. No se ofrece el envío directo: usá «Compartir» y elegí el contacto.'; } }
   document.getElementById('copMsg').style.display='none';
   document.getElementById('modalRec').classList.add('open');
 }
-function cerrarRec(){document.getElementById('modalRec').classList.remove('open');_recTxt='';}
+function cerrarRec(){document.getElementById('modalRec').classList.remove('open');_recTxt='';_recIds=[];}
 function compartir(){if(!_recTxt)return;if(navigator.share)navigator.share({text:_recTxt}).catch(()=>{});else{copiar();toast('📋 Texto copiado','v');}}
 function copiar(){
   if(!_recTxt)return;
