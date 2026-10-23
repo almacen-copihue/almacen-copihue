@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>ver.35 · Copihue · Reportes</title>
+<title>ver.36 · Copihue · Reportes</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
@@ -351,7 +351,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
 <div class="hdr">
   <div class="hdr-icon">🏪</div>
   <div><div class="hdr-t">Copihue</div><div class="hdr-s">Reportes</div></div>
-  <a href="seba21.html" class="btn-back">← Volver</a>
+  <button class="btn-back" id="btnExcelHdr" onclick="excelDesdeCabecera()" style="margin-left:auto" title="Descargar informe Excel del período elegido">📥 Excel</button>
+  <a href="seba21.html" class="btn-back" style="margin-left:0">← Volver</a>
 </div>
 
 <div id="app"><div class="ldg"><div class="spin"></div>Cargando reportes...</div></div>
@@ -377,6 +378,10 @@ let vendActivos=new Set(['TODOS']);
 let topOrden='venta'; // 'venta' | 'ganancia'
 let showVenc=false, showDiaSem=false, showHoras=false, showPDias=false, showGanDias=false, showMetodos=false, showVendedores=false, showTopProd=false, showMejDias=false, showCompMeses=false;
 let prodSelIdx=-1; // índice del producto seleccionado en el top (-1 = ninguno)
+// v36 — top: ver todos los productos y ordenar
+let topTodos=false;      // false = top 15 | true = todos los productos del período
+let topSort='venta';     // 'venta' | 'unidades' | 'tickets' (solo en Top por venta)
+const fmtQ=n=>(Math.round(n*10)/10).toLocaleString('es-AR');
 // ===== COMPRA SUGERIDA INTELIGENTE — estado =====
 let showCSI=false, csiFiltroPeriodo='todos';
 let showRecienLlegados=false;
@@ -486,7 +491,9 @@ async function init(){
   }
   try{ renderApp(); }catch(e){
     document.getElementById('app').innerHTML='<div class="ldg" style="color:#c62828">❌ Error al mostrar datos: '+e.message+'</div>';
+    return;
   }
+  _excelAutoDesdeURL();
 }
 
 // ====== FILTRAR ======
@@ -553,10 +560,14 @@ function calcStats(its,tots){
     prods[i.nombre].ganReal+=i.tieneCosto?(i.gananciaReal||0):0;
     prods[i.nombre].ganAprox+=i.gananciaAprox||0;
     if(i.tieneCosto)prods[i.nombre].conCosto=true;
+    if(!prods[i.nombre].tks)prods[i.nombre].tks=new Set();
+    prods[i.nombre].tks.add(i.ticket);
   });
-  const top=Object.entries(prods).sort((a,b)=>b[1].total-a[1].total).slice(0,15)
-    .map(([n,d])=>({nombre:n,qty:Math.round(d.qty),total:d.total,ganReal:d.ganReal,ganAprox:d.ganAprox,conCosto:d.conCosto}));
-  return{venta,ganReal,ganAprox,itemsConCosto,itemsSinCosto,metodos,vendedores,top,nTks:tots.length};
+  // v36 — todos los productos (mismo cálculo que el Excel); top = los 15 primeros por venta
+  const todos=Object.entries(prods).sort((a,b)=>b[1].total-a[1].total)
+    .map(([n,d])=>({nombre:n,qty:Math.round(d.qty*10)/10,total:d.total,ganReal:d.ganReal,ganAprox:d.ganAprox,conCosto:d.conCosto,tickets:d.tks?d.tks.size:0}));
+  const top=todos.slice(0,15);
+  return{venta,ganReal,ganAprox,itemsConCosto,itemsSinCosto,metodos,vendedores,top,todos,nTks:tots.length};
 }
 
 // ====== HELPERS ======
@@ -705,9 +716,17 @@ function renderApp(){
                                ['#e8f5e9','#2e7d32','📦 '+s+' und'];
     return '<span style="font-size:.6rem;font-weight:700;background:'+bg+';color:'+txt+';padding:1px 7px;border-radius:20px;margin-left:4px">'+lbl+'</span>';
   }
-  const maxV=stats.top.length?stats.top[0].total:1;
-  const maxG=Math.max(...stats.top.map(p=>p.conCosto?Math.max(p.ganReal,0):p.ganAprox),1);
-  _topNombres = stats.top.map(p=>p.nombre);
+  // v36 — base del top: los 15 de siempre o todos; el Top por venta se puede ordenar
+  const _baseV=[...stats.todos].sort((a,b)=>
+    topSort==='unidades'?(b.qty-a.qty)||(b.total-a.total):
+    topSort==='tickets' ?(b.tickets-a.tickets)||(b.total-a.total):
+    (b.total-a.total));
+  const listaV=topTodos?_baseV:_baseV.slice(0,15);
+  const totalVentaPer=stats.venta||1;
+  const extraLinea=p=>'<div style="font-size:.6rem;color:var(--gris);margin:1px 0 2px">🎫 '+p.tickets+' ticket'+(p.tickets===1?'':'s')+' · '+(Math.round(p.total/totalVentaPer*1000)/10).toLocaleString('es-AR')+'% del total</div>';
+  const maxV=listaV.length?Math.max(...listaV.map(p=>p.total),1):1;
+  const maxG=Math.max(...listaV.map(p=>p.conCosto?Math.max(p.ganReal,0):p.ganAprox),1);
+  _topNombres = listaV.map(p=>p.nombre);
 
   // Función helper: 30 días de un producto expandido
   function prod30H(nombre){
@@ -738,7 +757,7 @@ function renderApp(){
     '</div>';
   }
 
-  const topsH=stats.top.length?stats.top.map((p,i)=>{
+  const topsH=listaV.length?listaV.map((p,i)=>{
     const pctV=Math.round(p.total/maxV*100);
     const gan=p.conCosto?p.ganReal:p.ganAprox;
     const ganPos=Math.max(gan,0);
@@ -750,8 +769,8 @@ function renderApp(){
     const sel=prodSelIdx===i&&topOrden==='venta';
     return'<div style="border-radius:10px;padding:6px;margin-bottom:4px;background:'+(sel?'var(--vl)':'transparent')+';border:1px solid '+(sel?'var(--verde)':'transparent')+'">'+
       '<button onclick="prodSelIdx='+(sel?-1:i)+';renderApp()" style="width:100%;background:none;border:none;padding:0;cursor:pointer;font-family:inherit;text-align:left">'+
-        '<div class="prod-hdr"><span class="prod-n">'+medal+' '+p.nombre.substring(0,28)+'</span><span class="prod-d">'+p.qty+' u</span></div>'+
-        stockBadge(p.nombre)+
+        '<div class="prod-hdr"><span class="prod-n">'+medal+' '+p.nombre.substring(0,28)+'</span><span class="prod-d">'+fmtQ(p.qty)+' u</span></div>'+
+        stockBadge(p.nombre)+extraLinea(p)+
         '<div style="display:flex;gap:3px;align-items:center;margin-bottom:2px;"><div class="barra-bg" style="flex:1"><div class="barra-f bar-v" style="width:'+pctV+'%"></div></div><span style="font-size:.68rem;font-weight:700;color:var(--vd);min-width:60px;text-align:right">'+fmt(p.total)+'</span></div>'+
         '<div style="display:flex;gap:3px;align-items:center;"><div class="barra-bg" style="flex:1"><div class="barra-f '+barGCls+'" style="width:'+pctG+'%"></div></div><span class="'+ganCls+'" style="font-size:.65rem;min-width:60px;text-align:right">'+etiqueta+'</span></div>'+
       '</button>'+
@@ -760,10 +779,11 @@ function renderApp(){
   }).join(''):'<div class="empty">Sin datos para la selección</div>';
 
   // Top por GANANCIA
-  const topGananciaArr=[...stats.top]
+  const _ganTodos=[...stats.todos]
     .map(p=>({...p,ganancia:p.conCosto?p.ganReal:p.ganAprox}))
     .filter(p=>p.ganancia>0)
     .sort((a,b)=>b.ganancia-a.ganancia);
+  const topGananciaArr=topTodos?_ganTodos:_ganTodos.slice(0,15);
   _topGanNombres = topGananciaArr.map(p=>p.nombre);
   const maxGanRank=topGananciaArr.length?topGananciaArr[0].ganancia:1;
   const topGanH=topGananciaArr.length?topGananciaArr.map((p,i)=>{
@@ -778,8 +798,8 @@ function renderApp(){
         stockBadge(p.nombre)+
         '<div style="display:flex;gap:3px;align-items:center;">'+
           '<div class="barra-bg" style="flex:1"><div class="barra-f" style="width:'+pct+'%;background:'+(esReal?'var(--naranja)':'#a5d6a7')+'"></div></div>'+
-          '<span style="font-size:.65rem;color:var(--gris);min-width:60px;text-align:right">'+p.qty+' u · '+fmt(p.total)+'</span>'+
-        '</div>'+
+          '<span style="font-size:.65rem;color:var(--gris);min-width:60px;text-align:right">'+fmtQ(p.qty)+' u · '+fmt(p.total)+'</span>'+
+        '</div>'+extraLinea(p)+
       '</button>'+
       (sel?prod30H(p.nombre):'')+
     '</div>';
@@ -1138,7 +1158,14 @@ function renderApp(){
               '<button onclick="topOrden=\'ganancia\';prodSelIdx=-1;renderApp()" style="padding:3px 10px;border-radius:20px;border:1px solid '+(topOrden==='ganancia'?'var(--naranja)':'var(--borde)')+';background:'+(topOrden==='ganancia'?'var(--nl)':'#fff')+';color:'+(topOrden==='ganancia'?'#e65100':'var(--gris)')+';font-size:.65rem;font-weight:700;cursor:pointer;">🟧 Ganancia</button>'+
             '</div>'+
           '</div>'+
+          (topOrden==='venta'?
+            '<div style="display:flex;align-items:center;gap:4px;margin:2px 0 8px;flex-wrap:wrap"><span style="font-size:.62rem;color:var(--gris);font-weight:700">Ordenar:</span>'+
+              [['venta','💲 Venta'],['unidades','📦 Unidades'],['tickets','🎫 Tickets']].map(([k,l])=>
+                '<button onclick="topSort=\''+k+'\';prodSelIdx=-1;renderApp()" style="padding:3px 9px;border-radius:20px;border:1px solid '+(topSort===k?'var(--verde)':'var(--borde)')+';background:'+(topSort===k?'var(--vl)':'#fff')+';color:'+(topSort===k?'var(--vd)':'var(--gris)')+';font-size:.64rem;font-weight:700;cursor:pointer;font-family:inherit">'+l+'</button>').join('')+
+            '</div>':'')+
           (topOrden==='venta'?topsH:topGanH)+
+          (function(){const n=topOrden==='venta'?stats.todos.length:_ganTodos.length; if(n<=15) return '';
+            return '<button onclick="topTodos=!topTodos;prodSelIdx=-1;renderApp()" style="width:100%;margin-top:6px;padding:8px;border-radius:10px;border:1px dashed var(--borde);background:#fff;color:var(--vd);font-size:.72rem;font-weight:800;cursor:pointer;font-family:inherit">'+(topTodos?'▲ Ver solo el top 15':'▼ Ver todos los productos ('+n+')')+'</button>';})()+
         '</div>'
       :'')+
       // Mejores días (colapsable)
@@ -2317,6 +2344,22 @@ function renderRecienLlegados(rl) {
 // ====== FIN RECIÉN LLEGADOS ======
 
 // ====== EXPORTAR EXCEL ======
+// v36 — botón "📥 Excel" de la cabecera (siempre visible) y descarga directa desde el POS
+function excelDesdeCabecera(){
+  if(!raw||!diasSel.size){ alert('Todavía no hay datos o no hay un período elegido.'); return; }
+  descargarExcel();
+}
+function _excelAutoDesdeURL(){
+  try{
+    if(new URLSearchParams(location.search).get('excel')!=='mes') return;
+    const h=new Date(); mes=h.getMonth(); anio=h.getFullYear();
+    diasSel.clear(); getDiasMes().forEach(d=>diasSel.add(d));
+    renderApp();
+    setTimeout(()=>{ try{ descargarExcel(); }catch(e){ console.warn('Excel automático:',e); } },500);
+    // para que recargar la página no vuelva a descargar
+    try{ history.replaceState(null,'',location.pathname+location.search.replace(/[?&]excel=mes/,'').replace(/^&/,'?')); }catch(e){}
+  }catch(e){ console.warn('excel auto:',e); }
+}
 function descargarExcel(){
   if(!raw||!diasSel.size) return;
   const diasArr=Array.from(diasSel).sort();
