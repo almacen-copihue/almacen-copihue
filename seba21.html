@@ -1878,7 +1878,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>🛒 POS · Copihue v521b</title>
+    <title>🛒 POS · Copihue v530</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2934,6 +2934,10 @@
                     style="flex:1;font-size:0.7rem;font-weight:700;padding:4px 2px;border-radius:8px;border:1.5px solid;cursor:pointer;background:rgba(249,168,37,0.2);border-color:rgba(249,168,37,0.5);color:#f9a825;">
                 🖼️ FL
             </button>
+            <button id="toggleCotiz" onclick="_cotizToggle()" title="Activar/desactivar Cotizaciones por WhatsApp"
+                    style="flex:1.2;font-size:0.7rem;font-weight:700;padding:4px 2px;border-radius:8px;border:1.5px solid;cursor:pointer;transition:all 0.2s;white-space:nowrap;">
+                📲 COT
+            </button>
             <button id="btnRecargar" onclick="recargarTodo()" title="Recargar ofertas y productos"
                     style="flex:1.4;font-size:0.75rem;font-weight:900;padding:4px 4px;border-radius:8px;border:2px solid #4caf50;cursor:pointer;background:rgba(76,175,80,0.35);color:#fff;letter-spacing:0.03em;">
                 🔄 FULL
@@ -3008,6 +3012,14 @@
                            box-shadow:0 4px 14px rgba(183,28,28,0.45);
                            display:flex;align-items:center;justify-content:center;
                            touch-action:manipulation;">🗑️</button>
+        </div>
+
+        <!-- v528 Cotizar (solo si el interruptor está activo) -->
+        <div id="fabCotizar" style="display:none;">
+            <button onclick="abrirCotizar()" title="Cotizar por WhatsApp"
+                    style="width:52px;height:52px;border-radius:50%;border:none;cursor:pointer;
+                           background:linear-gradient(135deg,#128c7e,#25d366);color:white;font-size:1.4rem;
+                           box-shadow:0 4px 14px rgba(18,140,126,0.45);touch-action:manipulation;">📲</button>
         </div>
 
         <!-- Cobrar -->
@@ -3090,6 +3102,7 @@
             <div class="total-label">TOTAL</div>
             <div class="total-monto" id="totalMonto">$0</div>
         </div>
+        <button id="btnCotizarPanel" onclick="abrirCotizar()" style="display:none;padding:12px 14px;border:none;border-radius:12px;background:#25d366;color:#fff;font-weight:900;font-family:inherit;font-size:0.95rem;cursor:pointer;">📲 Cotizar</button>
         <button class="btn-confirmar" id="btnConfirmar" onclick="abrirConfirmacion()" disabled>
             ✅ Cobrar
         </button>
@@ -3444,7 +3457,7 @@
                        autocomplete="off" autocorrect="off" autocapitalize="characters"
                        oninput="buscarProductoIngreso()"
                        style="text-transform:uppercase;">
-                <div id="ingResultados" style="background:white;border:1px solid #ddd;border-radius:8px;margin-top:4px;max-height:150px;overflow-y:auto;display:none;"></div>
+                <div id="ingResultados" style="background:white;border:1px solid #ddd;border-radius:8px;margin-top:4px;max-height:300px;overflow-y:auto;display:none;"></div>
                 <div id="ingInfo" style="background:#e8f5e9;border-left:3px solid #4caf50;padding:8px 10px;border-radius:6px;font-size:0.85rem;margin-top:6px;display:none;"></div>
             </div>
 
@@ -3648,7 +3661,7 @@
         <div class="resumen-card" id="resumenCard"><!-- se llena dinámico --></div>
         <div class="resumen-ventas-lista" id="resumenLista"><!-- se llena dinámico --></div>
         <button class="btn-resumen" onclick="verVentasRealesPlanilla(this)" style="width:100%;margin:8px 0;background:#1976D2;color:#fff;border:none;border-radius:10px;padding:10px;font-weight:700;">📋 Ver ventas reales (planilla)</button>
-        <!-- v521b — informes a mano: Excel del mes y Reportes completos -->
+        <!-- v525 — informes a mano: Excel del mes y Reportes completos -->
         <div id="resumenAccesosInforme" style="display:flex;gap:8px;margin:0 0 8px;">
             <a href="copihue-reportes.html?v=123&excel=mes" style="flex:1;text-align:center;text-decoration:none;background:#2e7d32;color:#fff;border-radius:10px;padding:10px;font-weight:700;font-size:.85rem;">📥 Excel del mes</a>
             <a href="copihue-reportes.html?v=123" style="flex:1;text-align:center;text-decoration:none;background:rgba(156,39,176,0.9);color:#fff;border-radius:10px;padding:10px;font-weight:700;font-size:.85rem;">📈 Reportes</a>
@@ -4411,7 +4424,7 @@ async function _recargaSilenciosa() {
         if (!arr || arr.length === 0) return;
         const map = {};
         arr.forEach(p => { map[p.id] = p; });
-        productos = productos.map(p => { const f=map[p.id]; return f ? {...p,stock:parseInt(f.stock)||0,price:parseInt(f.price)||p.price} : p; });
+        productos = productos.map(p => { const f=map[p.id]; return f ? {...p,stock:_stockLeido(p,f.stock),price:parseInt(f.price)||p.price} : p; });
         const ind = document.getElementById('indicadorCarga');
         if (ind) { ind.classList.remove('cargando'); ind.classList.add('ok'); }
     } catch(e) { console.warn('Recarga silenciosa:', e.message); }
@@ -4435,7 +4448,7 @@ async function cargarProductos(intento = 1) {
                 id: p.id,
                 name: String(p.name).trim(),
                 price: parseInt(p.price) || 0,
-                stock: parseInt(p.stock) || 0,
+                stock: _stockLeido({ name: String(p.name).trim(), category: String(p.category || 'ALMACEN').trim().toUpperCase() }, p.stock),
                 image: `imagenes-productos/${simplificarNombre(String(p.name).trim())}.jpg`,
                 category: String(p.category || 'ALMACEN').trim().toUpperCase(),
                 rotacion: parseInt(p.rotacion) || 3,
@@ -4711,8 +4724,8 @@ function renderResultados(results, term = '') {
         const stockColor = sinStock ? '#bbb' : stockBajo ? '#f57c00' : '#aaa';
         const stockLabel = sinStock
             ? '<span style="background:#e0e0e0;color:#999;padding:1px 6px;border-radius:8px;font-size:0.6rem;font-weight:700;">SIN STOCK</span>'
-            : stockBajo ? `<span style="color:#f57c00;">${p.stock} u. (poco)</span>`
-            : `stock: ${p.stock}`;
+            : stockBajo ? `<span style="color:#f57c00;">${esPorPeso(p) ? _stockKgTexto(p.stock) + ' kg' : p.stock + ' u.'} (poco)</span>`
+            : `stock: ${esPorPeso(p) ? _stockKgTexto(p.stock) + ' kg' : p.stock}`;
 
         return `
         <div class="resultado-item ${sinStock ? 'sin-stock' : ''} ${qty > 0 ? 'en-carrito' : ''}"
@@ -4910,6 +4923,22 @@ function esPorPeso(producto) {
     const cat = (producto.category || '').toUpperCase();
     return /\bKG\b/.test(nombre) || 
            (cat.includes('FRUTA') || cat.includes('VERDURA')) && nombre.includes('KG');
+}
+
+// v524 — stock de productos por kilo con decimales. Antes SIEMPRE se leía con
+// parseInt, así que 1,479 kg se veía como "1 u." y menos de 1 kg como "SIN STOCK".
+// Los productos que NO son por kilo siguen leyéndose exactamente igual (parseInt).
+function _stockLeido(prod, raw) {
+    try {
+        if (esPorPeso(prod)) {
+            const n = parseFloat(String(raw).replace(',', '.'));
+            if (isFinite(n)) return Math.round(n * 1000) / 1000;
+        }
+    } catch(e) {}
+    return parseInt(raw) || 0;
+}
+function _stockKgTexto(n) {
+    return (Math.round(n * 100) / 100).toLocaleString('es-AR', { maximumFractionDigits: 2 });
 }
 
 function _refreshResultadosBadges(idActualizado) {
@@ -6393,6 +6422,7 @@ function _confirmarCobroDispatch() {
 async function togglePagoMixto() {
     const panel = document.getElementById('panelPagoMixto');
     const abrir = panel.style.display === 'none';
+    if (!abrir) { _pmLimpiarTodo(); return; } // v523 — "✕ cerrar" descarta lo cargado
     panel.style.display = abrir ? 'block' : 'none';
     document.getElementById('pmToggleFlecha').textContent = abrir ? '⌄' : '›';
     _pagoMixtoActivo = abrir;
@@ -6414,6 +6444,23 @@ const PM_PENDIENTE_KEY = 'copihue_pago_mixto_pendiente'; // v453
 // modal para agregar más productos (ej. dar caramelos en vez de vuelto) e
 // incluso a un refresh de página, igual que ya hace el carrito. Solo se
 // borra con "Vaciar carrito" o al confirmar el cobro con éxito.
+// v523 — limpieza TOTAL del pago mixto en curso (variables + panel + localStorage).
+// Se llama cuando una venta ya quedó cobrada y el carrito vaciado, y al cerrar
+// el panel con "✕ cerrar". Nunca lanza error.
+function _pmLimpiarTodo() {
+    try {
+        _pagosMixtos = [];
+        _pagoMixtoActivo = false;
+        localStorage.removeItem(PM_PENDIENTE_KEY);
+        const panel = document.getElementById('panelPagoMixto');
+        if (panel) panel.style.display = 'none';
+        const fl = document.getElementById('pmToggleFlecha');
+        if (fl) fl.textContent = '›';
+        const er = document.getElementById('pmErrorMsg');
+        if (er) er.style.display = 'none';
+    } catch(e) { console.warn('⚠️ _pmLimpiarTodo:', e); }
+}
+
 function _pmGuardarEstadoPendiente() {
     if (!_pagosMixtos.length) { localStorage.removeItem(PM_PENDIENTE_KEY); return; }
     try {
@@ -6863,6 +6910,7 @@ async function confirmarVentaMixta() {
         ventaActual = [];
         renderVenta();
         localStorage.removeItem(CARRITO_KEY);
+        _pmLimpiarTodo(); // v523 — la venta ya quedó guardada: nada de mixto residual aunque falle algo después
 
         try {
         itemsSnapshot.forEach(item => {
@@ -7016,6 +7064,7 @@ async function confirmarVenta() {
     ventaActual = [];
     renderVenta();
     localStorage.removeItem(CARRITO_KEY);
+    _pmLimpiarTodo(); // v523 — un cobro normal tampoco debe dejar restos de un mixto anterior
 
     try {
         // Actualizar stock local para no vender más de lo que hay
@@ -9075,6 +9124,7 @@ function actualizarDisplayPeso() {
     document.getElementById('pesoOkBtn').disabled = totalPesos <= 0;
 }
 
+const PESO_MARGEN_STOCK = 0.30; // v526 — margen de tolerancia sobre el stock en productos por kilo
 function confirmarPeso() {
     let gramos, totalPesos, oferta, tieneOferta;
 
@@ -9097,6 +9147,24 @@ function confirmarPeso() {
         const precioPorKg = tieneOferta ? oferta.precioUnitario : pesoProductoActual.price;
         gramos = precioPorKg > 0 ? Math.round((totalPesos / precioPorKg) * 1000) : 0;
     }
+
+    // v526 — AVISO de stock en productos por kilo (antes no se controlaba nada).
+    // Margen de tolerancia: hasta 130% del stock registrado carga sin preguntar,
+    // porque el stock de lo que se pesa suele estar un poco desactualizado.
+    // Pasado el margen se pregunta; NO bloquea ("Cargar igual" sigue como siempre).
+    try {
+        const stockKg = Number(pesoProductoActual.stock) || 0;
+        const yaGr = (ventaActual.find(i => i.esPeso && i.idOriginal === pesoProductoActual.id) || {}).gramos || 0;
+        const totalGr = yaGr + gramos;
+        if (totalGr > stockKg * 1000 * (1 + PESO_MARGEN_STOCK)) {
+            const kgTxt = n => (Math.round(n * 100) / 100).toLocaleString('es-AR', { maximumFractionDigits: 2 });
+            const msg = (stockKg > 0
+                ? '⚠️ Stock registrado: ' + kgTxt(stockKg) + ' kg.\nVas a tener ' + kgTxt(totalGr / 1000) + ' kg de este producto en el carrito (pasa el margen del ' + Math.round(PESO_MARGEN_STOCK * 100) + '%).'
+                : '⚠️ Este producto figura SIN STOCK registrado.\nVas a cargar ' + kgTxt(totalGr / 1000) + ' kg.')
+                + '\n\n¿Cargar igual?';
+            if (!confirm(msg)) return;
+        }
+    } catch (eAv) { console.warn('aviso stock peso:', eAv); }
 
     const costoPorKg = pesoProductoActual.precioCosto || 0;
     const costoCalculado = costoPorKg > 0 ? Math.round((costoPorKg / 1000) * gramos) : 0;
@@ -9364,6 +9432,43 @@ function cerrarModalIngreso(e) {
     // if (e.target === document.getElementById('modalIngreso')) cerrarIngreso();
 }
 
+
+// v527 — BÚSQUEDA POR PALABRAS (ingreso, salida, fotos): sin tildes ni mayúsculas, cada palabra
+// escrita tiene que estar en el nombre (en cualquier orden y aunque sea a medias). Ordena por relevancia.
+function _bpNorm(s) {
+    return String(s == null ? '' : s).toLowerCase().split('').map(function (ch) {
+        return ch.normalize('NFD').replace(/[̀-ͯ]/g, '');
+    }).join('').replace(/[^a-z0-9\s]/g, ' ');
+}
+function _buscarPalabras(items, q, getName, limite) {
+    var words = _bpNorm(q).split(/\s+/).filter(Boolean);
+    if (!words.length) return [];
+    var frase = words.join(' '), out = [];
+    for (var i = 0; i < items.length; i++) {
+        var n = _bpNorm(getName(items[i]));
+        var nw = n.split(/\s+/), score = 0, ok = true;
+        for (var k = 0; k < words.length; k++) {
+            var w = words[k];
+            if (n.indexOf(w) === -1) { ok = false; break; }
+            score += nw.indexOf(w) !== -1 ? 50 : (nw.some(function (x) { return x.indexOf(w) === 0; }) ? 35 : 20);
+        }
+        if (!ok) continue;
+        if (n.replace(/^\s+/, '').indexOf(words[0]) === 0) score += 30;
+        if (n.indexOf(frase) !== -1) score += 25;
+        out.push({ it: items[i], s: score, n: n });
+    }
+    out.sort(function (a, b) { return (b.s - a.s) || (a.n < b.n ? -1 : a.n > b.n ? 1 : 0); });
+    return out.slice(0, limite).map(function (x) { return x.it; });
+}
+
+// v530 — en las listas de búsqueda (ingreso, fotos) los productos CON stock van primero y los
+// "Sin stock" al final. Mantiene el orden por coincidencia dentro de cada grupo. Solo ordena.
+function _stockPrimero(lista, limite) {
+    var con = [], sin = [];
+    lista.forEach(function (p) { (Number(p.stock) > 0 ? con : sin).push(p); });
+    return con.concat(sin).slice(0, limite);
+}
+
 function buscarProductoIngreso() {
     const q = document.getElementById('ingProducto').value.toUpperCase().trim();
     const resultadosDiv = document.getElementById('ingResultados');
@@ -9373,7 +9478,7 @@ function buscarProductoIngreso() {
 
     if (q.length < 2) { resultadosDiv.style.display = 'none'; return; }
 
-    const matches = productos.filter(p => p.name.includes(q)).slice(0, 8);
+    const matches = _stockPrimero(_buscarPalabras(productos, q, p => p.name, 99999), 15);   // v527 por palabras; v530 stock primero
 
     if (matches.length === 0) {
         resultadosDiv.style.display = 'none';
@@ -14322,7 +14427,7 @@ function buscarProductoFotos() {
     var div = document.getElementById('fotosResultados');
     ['fotosPanel','fotosGrid','fotosPreviewWrap','ghStatus'].forEach(function(id){ document.getElementById(id).style.display='none'; });
     if (q.length < 2) { div.style.display = 'none'; return; }
-    var matches = productos.filter(function(p){ return p.name && p.name.toUpperCase().includes(q); }).slice(0,12);
+    var matches = _stockPrimero(_buscarPalabras(productos.filter(function(p){ return p.name; }), q, function(p){ return p.name; }, 99999), 12);   // v527; v530 stock primero
     if (!matches.length) { div.innerHTML = '<div style="padding:14px;color:#888;">Sin resultados</div>'; div.style.display='block'; return; }
     div.innerHTML = matches.map(function(p) {
         var slug = simplificarNombre(p.name);
@@ -15574,9 +15679,7 @@ function salidaBuscar() {
     if (q.length === 0) { salidaMostrarTodos(); return; }
     if (q.length < 1) return;
 
-    const matches = productos
-        .filter(p => p.stock > 0 && p.name.toLowerCase().includes(q))
-        .slice(0, 20);
+    const matches = _buscarPalabras(productos.filter(p => p.stock > 0), q, p => p.name, 20);   // v527: por palabras
 
     if (!matches.length) {
         div.innerHTML = '<div style="padding:10px;color:#aaa;font-size:0.85rem;">Sin resultados</div>';
@@ -16757,6 +16860,8 @@ function abrirRetiroCaja() {
     if (rcCatResumenTexto) rcCatResumenTexto.innerHTML = 'Tocá para elegir una categoría ▾';
     const rcCatGrid = document.getElementById('rcCatGrid');
     if (rcCatGrid) rcCatGrid.style.display = 'none';
+    rcTarjetaCancelarNueva();
+    rcRenderTarjetas();   // v522: sin categoría elegida, no hay tarjetas
     // El filtro de fecha arranca vacío (historial completo por defecto,
     // sin recorte de días — ver v417). El botón "Todo" limpia el filtro.
     document.getElementById('filtroFechaSalidas').value = '';
@@ -16793,6 +16898,115 @@ function rcToggleCategorias() {
     grid.style.display = (grid.style.display === 'none' || !grid.style.display) ? 'grid' : 'none';
 }
 
+// ── v522 — TARJETAS SELECCIONABLES POR CATEGORÍA ──────────────────────────────
+// Para que un mismo gasto (ej. "Claude IA") se escriba SIEMPRE igual y los reportes
+// lo reconozcan como el mismo gasto mensual. Lista base fija (la de la planilla) +
+// tarjetas propias creadas desde acá, que se guardan SOLO en este dispositivo.
+// No cambia lo que se registra: la tarjeta solo completa el campo Observación.
+const _RC_TARJETAS_BASE = {
+    'SUSCRIPCIONES': ['Netflix','HBO Max','Amazon Prime','YouTube Premium','Starlink','Tuenti','Paramount+','Claude IA','Amazon Music','IPTV','Boleta de luz CEB','Empretienda']
+};
+const _RC_TARJ_LS = 'rc_tarjetas_v1';
+let _rcTarjActual = [];   // [{n:nombre, propia:bool}] en el orden mostrado
+function _rcTarjNorm(t) { return String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim().toUpperCase(); }
+function _rcTarjEsc(t) { return String(t).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function _rcTarjPropias(cat) {
+    try { const o = JSON.parse(localStorage.getItem(_RC_TARJ_LS) || '{}'); return Array.isArray(o[cat]) ? o[cat].filter(x => typeof x === 'string' && x.trim()) : []; }
+    catch (e) { return []; }
+}
+function _rcTarjGuardarPropias(cat, arr) {
+    try { const o = JSON.parse(localStorage.getItem(_RC_TARJ_LS) || '{}'); o[cat] = arr; localStorage.setItem(_RC_TARJ_LS, JSON.stringify(o)); return true; }
+    catch (e) { return false; }
+}
+function _rcTarjLista(cat) {
+    const base = _RC_TARJETAS_BASE[cat];
+    if (!base) return null;
+    const vistos = new Set(base.map(_rcTarjNorm));
+    const propias = [];
+    _rcTarjPropias(cat).forEach(n => { const k = _rcTarjNorm(n); if (!vistos.has(k)) { vistos.add(k); propias.push(n); } });
+    return base.map(n => ({ n, propia: false })).concat(propias.map(n => ({ n, propia: true })));
+}
+// Si lo escrito coincide con una tarjeta (sin importar mayúsculas/tildes/espacios), se guarda con el nombre de la tarjeta
+function _rcCanonObs(texto, cat) {
+    const lista = _rcTarjLista(cat);
+    if (!lista) return texto;
+    const k = _rcTarjNorm(texto);
+    const t = lista.find(x => _rcTarjNorm(x.n) === k);
+    return t ? t.n : texto;
+}
+function rcRenderTarjetas() {
+    const wrap = document.getElementById('rcTarjetasWrap');
+    const grid = document.getElementById('rcTarjetas');
+    if (!wrap || !grid) return;
+    const lista = _rcTarjLista(_rcCategoriaSeleccionada);
+    if (!lista) { wrap.style.display = 'none'; grid.innerHTML = ''; _rcTarjActual = []; return; }
+    _rcTarjActual = lista;
+    const obs = document.getElementById('rcObservacion');
+    const actual = _rcTarjNorm(obs ? obs.value : '');
+    grid.innerHTML = lista.map((t, i) => {
+        const sel = actual && _rcTarjNorm(t.n) === actual;
+        const estilo = 'position:relative;padding:11px 8px;border-radius:12px;font-size:0.85rem;font-weight:800;cursor:pointer;text-align:center;' +
+            (sel ? 'border:2px solid #2e7d32;background:#2e7d32;color:#fff;' : 'border:2px solid #e0e0e0;background:#fff;color:#333;');
+        const borrar = t.propia ? '<span onclick="event.stopPropagation();rcTarjetaBorrar(' + i + ')" title="Quitar esta tarjeta" style="position:absolute;top:2px;right:6px;font-size:0.8rem;opacity:.7;">✕</span>' : '';
+        return '<button type="button" onclick="rcTarjetaTap(' + i + ')" style="' + estilo + '">' + (sel ? '✓ ' : '') + _rcTarjEsc(t.n) + borrar + '</button>';
+    }).join('') + '<button type="button" onclick="rcTarjetaNueva()" style="padding:11px 8px;border-radius:12px;font-size:0.85rem;font-weight:800;cursor:pointer;text-align:center;border:2px dashed #1565c0;background:#e3f2fd;color:#0d47a1;">➕ Crear tarjeta</button>';
+    wrap.style.display = 'block';
+    const hint = document.getElementById('rcTarjetasHint');
+    if (hint) hint.textContent = '— tocá para completar el nombre';
+    // Autocompletado del teclado: solo con los nombres de las tarjetas (sin variantes sueltas)
+    const obsInput = document.getElementById('rcObservacion');
+    let dl = document.getElementById('rcSuscList');
+    if (!dl) { dl = document.createElement('datalist'); dl.id = 'rcSuscList'; document.body.appendChild(dl); }
+    dl.innerHTML = lista.map(t => '<option value="' + _rcTarjEsc(t.n) + '">').join('');
+    if (obsInput) obsInput.setAttribute('list', 'rcSuscList');
+}
+function rcTarjetaTap(i) {
+    const t = _rcTarjActual[i];
+    const obs = document.getElementById('rcObservacion');
+    if (!t || !obs) return;
+    obs.value = (_rcTarjNorm(obs.value) === _rcTarjNorm(t.n)) ? '' : t.n;   // tocar de nuevo la quita
+    rcRenderTarjetas();
+}
+function rcTarjetaNueva() {
+    const box = document.getElementById('rcTarjetaNueva');
+    if (!box) return;
+    box.style.display = 'flex';
+    const inp = document.getElementById('rcTarjetaNuevaInput');
+    if (inp) { inp.value = ''; setTimeout(() => inp.focus(), 50); }
+}
+function rcTarjetaCancelarNueva() {
+    const box = document.getElementById('rcTarjetaNueva');
+    if (box) box.style.display = 'none';
+}
+function rcTarjetaGuardarNueva() {
+    const cat = _rcCategoriaSeleccionada;
+    const inp = document.getElementById('rcTarjetaNuevaInput');
+    if (!inp || !_RC_TARJETAS_BASE[cat]) return;
+    const nombre = inp.value.replace(/\s+/g, ' ').trim().slice(0, 40);
+    if (!nombre) { inp.focus(); return; }
+    const existente = (_rcTarjLista(cat) || []).find(x => _rcTarjNorm(x.n) === _rcTarjNorm(nombre));
+    const obs = document.getElementById('rcObservacion');
+    if (existente) {
+        if (obs) obs.value = existente.n;
+        mostrarToast('Ya existía la tarjeta "' + existente.n + '". La seleccioné.', 'naranja');
+    } else {
+        const propias = _rcTarjPropias(cat).concat([nombre]);
+        const ok = _rcTarjGuardarPropias(cat, propias);
+        if (obs) obs.value = nombre;
+        mostrarToast(ok ? '✅ Tarjeta "' + nombre + '" creada (queda en este dispositivo)' : 'No se pudo guardar la tarjeta en este dispositivo; se usa solo para este gasto', ok ? 'verde' : 'naranja');
+    }
+    rcTarjetaCancelarNueva();
+    rcRenderTarjetas();
+}
+function rcTarjetaBorrar(i) {
+    const t = _rcTarjActual[i];
+    const cat = _rcCategoriaSeleccionada;
+    if (!t || !t.propia) return;
+    if (!confirm('¿Quitar la tarjeta "' + t.n + '"? Los gastos ya registrados no cambian.')) return;
+    _rcTarjGuardarPropias(cat, _rcTarjPropias(cat).filter(x => _rcTarjNorm(x) !== _rcTarjNorm(t.n)));
+    rcRenderTarjetas();
+}
+
 function selRcCategoria(cat) {
     _rcCategoriaSeleccionada = cat;
     document.getElementById('rcCategoria').value = cat;
@@ -16819,16 +17033,10 @@ function selRcCategoria(cat) {
     };
     const hint = document.getElementById('rcObsHint');
     if (hint) hint.textContent = hints[cat] ? '— ' + hints[cat] : '';
-    // Si es SUSCRIPCIONES, agregar datalist con nombres canónicos
+    // v522 — tarjetas de la categoría (y autocompletado con los mismos nombres)
     const obsInput = document.getElementById('rcObservacion');
-    let dl = document.getElementById('rcSuscList');
-    if(cat === 'SUSCRIPCIONES'){
-        if(!dl){ dl=document.createElement('datalist'); dl.id='rcSuscList'; document.body.appendChild(dl); }
-        dl.innerHTML = ['Netflix', 'HBO Max', 'Amazon Prime', 'YouTube Premium', 'Paramount+', 'Starlink', 'Spotify', 'Tuenti', 'IPTV', 'Empretienda', 'Disney+', 'Apple TV+', 'Amazon Music', 'Prime Video'].map(s=>`<option value="${s}">`).join('');
-        if(obsInput) obsInput.setAttribute('list','rcSuscList');
-    } else {
-        if(obsInput) obsInput.removeAttribute('list');
-    }
+    if (obsInput && !_RC_TARJETAS_BASE[cat]) obsInput.removeAttribute('list');
+    rcRenderTarjetas();
     // Si selecciona FAMILIA CHILE y el monto está vacío, sugerir $85K
     if (cat === 'FAMILIA CHILE') {
         const m = document.getElementById('rcMonto');
@@ -16845,7 +17053,7 @@ async function confirmarRetiroCaja() {
     const monto = parseFloat(document.getElementById('rcMonto').value);
     const motivo = document.getElementById('rcMotivo').value.trim();
     const categoria = _rcCategoriaSeleccionada;
-    const observacion = document.getElementById('rcObservacion').value.trim();
+    const observacion = _rcCanonObs(document.getElementById('rcObservacion').value.trim(), categoria);   // v522: mismo nombre que la tarjeta
     const errDiv = document.getElementById('rcError');
 
     if (!monto || monto <= 0) {
@@ -16908,6 +17116,13 @@ async function confirmarRetiroCaja() {
                 const el2 = document.getElementById(id);
                 if (el2) el2.classList.remove('activo');
             });
+            // v522 — el cartel de categoría quedaba mostrando la anterior aunque ya no estuviera elegida
+            const rcResTxt = document.getElementById('rcCatResumenTexto');
+            if (rcResTxt) rcResTxt.innerHTML = 'Tocá para elegir una categoría ▾';
+            const rcGridPost = document.getElementById('rcCatGrid');
+            if (rcGridPost) rcGridPost.style.display = 'none';
+            rcTarjetaCancelarNueva();
+            rcRenderTarjetas();
             cargarHistorialSalidas();
         } else {
             errDiv.textContent = '❌ Error: ' + (resp.mensaje || resp.error || 'Error desconocido');
@@ -17116,7 +17331,7 @@ async function cargarHistorialRetiros() {
                         <span style="font-size:0.75rem;color:#1565c0;font-weight:700;">Cambiar</span>
                     </div>
                     <div id="rcCatGrid" style="display:none;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px;">
-                        <button type="button" class="cat-btn cat-proveedor" id="rcCatPROVEEDORES" onclick="selRcCategoria('PROVEEDORES')" style="font-size:0.72rem;">🚚 PROVEEDORES</button>
+                        <button type="button" class="cat-btn" id="rcCatPROVEEDORES" onclick="selRcCategoria('PROVEEDORES')" style="font-size:0.72rem;">🚚 PROVEEDORES</button>
                         <button type="button" class="cat-btn" id="rcCatSALUD"          onclick="selRcCategoria('SALUD')"          style="font-size:0.72rem;">💊 SALUD</button>
                         <button type="button" class="cat-btn" id="rcCatTRANSPORTE"     onclick="selRcCategoria('TRANSPORTE')"     style="font-size:0.72rem;">🚗 TRANSPORTE</button>
                         <button type="button" class="cat-btn" id="rcCatSUSCRIPCIONES"  onclick="selRcCategoria('SUSCRIPCIONES')"  style="font-size:0.72rem;">📺 SUSCRIPC.</button>
@@ -17133,9 +17348,20 @@ async function cargarHistorialRetiros() {
                     <input type="hidden" id="rcCategoria">
                 </div>
 
+                <!-- v522 — Tarjetas seleccionables de la categoría elegida (hoy: SUSCRIPCIONES) -->
+                <div class="form-grupo" id="rcTarjetasWrap" style="display:none;">
+                    <label class="form-label">Elegí una tarjeta <span id="rcTarjetasHint" style="font-weight:400;color:#888;font-size:0.75rem;"></span></label>
+                    <div id="rcTarjetas" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;"></div>
+                    <div id="rcTarjetaNueva" style="display:none;margin-top:8px;gap:6px;align-items:center;">
+                        <input type="text" class="form-input" id="rcTarjetaNuevaInput" maxlength="40" placeholder="Nombre de la tarjeta (ej: Disney+)" autocomplete="off" style="flex:1;margin:0;">
+                        <button type="button" onclick="rcTarjetaGuardarNueva()" style="padding:10px 12px;border:none;border-radius:10px;background:#2e7d32;color:#fff;font-weight:800;font-size:0.82rem;cursor:pointer;">Guardar</button>
+                        <button type="button" onclick="rcTarjetaCancelarNueva()" style="padding:10px 10px;border:1.5px solid #ddd;border-radius:10px;background:#fff;color:#666;font-weight:800;font-size:0.82rem;cursor:pointer;">✕</button>
+                    </div>
+                </div>
+
                 <div class="form-grupo">
                     <label class="form-label">Observación <span id="rcObsHint" style="font-weight:400;color:#888;font-size:0.75rem;"></span></label>
-                    <input type="text" class="form-input" id="rcObservacion"
+                    <input type="text" class="form-input" id="rcObservacion" oninput="rcRenderTarjetas()"
                            placeholder="Ej: Pago boleta de luz" autocomplete="off">
                 </div>
 
@@ -18049,5 +18275,370 @@ function prestCancelar(id){
 document.addEventListener('DOMContentLoaded',prestActualizarBadge);
 
 </script>
+<script>
+// ════════════════════════════════════════════════════════════════════════════
+// v528 — COTIZACIÓN POR WHATSAPP (aislada de la venta)
+// Solo LEE ventaActual / productos / motor de ofertas. No llama a confirmarVenta,
+// procesarVenta, guardarVentaDia, ni a la planilla. No toca stock, caja, tickets,
+// fiados ni el carrito. La preferencia (interruptor) se guarda solo en este
+// dispositivo (localStorage 'copihue_cotiz_wa'). El nombre del cliente NO se guarda.
+// ════════════════════════════════════════════════════════════════════════════
+var _COTIZ_KEY = 'copihue_cotiz_wa';
+var _COTIZ_DIAS = 3;
+var _COTIZ_TZ = 'America/Argentina/Buenos_Aires';
+var _cotizImgBlob = null;
+
+function _cotizActiva() {
+    try { var v = localStorage.getItem(_COTIZ_KEY); return v !== '0'; } catch (e) { return true; }
+}
+function _cotizToggle() {
+    var nuevo = !_cotizActiva();
+    try { localStorage.setItem(_COTIZ_KEY, nuevo ? '1' : '0'); } catch (e) {}
+    _cotizRefrescar();
+    try { mostrarToast(nuevo ? '📲 Cotizaciones por WhatsApp: ACTIVADAS' : '📲 Cotizaciones por WhatsApp: desactivadas', nuevo ? 'verde' : ''); } catch (e) {}
+}
+function _cotizRefrescar() {
+    var on = _cotizActiva();
+    var hay = (typeof ventaActual !== 'undefined') && ventaActual.length > 0;
+    var t = document.getElementById('toggleCotiz');
+    if (t) {
+        t.style.background = on ? 'rgba(37,211,102,0.35)' : 'rgba(255,255,255,0.08)';
+        t.style.borderColor = on ? '#25d366' : 'rgba(255,255,255,0.3)';
+        t.style.color = on ? '#fff' : 'rgba(255,255,255,0.55)';
+        t.textContent = on ? '📲 COT ✓' : '📲 COT';
+    }
+    var f = document.getElementById('fabCotizar');
+    if (f) f.style.display = (on && hay) ? 'block' : 'none';
+    var p = document.getElementById('btnCotizarPanel');
+    if (p) p.style.display = (on && hay) ? 'inline-block' : 'none';
+}
+
+// ── Fecha local del comercio (Bariloche = hora de Argentina) ─────────────
+function _cotizFechas() {
+    var parts = new Intl.DateTimeFormat('en-CA', { timeZone: _COTIZ_TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()).split('-');
+    var base = Date.UTC(+parts[0], +parts[1] - 1, +parts[2]);
+    var dias = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+    function fmt(ms) {
+        var d = new Date(ms);
+        return dias[d.getUTCDay()] + ' ' + String(d.getUTCDate()).padStart(2, '0') + '/' + String(d.getUTCMonth() + 1).padStart(2, '0');
+    }
+    return { emision: fmt(base), vence: fmt(base + _COTIZ_DIAS * 86400000) };
+}
+
+function _cotizPesos(n) { return '$' + Math.round(n).toLocaleString('es-AR'); }
+function _cotizKg(gr) {
+    if (gr >= 1000) return (Math.round(gr / 10) / 100).toLocaleString('es-AR', { maximumFractionDigits: 2 }) + ' kg';
+    return Math.round(gr) + ' gr';
+}
+
+// ── Arma las líneas SOLO leyendo el carrito y el motor existente ────────
+function _cotizLineas() {
+    var lista = ventaActual || [];
+    var prods = (typeof productos !== 'undefined') ? productos : [];
+    var qtyPorId = {};
+    lista.forEach(function (i) { if (!i.esPeso) qtyPorId[i.id] = (qtyPorId[i.id] || 0) + i.qty; });
+    return lista.map(function (item) {
+        var esPeso = !!item.esPeso;
+        var nombre = String(item.name || '').replace(/\s*\(\d+\s*gr\)\s*$/i, '');
+        // mismo criterio que el total del POS y la ventana de cobro (precio × cantidad): así las líneas suman el total
+        var subtotal = Math.round(esPeso ? item.price : item.price * item.qty);
+        var tieneOferta = !!(item.precioModificado && item.precioOriginal > 0 && item.precioOriginal > item.price)
+            || ((item.ofertaTipo === 'promo' || item.ofertaTipo === 'combo') && !!item.ofertaEtiqueta);
+        var antes = null, etiqueta = '', ahorroPack = 0;
+        if (item.ofertaTipo === 'multicompra-grupal') {
+            ahorroPack = _ahorroLineaGrupal(item);
+            if (ahorroPack > 0) etiqueta = item.ofertaEtiqueta || '📦 Pack';
+        } else if (tieneOferta) {
+            antes = Math.round(item.precioOriginal * (esPeso ? 1 : item.qty));
+            if (antes <= subtotal) antes = null;
+            etiqueta = item.ofertaEtiqueta || (item.ofertaTipo === 'cervecero' ? '🍺 Jueves Cervecero' : 'Oferta');
+        }
+        // Stock (solo lectura). unidades: estricto; kilos: margen 30% (PESO_MARGEN_STOCK)
+        var aviso = 'ok';
+        var p = prods.find(function (x) { return String(x.id) === String(esPeso ? item.idOriginal : item.id); });
+        var stockN = p ? Number(p.stock) : NaN;
+        if (!p || !isFinite(stockN)) {
+            aviso = 'sinverificar';
+        } else if (esPeso) {
+            var gr = lista.filter(function (i) { return i.esPeso && i.idOriginal === item.idOriginal; }).reduce(function (s, i) { return s + (i.gramos || 0); }, 0);
+            var margen = (typeof PESO_MARGEN_STOCK !== 'undefined') ? PESO_MARGEN_STOCK : 0.30;
+            if (gr > stockN * 1000 * (1 + margen)) aviso = 'consultar';
+        } else if (qtyPorId[item.id] > stockN) {
+            aviso = 'consultar';
+        }
+        return {
+            nombre: nombre,
+            esPeso: esPeso,
+            cant: esPeso ? _cotizKg(item.gramos || 0) : String(item.qty),
+            unit: (!esPeso && item.qty > 0) ? Math.round(subtotal / item.qty) : null,
+            qty: esPeso ? 1 : item.qty,
+            subtotal: subtotal,
+            antes: antes,
+            etiqueta: etiqueta,
+            ahorroPack: ahorroPack,
+            aviso: aviso,
+            foto: 'imagenes-productos/' + simplificarNombre(nombre) + '.jpg'
+        };
+    });
+}
+
+function _cotizResumen() {
+    return {
+        lineas: _cotizLineas(),
+        total: _totalCarritoConDescuentosGrupales(),   // mismo motor que el botón Cobrar
+        ahorro: _ahorroTotalVenta(),
+        fechas: _cotizFechas()
+    };
+}
+
+function _cotizTexto(nombreCliente) {
+    var r = _cotizResumen();
+    var n = String(nombreCliente || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+    var t = [];
+    t.push('🛒 COTIZACIÓN · ALMACÉN COPIHUE');
+    t.push('');
+    t.push('¡Hola' + (n ? ' ' + n : '') + '! Te compartimos la cotización que nos solicitaste.');
+    t.push('');
+    var hayConsulta = false, haySin = false;
+    r.lineas.forEach(function (l) {
+        var linea;
+        if (l.esPeso) linea = '• ' + l.nombre + ' — ' + l.cant + ' = ' + _cotizPesos(l.subtotal);
+        else if (l.qty > 1) linea = '• ' + l.qty + ' x ' + l.nombre + ' (' + _cotizPesos(l.unit) + ' c/u) = ' + _cotizPesos(l.subtotal);
+        else linea = '• ' + l.nombre + ' = ' + _cotizPesos(l.subtotal);
+        t.push(linea);
+        if (l.etiqueta) t.push('   ' + l.etiqueta + (l.antes ? ' (antes ' + _cotizPesos(l.antes) + ')' : '') + (l.ahorroPack ? ' · ahorro −' + _cotizPesos(l.ahorroPack) : ''));
+        if (l.aviso === 'consultar') { t.push('   ⚠️ Consultar disponibilidad'); hayConsulta = true; }
+        else if (l.aviso === 'sinverificar') { t.push('   ℹ️ Disponibilidad a confirmar'); haySin = true; }
+    });
+    t.push('');
+    if (r.ahorro > 0) t.push('Ahorro incluido: ' + _cotizPesos(r.ahorro));
+    t.push('*TOTAL ESTIMADO: ' + _cotizPesos(r.total) + '*');
+    t.push('');
+    t.push('📅 Cotización válida hasta el ' + r.fechas.vence + ' (' + _COTIZ_DIAS + ' días).');
+    t.push('Precios y disponibilidad sujetos a confirmación. No es una venta ni un comprobante fiscal.');
+    t.push('');
+    t.push('Almacén Copihue · Consultas por WhatsApp');
+    return t.join('\n');
+}
+
+// ── Modal ────────────────────────────────────────────────────────────────
+function _cotizModalEnsure() {
+    var m = document.getElementById('modalCotiz');
+    if (m) return m;
+    m = document.createElement('div');
+    m.id = 'modalCotiz';
+    m.style.cssText = 'display:none;position:fixed;inset:0;z-index:9500;background:rgba(0,0,0,0.6);align-items:flex-end;justify-content:center;';
+    m.onclick = function (e) { if (e.target === m) cerrarCotizar(); };
+    m.innerHTML =
+        '<div style="background:#fff;width:100%;max-width:520px;max-height:92vh;overflow:auto;border-radius:18px 18px 0 0;padding:16px 16px 22px;font-family:inherit;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+        '<div style="font-weight:900;font-size:1.05rem;color:#1b5e20;">📲 Cotización por WhatsApp</div>' +
+        '<button onclick="cerrarCotizar()" style="border:none;background:#eee;border-radius:50%;width:32px;height:32px;font-size:1rem;cursor:pointer;">✕</button></div>' +
+        '<div style="font-size:0.74rem;color:#666;margin-bottom:10px;">No es una venta: no descuenta stock, no registra caja ni toca el carrito.</div>' +
+        '<label style="font-size:0.78rem;font-weight:700;color:#333;">Nombre del cliente (opcional, solo para el saludo)</label>' +
+        '<input id="cotizNombre" type="text" maxlength="40" autocomplete="off" placeholder="Ej: Marta" style="width:100%;box-sizing:border-box;padding:10px;border:1.5px solid #ccc;border-radius:10px;font-size:1rem;margin:4px 0 10px;">' +
+        '<label style="font-size:0.78rem;font-weight:700;color:#333;">WhatsApp del cliente (opcional)</label>' +
+        '<input id="cotizTel" type="tel" inputmode="tel" autocomplete="off" placeholder="Ej: 2944123456 (vacío = elegís el contacto en WhatsApp)" style="width:100%;box-sizing:border-box;padding:10px;border:1.5px solid #ccc;border-radius:10px;font-size:1rem;margin:4px 0 10px;">' +
+        '<div id="cotizAviso" style="font-size:0.78rem;color:#b26a00;margin-bottom:8px;"></div>' +
+        '<div style="display:flex;gap:8px;">' +
+        '<button onclick="cotizEnviarTexto()" style="flex:1;padding:13px 6px;border:none;border-radius:12px;background:#25d366;color:#fff;font-weight:900;font-size:0.95rem;cursor:pointer;">💬 Enviar texto</button>' +
+        '<button onclick="cotizGenerarImagen()" style="flex:1;padding:13px 6px;border:none;border-radius:12px;background:#1b5e20;color:#fff;font-weight:900;font-size:0.95rem;cursor:pointer;">🖼️ Hacer imagen</button></div>' +
+        '<div id="cotizImgBox" style="display:none;margin-top:12px;text-align:center;">' +
+        '<img id="cotizImgPrev" alt="Vista previa de la cotización" style="max-width:100%;max-height:48vh;border:1px solid #ddd;border-radius:8px;">' +
+        '<div style="display:flex;gap:8px;margin-top:8px;">' +
+        '<button onclick="cotizCompartirImagen()" style="flex:1;padding:12px 6px;border:none;border-radius:12px;background:#25d366;color:#fff;font-weight:900;cursor:pointer;">📤 Compartir</button>' +
+        '<button onclick="cotizDescargarImagen()" style="flex:1;padding:12px 6px;border:none;border-radius:12px;background:#455a64;color:#fff;font-weight:900;cursor:pointer;">⬇️ Descargar</button></div>' +
+        '<div style="font-size:0.72rem;color:#777;margin-top:6px;">La imagen no se envía sola: con “Compartir” elegís WhatsApp y el contacto. En PC se descarga y la adjuntás en WhatsApp.</div></div>' +
+        '</div>';
+    document.body.appendChild(m);
+    return m;
+}
+function abrirCotizar() {
+    if (!_cotizActiva() || !ventaActual || !ventaActual.length) return;
+    var m = _cotizModalEnsure();
+    var ls = _cotizLineas();
+    var c = ls.filter(function (l) { return l.aviso === 'consultar'; }).length;
+    var s = ls.filter(function (l) { return l.aviso === 'sinverificar'; }).length;
+    var av = '';
+    if (c) av += '⚠️ ' + c + ' producto(s) con stock insuficiente: saldrán como “Consultar disponibilidad”. ';
+    if (s) av += 'ℹ️ No se pudo verificar el stock de ' + s + ' producto(s). ';
+    document.getElementById('cotizAviso').textContent = av;
+    document.getElementById('cotizImgBox').style.display = 'none';
+    _cotizImgBlob = null;
+    m.style.display = 'flex';
+}
+function cerrarCotizar() {
+    var m = document.getElementById('modalCotiz');
+    if (m) m.style.display = 'none';
+    var n = document.getElementById('cotizNombre'); if (n) n.value = '';   // el nombre no se conserva
+    var t = document.getElementById('cotizTel'); if (t) t.value = '';
+    _cotizImgBlob = null;
+}
+
+function cotizEnviarTexto() {
+    var texto = _cotizTexto(document.getElementById('cotizNombre').value);
+    var tel = (document.getElementById('cotizTel').value || '').trim();
+    var num = tel ? _normNumWA(tel) : '';
+    if (tel || MOBILE) {
+        abrirWABusiness(texto, tel);      // mismo mecanismo que usa el POS para WhatsApp
+    } else {
+        window.open('https://wa.me/' + num + '?text=' + encodeURIComponent(texto), '_blank');
+    }
+}
+
+// ── Imagen PNG ───────────────────────────────────────────────────────────
+function _cotizCargarImg(src) {
+    return new Promise(function (res) {
+        var im = new Image(), listo = false;
+        var fin = function (v) { if (!listo) { listo = true; res(v); } };
+        im.onload = function () { fin(im); };
+        im.onerror = function () { fin(null); };
+        setTimeout(function () { fin(null); }, 5000);
+        im.src = src;
+    });
+}
+function _cotizWrap(ctx, txt, ancho, maxL) {
+    var pal = String(txt).split(' '), ls = [], cur = '';
+    pal.forEach(function (w) {
+        var t = cur ? cur + ' ' + w : w;
+        if (ctx.measureText(t).width <= ancho || !cur) cur = t; else { ls.push(cur); cur = w; }
+    });
+    if (cur) ls.push(cur);
+    if (ls.length > maxL) { ls = ls.slice(0, maxL); ls[maxL - 1] = ls[maxL - 1].replace(/.{1,2}$/, '…'); }
+    return ls;
+}
+async function _cotizDibujar(nombreCliente, conFotos) {
+    var r = _cotizResumen(), N = r.lineas.length;
+    var modo = !conFotos || N > 40 ? 'sin' : (N > 25 ? 'chica' : 'normal');
+    var W = 800, PAD = 28, FOTO = modo === 'normal' ? 72 : (modo === 'chica' ? 36 : 0);
+    var ROWH = modo === 'normal' ? 96 : (modo === 'chica' ? 56 : 52);
+    var fotos = modo === 'sin' ? r.lineas.map(function () { return null; }) : await Promise.all(r.lineas.map(function (l) { return _cotizCargarImg(l.foto); }));
+    var cv = document.createElement('canvas'), ctx = cv.getContext('2d');
+    cv.width = W; cv.height = 200;
+    var F = '"Segoe UI",Roboto,Arial,sans-serif';
+    var nomW = W - PAD * 2 - (FOTO ? FOTO + 14 : 0) - 190;
+    // Medición de alto
+    ctx.font = '600 ' + (modo === 'chica' ? 20 : 22) + 'px ' + F;
+    var extra = 0;
+    var alto = r.lineas.map(function (l) {
+        var ls = _cotizWrap(ctx, l.nombre, nomW, 2).length;
+        var h = Math.max(ROWH, 18 + ls * 26 + 24 + (l.etiqueta ? 22 : 0) + (l.aviso !== 'ok' ? 22 : 0));
+        return h;
+    });
+    var cuerpo = alto.reduce(function (s, h) { return s + h; }, 0);
+    var HEAD = 150, SALUDO = 70, FOOT = 270 + (r.ahorro > 0 ? 34 : 0);
+    var H = HEAD + SALUDO + cuerpo + FOOT;
+    cv.width = W; cv.height = H;
+    ctx = cv.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+    // Cabecera
+    var g = ctx.createLinearGradient(0, 0, W, HEAD); g.addColorStop(0, '#1b5e20'); g.addColorStop(1, '#2e7d32');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, HEAD);
+    ctx.fillStyle = '#fff'; ctx.textBaseline = 'alphabetic';
+    ctx.font = '900 40px ' + F; ctx.fillText('🛒 COTIZACIÓN', PAD, 62);
+    ctx.font = '700 26px ' + F; ctx.fillText('ALMACÉN COPIHUE', PAD, 100);
+    ctx.font = '500 20px ' + F; ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fillText('Emitida ' + r.fechas.emision + ' · Válida hasta ' + r.fechas.vence, PAD, 130);
+    // Saludo
+    var n = String(nombreCliente || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+    ctx.fillStyle = '#333'; ctx.font = '600 22px ' + F;
+    ctx.fillText('¡Hola' + (n ? ' ' + n : '') + '! Te compartimos la cotización', PAD, HEAD + 34);
+    ctx.fillText('que nos solicitaste.', PAD, HEAD + 60);
+    // Filas
+    var y = HEAD + SALUDO;
+    r.lineas.forEach(function (l, i) {
+        var h = alto[i];
+        if (i % 2 === 0) { ctx.fillStyle = '#f6f9f6'; ctx.fillRect(0, y, W, h); }
+        var x = PAD;
+        if (FOTO) {
+            var fy = y + (h - FOTO) / 2;
+            if (fotos[i]) {
+                ctx.save(); ctx.beginPath(); ctx.rect(x, fy, FOTO, FOTO); ctx.clip();
+                var iw = fotos[i].naturalWidth, ih = fotos[i].naturalHeight, s = Math.max(FOTO / iw, FOTO / ih);
+                ctx.drawImage(fotos[i], x + (FOTO - iw * s) / 2, fy + (FOTO - ih * s) / 2, iw * s, ih * s);
+                ctx.restore();
+            } else {
+                ctx.fillStyle = '#e3e8e3'; ctx.fillRect(x, fy, FOTO, FOTO);
+                ctx.fillStyle = '#9aa59a'; ctx.font = (FOTO * 0.5) + 'px ' + F; ctx.textAlign = 'center';
+                ctx.fillText('🛒', x + FOTO / 2, fy + FOTO * 0.68); ctx.textAlign = 'left';
+            }
+            x += FOTO + 14;
+        }
+        ctx.fillStyle = '#222'; ctx.font = '600 ' + (modo === 'chica' ? 20 : 22) + 'px ' + F;
+        var ls = _cotizWrap(ctx, l.nombre, nomW, 2), ty = y + 30;
+        ls.forEach(function (t) { ctx.fillText(t, x, ty); ty += 26; });
+        ctx.font = '500 19px ' + F; ctx.fillStyle = '#555';
+        var det = l.esPeso ? l.cant : (l.qty > 1 ? l.qty + ' x ' + _cotizPesos(l.unit) : l.qty + ' u.');
+        ctx.fillText(det, x, ty); ty += 24;
+        if (l.etiqueta) { ctx.fillStyle = '#6a1b9a'; ctx.font = '700 17px ' + F; ctx.fillText(l.etiqueta.slice(0, 40) + (l.ahorroPack ? ' −' + _cotizPesos(l.ahorroPack) : ''), x, ty); ty += 22; }
+        if (l.aviso === 'consultar') { ctx.fillStyle = '#d84315'; ctx.font = '800 18px ' + F; ctx.fillText('⚠️ Consultar disponibilidad', x, ty); ty += 22; }
+        else if (l.aviso === 'sinverificar') { ctx.fillStyle = '#8a6d00'; ctx.font = '700 17px ' + F; ctx.fillText('ℹ️ Disponibilidad a confirmar', x, ty); ty += 22; }
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#111'; ctx.font = '800 24px ' + F; ctx.fillText(_cotizPesos(l.subtotal), W - PAD, y + 34);
+        if (l.antes) { ctx.fillStyle = '#999'; ctx.font = '500 17px ' + F; var tx = _cotizPesos(l.antes), tw = ctx.measureText(tx).width; ctx.fillText(tx, W - PAD, y + 58); ctx.fillRect(W - PAD - tw, y + 52, tw, 1.5); }
+        ctx.textAlign = 'left';
+        y += h;
+    });
+    // Pie
+    ctx.fillStyle = '#1b5e20'; ctx.fillRect(PAD, y + 8, W - PAD * 2, 2);
+    y += 24;
+    if (r.ahorro > 0) { ctx.fillStyle = '#2e7d32'; ctx.font = '700 22px ' + F; ctx.fillText('Ahorro incluido: ' + _cotizPesos(r.ahorro), PAD, y + 22); y += 34; }
+    ctx.fillStyle = '#1b5e20'; ctx.font = '900 30px ' + F; ctx.fillText('TOTAL ESTIMADO', PAD, y + 40);
+    ctx.textAlign = 'right'; ctx.font = '900 40px ' + F; ctx.fillText(_cotizPesos(r.total), W - PAD, y + 42); ctx.textAlign = 'left';
+    y += 78;
+    ctx.fillStyle = '#333'; ctx.font = '700 21px ' + F; ctx.fillText('📅 Cotización válida hasta el ' + r.fechas.vence + ' (' + _COTIZ_DIAS + ' días)', PAD, y + 8);
+    ctx.fillStyle = '#777'; ctx.font = '500 17px ' + F;
+    ctx.fillText('Precios y disponibilidad sujetos a confirmación.', PAD, y + 38);
+    ctx.fillText('No es una venta ni un comprobante fiscal.', PAD, y + 62);
+    ctx.fillStyle = '#1b5e20'; ctx.font = '700 20px ' + F; ctx.textAlign = 'center';
+    ctx.fillText('Almacén Copihue · Consultas por WhatsApp', W / 2, H - 22); ctx.textAlign = 'left';
+    return cv;
+}
+function _cotizBlob(cv) {
+    return new Promise(function (res, rej) {
+        try { cv.toBlob(function (b) { b ? res(b) : rej(new Error('blob')); }, 'image/png'); } catch (e) { rej(e); }
+    });
+}
+async function cotizGenerarImagen() {
+    var nom = document.getElementById('cotizNombre').value;
+    var box = document.getElementById('cotizImgBox');
+    try {
+        var blob;
+        try { blob = await _cotizBlob(await _cotizDibujar(nom, true)); }
+        catch (e) { blob = await _cotizBlob(await _cotizDibujar(nom, false)); }   // fotos bloqueadas (canvas) → versión sin fotos
+        _cotizImgBlob = blob;
+        document.getElementById('cotizImgPrev').src = URL.createObjectURL(blob);
+        box.style.display = 'block';
+    } catch (e) {
+        mostrarToast('No se pudo generar la imagen', 'rojo');
+    }
+}
+function cotizDescargarImagen() {
+    if (!_cotizImgBlob) return;
+    var a = document.createElement('a');
+    a.download = 'cotizacion-copihue.png';
+    a.href = URL.createObjectURL(_cotizImgBlob);
+    a.click();
+}
+async function cotizCompartirImagen() {
+    if (!_cotizImgBlob) return;
+    var file = new File([_cotizImgBlob], 'cotizacion-copihue.png', { type: 'image/png' });
+    if (navigator.canShare && navigator.share && navigator.canShare({ files: [file] })) {
+        try { await navigator.share({ files: [file], title: 'Cotización · Almacén Copihue' }); } catch (e) {}
+    } else {
+        cotizDescargarImagen();
+        mostrarToast('Imagen descargada: adjuntala en WhatsApp', 'verde');
+    }
+}
+
+// Mantiene botones al día cuando cambia el carrito, SIN editar renderVenta
+// (se envuelve la función existente: llama a la original y después refresca).
+(function () {
+    var orig = _renderVentaCompleta;
+    _renderVentaCompleta = function (ligero) { var r = orig.apply(this, arguments); try { _cotizRefrescar(); } catch (e) {} return r; };
+})();
+document.addEventListener('DOMContentLoaded', function () { try { _cotizRefrescar(); } catch (e) {} });
+try { _cotizRefrescar(); } catch (e) {}
+</script>
+
 </body>
 </html>
