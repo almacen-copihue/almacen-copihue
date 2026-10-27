@@ -1878,7 +1878,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>🛒 POS · Copihue v530</title>
+    <title>🛒 POS · Copihue v537</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2813,7 +2813,7 @@
     <link rel="prefetch" href="copihue-finanzas.html">
 </head>
 <body>
-
+    
 <!-- v502 ETAPA 2: el botón «Pagos pendientes» se oculta en pantallas < 768 px (celular no cambia) -->
 <style>@media (max-width: 767px) { #btnPagosPendientes { display: none !important; } }
 @media (min-width: 768px) { #chipOpsPgp { display: none !important; } }</style>
@@ -3796,7 +3796,7 @@
         <div id="pmToggleWrap" onclick="togglePagoMixto()" style="margin:8px 20px 4px;background:linear-gradient(135deg,#5e35b1,#7e57c2);border-radius:14px;padding:12px 16px;display:flex;align-items:center;gap:10px;cursor:pointer;box-shadow:0 2px 8px rgba(94,53,177,0.3);">
             <span style="font-size:1.5rem;">💱</span>
             <div style="flex:1;">
-                <div id="pmToggleLink" style="font-size:0.85rem;font-weight:900;color:white;">PAGO MIXTO (MIX MONEDAS, MODOS, ABONOS)</div>
+                <div id="pmToggleLink" style="font-size:0.85rem;font-weight:900;color:white;">PAGO MIXTO • ABONO + FIADO + $CL + $US ETC</div>
             </div>
             <span id="pmToggleFlecha" style="font-size:1.1rem;color:rgba(255,255,255,0.6);">›</span>
         </div>
@@ -6412,6 +6412,14 @@ async function _cargarCotizaciones() {
 }
 
 function _confirmarCobroDispatch() {
+    // v532 — con el panel mixto abierto el cobro NUNCA vuelve al camino normal (era lo que abría "Registrar
+    // Fiado" por el total entero): si no hay ningún pago cargado, avisa y no hace nada.
+    const _pmPanelAbierto = (document.getElementById('panelPagoMixto') || { style: {} }).style.display === 'block';
+    if (_pmPanelAbierto && !(_pagoMixtoActivo && _pagosMixtos.length > 0)) {
+        const er = document.getElementById('pmErrorMsg');
+        if (er) { er.textContent = '⚠️ Cargá al menos un pago (efectivo, tarjeta, transferencia, fiado…) o tocá "cerrar" para cobrar normal.'; er.style.display = 'block'; }
+        return;
+    }
     if (_pagoMixtoActivo && _pagosMixtos.length > 0) {
         confirmarVentaMixta();
     } else {
@@ -6876,7 +6884,9 @@ async function confirmarVentaMixta() {
             const resp = await _apiFetchUrl('vender', url);
             stockOk = resp.success === true;
             ticketNum = resp.ticket || resp.numeroTicket || null;
+            window._dbgVender = 'success=' + resp.success + ' ticket=' + (resp.ticket === undefined ? 'undefined' : JSON.stringify(resp.ticket)) + ' claves=' + Object.keys(resp || {}).join(','); // v535 diag
         } catch(e) {
+            window._dbgVender = 'ERROR al llamar vender: ' + (e && e.message || e); // v535 diag
             console.warn('⚠️ No se pudo conectar con la planilla (venta mixta):', e);
         }
 
@@ -6923,6 +6933,7 @@ async function confirmarVentaMixta() {
         // FIADO parcial — SOLO el saldo, nunca el total de la venta. Si falla,
         // encola con reintento idempotente (spec punto 6: nunca fallar en
         // silencio como sí puede pasar hoy en el fiado puro).
+        let _fiadoMixtoGuardado = false, _datosFiadoMixto = null; // v533
         if (pagoFiado) {
             const idFiado = 'f_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
             const datosFiado = {
@@ -6932,12 +6943,20 @@ async function confirmarVentaMixta() {
                 total: pagoFiado.equivalenteARS,
                 ticket: ticketNum,
                 items: itemsSnapshot.map(i => i.name + ' x' + i.qty).join(', '),
+                // v534 — mismo formato que el fiado normal (antes la planilla ponía "TICKET COMPLETO")
+                descripcion: itemsSnapshot.slice(0,3).map(i => (i.esPeso ? i.gramos + 'gr' : i.qty + 'x') + ' ' + i.name.substring(0,15)).join(' · ') + (itemsSnapshot.length > 3 ? ' (+' + (itemsSnapshot.length-3) + ')' : ''),
                 cantItems: itemsSnapshot.length,
                 vencimiento: ''
             };
+            _datosFiadoMixto = datosFiado; // v533
             try {
                 const urlF = API_URL + '?action=guardarFiado&data=' + encodeURIComponent(JSON.stringify(datosFiado));
-                await _apiFetchUrl('guardarFiado', urlF);
+                const respF = await _apiFetchUrl('guardarFiado', urlF);
+                // v531 — antes el POS no miraba si la planilla había dicho "success:false": el fiado se perdía
+                // en silencio. Ahora cualquier respuesta sin success:true cae al mismo camino que una falla de red:
+                // queda en pendientes (reintento seguro: consulta antes de guardar, no duplica) y avisa.
+                if (!respF || respF.success !== true) throw new Error('guardarFiado sin success: ' + ((respF && respF.mensaje) || 'respuesta inesperada'));
+                _fiadoMixtoGuardado = true; // v533
             } catch(eF) {
                 console.warn('⚠️ Error guardando fiado parcial (se reintentará):', eF);
                 try {
@@ -6954,6 +6973,50 @@ async function confirmarVentaMixta() {
 
         window._ultimaVenta = { items: itemsSnapshot, total, totalOriginal: totalV, descuentoRedondeo: window._descuentoRedondeo || 0, hora, metodo: metodoPagoTexto, detallePagos };
 
+        // v533 — venta mixta CON fiado: se calcula (en segundo plano) la deuda total del cliente para el ticket.
+        // Solo lectura de la planilla; si no se puede confirmar, el ticket sale sin ese bloque (nunca inventa números).
+        if (_datosFiadoMixto) {
+            const _vRef = window._ultimaVenta;
+            _vRef.fiadoMixto = { datos: _datosFiadoMixto, monto: Math.round(_datosFiadoMixto.total), estado: 'calculando', deuda: null };
+            const _dbgTk = () => {}; // diagnóstico desactivado en producción
+            // v536 — completar el N° de ticket del fiado en segundo plano (no demora ni el ticket ni el cálculo de la deuda).
+            // Antes no corría cuando 'vender' daba timeout (justo el caso real). El servidor sigue trabajando aunque el POS ya no espere.
+            if (_fiadoMixtoGuardado && !ticketNum) {
+                (async () => {
+                    try {
+                        let tk = '';
+                        const esperas = [0, 3000, 5000, 8000, 12000, 15000, 20000]; // ~63 s en total
+                        for (let n = 0; n < esperas.length && !tk; n++) {
+                            if (esperas[n]) await new Promise(r => setTimeout(r, esperas[n]));
+                            let rT = null;
+                            try { rT = await _apiFetchUrl('consultarEstadoOperacion', API_URL + '?action=consultarEstadoOperacion&data=' + encodeURIComponent(JSON.stringify({ idVenta: idVenta })) + '&t=' + Date.now()); }
+                            catch (eC) { _dbgTk('consulta ' + (n + 1) + ': ERROR ' + (eC && eC.message || eC)); continue; }
+                            _dbgTk('consulta ' + (n + 1) + ': ' + (rT && rT.venta ? (rT.venta.estado + ' / ' + (rT.venta.motivo || '') + ' / ticket=' + rT.venta.ticket) : 'sin venta en la respuesta (success=' + (rT && rT.success) + ' msg=' + (rT && rT.mensaje) + ')'));
+                            if (rT && rT.venta && String(rT.venta.estado || '').toUpperCase() === 'REGISTRADA' && rT.venta.ticket) tk = String(rT.venta.ticket);
+                        }
+                        if (tk) {
+                            _datosFiadoMixto.ticket = tk;
+                            const rU = await _apiFetchUrl('actualizarTicketFiado', API_URL + '?action=actualizarTicketFiado&data=' + encodeURIComponent(JSON.stringify({ idFiado: _datosFiadoMixto.idFiado, ticket: tk })) + '&t=' + Date.now());
+                            _dbgTk('actualizar ticket ' + tk + ': ' + JSON.stringify(rU));
+                        } else _dbgTk('NO se completó el ticket (queda vacío, no se pisa nada)');
+                    } catch (eTk) { _dbgTk('ERROR: ' + (eTk && eTk.message || eTk)); console.warn('⚠️ no se pudo completar el ticket del fiado:', eTk); }
+                })();
+            }
+            (async () => {
+                let d;
+                if (!_fiadoMixtoGuardado) d = { ok: false, motivo: 'el fiado quedó pendiente de sincronizar' };
+                else {
+                    try {
+                        d = await Promise.race([
+                            _fiadoDeudaAcumulada(_datosFiadoMixto, Math.round(_datosFiadoMixto.total)),
+                            new Promise(res => setTimeout(() => res({ ok: false, motivo: 'la planilla tardó más de ' + (_FIADO_DEUDA_TOPE_MS / 1000) + ' s' }), _FIADO_DEUDA_TOPE_MS))
+                        ]);
+                    } catch (e) { d = { ok: false, motivo: String(e && e.message || e) }; }
+                }
+                _vRef.fiadoMixto.deuda = d; _vRef.fiadoMixto.estado = 'listo';
+            })();
+        }
+
         // Resetear panel mixto y volver el selector simple a Efectivo
         _pagoMixtoActivo = false;
         _pagosMixtos = [];
@@ -6965,7 +7028,7 @@ async function confirmarVentaMixta() {
         actualizarRanking();
 
         const btnTicket = document.getElementById('btnTicketWA');
-        if (btnTicket) btnTicket.style.display = 'block';
+        if (btnTicket) { btnTicket.style.display = 'block'; setTimeout(() => { try { btnTicket.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e) {} }, 200); } // v534
         if (btn) { btn.textContent = '✅ Cobro confirmado'; btn.disabled = true; }
         const btnCancelar = document.querySelector('.btn-cancelar-confirm');
         if (btnCancelar) { btnCancelar.textContent = 'Cerrar'; btnCancelar.onclick = () => { cerrarConfirm(); }; }
@@ -7094,7 +7157,7 @@ async function confirmarVenta() {
 
         // Mostrar botón ticket en el modal antes de cerrarlo
         const btnTicket = document.getElementById('btnTicketWA');
-        if (btnTicket) btnTicket.style.display = 'block';
+        if (btnTicket) { btnTicket.style.display = 'block'; setTimeout(() => { try { btnTicket.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e) {} }, 200); } // v534
         const btnOk = document.getElementById('btnOkConfirm');
         if (btnOk) { btnOk.textContent = '✅ Cobro confirmado'; btnOk.disabled = true; }
         const btnCancelar = document.querySelector('.btn-cancelar-confirm');
@@ -7224,6 +7287,24 @@ function enviarTicketWA() {
     var lineaRedondeo = (v.descuentoRedondeo && v.descuentoRedondeo > 0)
         ? '\n↓ Redondeo −$' + v.descuentoRedondeo.toLocaleString('es-AR')
         : '';
+    // v533 — venta mixta con fiado: agregar el estado de la deuda del cliente (solo si se pudo confirmar).
+    var bloqueDeuda = '';
+    if (v.fiadoMixto) {
+        var fm = v.fiadoMixto;
+        if (fm.estado !== 'listo') { mostrarToast('⏳ Calculando la deuda del cliente… tocá de nuevo en unos segundos', 'naranja'); return; }
+        var dd = fm.deuda;
+        if (dd && dd.ok) {
+            bloqueDeuda = '\n\n📌 *ESTADO DE TU DEUDA*\n' +
+                (dd.previa > 0 ? 'Deuda anterior: ' + _fiadoFmt(dd.previa) + '\n' : '') +
+                'Fiado de esta compra: ' + _fiadoFmt(fm.monto) + '\n' +
+                '💰 *TOTAL PENDIENTE: ' + _fiadoFmt(dd.total) + '*' +
+                (dd.previa > 0 && dd.tickets && dd.tickets.length ? '\n(' + dd.tickets.length + (dd.tickets.length === 1 ? ' compra pendiente' : ' compras pendientes') + ' + esta compra)' : '');
+        } else {
+            mostrarToast(dd && dd.ambiguo
+                ? '⚠️ Este teléfono tiene fiados a nombre de otra persona (' + dd.nombres.join(', ') + '): el ticket sale SIN deuda total. Verificá.'
+                : '⚠️ No se pudo confirmar la deuda total (' + ((dd && dd.motivo) || 'sin dato') + '): el ticket sale sin ese dato.', 'naranja');
+        }
+    }
     var nroTicket = v.nroTicket ? ' · #' + v.nroTicket : '';
     var saludo = _clienteActual ? '\n¡Hasta pronto, ' + _clienteActual.nombre.split(' ')[0] + '! 👋' : '\n¡Gracias por tu compra! 🙏';
     var mensaje = '🛒 *Almacén Copihue*' + nroTicket + '\n' +
@@ -7232,7 +7313,7 @@ function enviarTicketWA() {
         lineaRedondeo + '\n' +
         '─────────────────\n' +
         '*💰 Total: $' + v.total.toLocaleString('es-AR') + '*\n' +
-        metodoLabel + saludo;
+        metodoLabel + bloqueDeuda + saludo;
 
     // Si hay cliente seleccionado → abrir WA Business con su número
     if (_clienteActual && _clienteActual.telefono) {
@@ -7263,8 +7344,9 @@ function cerrarConfirm() {
     document.removeEventListener('keydown', _keyHandlerConfirm);
     const btnTicket = document.getElementById('btnTicketWA');
     if (btnTicket) btnTicket.style.display = 'none';
+    const _dbgEl = document.getElementById('dbgTicketMixto'); if (_dbgEl) _dbgEl.remove(); // v535
     const btnOk = document.getElementById('btnOkConfirm');
-    if (btnOk) { btnOk.textContent = '✅ Confirmar cobro'; btnOk.disabled = false; btnOk.onclick = confirmarVenta; }
+    if (btnOk) { btnOk.textContent = '✅ Confirmar cobro'; btnOk.disabled = false; btnOk.onclick = _confirmarCobroDispatch; } // v537: antes apuntaba directo a confirmarVenta y salteaba el pago mixto
     const btnCancelar = document.querySelector('.btn-cancelar-confirm');
     if (btnCancelar) { btnCancelar.textContent = 'Cancelar'; btnCancelar.onclick = cerrarConfirm; }
     // Resetear cliente
@@ -16720,7 +16802,7 @@ async function _procesarVentaFiado(datosFiado, itemsSnapshot) {
     actualizarTotalConRedondeo();
     // Restaurar botón Cobrar
     const btnOk = document.getElementById('btnOkConfirm');
-    if (btnOk) { btnOk.textContent = '✅ Confirmar cobro'; btnOk.disabled = false; btnOk.onclick = confirmarVenta; }
+    if (btnOk) { btnOk.textContent = '✅ Confirmar cobro'; btnOk.disabled = false; btnOk.onclick = _confirmarCobroDispatch; } // v537: antes apuntaba directo a confirmarVenta y salteaba el pago mixto
     return { fiadoConfirmado: _fiadoConfirmado, resultado: _sync.resultado, snap: _snapComp, ticket: ticketNum ? String(ticketNum) : '' };
 }
 
@@ -16791,7 +16873,7 @@ async function _enviarFiadoWhatsApp(datosFiado, total, ctx) {
                 `Deuda anterior: ${_fiadoFmt(deuda.previa)}`,
                 `Esta compra: ${_fiadoFmt(totalCompra)}`,
                 `💰 *TOTAL PENDIENTE: ${_fiadoFmt(deuda.total)}*`,
-                `(Tickets pendientes: ${deuda.tickets.join(', ')} + esta compra)`);
+                `(${deuda.tickets.length} ${deuda.tickets.length === 1 ? 'compra pendiente' : 'compras pendientes'} + esta compra)`);
         } else if (!deuda.ok) {
             // Solo el ticket de la compra. Aviso para quien vende (no para el cliente):
             mostrarToast(deuda.ambiguo
@@ -18640,5 +18722,39 @@ document.addEventListener('DOMContentLoaded', function () { try { _cotizRefresca
 try { _cotizRefrescar(); } catch (e) {}
 </script>
 
+<script>
+// v532 — mientras el PAGO MIXTO está abierto, los 4 métodos normales (Efectivo/Posnet/Transferencia/Fiado)
+// quedan apagados y sin selección; al cerrarlo vuelven, con Efectivo elegido. Se engancha al cambio de
+// visibilidad del panel (así cubre TODAS las formas de abrir/cerrar sin tocar cada función). No toca la lógica de cobro.
+(function () {
+    var IDS = ['btnEfectivo', 'btnPosnet', 'btnTransf', 'btnFiado'];
+    var ultimo = null;
+    function sincronizar() {
+        var panel = document.getElementById('panelPagoMixto');
+        if (!panel) return;
+        var abierto = panel.style.display === 'block';
+        if (abierto === ultimo) return;
+        ultimo = abierto;
+        IDS.forEach(function (id) {
+            var b = document.getElementById(id); if (!b) return;
+            b.disabled = abierto;
+            b.style.opacity = abierto ? '0.35' : '';
+            b.style.pointerEvents = abierto ? 'none' : '';
+            b.style.cursor = abierto ? 'not-allowed' : '';
+        });
+        try {
+            seleccionarMetodo('efectivo');      // cierra QR y deja el método interno en efectivo (nunca queda "fiado" colgado)
+            if (abierto) IDS.forEach(function (id) { var b = document.getElementById(id); if (b) b.classList.remove('seleccionado'); });
+        } catch (e) {}
+    }
+    function iniciar() {
+        var panel = document.getElementById('panelPagoMixto');
+        if (!panel) return;
+        new MutationObserver(sincronizar).observe(panel, { attributes: true, attributeFilter: ['style'] });
+        sincronizar();
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciar); else iniciar();
+})();
+</script>
 </body>
 </html>
