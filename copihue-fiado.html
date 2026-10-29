@@ -237,7 +237,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--texto);mi
 <div id="toast"></div>
 
 <script>
-const APP_VERSION=41;
+const APP_VERSION=43;
 const API_URL='https://script.google.com/macros/s/AKfycbx-84yapENFqCNS1nfivFOR4P25l8U27gEoeWvVL6Nu5HmKr8e7m3KIJjshqtR_2brrHA/exec';
 
 // ── Estado ─────────────────────────────────────────
@@ -251,6 +251,8 @@ let _ordenAsc=false; // tocar el mismo criterio de nuevo invierte el orden
 
 // ── Helpers ────────────────────────────────────────
 const fmt=n=>'$'+Math.round(n).toLocaleString('es-AR');
+// v43 — referencia legible de un fiado: N° de ticket o, si no tiene, "Compra del DD/MM/AAAA" (nunca el código interno).
+const _refFiado=f=>f&&f.ticket&&String(f.ticket).trim()!==''?'Ticket #'+f.ticket:(f&&f.fecha?'Compra del '+_fmt(f.fecha):(f&&f.idFiado)||'Compra');
 function safeEnc(s){try{return encodeURIComponent(s);}catch(e){return encodeURIComponent(String(s).replace(/[\uD800-\uDFFF]/g,'?'));}}
 function sanitizeWA(s){return(s||'').replace(/◆/g,'-').replace(/·/g,'-').replace(/[^\x20-\x7E\u00C0-\u024F\u00A0\n]/g,' ').replace(/\s{2,}/g,' ').trim();}
 function normTel(t){const d=String(t||'').replace(/\D/g,'');if(d.length===10)return'549'+d;if(d.length>=11)return d;return'';}
@@ -760,7 +762,7 @@ function abrirCobrar(){
   _montoFull=selF.reduce((s,f)=>s+parseFloat(f.total||0),0);
 
   let info=`<b>${_cliNom}</b><br>`;
-  selF.forEach(f=>{const ref=f.ticket&&f.ticket.trim()!==''?'Ticket #'+f.ticket:f.idFiado;info+=`🧾 ${ref} · ${fmt(f.total)}<br>`;});
+  selF.forEach(f=>{const ref=_refFiado(f);info+=`🧾 ${ref} · ${fmt(f.total)}<br>`;});
   info+=`<br>💰 <b>Total: ${fmt(_montoFull)}</b>`;
   document.getElementById('cobInfo').innerHTML=info;
   document.getElementById('cobTit').innerHTML='✅ Registrar pago <button onclick="cerrarCob()">✕</button>';
@@ -796,6 +798,10 @@ async function confirmarCob(){
   if(montoIngresado<=0){toast('⚠️ Ingresá un monto','r');return;}
   const esAbono=montoIngresado<_montoFull-0.5;
   const selArr=[..._sel];
+  // v42 — deuda del cliente ANTES de cobrar (la misma suma que muestra "Deuda total") y fecha/hora del recibo
+  const _deudaAntes=Math.round(_cliData.filter(f=>f.estado!=='PAGADO').reduce((s,f)=>s+parseFloat(f.total||0),0));
+  const _ahoraRec=new Date(), _fechaRec=_ahoraRec.toLocaleDateString('es-AR'), _horaRec=_ahoraRec.toTimeString().slice(0,5);
+  const _bloqueDeuda=(abonado)=>{const act=Math.max(0,_deudaAntes-Math.round(abonado));return['📌 *Deuda anterior: '+fmt(_deudaAntes)+'*',`💵 *Abono: ${fmt(abonado)}* (${_met})`,(act>0?'📋':'✅')+' *Deuda actualizada: '+fmt(act)+'*'];};
   _recIds=selArr.slice();   // v40: a qué fiados corresponde el comprobante (para elegir el teléfono correcto)
   const btn=document.getElementById('btnConf');
   btn.disabled=true;btn.textContent='⏳ Guardando...';
@@ -808,15 +814,15 @@ async function confirmarCob(){
       toast(r.yaExistia?'✅ Ese abono ya estaba registrado — no se descontó de nuevo':'✅ Abono registrado','v');
       // Recordatorio de abono
       const f=_cliData.find(x=>x.idFiado===selArr[0]);
-      const ref=f?.ticket&&f.ticket.trim()!==''?'Ticket #'+f.ticket:selArr[0];
+      const ref=f?_refFiado(f):selArr[0];
       const resta=Math.max(0,(f?.total||0)-montoIngresado);
       _recTxt=['✅ *ABONO RECIBIDO — Almacén Copihue*','',
-        `📅 ${new Date().toLocaleDateString('es-AR')}  🕐 ${new Date().toTimeString().slice(0,5)}`,
-        `👤 Cliente: ${_cliNom}`,'',
-        `🧾 Ref: ${ref}`,
-        `💰 Abono: ${fmt(montoIngresado)}`,
-        resta>0?`📋 Saldo restante: ${fmt(resta)}`:'✅ Deuda saldada',
-        `💳 Método: ${_met}`,'','📍 Almacén Copihue'].join('\n');
+        `📅 Fecha: ${_fechaRec}`,
+        `🕐 Hora: ${_horaRec}`,
+        `👤 Cliente: ${_cliNom}`,'']
+        .concat(_bloqueDeuda(montoIngresado),['',
+        `  🧾 ${ref} · ${fmt(montoIngresado)} de ${fmt(f?.total||0)} 📋 Abonado${resta>0?' (resta '+fmt(resta)+')':' ✅ Saldado'}`,
+        '','📍 Almacén Copihue']).join('\n');
     }else if(esAbono&&selArr.length>1){
       // Abono parcial repartido entre varios fiados seleccionados:
       // se van marcando pagados en orden mientras el monto alcance, y el
@@ -829,7 +835,7 @@ async function confirmarCob(){
       const selF=selArr.map(id=>_cliData.find(f=>f.idFiado===id)).filter(Boolean);
       for(const f of selF){
         if(resta<=0.5)break;
-        const ref=f.ticket&&f.ticket.trim()!==''?'Ticket #'+f.ticket:f.idFiado;
+        const ref=_refFiado(f);
         if(resta>=f.total-0.5){
           const r=await _api('cobrarFiado',{idFiado:f.idFiado,metodoPago:_met,idOperacion:_idOpCobro});
           if(!r.success){err++;toast('❌ '+(r.mensaje||'Error'),'r');continue;}
@@ -846,10 +852,10 @@ async function confirmarCob(){
       if(err>0)throw new Error('Algunos cobros/abonos fallaron');
       toast('✅ Pago registrado','v');
       _recTxt=['✅ *PAGO RECIBIDO — Almacén Copihue*','',
-        `📅 ${new Date().toLocaleDateString('es-AR')}  🕐 ${new Date().toTimeString().slice(0,5)}`,
-        `👤 Cliente: ${_cliNom}`,'',lineas.join('\n'),'',
-        `💰 *Total pagado: ${fmt(montoIngresado)}*`,
-        `💳 Método: ${_met}`,'','📍 Almacén Copihue'].join('\n');
+        `📅 Fecha: ${_fechaRec}`,
+        `🕐 Hora: ${_horaRec}`,
+        `👤 Cliente: ${_cliNom}`,'']
+        .concat(_bloqueDeuda(montoIngresado),['',lineas.join('\n'),'','📍 Almacén Copihue']).join('\n');
     }else{
       // Cobro total de todos los seleccionados
       let err=0;
@@ -861,12 +867,14 @@ async function confirmarCob(){
       toast('✅ Cobro registrado','v');
       // Recordatorio de cobro
       const selF=selArr.map(id=>_cliData.find(f=>f.idFiado===id)).filter(Boolean);
-      const lineas=selF.map(f=>{const ref=f.ticket&&f.ticket.trim()!==''?'Ticket #'+f.ticket:f.idFiado;return`  🧾 ${ref} · ${fmt(f.total)}`;}).join('\n');
+      const lineas=selF.map(f=>{const ref=_refFiado(f);return`  🧾 ${ref} · ${fmt(f.total)}`;}).join('\n');
       _recTxt=['✅ *PAGO RECIBIDO — Almacén Copihue*','',
-        `📅 ${new Date().toLocaleDateString('es-AR')}  🕐 ${new Date().toTimeString().slice(0,5)}`,
-        `👤 Cliente: ${_cliNom}`,'',lineas,'',
-        `💰 *Total cobrado: ${fmt(_montoFull)}*`,
-        `💳 Método: ${_met}`,'','✅ ¡Gracias por saldar tu deuda! 🙌','📍 Almacén Copihue'].join('\n');
+        `📅 Fecha: ${_fechaRec}`,
+        `🕐 Hora: ${_horaRec}`,
+        `👤 Cliente: ${_cliNom}`,'']
+        .concat(_bloqueDeuda(_montoFull),['',lineas,'',
+        ...(Math.max(0,_deudaAntes-Math.round(_montoFull))===0?['✅ ¡Gracias por saldar tu deuda! 🙌']:[]),
+        '📍 Almacén Copihue']).join('\n');
     }
     cerrarCob();
     // Recargar fiados y abrir recordatorio
