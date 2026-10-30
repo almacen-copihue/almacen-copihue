@@ -45,6 +45,7 @@ Cada archivo tiene su propia numeración. Los respaldos de la versión anterior 
 | Archivo | Versión | Qué cambió | Dónde |
 |---|---|---|---|
 | copihue-fiado.html | v43 | (v43: los fiados sin N° de ticket salen como "Compra del DD/MM/AAAA" en vez del código f_…; respaldo copihue-fiado-v42. Simulador 7/7.) v42: Los tres recibos de WhatsApp (abono a un fiado, pago repartido, cobro total) muestran Fecha, Hora, Cliente, Deuda anterior, Abono y Deuda actualizada, más el detalle por ticket. Importes y registros no se tocan. Respaldo: copihue-fiado-v41. Simulador 6/6; celular pendiente. | solo STAGING |
+| manifest-venta.json + sw-venta.js | 29/10 | La app instalada "Copihue Caja" daba 404 porque abría /venta.html (no existe en el repo). Ahora abre /seba21.html, con el logo de Copihue (iconos-pwa) y nombre "Copihue POS". sw-venta.js v61→v62 sin /venta.html en su lista. Respaldos: manifest-venta-RESPALDO.json y sw-venta-v61-RESPALDO.js. Verificado en servidor local (todo responde 200); falta reinstalar la app en el celular. | solo PRODUCCIÓN (a subir) |
 | copihue-ingreso.html | v28 | Lista de resultados más alta y stock primero (pasó a PROD junto con seba21 v530). Respaldo: copihue-ingreso-v27. | STAGING y PROD |
 
 ## Respaldos disponibles
