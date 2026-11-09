@@ -9,62 +9,6 @@
 <title>SendWA — Almacén Copihue</title>
 <!--
   CHANGELOG sendwa.html
-  v124: STAGING ahora lee y escribe en el script de STAGING (AKfycbzQcc…, planilla
-        "Copia de Almacén Copihue - Base de Datos_Staging"). Hasta la v123 la copia
-        de staging usaba la misma URL que producción (AKfycbzWZz…). Único cambio.
-  v123: ESTILO PROMO — más simple y texto centrado.
-        - Se sacó la fila Normal/Explosivo (Normal = Ninguno). Queda una sola
-          fila "Badge: Ninguno / Explosión / Tarjeta" que arranca en Ninguno;
-          texto, color, tamaño y posición aparecen solo con Explosión/Tarjeta.
-          _promoEstilo queda fijo en 'explosivo' por dentro, así las 3
-          funciones de dibujo (Clásico, Expandido, 2H/2V) no cambian.
-        - Explosión: el texto ahora se centra de verdad (se mide cuántas
-          líneas ocupa y se centra el bloque, textBaseline 'middle'). Antes
-          quedaba arriba (y = cy - fs*0.4) y no compensaba 2 líneas.
-        - Letra más grande, se achica sola hasta entrar en el círculo
-          interior de la estrella (sin pisar las puntas).
-        - Borde fino automático en la estrella si el color es claro
-          (blanco/amarillo) para que no se pierda sobre la foto.
-  v122: SENDWA = SOLO LO ACTIVO (decisión de Victor): se publica lo mismo que
-        cobra el POS en este momento. Publicar a la mañana una oferta que
-        abre a la tarde confunde a los clientes.
-        - getModoResolucion() y resolveOfertas() usan SIEMPRE 'activo'
-          (horario + interruptor del día). Afecta lista, chips por tipo,
-          texto de WA, collage/1 Foto, IA y "Sin oferta".
-        - Se quitó el chip "🔥 Pool". El pool completo es para EDITAR
-          ofertas → queda para un módulo aparte (configurador de ofertas).
-          construirPoolLocal() se mantiene: arma Multicompra desde el
-          listado (sin tope) y sirve de base para ese módulo.
-        - Chip de tipo vacío (ej. ⚡ Relámpago antes de las 21) muestra el
-          horario de hoy de ese tipo.
-  v121: ETAPA 1 — filtros de ofertas (sin tocar Code.gs ni la planilla).
-        - 🔥 Pool DE VERDAD: se arma con el listado de productos (columnas
-          G/H/I + texto de la columna J, igual que la fórmula de la planilla),
-          sin horario y sin la rotación diaria del servidor. Antes copiaba la
-          rotación de getOfertas, que fuera de horario/OFF venía vacía.
-          Excluye REPONER / ERROR / sin stock (lo que dice la columna J).
-        - ⏰ Activos ahora DE VERDAD: listas de getOfertas (lo mismo que ve
-          seba21) filtradas por las filas "Dias ofertas X" (0/1/A) y el
-          horario de config_sistema, con el mismo parser de horas que seba21.
-          Antes buscaba filas "Estado X" que no existen → siempre caía en A.
-        - Refresco solo: cada 60 s re-evalúa horario (abre/cierra sin
-          recargar) y cada 5 min vuelve a pedir getOfertas + getConfig.
-          También al abrir el panel 🔥 Ofertas. Mantiene el scroll.
-        - Ofertas = solo descuentos. 🆕 Recién Llegados sale del panel a un
-          botón propio en la barra; ya no cuenta como oferta (ni en Pool,
-          ni en Activos, ni en el texto de WA, ni en la IA). Sí entra en
-          "Sin oferta" (tiene precio normal).
-        - 🎁 2x1 REAL (columna AL, oferta2x1) — antes sendwa no lo veía.
-          Máxima prioridad, igual que seba21. Chip propio.
-        - 🎉 Chip Personalizada / Simple.
-        - Multicompra se arma desde el listado completo (mcActiva), sin el
-          tope de 6 de getOfertas — igual que seba21 v10.22.
-        - Precios SIEMPRE enteros: se eliminó el "99" chiquito agregado
-          (fmtPsico) — la Oferta Simple de $1.500 se veía "$1.500⁹⁹".
-        - IA "🔥 Mejores ofertas activas" no encontraba nada (filtraba
-          allProducts sin resolver ofertas). Ahora resuelve con Activos.
-        - Horario para el flyer guardado (textoHorarioFlyer) — se dibuja en
-          la Etapa 2.
   v120: - FIX — Precio como badge y Estilo Promo "se anulaban": el badge
           Explosivo/Tarjeta de Estilo Promo tenía en drawSingleFmt (Clásico)
           un candado viejo "solo si el formato es 1:1 (W===H)" que quedó de
@@ -1347,7 +1291,6 @@
 <!-- BARRA DE FILTROS FIJA debajo del header -->
 <div id="filter-bar">
   <button class="fbar-btn fb-ofertas" id="fb-ofertas" onclick="toggleFBar('ofertas')">🔥 Ofertas ▾</button>
-  <button class="fbar-btn" id="fb-recien" onclick="setFilter('recienllegado')" style="background:#00a152">🆕 Recién llegados</button>
   <button class="fbar-btn fb-cats"    id="fb-cats"    onclick="toggleFBar('cats')">📦 Categorías ▾</button>
   <button class="fbar-btn fb-buscar"                  onclick="toggleSearch()">🔍 Buscar</button>
   <button class="fbar-btn" id="fb-precio" onclick="toggleFBar('precio')" style="background:#16a085">💲 Precio ▾</button>
@@ -1359,14 +1302,14 @@
   <div class="filter-panel-title">Tipo de oferta</div>
   <div class="filter-chips-wrap">
     <button class="filter-chip select-chip" data-filter="seleccionados" id="chip-seleccionados">✅ Solo seleccionados</button>
-    <button class="filter-chip oferta-chip" data-filter="activo">⏰ Todas las activas ahora</button>
+    <button class="filter-chip oferta-chip" data-filter="oferta">🔥 Pool</button>
+    <button class="filter-chip oferta-chip" data-filter="activo">⏰ Activos ahora</button>
     <button class="filter-chip oferta-chip" data-filter="relampago">⚡ Relámpago</button>
     <button class="filter-chip oferta-chip" data-filter="destacado">🔥 Destacado</button>
     <button class="filter-chip oferta-chip" data-filter="especial">💜 Especial</button>
     <button class="filter-chip oferta-chip" data-filter="ultimas">🏷️ Últimas</button>
     <button class="filter-chip oferta-chip" data-filter="multicompra">📦 Multicompra</button>
-    <button class="filter-chip oferta-chip" data-filter="dosxuno">🎁 2x1 real</button>
-    <button class="filter-chip oferta-chip" data-filter="personalizada">🎉 Personalizada / Simple</button>
+    <button class="filter-chip oferta-chip" data-filter="recienllegado">🆕 Recién Llegados</button>
     <button class="filter-chip oferta-chip" data-filter="promo">🏷️ Promos</button>
     <button class="filter-chip oferta-chip" data-filter="combo">🎯 Combos</button>
     <button class="filter-chip oferta-chip" data-filter="sinoferta">✅ Sin oferta</button>
@@ -1769,13 +1712,17 @@
       <div id="promo-style-bar" class="acc" style="margin-top:8px;">
         <button type="button" class="acc-head">🎨 Estilo Promo <span class="acc-arrow">▾</span></button>
         <div class="acc-body" style="display:none;">
-          <div class="layout-section-label">Badge con frase</div>
-          <div class="layout-row" id="promo-tipo-row">
-            <button class="layout-btn active" data-promo-tipo="ninguno">Ninguno</button>
-            <button class="layout-btn" data-promo-tipo="explosion">💥 Explosión</button>
-            <button class="layout-btn" data-promo-tipo="tarjeta">🏷️ Tarjeta</button>
+          <div class="layout-row" id="promo-estilo-row">
+            <button class="layout-btn active" data-promo-estilo="normal">Normal</button>
+            <button class="layout-btn" data-promo-estilo="explosivo">💥 Explosivo</button>
           </div>
           <div id="promo-explosivo-opts" style="display:none;">
+            <div class="layout-section-label" style="margin-top:6px">Badge</div>
+            <div class="layout-row" id="promo-tipo-row">
+              <button class="layout-btn" data-promo-tipo="ninguno">Ninguno</button>
+              <button class="layout-btn active" data-promo-tipo="explosion">💥 Explosión</button>
+              <button class="layout-btn" data-promo-tipo="tarjeta">🏷️ Tarjeta</button>
+            </div>
             <div class="layout-section-label" style="margin-top:6px">Texto del badge</div>
             <input id="promo-texto-input" value="SOLO HOY" maxlength="20"
               style="width:100%;height:32px;border-radius:8px;border:1.5px solid var(--border);padding:0 10px;font-size:13px;font-weight:700;color:var(--text);background:var(--card-bg);">
@@ -1894,7 +1841,7 @@
 // pestaña y el badge del header se arman solos a partir de esta constante
 // (ver aplicarVersionUI() más abajo, llamada al final de init()).
 // ============================================================
-const APP_VERSION = 124;
+const APP_VERSION = 120;
 function aplicarVersionUI() {
   document.title = `SendWA — Almacén Copihue ver.${APP_VERSION}`;
   const badge = document.getElementById('ver-badge');
@@ -1922,22 +1869,19 @@ if (window.history && window.history.pushState) {
 // ============================================================
 // CONFIG
 // ============================================================
-// v124: STAGING apunta al script "almacen copihue STAGING" (planilla "Copia… _Staging").
-// Antes apuntaba a AKfycbzWZz… (la URL de sendwa de producción) → leía la planilla real.
-const API_URL = 'https://script.google.com/macros/s/AKfycbzQccLKYVVhdCGzX8_SKd59rcifTTm_Ciuu0MPDVNBNEtDhG0LOB7WylhYVMSFAypB9pg/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbzWZzDvdGfW8vd2-FpQolT852cdPMeHbfKugn9DBOlju75bE1D0SUNB5EKEDOsI2vP4lA/exec';
 const WA_LIMIT_ESTADO = 30;
 const IMG_SIZE_MB = 0.15;
 
 // Priority map
 // Orden flyer: Promos → Combos → Multicompra → Especial → Destacada → Relámpago → Últimas
 // Orden flyer: Promos → Combos → Multicompra → Especial → Destacada → Relámpago → Últimas → Recién llegado
-// v121: dosxuno (2x1 real, col AL) primero — misma prioridad que seba21.
-const PRIORITY_ORDER = { dosxuno: -1, personalizada: 0, promo: 1, combo: 2, multicompra: 3, especial: 4, destacado: 5, relampago: 6, ultimas: 7, recienllegado: 8, '': 9 };
+const PRIORITY_ORDER = { personalizada: 0, promo: 1, combo: 2, multicompra: 3, especial: 4, destacado: 5, relampago: 6, ultimas: 7, recienllegado: 8, '': 9 };
 const BADGE_COLORS = {
   relampago: '#FF5722', destacado: '#FFC107', especial: '#00BCD4',
   multicompra: '#9C27B0', ultimas: '#E53935', promo: '#43A047',
   combo: '#6D4C41', jueves: '#1A237E', personalizada: '#E91E63',
-  recienllegado: '#00E676', dosxuno: '#D81B60'
+  recienllegado: '#00E676'
 };
 
 // Separadores automáticos por categoría
@@ -1979,19 +1923,12 @@ function calcularOferta(p) {
   const cat    = p.catOferta;
   if (!cat) return null;
 
-  // v121 — 2x1 REAL (columna AL). Igual que seba21: por cada par, una gratis.
-  // No hay precio unitario fijo (depende de la cantidad) → va como "por
-  // cantidad" (estrella en el collage), igual que Relámpago NxM.
-  if (cat === 'dosxuno') {
-    return { precio: null, etiqueta: '🎁 2x1', esCantidad: true };
-  }
-
   // OFERTA PERSONALIZADA — texto + % manual elegido por el operador, máxima prioridad.
   // El precio final y la etiqueta ya vienen calculados desde Code.gs (fuente única de
   // verdad), así seba21/index/sendwa muestran siempre el mismo número.
   if (cat === 'personalizada' && p._personal) {
     const per = p._personal;
-    return { precio: per.precioFinal, etiqueta: per.etiqueta || `🎉 ${per.texto}`, psico: false }; // v121: precio entero tal cual
+    return { precio: per.precioFinal, etiqueta: per.etiqueta || `🎉 ${per.texto}`, psico: true };
   }
 
   // RELÁMPAGO
@@ -2118,9 +2055,8 @@ function fmt(n) {
 // "termina en 99" más chico y levantado, como en los carteles de súper
 function fmtPsico(n) {
   if (!n && n !== 0) return '';
-  // v121 — los precios son SIEMPRE enteros: ya no se agrega el "99" chiquito
-  // (eran centavos de otra época). Se deja la función por compatibilidad.
-  return fmt(n);
+  const full = Number(n).toLocaleString('es-AR');
+  return `$${full}<sup class="psico-99">99</sup>`;
 }
 function norm(s) {
   return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -2158,48 +2094,34 @@ function _diaActualIdx() {
   return (d.getDay() + 6) % 7; // 0=Lun … 6=Dom
 }
 
-// v121 — parser de hora de config_sistema, IDÉNTICO al de seba21 (v329/v330):
-// las celdas con formato hora llegan como "1899-12-30T..Z" y se leen con la
-// hora local del dispositivo. Separado en su propia función para poder usarlo
-// también al mostrar el horario en el flyer.
-function _parseHoraCfg(v) {
-  if (v===null||v===undefined||v==='') return null;
-  const s=String(v).trim();
-  if (s.includes('T')&&s.includes('Z')) { try{const d=new Date(s);if(!isNaN(d))return d.getHours()+d.getMinutes()/60;}catch(e){} return null; }
-  const n=parseFloat(s);
-  if (!s.includes(':')&&!isNaN(n)&&n>=0&&n<1) { const t=Math.round(n*24*60);return(Math.floor(t/60)%24)+(t%60)/60; }
-  if (!s.includes(':')&&!isNaN(n)) return Math.floor(n)+Math.round((n%1)*60)/60;
-  const p=s.split(':');const h=parseInt(p[0]);const m=p.length>1?(parseInt(p[1])||0):0;
-  return isNaN(h)?null:h+m/60;
-}
-const _HORARIO_CLAVES = {
-  relampago:  { ini:'Hora inicio RELAMPAGO',  cie:'Hora cierre RELAMPAGO',  dias:'Dias ofertas RELAMPAGO' },
-  destacadas: { ini:'Hora inicio DESTACADAS', cie:'Hora cierre DESTACADAS', dias:'Dias ofertas DESTACADAS' },
-  especiales: { ini:'Hora inicio ESPECIALES', cie:'Hora cierre ESPECIALES', dias:'Dias ofertas ESPECIALES' },
-  ultimas:    { ini:'Hora inicio ULTIMAS UNIDADES', cie:'Hora cierre ULTIMAS UNIDADES', dias:'Dias ofertas ULTIMAS UNIDADES' }
-};
-function _normCfg(s) { return String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim(); }
-// Busca la fila de config por nombre (con o sin prefijo de sección "x|")
-function _filaCfg(cfg, clave) {
-  if (!cfg) return null;
-  const objetivo = _normCfg(clave);
-  const key = Object.keys(cfg).find(k => {
-    const nk = _normCfg(k);
-    return nk === objetivo || nk.endsWith('|' + objetivo);
-  });
-  return key ? cfg[key] : null;
-}
-
 const _horarioCache = {};
 function _dentroDeHorario(cfg, tipo, diaIdx) {
   try {
     const now = new Date();
     const ckey = tipo+'-'+diaIdx+'-'+now.getHours()+'-'+now.getMinutes();
     if (ckey in _horarioCache) return _horarioCache[ckey];
-    const claves = _HORARIO_CLAVES[tipo]; if (!claves) return false;
-    const filaIni = _filaCfg(cfg, claves.ini), filaCie = _filaCfg(cfg, claves.cie);
-    if (!filaIni || !filaCie) return false;
-    const hIni=_parseHoraCfg(filaIni[diaIdx]), hCie=_parseHoraCfg(filaCie[diaIdx]);
+    const mapa = {
+      relampago:  { ini:'Hora inicio RELAMPAGO',  cie:'Hora cierre RELAMPAGO'  },
+      destacadas: { ini:'Hora inicio DESTACADAS', cie:'Hora cierre DESTACADAS' },
+      especiales: { ini:'Hora inicio ESPECIALES', cie:'Hora cierre ESPECIALES' },
+      ultimas:    { ini:'Hora inicio ULTIMAS UNIDADES', cie:'Hora cierre ULTIMAS UNIDADES' }
+    };
+    const claves = mapa[tipo]; if (!claves) return false;
+    const norm = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    const keyIni = Object.keys(cfg).find(k => norm(k).endsWith(norm(claves.ini)));
+    const keyCie = Object.keys(cfg).find(k => norm(k).endsWith(norm(claves.cie)));
+    if (!keyIni || !keyCie) return false;
+    const parseH = v => {
+      if (v===null||v===undefined||v==='') return null;
+      const s=String(v).trim();
+      if (s.includes('T')&&s.includes('Z')) { try{const d=new Date(s);if(!isNaN(d))return d.getHours()+d.getMinutes()/60;}catch(e){} return null; }
+      const n=parseFloat(s);
+      if (!s.includes(':')&&!isNaN(n)&&n>=0&&n<1) { const t=Math.round(n*24*60);return(Math.floor(t/60)%24)+(t%60)/60; }
+      if (!s.includes(':')&&!isNaN(n)) return Math.floor(n)+Math.round((n%1)*60)/60;
+      const p=s.split(':');const h=parseInt(p[0]);const m=p.length>1?(parseInt(p[1])||0):0;
+      return isNaN(h)?null:h+m/60;
+    };
+    const hIni=parseH(cfg[keyIni][diaIdx]), hCie=parseH(cfg[keyCie][diaIdx]);
     if (hIni===null||hCie===null||isNaN(hIni)||isNaN(hCie)) return false;
     const arg=new Date(new Date().toLocaleString('en-US',{timeZone:'America/Argentina/Buenos_Aires'}));
     const horaActual=arg.getHours()+arg.getMinutes()/60;
@@ -2209,7 +2131,7 @@ function _dentroDeHorario(cfg, tipo, diaIdx) {
 }
 
 // Resuelve si un tipo de oferta está activo AHORA (forzado o por horario)
-// Igual que _tipoActivo en seba21
+// Igual que _tipoActivo en seba21 v361
 function _tipoActivoAhora(tipo) {
   const estado = _toggleEstado[tipo];
   if (estado === true)  return true;
@@ -2218,74 +2140,32 @@ function _tipoActivoAhora(tipo) {
   return false; // conservador: sin config → no mostrar
 }
 
-// v121 — antes buscaba filas "Estado RELAMPAGO" (no existen en la planilla) y
-// por eso siempre quedaba en automático. Ahora lee las mismas filas que seba21
-// (_TOGGLE_CONFIG): "Dias ofertas X" → 0 = OFF forzado, 1 = ON forzado, A = horario.
-// forzar=true vuelve a pedir la config (refresco cada 5 min).
-async function _cargarConfig(forzar = false) {
-  if (_configCache && !forzar) return _configCache;
+async function _cargarConfig() {
+  if (_configCache) return _configCache;
   try {
     const data = await _apiFetch('getConfig');
     if ((data.ok||data.success) && data.config) {
       _configCache = data.config;
-      for (const k in _horarioCache) delete _horarioCache[k];
+      // Cargar toggles forzados desde config (ON=1, OFF=0, AUTO=A/null)
       const diaIdx = _diaActualIdx();
-      for (const tipo of Object.keys(_HORARIO_CLAVES)) {
-        const fila = _filaCfg(_configCache, _HORARIO_CLAVES[tipo].dias);
-        const val = fila ? fila[diaIdx] : null;
+      const CLAVES = {
+        relampago:  'Estado RELAMPAGO',
+        destacadas: 'Estado DESTACADAS',
+        especiales: 'Estado ESPECIALES',
+        ultimas:    'Estado ULTIMAS UNIDADES'
+      };
+      for (const [tipo, clave] of Object.entries(CLAVES)) {
+        const norm = s=>s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+        const key = Object.keys(_configCache).find(k=>norm(k).endsWith(norm(clave)));
+        if (!key) continue;
+        const val = _configCache[key][diaIdx];
         if (val===1||val==='1') _toggleEstado[tipo]=true;
         else if (val===0||val==='0') _toggleEstado[tipo]=false;
-        else _toggleEstado[tipo]=null; // 'A' / vacío → auto horario
+        else _toggleEstado[tipo]=null; // auto horario
       }
     }
     return _configCache;
-  } catch(e){ console.warn('getConfig error:',e.message); return _configCache; }
-}
-
-// v121 — horario de HOY de un tipo, para mostrarlo (flyer / lista vacía).
-// Devuelve { modo:'on'|'off'|'auto', ini, cie } (ini/cie en horas decimales o null)
-function _horarioHoy(tipo) {
-  const est = _toggleEstado[tipo];
-  const modo = est === true ? 'on' : est === false ? 'off' : 'auto';
-  let ini = null, cie = null;
-  const claves = _HORARIO_CLAVES[tipo];
-  if (_configCache && claves) {
-    const d = _diaActualIdx();
-    const fi = _filaCfg(_configCache, claves.ini), fc = _filaCfg(_configCache, claves.cie);
-    if (fi) ini = _parseHoraCfg(fi[d]);
-    if (fc) cie = _parseHoraCfg(fc[d]);
-  }
-  return { modo, ini, cie };
-}
-function _fmtHora(h) {
-  if (h === null || h === undefined || isNaN(h)) return '';
-  const tot = Math.round(h * 60);
-  return String(Math.floor(tot/60) % 24).padStart(2,'0') + ':' + String(tot % 60).padStart(2,'0');
-}
-// Texto de horario para el flyer — SOLO Relámpago, Destacadas y Especiales
-// (los únicos con horario). Recibe la lista de catOferta presentes en el flyer.
-//  - 1 tipo:   "⏰ Válido de 19:00 a 22:00 hs"
-//  - varios:   "⏰ Especiales 19:00–22:00 · Destacadas 20:00–22:00"
-//  - ON forzado → "todo el día"; OFF forzado → no se muestra.
-// Devuelve '' si no corresponde mostrar nada. (Se dibuja en la Etapa 2.)
-function textoHorarioFlyer(cats) {
-  const MAPA = [['relampago','relampago','Relámpago'],['destacado','destacadas','Destacadas'],['especial','especiales','Especiales']];
-  const set = new Set(cats || []);
-  const partes = [];
-  for (const [cat, tipo, nombre] of MAPA) {
-    if (!set.has(cat)) continue;
-    const h = _horarioHoy(tipo);
-    if (h.modo === 'off') continue;
-    if (h.modo === 'on') { partes.push({ nombre, txt: 'todo el día', ini: null }); continue; }
-    if (h.ini === null || h.cie === null) continue;
-    partes.push({ nombre, txt: `${_fmtHora(h.ini)}–${_fmtHora(h.cie)}`, ini: h.ini, cie: h.cie });
-  }
-  if (!partes.length) return '';
-  if (partes.length === 1) {
-    const x = partes[0];
-    return x.ini === null ? '⏰ Válido todo el día' : `⏰ Válido de ${_fmtHora(x.ini)} a ${_fmtHora(x.cie)} hs`;
-  }
-  return '⏰ ' + partes.map(x => `${x.nombre} ${x.txt}`).join(' · ');
+  } catch(e){ console.warn('getConfig error:',e.message); return null; }
 }
 
 // ============================================================
@@ -2300,12 +2180,6 @@ const _poolUltimas    = new Set();
 const _poolUltimasData = new Map(); // id → { precioOferta, pct, diasParaVencer }
 const _poolMulticompra = new Map(); // id → { tipo, cantidad, precio, grupo } — igual patrón que seba21
 const _poolRecienLlegados = new Map(); // id → { fechaIngreso } — pool ya armado en Code.gs desde el Historial
-// v121 — NOTA: _poolRelampago/_poolDestacadas/_poolEspeciales son lo que manda
-// getOfertas (rotación del día, vacío si el servidor lo ve OFF) → se usan SOLO
-// para "⏰ Activos ahora", igual que seba21. El "🔥 Pool" de verdad (todo lo
-// cargado en la planilla, sin horario ni rotación) vive en _poolLocal y se arma
-// con el listado de productos en construirPoolLocal().
-const _poolLocal = { relampago: new Set(), destacadas: new Set(), especiales: new Set() };
 
 async function _apiFetch(action) {
   const r = await fetch(API_URL + '?action=' + action + '&t=' + Date.now(),
@@ -2373,47 +2247,13 @@ async function cargarPools() {
       });
     });
 
-    // v121 — el horario ya no se toma de acá (el servidor manda inicio:null
-    // porque no entiende las celdas con formato hora). Ver _horarioHoy().
+    // Guardar horarios para mensaje fuera de horario
     window._horariosOferta = data.horariosOferta || {};
-    if (allProducts.length) construirPoolLocal(allProducts);
     console.log(`📊 Pools SendWA — ⚡${_poolRelampago.size} 🔥${_poolDestacadas.size} 🌙${_poolEspeciales.size} 🏷️${_poolUltimas.size} 📦${_poolMulticompra.size} 🆕${_poolRecienLlegados.size}`);
   } catch(e) {
     console.warn('No se pudieron cargar pools de ofertas:', e.message);
   }
 }
-
-// v121 — POOL LOCAL: todo lo cargado en la planilla, sin horario ni rotación.
-// Usa las columnas G/H/I del listado + el texto de la columna J (fórmula de la
-// planilla), así quedan afuera los "REPONER X PARA PROMO", "ERROR ..." y
-// "sin stock" — mismo criterio que la planilla.
-// También arma Multicompra desde el listado completo (mcActiva), sin el tope
-// de getOfertas — igual que seba21 v10.22.
-function construirPoolLocal(products) {
-  _poolLocal.relampago.clear(); _poolLocal.destacadas.clear(); _poolLocal.especiales.clear();
-  for (const p of products) {
-    if (!(p.stock > 0)) continue;
-    const pid = Number(p.id);
-    const j = String(p._raw?.categoriaOferta || '').toLowerCase().trim();
-    const jVacia = j === '';
-    const cerveza = String(p.categoria || '').toUpperCase() === 'CERVEZAS'; // igual que getOfertas/seba21 (van por Jueves Cervecero)
-    if (p.relampago && (jVacia || j.startsWith('relampago') || j === '2da50off')) _poolLocal.relampago.add(pid);
-    if (!cerveza && p.destacada > 0 && (jVacia || j === 'destacada')) _poolLocal.destacadas.add(pid);
-    if (!cerveza && p.especial  > 0 && (jVacia || j === 'especial'))  _poolLocal.especiales.add(pid);
-    if (p._raw && p._raw.mcActiva) {
-      _poolMulticompra.set(pid, {
-        tipo:     p._raw.mcTipo     || '',
-        cantidad: p._raw.mcCantidad || 0,
-        precio:   p._raw.mcPrecio   || 0,
-        grupo:    p._raw.mcGrupo    || ''
-      });
-    }
-  }
-  console.log(`📦 Pool local SendWA — ⚡${_poolLocal.relampago.size} 🔥${_poolLocal.destacadas.size} 🌙${_poolLocal.especiales.size} 📦${_poolMulticompra.size}`);
-}
-
-// ¿Es un DESCUENTO? Recién Llegado no lo es (precio normal) — v121.
-function esDescuento(cat) { return !!cat && cat !== 'recienllegado'; }
 
 // ============================================================
 // PARSE PRODUCTS — misma estructura que seba21
@@ -2429,7 +2269,7 @@ function parseProducts(data) {
   }
   if (!Array.isArray(rows) || rows.length === 0) return [];
 
-  const out = rows
+  return rows
     .filter(r => r && typeof r === 'object')
     .map((r, i) => {
       const nombre      = String(r.name || r.nombre || '').trim();
@@ -2452,27 +2292,18 @@ function parseProducts(data) {
       return { id, nombre, precioVenta, categoria, stock, foto, vendidos,
                relampago, destacada, especial, normal, costo, catOferta: '',
                ofertaPersonalizadaServer: r.ofertaPersonalizada || null,
-               ofertaSimpleServer: r.ofertaSimple || null,
-               oferta2x1: r.oferta2x1 === true, // v121 — 2x1 real (col AL)
-               _raw: r };
+               ofertaSimpleServer: r.ofertaSimple || null, _raw: r };
     })
     .filter(p => p.nombre && p.precioVenta > 0);
-  // v121 — cada vez que se (re)lee el listado (al abrir y después de escribir
-  // una oferta en la planilla) se rearma el pool de verdad + multicompra.
-  construirPoolLocal(out);
-  return out;
 }
 
 // resolveOfertas — tres modos:
 //   'pool'   → en el pool configurado (independiente de horario) — filtro "Con ofertas"
 //   'activo' → solo los activos AHORA según horario/forzados (igual que seba21) — filtro "Activos ahora"
 //   'collage'→ igual que 'pool' (para el canvas)
-function resolveOfertas(products, modo = 'activo') { // v122: por defecto SIEMPRE lo activo
+function resolveOfertas(products, modo = 'pool') {
   return products.map(p => {
     const pid = Number(p.id);
-    // v121 — 2x1 REAL: máxima prioridad, pisa incluso a la personalizada
-    // (igual que calcularOfertaPOS de seba21). No tiene horario.
-    if (p.oferta2x1 && p.stock > 0) return { ...p, catOferta: 'dosxuno' };
     // Oferta personalizada: fuente de verdad = planilla (Code.gs), no un mapa local —
     // así seba21, index y sendwa muestran siempre lo mismo.
     const personalServer = p.ofertaPersonalizadaServer;
@@ -2485,31 +2316,35 @@ function resolveOfertas(products, modo = 'activo') { // v122: por defecto SIEMPR
     if      (rawCat === 'PROMO ACTIVA') catOferta = 'promo';
     else if (rawCat === 'COMBO ACTIVO') catOferta = 'combo';
     else {
-      let enR, enD, enE, enU;
+      // Para relampago/destacado/especial/ultimas: chequear pool
+      const enPoolR = p.relampago && _poolRelampago.has(pid);
+      const enPoolD = p.destacada > 0 && _poolDestacadas.has(pid);
+      const enPoolE = p.especial  > 0 && _poolEspeciales.has(pid);
+      const enPoolU = _poolUltimas.has(pid);
+      // Multicompra: no tiene horario en Code.gs (a diferencia de relámpago/destacadas/
+      // especiales/últimas) — si está en el pool, se muestra siempre, en ambos modos.
+      const enPoolM = _poolMulticompra.has(pid);
+      // Recién llegado: pool ya armado en Code.gs con los otros pools excluidos —
+      // última prioridad acá también, por las dudas.
+      const enPoolRL = _poolRecienLlegados.has(pid);
+
       if (modo === 'activo') {
-        // ACTIVOS AHORA — lo que manda getOfertas (rotación del día, igual que
-        // seba21) + interruptor del día (0/1/A) + horario de config_sistema.
-        enR = p.relampago    && _poolRelampago.has(pid)  && _tipoActivoAhora('relampago');
-        enU =                   _poolUltimas.has(pid)    && _tipoActivoAhora('ultimas');
-        enD = p.destacada > 0 && _poolDestacadas.has(pid) && _tipoActivoAhora('destacadas');
-        enE = p.especial  > 0 && _poolEspeciales.has(pid) && _tipoActivoAhora('especiales');
+        // Solo los activos según horario/forzado — igual que seba21
+        if      (enPoolR && _tipoActivoAhora('relampago'))  catOferta = 'relampago';
+        else if (enPoolU && _tipoActivoAhora('ultimas'))     catOferta = 'ultimas';
+        else if (enPoolD && _tipoActivoAhora('destacadas'))  catOferta = 'destacado';
+        else if (enPoolE && _tipoActivoAhora('especiales'))  catOferta = 'especial';
+        else if (enPoolM) catOferta = 'multicompra';
+        else if (enPoolRL) catOferta = 'recienllegado';
       } else {
-        // POOL — todo lo cargado en la planilla, sin horario ni rotación.
-        enR = _poolLocal.relampago.has(pid);
-        enU = _poolUltimas.has(pid);
-        enD = _poolLocal.destacadas.has(pid);
-        enE = _poolLocal.especiales.has(pid);
+        // modo 'pool' o 'collage': en el pool = tiene oferta, sin importar horario
+        if      (enPoolR) catOferta = 'relampago';
+        else if (enPoolU) catOferta = 'ultimas';
+        else if (enPoolD) catOferta = 'destacado';
+        else if (enPoolE) catOferta = 'especial';
+        else if (enPoolM) catOferta = 'multicompra';
+        else if (enPoolRL) catOferta = 'recienllegado';
       }
-      // Multicompra: sin horario — igual en los dos modos.
-      const enM  = _poolMulticompra.has(pid);
-      // Recién llegado: NO es un descuento — última prioridad.
-      const enRL = _poolRecienLlegados.has(pid);
-      if      (enR)  catOferta = 'relampago';
-      else if (enU)  catOferta = 'ultimas';
-      else if (enD)  catOferta = 'destacado';
-      else if (enE)  catOferta = 'especial';
-      else if (enM)  catOferta = 'multicompra';
-      else if (enRL) catOferta = 'recienllegado';
     }
     return { ...p, catOferta };
   });
@@ -2530,8 +2365,7 @@ function sortProducts(products, mode) {
   const sorted = [...products];
 
   const esVistaCategoria = !['oferta','activo','relampago','destacado','especial',
-    'promo','combo','ultimas','multicompra','recienllegado','sinoferta',
-    'dosxuno','personalizada'].includes(currentFilter);
+    'promo','combo','ultimas','multicompra','recienllegado','sinoferta'].includes(currentFilter);
 
   if (esVistaCategoria) {
     const esCategoriaUnica = currentFilter !== 'todos' && currentFilter !== '';
@@ -2589,8 +2423,8 @@ function interleavedSort(sorted) {
 
 // Modo de resolución según filtro actual
 function getModoResolucion() {
-  // v122 — sendwa publica SOLO lo activo ahora (igual que cobra el POS).
-  return 'activo';
+  if (currentFilter === 'activo') return 'activo';
+  return 'pool';
 }
 
 function applyFilter() {
@@ -2604,18 +2438,15 @@ function applyFilter() {
       // activas en planilla) ──
       case 'seleccionados': return selectedIds.has(String(p.id));
       // ── Con oferta (pool) — en el pool sin importar horario ──
-      // v121: solo DESCUENTOS — Recién Llegado tiene su propio botón.
-      case 'oferta':    return esDescuento(p.catOferta);
+      case 'oferta':    return !!p.catOferta;
       // ── Activos ahora — horario seba21 sincronizado ──
-      case 'activo':    return esDescuento(p.catOferta);
-      // ── Sin oferta — precio normal puro (un recién llegado SÍ entra:
-      //    no tiene descuento) ──
+      case 'activo':    return !!p.catOferta;
+      // ── Sin oferta — precio normal puro ──
       case 'sinoferta': {
-        const enPool = resolveOfertas([p], 'activo')[0].catOferta;
-        return !esDescuento(enPool);
+        // Chequear contra AMBOS modos para asegurar que no tiene nada
+        const enPool = resolveOfertas([p], 'pool')[0].catOferta;
+        return !enPool;
       }
-      case 'dosxuno':       return p.catOferta === 'dosxuno';
-      case 'personalizada': return p.catOferta === 'personalizada';
       case 'relampago': return p.catOferta === 'relampago';
       case 'destacado': return p.catOferta === 'destacado';
       case 'especial':  return p.catOferta === 'especial';
@@ -2662,13 +2493,10 @@ function insertSeparators(products) {
 
   // Vista Ofertas estilo FLYER — sin separadores de categoría, un único header
   const esVistaOfertaFlyer = ['oferta','activo','relampago','destacado','especial',
-    'promo','combo','ultimas','multicompra','recienllegado','dosxuno','personalizada'].includes(currentFilter);
+    'promo','combo','ultimas','multicompra','recienllegado'].includes(currentFilter);
   if (esVistaOfertaFlyer) {
     if (!products.length) return products;
-    const label = currentFilter === 'recienllegado'
-      ? '🛒 ALMACÉN COPIHUE — RECIÉN LLEGADOS 🆕'
-      : '🛒 ALMACÉN COPIHUE — OFERTAS 🔥';
-    return [{ _sep: true, label, cat: '__flyer__', _flyer: true }, ...products];
+    return [{ _sep: true, label: '🛒 ALMACÉN COPIHUE — OFERTAS 🔥', cat: '__flyer__', _flyer: true }, ...products];
   }
 
   // Separadores normales por categoría (vista categorías/todos)
@@ -2702,23 +2530,18 @@ function renderGrid() {
   
   if (filteredProducts.length === 0) {
     grid.innerHTML = '';
-    // v121 — "Activos ahora" vacío: mostrar el horario de HOY de cada tipo,
-    // leído de config_sistema (con minutos, ya no se cortan).
+    // Verificar si es por fuera de horario automático
+    const h = window._horariosOferta || {};
+    const tipoMap = { 'relampago':'relampago','destacado':'destacadas','especial':'especiales','ultimas':'ultimas' };
+    const tipoKey = tipoMap[currentFilter];
+    const horario = tipoKey && h[tipoKey];
     const emptyEl = document.getElementById('empty-state');
-    const _TIPO_CHIP = { relampago:'relampago', destacado:'destacadas', especial:'especiales', ultimas:'ultimas' };
-    if (currentFilter === 'activo' || currentFilter === 'oferta' || _TIPO_CHIP[currentFilter]) {
-      const NOM = { relampago:'⚡ Relámpago', destacadas:'🔥 Destacadas', especiales:'💜 Especiales', ultimas:'🏷️ Últimas' };
-      const tiposMostrar = _TIPO_CHIP[currentFilter] ? [_TIPO_CHIP[currentFilter]] : Object.keys(NOM);
-      const lineas = tiposMostrar.map(t => {
-        const h = _horarioHoy(t);
-        if (h.modo === 'off') return `${NOM[t]}: apagado hoy`;
-        if (h.modo === 'on')  return `${NOM[t]}: todo el día`;
-        if (h.ini === null || h.cie === null) return `${NOM[t]}: sin horario cargado`;
-        return `${NOM[t]}: ${_fmtHora(h.ini)} a ${_fmtHora(h.cie)} hs`;
-      });
+    if (horario && !horario.activo && horario.inicio != null) {
+      const ini = Math.floor(horario.inicio).toString().padStart(2,'0') + ':00';
+      const cie = Math.floor(horario.cierre).toString().padStart(2,'0') + ':00';
       emptyEl.innerHTML = `<div class="empty-icon">⏰</div>
-        <p><b>No hay ofertas activas en este momento</b><br>
-        <small>${lineas.join('<br>')}</small></p>`;
+        <p><b>Modo automático — fuera de horario</b><br>
+        <small>Esta oferta está activa de ${ini} a ${cie} hs</small></p>`;
     } else {
       emptyEl.innerHTML = `<div class="empty-icon">🔍</div><p>No se encontraron productos con estos filtros.</p>`;
     }
@@ -2889,13 +2712,13 @@ function generateText(mode) {
   const prods = resolveOfertas(prodsRaw);
 
   // ── Contar cuántos tienen oferta para elegir encabezado ──
-  const conOferta = prods.filter(p => esDescuento(p.catOferta)).length; // v121: recién llegado no es oferta
+  const conOferta = prods.filter(p => p.catOferta).length;
   const tiposPresentes = [...new Set(prods.map(p=>p.catOferta).filter(Boolean))];
   const tituloOferta = {
     relampago:'⚡ OFERTAS RELÁMPAGO', ultimas:'🏷️ ÚLTIMAS UNIDADES',
     destacado:'🔥 OFERTAS DESTACADAS', especial:'💜 PRECIOS ESPECIALES',
     promo:'🏷️ PROMOS DEL DÍA', combo:'🎯 COMBOS', multicompra:'📦 MULTICOMPRA',
-    recienllegado:'🆕 RECIÉN LLEGADOS', dosxuno:'🎁 2x1'
+    recienllegado:'🆕 RECIÉN LLEGADOS'
   };
 
   // Encabezado dinámico
@@ -2936,8 +2759,6 @@ ${tituloOferta[tiposPresentes[0]]}
     if (cat === 'combo')     return of.etiqueta ? ` _${of.etiqueta}_` : ' _(combo)_';
     if (cat === 'multicompra') return of.etiqueta ? ` _${of.etiqueta}_` : ' _(multicompra)_';
     if (cat === 'recienllegado') return ' _(recién llegado)_';
-    if (cat === 'dosxuno')       return ' _(2x1 llevando 2)_';
-    if (cat === 'personalizada') return of.etiqueta ? ` _${of.etiqueta}_` : '';
     return '';
   }
 
@@ -3854,10 +3675,8 @@ function drawPrecioBadge(ctx, p, oferta, x, y, W, IMGH) {
 }
 
 // ── Estilo Promo (badge explosivo) — solo aplica al formato 1:1 ──
-// v123: _promoEstilo queda fijo en 'explosivo' (se sacó la fila Normal/Explosivo);
-// lo que prende/apaga el badge es _promoBadgeTipo ('ninguno' = antes "Normal").
-let _promoEstilo    = 'explosivo';
-let _promoBadgeTipo = 'ninguno';   // 'ninguno' | 'explosion' | 'tarjeta'
+let _promoEstilo    = 'normal';    // 'normal' | 'explosivo'
+let _promoBadgeTipo = 'explosion'; // 'ninguno' | 'explosion' | 'tarjeta'
 let _promoTexto     = 'SOLO HOY';
 let _promoColor     = '#e53935';
 let _promoTamano    = 'medio';     // 'chico' | 'medio' | 'grande'
@@ -3881,30 +3700,13 @@ function drawPromoBadge(ctx, W, imgAreaY, IMGH, imgRect, oferta, p, xOffset = 0)
   const texto = (_promoTexto || 'SOLO HOY').toUpperCase();
 
   if (_promoBadgeTipo === 'explosion') {
-    const rIn = size * 0.58;
-    drawStarburst(ctx, cx, cy, size, rIn, 9, color);
-    // v123 — borde fino si el color es claro (blanco/amarillo), para que la
-    // estrella no se pierda sobre la foto. Sin botones nuevos.
-    if (_contrasteTexto(color) === '#1a1a1a') _strokeStarburst(ctx, cx, cy, size, rIn, 9, 'rgba(0,0,0,.45)', Math.max(1.5, size * 0.02));
-    // v123 — texto centrado de verdad: se arma en 1 o 2 líneas, se achica
-    // hasta entrar en el círculo interior, y se centra el bloque completo.
-    ctx.save();
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillStyle = _contrasteTexto(color);
-    // Ancho útil = cuerda del círculo interior a la altura del bloque de
-    // texto (una sola línea baja puede usar casi todo el diámetro).
-    const anchoUtil = altoBloque => 2 * Math.sqrt(Math.max(0, rIn*rIn - (altoBloque/2)*(altoBloque/2))) * 0.94;
-    let fs = Math.round(size * 0.34), lineas = [texto];
-    for (; fs >= 8; fs--) {
-      ctx.font = `900 ${fs}px Segoe UI`;
-      lineas = _partirEnLineas(ctx, texto, rIn * 1.8, 2);
-      const w = anchoUtil(lineas.length * fs * 1.05);
-      if (w > 0 && lineas.every(l => ctx.measureText(l).width <= w)) break;
-    }
-    const lh = fs * 1.05;
-    const y0 = cy - (lineas.length - 1) * lh / 2;
-    lineas.forEach((l, i) => ctx.fillText(l, cx, y0 + i * lh));
-    ctx.restore();
+    drawStarburst(ctx, cx, cy, size, size * 0.58, 9, color);
+    ctx.textAlign = 'center'; ctx.fillStyle = _contrasteTexto(color);
+    let fs = Math.max(size * 0.19, 12);
+    ctx.font = `900 ${fs}px Segoe UI`;
+    const maxW = size * 1.25;
+    while (ctx.measureText(texto).width > maxW && fs > 8) { fs -= 1; ctx.font = `900 ${fs}px Segoe UI`; }
+    wrapText(ctx, texto, cx, cy - fs*0.4, maxW, fs*1.05, 2);
   } else if (_promoBadgeTipo === 'tarjeta') {
     const cw = size * 1.7, ch = size * 1.35;
     const cxL = Math.max(xOffset + 6, Math.min(xOffset + W - cw - 6, cx - cw/2));
@@ -3936,36 +3738,6 @@ function drawPromoBadge(ctx, W, imgAreaY, IMGH, imgRect, oferta, p, xOffset = 0)
       ctx.fillText(oferta.etiqueta.toUpperCase(), cxL + cw/2, cyT + ch*0.86);
     }
   }
-}
-// v123 — parte un texto en hasta maxLines líneas (por palabras). Si no entra,
-// la última línea se lleva el resto (después se achica la letra).
-function _partirEnLineas(ctx, text, maxW, maxLines) {
-  const words = String(text).split(' ').filter(Boolean);
-  const lines = [];
-  let line = '';
-  for (const w of words) {
-    const test = line ? line + ' ' + w : w;
-    if (ctx.measureText(test).width > maxW && line && lines.length < maxLines - 1) { lines.push(line); line = w; }
-    else line = test;
-  }
-  if (line) lines.push(line);
-  return lines;
-}
-// v123 — contorno de la estrella (mismo trazado que drawStarburst)
-function _strokeStarburst(ctx, cx, cy, rOuter, rInner, points, color, width) {
-  ctx.save();
-  ctx.beginPath();
-  const step = Math.PI / points;
-  for (let i = 0; i < points * 2; i++) {
-    const r = i % 2 === 0 ? rOuter : rInner;
-    const a = i * step - Math.PI / 2;
-    const px = cx + r * Math.cos(a), py = cy + r * Math.sin(a);
-    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-  }
-  ctx.closePath();
-  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineJoin = 'round';
-  ctx.stroke();
-  ctx.restore();
 }
 // Blanco o negro según qué contraste más con el color de fondo (para que el
 // texto del badge se lea bien con cualquier color elegido, incluido blanco)
@@ -3999,13 +3771,19 @@ document.getElementById('layout-format-row').onclick = e => {
 };
 
 // ── Estilo Promo: wiring ──
+document.getElementById('promo-estilo-row').onclick = e => {
+  const btn = e.target.closest('.layout-btn');
+  if (!btn) return;
+  _promoEstilo = btn.dataset.promoEstilo;
+  document.querySelectorAll('#promo-estilo-row .layout-btn').forEach(b => b.classList.toggle('active', b===btn));
+  document.getElementById('promo-explosivo-opts').style.display = _promoEstilo === 'explosivo' ? 'block' : 'none';
+  renderCollageMode();
+};
 document.getElementById('promo-tipo-row').onclick = e => {
   const btn = e.target.closest('.layout-btn');
   if (!btn) return;
   _promoBadgeTipo = btn.dataset.promoTipo;
   document.querySelectorAll('#promo-tipo-row .layout-btn').forEach(b => b.classList.toggle('active', b===btn));
-  // v123 — opciones (texto/color/tamaño/posición) solo si hay badge
-  document.getElementById('promo-explosivo-opts').style.display = _promoBadgeTipo === 'ninguno' ? 'none' : 'block';
   renderCollageMode();
 };
 document.getElementById('promo-texto-presets').addEventListener('click', e => {
@@ -6476,10 +6254,8 @@ on('btn-ia-suggest', async () => {
     // más (hasta que se apague a mano con el chip "📦 Stock").
     _mostrarStockEnLista = true;
   } else if (modo === 'oferta') {
-    // v121 FIX — allProducts nunca trae catOferta (se resuelve aparte), por
-    // eso este criterio no encontraba nada. Se resuelve con "Activos ahora".
-    candidatos = resolveOfertas(candidatos, 'activo').filter(p => esDescuento(p.catOferta));
-    candidatos.sort((a,b) => (PRIORITY_ORDER[a.catOferta] ?? 9) - (PRIORITY_ORDER[b.catOferta] ?? 9));
+    candidatos = candidatos.filter(p => p.catOferta);
+    candidatos.sort((a,b) => (PRIORITY_ORDER[a.catOferta]||6) - (PRIORITY_ORDER[b.catOferta]||6));
   }
 
   if (!candidatos.length) { toast('⚠️ Sin productos para ese criterio en esas categorías'); return; }
@@ -6538,7 +6314,6 @@ window.setFilter = function(filter) {
   document.querySelectorAll('.filter-chip').forEach(c =>
     c.classList.toggle('active', c.dataset.filter === filter));
   document.querySelectorAll('.fbar-btn').forEach(b => b.classList.remove('active'));
-  if (filter === 'recienllegado') document.getElementById('fb-recien')?.classList.add('active');
   applyFilter();
 };
 
@@ -6588,7 +6363,6 @@ window.toggleFBar = function(tipo) {
   if (!wasOpen) {
     panel.classList.add('open');
     document.getElementById(btnId)?.classList.add('active');
-    if (tipo === 'ofertas') refrescarOfertas(); // v121 — trae lo último sin bloquear
   }
 };
 // Alias por compatibilidad con HTML viejo
@@ -6798,40 +6572,6 @@ window.addEventListener('beforeunload', (e) => {
   return '';
 });
 
-// v121 — REFRESCO DE OFERTAS
-// "Firma" = qué tipos están activos ahora + qué ids manda el servidor. Si
-// cambia, y estás mirando "⏰ Activos ahora", se re-dibuja la lista
-// conservando el scroll (nunca salta arriba ni recarga la página).
-let _activosFirma = '';
-let _refrescandoOfertas = false;
-function _firmaActivos() {
-  const act = ['relampago','destacadas','especiales','ultimas'].map(t => _tipoActivoAhora(t) ? 1 : 0).join('');
-  const ids = set => [...set].sort((a,b)=>a-b).join(',');
-  return act + '|' + ids(_poolRelampago) + '|' + ids(_poolDestacadas) + '|' + ids(_poolEspeciales) + '|' + ids(_poolUltimas);
-}
-function _rerenderSiActivos() {
-  // v122: todo es "activo" → refrescar en cualquier vista de ofertas
-  if (!['activo','oferta','relampago','destacado','especial','ultimas','multicompra',
-        'dosxuno','personalizada','sinoferta'].includes(currentFilter)) return;
-  const y = window.scrollY;
-  applyFilter();
-  window.scrollTo(0, y);
-  toast('⏰ Ofertas activas actualizadas');
-}
-async function refrescarOfertas() {
-  if (_refrescandoOfertas || !allProducts.length) return;
-  _refrescandoOfertas = true;
-  try {
-    await Promise.all([cargarPools(), _cargarConfig(true)]);
-    const f = _firmaActivos();
-    if (f !== _activosFirma) { _activosFirma = f; _rerenderSiActivos(); }
-  } catch (e) {
-    console.warn('refrescarOfertas:', e.message);
-  } finally {
-    _refrescandoOfertas = false;
-  }
-}
-
 async function init() {
   aplicarVersionUI();
   // Cargar productos Y pools en paralelo — igual que seba21
@@ -6872,15 +6612,6 @@ async function init() {
   applyFilter();
   recalcLayout();
   window.addEventListener('resize', recalcLayout);
-  _activosFirma = _firmaActivos();
-  // v121 — refresco solo de "Activos ahora":
-  //  · cada 60 s re-evalúa el horario (abre/cierra sin recargar, igual que seba21)
-  //  · cada 5 min vuelve a pedir getOfertas + getConfig
-  setInterval(() => {
-    const f = _firmaActivos();
-    if (f !== _activosFirma) { _activosFirma = f; _rerenderSiActivos(); }
-  }, 60000);
-  setInterval(refrescarOfertas, 5 * 60000);
   // Restaurar UI de precio mínimo guardado en localStorage
   if (precioMinimo > 0) {
     const fb = document.getElementById('fb-precio');
