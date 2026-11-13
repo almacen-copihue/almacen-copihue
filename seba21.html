@@ -1878,7 +1878,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>🛒 POS · Copihue v559</title>
+    <title>🛒 POS · Copihue v574</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3851,7 +3851,7 @@
 
             <!-- v538 — VUELTO → DEUDA: solo aparece si hay vuelto y no hay fiado en esta venta -->
             <div id="pmVueltoDeuda" style="display:none;margin-bottom:8px;">
-                <button type="button" id="pmVdBtn" onclick="_vdAbrir()" style="width:100%;padding:11px 14px;border:1.5px solid #e65100;background:#fff3e0;color:#e65100;font-weight:800;font-size:0.9rem;border-radius:12px;cursor:pointer;text-align:left;">💳 Aplicar vuelto a deuda</button>
+                <button type="button" id="pmVdBtn" onclick="_vdAbrir()" style="width:100%;padding:11px 14px;border:1.5px solid #e65100;background:#fff3e0;color:#e65100;font-weight:800;font-size:0.9rem;border-radius:12px;cursor:pointer;text-align:left;">💵 Aplicar vuelto a deuda</button>
                 <div id="pmVdPanel" style="display:none;margin-top:8px;padding:10px;border:1.5px solid #ffcc80;border-radius:12px;background:#fffaf3;">
                     <div style="position:relative;">
                         <input id="pmVdCliente" type="text" placeholder="👤 Cliente con deuda (nombre o teléfono)" autocomplete="off" oninput="_vdFiltrar(this.value)" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid #ddd;border-radius:10px;font-size:0.95rem;">
@@ -3920,6 +3920,7 @@
                 <div id="dcLista" style="margin-top:6px;"></div>
                 <div id="dcResumen" style="font-size:0.85rem;font-weight:700;color:#e65100;margin-top:6px;"></div>
                 <button type="button" id="dcSumarBtn" onclick="_dcSumar()" style="display:none;width:100%;margin-top:8px;padding:11px;border:none;border-radius:10px;background:#e65100;color:white;font-weight:800;font-size:0.9rem;cursor:pointer;">➕ Sumar al cobro</button>
+                <button type="button" id="dcCerrarBtn" onclick="_dcQuitar()" style="width:100%;margin-top:8px;padding:10px;border:1.5px solid #bbb;border-radius:10px;background:#fff;color:#555;font-weight:700;font-size:0.9rem;cursor:pointer;">✕ Cerrar y no cobrar deuda</button>
             </div>
             <div id="dcBloque" style="display:none;margin:8px 20px 0;padding:10px 12px;border:2px solid #e65100;border-radius:12px;background:#fff3e0;"></div>
         </div>
@@ -5899,15 +5900,27 @@ function _patchFilaVenta(id) {
 
 // ========== CONFIRMACIÓN Y COBRO ==========
 let _redondeoActivo = false; // siempre manual, cualquier medio de pago
+let _redondeoModo = '';      // v566 — '' | 'dec' (decenas, hasta −$9) | 'cen' (centenas, hasta −$99, el de siempre) | 'esp' (cliente especial, hasta 6%)
+const _RED_ESP_PCT = 6;      // v566 — tope del redondeo especial: máximo 6% del total (siempre a mano)
 
-function calcularRedondeo(total) {
-    const redondeado = Math.floor(total / 100) * 100;
-    return redondeado < total ? redondeado : total;
+// v566 — total redondeado según el modo (siempre hacia abajo; nunca sube el total)
+function _redondeoCalc(total, modo) {
+    if (modo === 'dec') { const r = Math.floor(total / 10) * 10; return r < total ? r : total; }
+    if (modo === 'cen') { const r = Math.floor(total / 100) * 100; return r < total ? r : total; }
+    if (modo === 'esp') {   // el número más redondo (múltiplo de 10.000, luego 1.000, luego 100) sin pasar el tope
+        for (const paso of [10000, 1000, 100]) {
+            const r = Math.floor(total / paso) * paso;
+            if (r < total && (total - r) * 100 <= total * _RED_ESP_PCT) return r;
+        }
+    }
+    return total;
 }
+function calcularRedondeo(total) { return _redondeoCalc(total, _redondeoModo || 'cen'); }
+function _redondeoElegir(modo) { _redondeoModo = modo || ''; _redondeoActivo = !!_redondeoModo; actualizarTotalConRedondeo(); }
 
 function actualizarTotalConRedondeo() {
     const total = _totalCarritoConDescuentosGrupales();
-    const totalMostrar = _redondeoActivo ? calcularRedondeo(total) : total;
+    const totalMostrar = _redondeoModo ? _redondeoCalc(total, _redondeoModo) : (_redondeoActivo ? calcularRedondeo(total) : total);   // v566: _redondeoActivo solo queda por compatibilidad
     const descuento = total - totalMostrar;
 
     // Reconstruir solo la fila de total + redondeo
@@ -5924,22 +5937,32 @@ function actualizarTotalConRedondeo() {
         const descRow = document.createElement('div');
         descRow.className = 'confirm-item redondeo-row';
         descRow.style.cssText = 'color:#2e7d32;font-size:0.85rem;';
-        descRow.innerHTML = `<span>↓ Redondeo</span><span style="font-weight:700;">−$${descuento.toLocaleString('es-AR')}</span>`;
+        descRow.innerHTML = `<span>↓ Redondeo${_redondeoModo === 'esp' ? ' especial' : ''}</span><span style="font-weight:700;">−$${descuento.toLocaleString('es-AR')}</span>`;
         confirmDetalle.insertBefore(descRow, totalRow);
 
         // Botón para cancelar redondeo
         const cancelRow = document.createElement('div');
         cancelRow.className = 'redondeo-row';
         cancelRow.style.cssText = 'text-align:center;padding:2px 0 6px;';
-        cancelRow.innerHTML = `<button onclick="_redondeoActivo=false;actualizarTotalConRedondeo()" style="background:none;border:none;color:#999;font-size:0.72rem;cursor:pointer;text-decoration:underline;">quitar redondeo</button>`;
+        cancelRow.innerHTML = `<button onclick="_redondeoElegir('')" style="background:none;border:none;color:#999;font-size:0.72rem;cursor:pointer;text-decoration:underline;">quitar redondeo</button>`;
         confirmDetalle.insertBefore(cancelRow, totalRow);
-    } else if (!_redondeoActivo && total % 100 !== 0) {
-        // Ofrecer activar redondeo — siempre, sin importar el medio de pago
-        const activarRow = document.createElement('div');
-        activarRow.className = 'redondeo-row';
-        activarRow.style.cssText = 'text-align:center;padding:2px 0 6px;';
-        activarRow.innerHTML = `<button onclick="_redondeoActivo=true;actualizarTotalConRedondeo()" style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:20px;color:#2e7d32;font-size:0.72rem;font-weight:700;padding:3px 12px;cursor:pointer;">↓ Aplicar redondeo −$${(total - calcularRedondeo(total)).toLocaleString('es-AR')}</button>`;
-        confirmDetalle.insertBefore(activarRow, totalRow);
+    } else {
+        // v566 — ofrecer los redondeos que de verdad bajan algo (siempre manual, cualquier medio de pago)
+        if (_redondeoModo || _redondeoActivo) { _redondeoModo = ''; _redondeoActivo = false; }   // el total cambió y ya no hay nada que redondear en ese modo
+        const dDec = total - _redondeoCalc(total, 'dec'), dCen = total - _redondeoCalc(total, 'cen'), dEsp = total - _redondeoCalc(total, 'esp');
+        const f = n => n.toLocaleString('es-AR');
+        const chips = [];
+        const chip = (modo, txt, estilo) => `<button onclick="_redondeoElegir('${modo}')" style="${estilo}border-radius:20px;font-size:0.72rem;font-weight:700;padding:3px 12px;cursor:pointer;margin:2px 3px;">${txt}</button>`;
+        if (dDec > 0) chips.push(chip('dec', '↓ Decenas −$' + f(dDec), 'background:#e8f5e9;border:1px solid #a5d6a7;color:#2e7d32;'));
+        if (dCen > 0 && dCen !== dDec) chips.push(chip('cen', '↓ Centenas −$' + f(dCen), 'background:#e8f5e9;border:1px solid #a5d6a7;color:#2e7d32;'));
+        if (dEsp > 0 && dEsp !== dCen && dEsp !== dDec) chips.push(chip('esp', '⭐ Especial −$' + f(dEsp) + ' (máx. ' + _RED_ESP_PCT + '%)', 'background:#f3e5f5;border:1px solid #ce93d8;color:#6a1b9a;'));
+        if (chips.length) {
+            const activarRow = document.createElement('div');
+            activarRow.className = 'redondeo-row';
+            activarRow.style.cssText = 'text-align:center;padding:2px 0 6px;';
+            activarRow.innerHTML = chips.join('');
+            confirmDetalle.insertBefore(activarRow, totalRow);
+        }
     }
 
     // Actualizar total mostrado
@@ -6422,7 +6445,7 @@ function abrirConfirmacion() {
     document.getElementById('btnOkConfirm').textContent = '✅ Confirmar cobro';
 
     // Redondeo siempre manual — no se activa automáticamente
-    _redondeoActivo = false;
+    _redondeoActivo = false; _redondeoModo = '';   // v566
     window._totalConRedondeo = total;
     window._descuentoRedondeo = 0;
 
@@ -6524,6 +6547,7 @@ async function togglePagoMixto() {
     const abrir = panel.style.display === 'none';
     if (!abrir) { _pmLimpiarTodo(); return; } // v523 — "✕ cerrar" descarta lo cargado
     if (abrir && _dcMonto() > 0) { mostrarToast('⚠️ Quitá la deuda sumada para usar pago mixto (el mixto ya permite aplicar el vuelto a la deuda).', 'naranja'); return; } // v553
+    if (abrir && _dc) { _dcReset(); }   // v562 — tarjeta «Cobrar deuda del cliente» abierta/leída (sin sumar) se descarta: no puede convivir con el vuelto a deuda
     panel.style.display = abrir ? 'block' : 'none';
     document.getElementById('pmToggleFlecha').textContent = abrir ? '⌄' : '›';
     _pagoMixtoActivo = abrir;
@@ -6922,8 +6946,17 @@ function _vdMetodoMostrar(mostrar) {
 // ══════════════════════════════════════════════════════════════
 let _dc = null; // { cliente, telefono, fiados:[{idFiado,ticket,saldo,desc,ts,monto}], activo:boolean }
 function _dcMonto() { return (_dc && _dc.activo) ? _dc.fiados.reduce((a, f) => a + f.monto, 0) : 0; }
+// v563 — el mixto cuenta como abierto solo si su panel se ve. Si la variable dice «activo» pero el panel está oculto
+// (estado fantasma restaurado de un mixto guardado), se limpia en vez de bloquear la tarjeta de deuda.
+function _pmAbiertoReal() {
+    if (!_pagoMixtoActivo) return false;
+    const pm = document.getElementById('panelPagoMixto');
+    if (pm && pm.style.display === 'block') return true;
+    try { _pmLimpiarTodo(); } catch (e) { _pagoMixtoActivo = false; }
+    return false;
+}
 function _dcToggle() {
-    if (_pagoMixtoActivo) { mostrarToast('⚠️ Cerrá el pago mixto para sumar una deuda (el mixto ya permite aplicar el vuelto a la deuda).', 'naranja'); return; }
+    if (_pmAbiertoReal()) { mostrarToast('⚠️ Cerrá el pago mixto para sumar una deuda (el mixto ya permite aplicar el vuelto a la deuda).', 'naranja'); return; }
     const pn = document.getElementById('dcPanel'); if (!pn) return;
     const abrir = pn.style.display === 'none';
     pn.style.display = abrir ? 'block' : 'none';
@@ -7024,6 +7057,7 @@ function _dcRenderResumen() {
     b.textContent = '➕ Sumar ' + _fiadoFmt(ap) + ' al cobro';
 }
 function _dcSumar() {
+    if (_pmAbiertoReal()) { _dcModalAviso('⛔ Pago mixto abierto', 'No se puede sumar la deuda con el pago mixto abierto: usá «Aplicar vuelto a deuda» o cerrá el pago mixto.', '#c62828'); return; }   // v562
     if (!_dc || _dc.fiados.reduce((a, f) => a + f.monto, 0) <= 0) return;
     _dc.activo = true;
     document.getElementById('dcPanel').style.display = 'none';
@@ -7146,7 +7180,7 @@ function _vdReset(ocultarPanel) {
         const c = document.getElementById('pmVdCliente'); if (c) c.value = '';
         const d = document.getElementById('pmVdDrop'); if (d) d.style.display = 'none';
         if (ocultarPanel) { const pn = document.getElementById('pmVdPanel'); if (pn) pn.style.display = 'none'; }
-        const b = document.getElementById('pmVdBtn'); if (b) b.textContent = '💳 Aplicar vuelto a deuda';
+        const b = document.getElementById('pmVdBtn'); if (b) b.textContent = '💵 Aplicar vuelto a deuda';
     } catch (e) {}
 }
 function _vdActualizar() {
@@ -7237,10 +7271,12 @@ function _vdTotales() {
 function _vdRenderResumen() {
     const el = document.getElementById('pmVdResumen'); if (!el) return;
     const b = document.getElementById('pmVdBtn');
-    if (!_vd) { el.textContent = ''; if (b) b.textContent = '💳 Aplicar vuelto a deuda'; return; }
+    if (!_vd) { el.textContent = ''; if (b) b.textContent = '💵 Aplicar vuelto a deuda'; return; }
     const t = _vdTotales();
-    el.textContent = 'Se aplican ' + _fiadoFmt(t.aplicado) + ' a la deuda · Vuelto en efectivo: ' + _fiadoFmt(t.efectivo) + ' · Deuda que queda: ' + _fiadoFmt(t.restante);
-    if (b) b.textContent = t.aplicado > 0 ? '💳 Vuelto → deuda de ' + _vd.cliente + ': ' + _fiadoFmt(t.aplicado) : '💳 Aplicar vuelto a deuda';
+    // v561 — antes no se veía la deuda de partida; ahora: Deuda total → Se aplican → Queda (solo texto, mismos montos)
+    el.style.whiteSpace = 'pre-line';
+    el.textContent = 'Deuda total: ' + _fiadoFmt(t.deuda) + '\nSe aplican: ' + _fiadoFmt(t.aplicado) + ' a la deuda\nQueda: ' + _fiadoFmt(t.restante) + '\nSe lo devolvés en mano: ' + _fiadoFmt(t.efectivo);
+    if (b) b.textContent = t.aplicado > 0 ? '💵 Vuelto → deuda de ' + _vd.cliente + ': ' + _fiadoFmt(t.aplicado) : '💵 Aplicar vuelto a deuda';
 }
 function _vdRender() {
     const cont = document.getElementById('pmVdLista'); if (!cont) return;
@@ -7286,48 +7322,189 @@ function _ticketBtnEstado(txt) {
         else { t.textContent = 'Enviar ticket al cliente'; b.disabled = false; b.style.opacity = ''; b.style.cursor = 'pointer'; }
     } catch (e) {}
 }
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// v560 — Abonos del vuelto/deuda: "ocupado" ya NO es un fallo.
+// Antes: cualquier respuesta que no fuera éxito se tomaba como definitiva ("NO se pudo confirmar").
+// Ahora el servidor (Code.gs v11.2) puede contestar { ocupado:true } = "no escribí nada, reintentá".
+//  · ocupado / sin respuesta  → se reintenta con el MISMO idOperacion (seguro: no descuenta dos veces)
+//  · rechazo (tope, ya pagado…) → definitivo, se informa y NO se reintenta
+//  · se agota el tiempo (_VD_TOPE_MS en total) → el abono queda GUARDADO como pendiente en
+//    localStorage 'abonos_vuelto_sin_confirmar' (con su idOperacion) y se reintenta desde ahí:
+//    solo (1 reintento a los 90 s, al volver internet y a los 20 s de abrir el POS) o con el botón
+//    «Reintentar abono». Mientras tanto el cajero puede seguir vendiendo (todo corre en segundo plano).
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+let _VD_TOPE_MS = 60000;                                   // tiempo total máximo de reintentos por venta
+let _VD_ESPERAS_MS = [0, 3000, 5000, 8000, 12000, 15000]; // espera antes de cada intento (el último se repite)
+let _VD_AUTO_MS = 90000;                                   // reintento automático tras agotar el tiempo
+const _VD_PEND_KEY = 'abonos_vuelto_sin_confirmar';
+window._vdResPorOp = window._vdResPorOp || {};             // idOperacion → { res, a } de la venta en pantalla (para actualizar el ticket)
+let _vdAplicando = 0, _vdReintentando = false;
+const _vdSleep = ms => new Promise(r => setTimeout(r, ms));
+
+function _vdPendLeer() { try { const a = JSON.parse(localStorage.getItem(_VD_PEND_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
+function _vdPendGuardar(arr) { try { localStorage.setItem(_VD_PEND_KEY, JSON.stringify(arr)); } catch (e) {} }
+function _vdPendSet(entrada) {                              // alta o actualización por idOperacion
+    const arr = _vdPendLeer(); const i = arr.findIndex(x => x && x.idOperacion === entrada.idOperacion);
+    if (i >= 0) arr[i] = Object.assign({}, arr[i], entrada); else arr.push(entrada);
+    _vdPendGuardar(arr);
+}
+function _vdPendQuitar(idOp) { _vdPendGuardar(_vdPendLeer().filter(x => !(x && x.idOperacion === idOp))); }
+// "reintentable" = lo guardó v560 como pendiente y sabemos con qué método cobrarlo. Los registros viejos (sin estado) NO se reintentan solos.
+function _vdPendReintentables() { return _vdPendLeer().filter(x => x && x.estado === 'pendiente' && x.metodo); }
+
+// Un intento. Devuelve { tipo: 'ok' | 'ocupado' | 'rechazado' | 'sinRespuesta', r?, error? }
+async function _vdEnviarAbono(idFiado, monto, metodo, idOp) {
+    try {
+        const r = await _apiFetchUrl('abonarFiado', API_URL + '?action=abonarFiado&data=' + encodeURIComponent(JSON.stringify({ idFiado: idFiado, abono: monto, metodoPago: (metodo || 'EFECTIVO'), idOperacion: idOp })) + '&t=' + Date.now());
+        if (r && r.success === true) return { tipo: 'ok', r: r };
+        if (r && r.ocupado === true) return { tipo: 'ocupado', r: r };
+        return { tipo: 'rechazado', r: r };
+    } catch (e) { return { tipo: 'sinRespuesta', error: e }; }
+}
+
+// Cartelito de progreso/estado (abajo a la izquierda, chico): se ve aunque el cajero siga vendiendo.
+function _vdPill(texto, color) {
+    try {
+        let el = document.getElementById('vdPill');
+        if (!texto) { if (el) el.style.display = 'none'; return; }
+        if (!el) {
+            el = document.createElement('div'); el.id = 'vdPill';
+            el.style.cssText = 'position:fixed;left:10px;bottom:84px;z-index:4500;max-width:62vw;padding:8px 12px;border-radius:18px;font-size:0.78rem;font-weight:800;color:#fff;box-shadow:0 3px 12px rgba(0,0,0,.3);cursor:pointer;line-height:1.25;';
+            el.onclick = () => { try { _vdPanelPendientes(); } catch (e) {} };
+            document.body.appendChild(el);
+        }
+        el.style.background = color || '#e65100'; el.style.display = 'block'; el.textContent = texto;
+    } catch (e) {}
+}
+function _vdPillRefrescar() {
+    if (_vdAplicando > 0 || _vdReintentando) return;        // mientras corre, manda el texto de progreso
+    const pend = _vdPendReintentables(), otros = _vdPendLeer().filter(x => x && x.estado !== 'pendiente' || x && !x.metodo);
+    if (pend.length) _vdPill('⏳ ' + pend.length + ' abono' + (pend.length > 1 ? 's' : '') + ' a deuda pendiente' + (pend.length > 1 ? 's' : '') + ' · tocá para reintentar', '#e65100');
+    else if (otros.length) _vdPill('⚠️ ' + otros.length + ' abono' + (otros.length > 1 ? 's' : '') + ' sin confirmar (revisar) · tocá', '#b71c1c');
+    else _vdPill(null);
+}
+
+function _vdPanelPendientes() {
+    const lista = _vdPendLeer(); if (!lista.length) { mostrarToast('No hay abonos pendientes', ''); return; }
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:white;border-radius:16px;padding:18px;max-width:380px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,0.3);max-height:85vh;overflow:auto;';
+    const filas = lista.map((x, i) => {
+        const est = x.estado === 'pendiente' && x.metodo ? '⏳ pendiente' : (x.estado === 'rechazado' ? '⛔ rechazado' : '⚠️ revisar a mano');
+        return '<div style="border:1px solid #eee;border-radius:10px;padding:8px 10px;margin-bottom:8px;font-size:0.85rem;line-height:1.35;">'
+            + '<div style="display:flex;justify-content:space-between;gap:8px;"><strong class="vdN"></strong><span>' + _fiadoFmt(x.monto) + '</span></div>'
+            + '<div style="color:#666;">' + est + '<span class="vdM"></span></div>'
+            + '<button type="button" data-i="' + i + '" class="vdQuitar" style="margin-top:6px;background:none;border:none;color:#999;text-decoration:underline;font-size:0.75rem;cursor:pointer;">Quitar de la lista</button></div>';
+    }).join('');
+    box.innerHTML = '<div style="font-weight:900;color:#e65100;margin-bottom:6px;">Abonos a deuda sin confirmar</div>'
+        + '<div style="font-size:0.82rem;color:#555;margin-bottom:10px;">Cada abono guarda su código de operación: reintentar NO lo descuenta dos veces. No lo cargues a mano.</div>' + filas
+        + '<div style="display:flex;gap:10px;margin-top:10px;"><button type="button" id="vdCerrar" style="flex:1;padding:12px;border-radius:10px;border:2px solid #ddd;background:white;font-weight:700;color:#666;">Cerrar</button>'
+        + '<button type="button" id="vdReint" style="flex:1;padding:12px;border-radius:10px;border:none;background:#2e7d32;color:white;font-weight:700;">🔄 Reintentar abono</button></div>';
+    ov.appendChild(box); document.body.appendChild(ov);
+    const nombres = box.querySelectorAll('.vdN'), motivos = box.querySelectorAll('.vdM');
+    lista.forEach((x, i) => { nombres[i].textContent = String(x.cliente || 'Cliente'); if (x.motivo) motivos[i].textContent = ' — ' + x.motivo; });
+    box.querySelector('#vdCerrar').onclick = () => ov.remove();
+    box.querySelector('#vdReint').onclick = () => { ov.remove(); _vdReintentarPend(true); };
+    box.querySelectorAll('.vdQuitar').forEach(btn => btn.onclick = () => {
+        const x = lista[+btn.dataset.i]; ov.remove();
+        _confirmModal('¿Quitar este abono de la lista?\n\nUsalo solo si ya figura en Fiados o si no querés que se registre.', () => { _vdPendQuitar(x.idOperacion); _vdPillRefrescar(); });
+    });
+}
+
+// Reintenta lo guardado como pendiente (mismo idOperacion). manual=true → avisa el resultado con cartel grande.
+async function _vdReintentarPend(manual) {
+    if (_vdReintentando || _vdAplicando > 0) { if (manual) mostrarToast('⏳ Ya se está aplicando un abono…', 'naranja'); return; }
+    const lista = _vdPendReintentables();
+    if (!lista.length) { if (manual) mostrarToast('No hay abonos pendientes para reintentar', ''); _vdPillRefrescar(); return; }
+    _vdReintentando = true;
+    let ok = 0, rech = 0, sigue = 0, montoOk = 0, ultimoCli = '';
+    const tIni = Date.now();
+    try {
+        for (let k = 0; k < lista.length; k++) {
+            const e = lista[k]; let resuelto = false;
+            _vdPill('⏳ Reintentando abono ' + (k + 1) + ' de ' + lista.length + '…', '#e65100');
+            for (let n = 0; n < _VD_ESPERAS_MS.length && !resuelto; n++) {
+                if (n > 0) { const esp = _VD_ESPERAS_MS[Math.min(n, _VD_ESPERAS_MS.length - 1)]; if (Date.now() - tIni + esp >= _VD_TOPE_MS) break; await _vdSleep(esp); }
+                else if (Date.now() - tIni >= _VD_TOPE_MS) break;
+                const x = await _vdEnviarAbono(e.idFiado, e.monto, e.metodo, e.idOperacion);
+                if (x.tipo === 'ok') {
+                    resuelto = true; ok++; montoOk += e.monto; ultimoCli = e.cliente; _vdPendQuitar(e.idOperacion);
+                    const ref = window._vdResPorOp[e.idOperacion];   // si el ticket de esa venta sigue en pantalla, se completa
+                    if (ref) { const r0 = ref.res; r0.aplicado += e.monto; r0.detalle.push({ ticket: ref.a.ticket, idFiado: ref.a.idFiado, monto: ref.a.monto, saldo: ref.a.saldo, fecha: ref.a.fecha }); r0.pendientes = (r0.pendientes || []).filter(z => z !== ref.a); r0.fallos = (r0.fallos || []).filter(z => z !== ref.a); r0.deudaRestante = Math.max(0, (r0.deudaAnterior || 0) - r0.aplicado); delete window._vdResPorOp[e.idOperacion]; }
+                } else if (x.tipo === 'rechazado') {
+                    resuelto = true; rech++; _vdPendSet({ idOperacion: e.idOperacion, estado: 'rechazado', motivo: (x.r && x.r.mensaje) || 'la planilla no lo aceptó' });
+                    if (manual) _dcModalAviso('⛔ Abono rechazado', 'La planilla no aceptó el abono de ' + _fiadoFmt(e.monto) + ' a la deuda de ' + e.cliente + ': ' + ((x.r && x.r.mensaje) || 'sin detalle') + '. No se registró. Revisá la deuda en Fiados.', '#c62828');
+                }
+            }
+            if (!resuelto) { sigue++; _vdPendSet({ idOperacion: e.idOperacion, intentos: (e.intentos || 0) + 1 }); }
+        }
+    } finally { _vdReintentando = false; }
+    _vdPillRefrescar();
+    if (ok > 0) {
+        if (manual) _dcModalAviso('✅ Abono confirmado', _fiadoFmt(montoOk) + ' descontados de la deuda de ' + ultimoCli + (sigue ? '. Quedan ' + sigue + ' pendientes.' : '.'), '#2e7d32');
+        else { _vdPill('✅ Abono a deuda confirmado: ' + _fiadoFmt(montoOk), '#2e7d32'); setTimeout(_vdPillRefrescar, 5000); }
+    } else if (sigue > 0 && manual) {
+        _dcModalAviso('⏳ Sigue pendiente', 'La planilla todavía no confirmó ' + (sigue > 1 ? 'los abonos' : 'el abono') + '. Quedan guardados con su código de operación: podés volver a tocar «Reintentar abono» en un rato. No lo cargues a mano.', '#e65100');
+    }
+}
+
 // Aplica los abonos DESPUÉS de registrar la venta. Cada abono lleva idOperacion: si la planilla tarda o el
 // POS reintenta, abonarFiado responde "ya estaba registrado" y no descuenta de nuevo.
 async function _vdAplicar(snap, idVenta, vRef, tkProm) {
-    const res = { estado: 'aplicando', cliente: snap.cliente, aplicado: 0, fallos: [], deudaRestante: null, deudaAnterior: snap.deudaTotal, efectivo: snap.efectivo, hechos: 0, total: snap.asignaciones.length, detalle: [] };
+    const res = { estado: 'aplicando', cliente: snap.cliente, aplicado: 0, fallos: [], pendientes: [], rechazados: [], deudaRestante: null, deudaAnterior: snap.deudaTotal, efectivo: snap.efectivo, hechos: 0, total: snap.asignaciones.length, detalle: [] };
     vRef.vueltoDeuda = res; res.modo = snap.modo || '';
     const _vdDbg = () => {}; // diagnóstico desactivado en producción
     try { const _o = document.getElementById('dbgAbonoVd'); if (_o) _o.remove(); } catch (e) {}
-    const _tIni = performance.now();
+    const _tIni = performance.now(), _t0 = Date.now();
+    _vdAplicando++;
     _vdDbg('Progreso · abonos a aplicar: ' + snap.asignaciones.length);
     _ticketBtnEstado('⏳ Aplicando abono a la deuda: 0 de ' + res.total + '…');
+    _vdPill('⏳ Abono a la deuda de ' + snap.cliente + ': 0 de ' + res.total + '…', '#e65100');
     try {
         for (const a of snap.asignaciones) {
             const idOp = 'vd_' + idVenta + '_' + a.idFiado;
-            let hecho = false, definitivo = false;
-            for (let n = 0; n < 3 && !hecho && !definitivo; n++) {
-                if (n) await new Promise(r => setTimeout(r, n * 4000));
-                try {
-                    const r = await _apiFetchUrl('abonarFiado', API_URL + '?action=abonarFiado&data=' + encodeURIComponent(JSON.stringify({ idFiado: a.idFiado, abono: a.monto, metodoPago: (snap.metodo || 'EFECTIVO'), idOperacion: idOp })) + '&t=' + Date.now());
-                    if (r && r.success === true) { hecho = true; res.aplicado += a.monto; res.detalle.push({ ticket: a.ticket, idFiado: a.idFiado, monto: a.monto, saldo: a.saldo, fecha: a.fecha }); }
-                    else { definitivo = true; _vdDbg('abono ' + (res.hechos + 1) + ' RECHAZADO: ' + ((r && r.mensaje) || 'sin mensaje')); } // la planilla contestó que no: no se reintenta
-                } catch (e) { _vdDbg('abono ' + (res.hechos + 1) + ' intento ' + (n + 1) + ': ' + (e && e.message || e)); /* sin respuesta: se reintenta con el MISMO idOperacion (seguro) */ }
+            let hecho = false, definitivo = false, motivo = '', intentos = 0;
+            for (let n = 0; !hecho && !definitivo; n++) {
+                if (n > 0) {
+                    const esp = _VD_ESPERAS_MS[Math.min(n, _VD_ESPERAS_MS.length - 1)];
+                    if (Date.now() - _t0 + esp >= _VD_TOPE_MS) break;          // no alcanza el tiempo: queda pendiente
+                    await _vdSleep(esp);
+                } else if (Date.now() - _t0 >= _VD_TOPE_MS) break;            // los abonos anteriores ya consumieron el tope
+                intentos++;
+                _vdPill('⏳ Abono a la deuda de ' + snap.cliente + ': ' + (res.hechos + 1) + ' de ' + res.total + (intentos > 1 ? ' · reintentando (' + intentos + ')' : '') + '…', '#e65100');
+                const x = await _vdEnviarAbono(a.idFiado, a.monto, snap.metodo, idOp);
+                if (x.tipo === 'ok') { hecho = true; res.aplicado += a.monto; res.detalle.push({ ticket: a.ticket, idFiado: a.idFiado, monto: a.monto, saldo: a.saldo, fecha: a.fecha }); }
+                else if (x.tipo === 'rechazado') { definitivo = true; motivo = (x.r && x.r.mensaje) || 'sin mensaje'; _vdDbg('abono ' + (res.hechos + 1) + ' RECHAZADO: ' + motivo); } // la planilla contestó que no: no se reintenta
+                else if (x.tipo === 'ocupado') { _vdDbg('abono ' + (res.hechos + 1) + ' intento ' + intentos + ': planilla ocupada (no se escribió nada) → se reintenta'); }
+                else { _vdDbg('abono ' + (res.hechos + 1) + ' intento ' + intentos + ': ' + (x.error && x.error.message || x.error) + ' → se reintenta con el MISMO idOperacion'); /* sin respuesta: puede haberse grabado; el idOperacion lo hace seguro */ }
             }
             res.hechos++;
             _ticketBtnEstado(res.hechos < res.total ? '⏳ Aplicando abono a la deuda: ' + res.hechos + ' de ' + res.total + '…' : '⏳ Terminando…');
-            _vdDbg('abono ' + res.hechos + '/' + res.total + (hecho ? ' OK' : ' SIN CONFIRMAR') + ' · ' + _fiadoFmt(a.monto) + ' · ' + Math.round((performance.now() - _tIni) / 1000) + ' s desde el inicio');
+            _vdDbg('abono ' + res.hechos + '/' + res.total + (hecho ? ' OK' : (definitivo ? ' RECHAZADO' : ' PENDIENTE')) + ' · ' + _fiadoFmt(a.monto) + ' · ' + intentos + ' intento(s) · ' + Math.round((performance.now() - _tIni) / 1000) + ' s desde el inicio');
             if (!hecho) {
                 res.fallos.push(a);
-                try {
-                    const arr = JSON.parse(localStorage.getItem('abonos_vuelto_sin_confirmar') || '[]');
-                    arr.push({ idOperacion: idOp, idFiado: a.idFiado, monto: a.monto, cliente: snap.cliente, ts: Date.now() });
-                    localStorage.setItem('abonos_vuelto_sin_confirmar', JSON.stringify(arr));
-                } catch (e) {}
+                const base = { idOperacion: idOp, idFiado: a.idFiado, monto: a.monto, metodo: (snap.metodo || 'EFECTIVO'), cliente: snap.cliente, ticket: a.ticket, saldo: a.saldo, fecha: a.fecha, ts: Date.now(), intentos: intentos };
+                if (definitivo) { res.rechazados.push({ a: a, motivo: motivo }); _vdPendSet(Object.assign(base, { estado: 'rechazado', motivo: motivo })); }
+                else { res.pendientes.push(a); window._vdResPorOp[idOp] = { res: res, a: a }; _vdPendSet(Object.assign(base, { estado: 'pendiente' })); }
             }
         }
         if (res.aplicado > 0) res.deudaRestante = Math.max(0, snap.deudaTotal - res.aplicado); // v539: cálculo local con el saldo consultado al elegir el cliente (evita otra consulta lenta)
     } catch (e) { console.warn('⚠️ _vdAplicar:', e); }
     try { await Promise.race([tkProm, new Promise(r => setTimeout(r, 15000))]); } catch (e) {} // v540: espera el N° de ticket hasta 15 s
     res.estado = 'listo';
+    _vdAplicando--;
     _ticketBtnEstado(null);
-    if (res.fallos.length) {
-        mostrarToast('⚠️ NO se pudo confirmar el abono de ' + _fiadoFmt(res.fallos.reduce((x, a) => x + a.monto, 0)) + ' a la deuda de ' + snap.cliente + '. Revisá en Fiados ANTES de repetirlo (si ya figura, no lo cargues otra vez).', 'naranja');
-    } else if (res.aplicado > 0) {
+    _vdPillRefrescar();
+    const montoDe = arr => _fiadoFmt(arr.reduce((x, a) => x + a.monto, 0));
+    if (res.rechazados.length) {
+        _dcModalAviso('⛔ Abono rechazado', 'La planilla no aceptó el abono de ' + _fiadoFmt(res.rechazados.reduce((x, r) => x + r.a.monto, 0)) + ' a la deuda de ' + snap.cliente + ': ' + res.rechazados[0].motivo + '. No se registró. Revisá la deuda en Fiados.', '#c62828');
+    }
+    if (res.pendientes.length) {
+        _dcModalAviso('⏳ Abono pendiente de confirmar', 'El abono de ' + montoDe(res.pendientes) + ' a la deuda de ' + snap.cliente + ' todavía no está confirmado en la planilla. NO lo cargues de nuevo: queda guardado y se reintenta solo en un par de minutos. También podés tocar «Reintentar abono» (cartelito naranja, abajo a la izquierda). Con el mismo código de operación no se descuenta dos veces.', '#e65100');
+        setTimeout(() => { try { _vdReintentarPend(false); } catch (e) {} }, _VD_AUTO_MS);
+    }
+    if (!res.fallos.length && res.aplicado > 0) {
         mostrarToast('✅ ' + _fiadoFmt(res.aplicado) + ' descontados de la deuda de ' + snap.cliente, 'verde');
     }
 }
@@ -7428,7 +7605,8 @@ async function confirmarVentaMixta() {
         const ventaPayload = {
             items: ventaData, metodoPago: metodoPagoTexto, vendedor: vendedorActual, idVenta, detallePagos,
             clienteFiado: pagoFiado ? pagoFiado.cliente : '',
-            telefonoFiado: pagoFiado ? (pagoFiado.telefono || '') : ''
+            telefonoFiado: pagoFiado ? (pagoFiado.telefono || '') : '',
+            ..._drCampo(totalV - total)   // v567
         };
 
         try {
@@ -7447,7 +7625,7 @@ async function confirmarVentaMixta() {
         if (!stockOk) {
             try {
                 const pendientes = JSON.parse(localStorage.getItem('ventas_pendientes') || '[]');
-                pendientes.push({ items: ventaData, metodoPago: metodoPagoTexto, vendedor: vendedorActual, idVenta, ts: Date.now() });
+                pendientes.push({ items: ventaData, metodoPago: metodoPagoTexto, vendedor: vendedorActual, idVenta, ts: Date.now(), ..._drCampo(totalV - total) });   // v567
                 localStorage.setItem('ventas_pendientes', JSON.stringify(pendientes));
                 _actualizarBadgePendientes();
                 _autoProgramar(); // v510
@@ -7530,7 +7708,7 @@ async function confirmarVentaMixta() {
         _uv.fechaVenta = _t.toLocaleDateString('es-AR');
         if (ticketNum) _uv.nroTicket = String(ticketNum);
         const _tkProm = ticketNum ? Promise.resolve(String(ticketNum))
-            : ((_datosFiadoMixto || _vdSnap) ? _buscarTicketVenta(idVenta, [0, 3000, 5000, 8000, 12000, 15000, 20000], null) : Promise.resolve(''));
+            : _buscarTicketVenta(idVenta, (_datosFiadoMixto || _vdSnap) ? [0, 3000, 5000, 8000, 12000, 15000, 20000] : [3000, 8000, 15000, 20000], null);   // v568: también sin fiado/vuelto (solo lectura): antes, si vender daba timeout, el ticket salía sin N°
         _tkProm.then(tk => { if (tk) _uv.nroTicket = tk; }).catch(() => {});
 
         // v538 — aplicar el vuelto a la deuda (en segundo plano, con idOperacion)
@@ -7658,7 +7836,7 @@ async function confirmarVenta() {
         // Agregar método de pago al request
         metodoPagoFinal = metodoPagoActual.toUpperCase();
         idVenta = 'v_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
-        const ventaPayload = { items: ventaData, metodoPago: metodoPagoFinal, vendedor: vendedorActual, idVenta };
+        const ventaPayload = { items: ventaData, metodoPago: metodoPagoFinal, vendedor: vendedorActual, idVenta, ..._drCampo(descuentoRedondeo) };   // v567
         const dataEncoded = encodeURIComponent(JSON.stringify(ventaPayload));
         const url = API_URL + '?action=vender&data=' + dataEncoded;
         const resp = await _apiFetchUrl('vender', url);
@@ -7681,7 +7859,8 @@ async function confirmarVenta() {
             metodoPago: metodoPagoFinal || metodoPagoActual,
             vendedor: vendedorActual,
             idVenta,
-            ts: Date.now()
+            ts: Date.now(),
+            ..._drCampo(descuentoRedondeo)   // v567
         };
         // Encolar en localStorage para reintento
         const pendientes = JSON.parse(localStorage.getItem('ventas_pendientes') || '[]');
@@ -7736,6 +7915,10 @@ async function confirmarVenta() {
             fechaVenta: _t.toLocaleDateString('es-AR')
         };
         _dcLanzar(window._ultimaVenta); // v553
+        if (!_tkNormal && !_dcSnap) {   // v568 — venta simple sin N° de ticket (vender dio timeout): se busca por idVenta en segundo plano (solo lectura)
+            const _uvS = window._ultimaVenta;
+            _buscarTicketVenta(idVenta, [3000, 8000, 15000, 20000], null).then(tk => { if (tk) _uvS.nroTicket = tk; }).catch(() => {});
+        }
         try { _dcReset(); } catch (e) {} // v553
 
         actualizarRanking(); // recalcular ranking después de confirmar venta
@@ -7896,7 +8079,22 @@ function enviarTicketWA() {
     if (v.vueltoDeuda) {
         var vdd = v.vueltoDeuda;
         if (vdd.estado !== 'listo') { mostrarToast('⏳ Aplicando el abono a la deuda: ' + (vdd.hechos || 0) + ' de ' + (vdd.total || '?') + ' fiados listos… tocá de nuevo en unos segundos', 'naranja'); return; }
+        if (vdd.pendientes && vdd.pendientes.length && !vdd._ticketSinAbono) { // v560: abono pendiente de confirmar → se pregunta; el ticket nunca queda trabado
+            _confirmModal('⏳ Hay un abono a la deuda PENDIENTE de confirmar.\n\nSi enviás el ticket ahora saldrá SIN ese abono (la deuda figurará sin descontar). Podés esperar la confirmación o tocar «Reintentar abono».\n\n¿Enviar el ticket igual?', () => { vdd._ticketSinAbono = true; enviarTicketWA(); });
+            return;
+        }
         if (vdd.aplicado > 0) {
+            // v564 — «Vuelto: $X» a secas se leía como plata devuelta en mano: si el vuelto fue a la deuda, el renglón lo dice.
+            if (vdd.modo !== 'cobro' && v.detallePagos && v.detallePagos.vueltoARS > 0) {
+                var _lineaVuelto = '\nVuelto: $' + v.detallePagos.vueltoARS.toLocaleString('es-AR');
+                var _dp1 = v.detallePagos.pagos;
+                if (_dp1 && _dp1.length === 1) {   // v565 — un solo pago: el ticket no decía cuánto pagó; ahora «• Efectivo: $10.000» + el vuelto aplicado
+                    var _p1 = _dp1[0], _n1 = ({ EFECTIVO:'Efectivo', TARJETA:'Tarjeta', TRANSFERENCIA:'Transferencia', FIADO:'Fiado' })[_p1.metodo] || _p1.metodo;
+                    if (_p1.moneda && _p1.moneda !== 'ARS') _n1 += ' ' + _p1.moneda;
+                    var _m1 = (!_p1.moneda || _p1.moneda === 'ARS') ? '$' + Number(_p1.recibido).toLocaleString('es-AR') : _p1.recibido + ' ' + _p1.moneda + ' (≈$' + Number(_p1.equivalenteARS).toLocaleString('es-AR') + ')';
+                    metodoLabel = '• ' + _n1 + ': ' + _m1 + '\nVuelto aplicado a la deuda: ' + _fiadoFmt(vdd.aplicado);
+                } else if (metodoLabel.indexOf(_lineaVuelto) >= 0) metodoLabel = metodoLabel.replace(_lineaVuelto, function() { return '\nVuelto aplicado a la deuda: ' + _fiadoFmt(vdd.aplicado); });
+            }
             var _detVd = (vdd.detalle || []).map(function(d) {
                 var resta = Math.max(0, Math.round((d.saldo || 0) - d.monto));
                 return (d.ticket ? 'Ticket #' + d.ticket : (d.fecha ? 'Compra del ' + d.fecha : 'Compra')) + ' · ' + _fiadoFmt(d.monto) + (d.saldo ? ' de ' + _fiadoFmt(d.saldo) : '') + ' ' + (resta > 0 ? '📋 Abonado (resta ' + _fiadoFmt(resta) + ')' : '✅ Saldado');
@@ -9181,7 +9379,7 @@ async function _reenviarVentasPendientes() {
                 continue;
             }
             try {
-                const payload = { items: venta.items, metodoPago: venta.metodoPago, vendedor: venta.vendedor, idVenta: venta.idVenta };
+                const payload = { items: venta.items, metodoPago: venta.metodoPago, vendedor: venta.vendedor, idVenta: venta.idVenta, ..._drCampo(venta.descuentoRedondeo) };   // v567
                 const url = API_URL + '?action=vender&data=' + encodeURIComponent(JSON.stringify(payload));
                 const resp = await _apiFetchUrl('vender', url);
                 if (resp.success) {
@@ -11958,6 +12156,8 @@ setTimeout(_autoConfirmarPendientes, 8000);
 setTimeout(() => _salColaProcesar(), 10000);   // v511: salidas por confirmar
 setInterval(() => _salColaProcesar(), 600000);
 window.addEventListener('online', () => { _salFallos = 0; _salColaProcesar(); });
+window.addEventListener('online', () => { try { setTimeout(() => _vdReintentarPend(false), 4000); } catch (e) {} }); // v560: abonos a deuda pendientes
+document.addEventListener('DOMContentLoaded', function () { try { _vdPillRefrescar(); setTimeout(() => _vdReintentarPend(false), 20000); } catch (e) {} }); // v560
 setInterval(_autoConfirmarPendientes, 600000);
 // setTimeout(() => { _reenviarVentasPendientes(); _actualizarBadgePendientes(); }, 5000);
 // ========== SISTEMA DE CLIENTES ==========
@@ -12338,6 +12538,7 @@ const OFERTAS_RELAMPAGO_SISTEMA = {
 
 // Helper: estado real del toggle cervecero
 function _esCerveceroActivo() {
+    _jcOverrideVigente(); // v574: el apagado/encendido manual vale solo por el día en que se hizo
     return _cerveceroOverride !== null ? _cerveceroOverride : _esCerveceroAutoActivo();
 }
 
@@ -13492,6 +13693,56 @@ if (_cerveceroOverride === 'true')  _cerveceroOverride = true;
 else if (_cerveceroOverride === 'false') _cerveceroOverride = false;
 else _cerveceroOverride = null;
 
+// v574 — el override manual vale SOLO por el día en que se hizo (hora Argentina).
+// Si la fecha guardada no es la de hoy (o no existe), se descarta y vuelve el automático.
+var _jcFechaCache = { t: 0, f: '' };
+var _jcTemp = false; // true mientras _repreciarCarritoCervecero compara estados (no vencer el override)
+function _jcHoy() {
+    var n = Date.now();
+    if (n - _jcFechaCache.t > 30000) {
+        _jcFechaCache = { t: n, f: new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' }) };
+    }
+    return _jcFechaCache.f;
+}
+function _jcOverrideVigente() {
+    if (_cerveceroOverride === null || _jcTemp) return;
+    var f = null;
+    try { f = localStorage.getItem('cervecero_override_fecha'); } catch (e) {}
+    if (f !== _jcHoy()) {
+        _cerveceroOverride = null;
+        try { localStorage.removeItem('cervecero_override'); localStorage.removeItem('cervecero_override_fecha'); } catch (e) {}
+    }
+}
+_jcOverrideVigente();
+
+// v574 — al prender/apagar el Jueves Cervecero, re-precia las cervezas que YA están en el carrito.
+// Solo toca líneas cuyo precio actual coincide con lo que daba el sistema en el estado anterior
+// (una línea con precio cambiado a mano con el lápiz NO se toca). Devuelve {cambiadas, manuales}.
+function _repreciarCarritoCervecero(estadoAnterior) {
+    var cambiadas = 0, manuales = 0;
+    (ventaActual || []).forEach(function (item) {
+        if (item.esPeso || !_poolCervecero.has(item.id)) return;
+        var p = productos.find(function (pr) { return pr.id === item.id; });
+        if (!p) return;
+        var nuevo = calcularOfertaPOS(p, item.qty);
+        var guardado = _cerveceroOverride;
+        _jcTemp = true; _cerveceroOverride = estadoAnterior;
+        var previo;
+        try { previo = calcularOfertaPOS(p, item.qty); } finally { _cerveceroOverride = guardado; _jcTemp = false; }
+        if (item.price !== previo.precioUnitario) { manuales++; return; }
+        if (nuevo.precioUnitario === item.price && (nuevo.etiqueta || null) === (item.ofertaEtiqueta || null)) return;
+        item.price            = nuevo.precioUnitario;
+        item.precioTotalCalc  = nuevo.precioTotal;
+        item.precioOriginal   = (nuevo.tipoOferta === 'normal' || nuevo.tipoOferta === 'combo' || nuevo.tipoOferta === 'promo') ? p.price : (nuevo.tieneOferta ? p.price : 0);
+        item.precioModificado = nuevo.tieneOferta;
+        item.ofertaEtiqueta   = nuevo.etiqueta || null;
+        item.ofertaTipo       = nuevo.tipoOferta || null;
+        cambiadas++;
+    });
+    if (cambiadas) { renderVenta(); guardarCarritoPendiente(); }
+    return { cambiadas: cambiadas, manuales: manuales };
+}
+
 let _jcHoraCierre = (typeof _horaCierreSistema !== 'undefined') ? _horaCierreSistema : 22; // se actualiza al cargar el pool cervecero
 
 function _esCerveceroAutoActivo() {
@@ -13519,6 +13770,7 @@ function _pintarToggleCervecero() {
 
 function toggleCervecero() {
     const autoActivo = _esCerveceroAutoActivo();
+    _jcOverrideVigente();
     const estadoActual = _cerveceroOverride !== null ? _cerveceroOverride : autoActivo;
 
     if (_cerveceroOverride === null) {
@@ -13530,16 +13782,23 @@ function toggleCervecero() {
     }
 
     // Guardar en localStorage
-    if (_cerveceroOverride === null) localStorage.removeItem('cervecero_override');
-    else localStorage.setItem('cervecero_override', String(_cerveceroOverride));
+    if (_cerveceroOverride === null) { localStorage.removeItem('cervecero_override'); localStorage.removeItem('cervecero_override_fecha'); }
+    else { localStorage.setItem('cervecero_override', String(_cerveceroOverride)); localStorage.setItem('cervecero_override_fecha', _jcHoy()); }
 
     _pintarToggleCervecero();
 
     const nuevoEstado = _cerveceroOverride !== null ? _cerveceroOverride : autoActivo;
+    var _rp = { cambiadas: 0, manuales: 0 };
+    try { _rp = _repreciarCarritoCervecero(estadoActual); } catch (eRp) { console.warn('⚠️ repreciar carrito cervecero:', eRp); }
     const msg = _cerveceroOverride === null
         ? '🔄 Cervecero en modo automático'
         : (nuevoEstado ? '🟢 🍺 Cervecero activado (manual)' : '🔴 🍺 Cervecero desactivado (manual)');
     mostrarToast(msg, nuevoEstado ? 'verde' : 'rojo');
+    if (_rp.cambiadas || _rp.manuales) {
+        setTimeout(function () {
+            mostrarToast('🍺 Carrito: ' + _rp.cambiadas + ' línea(s) actualizada(s)' + (_rp.manuales ? ' · ' + _rp.manuales + ' con precio a mano sin tocar' : ''), _rp.manuales ? 'naranja' : 'verde');
+        }, 1500);
+    }
     // Recargar pool cervecero y refrescar badges
     cargarPoolsOfertas().then(() => _refreshResultadosBadges());
 }
@@ -14379,6 +14638,11 @@ async function compartirFlyerAdminWA() {
         </div>
         <div id="fotosGHConfig" style="display:none;margin-top:14px;background:#f9f9f9;border:1.5px solid #e0e0e0;border-radius:14px;padding:14px;">
           <div style="font-size:0.8rem;font-weight:700;color:#333;margin-bottom:10px;">⚙️ Configurar GitHub (una sola vez)</div>
+          <input type="file" id="cfgGHFileInput" accept="application/json,.json" style="display:none" onchange="cargarConfigGHDesdeArchivo(event)">
+          <button onclick="document.getElementById('cfgGHFileInput').click()"
+                  style="width:100%;padding:10px;margin-bottom:10px;border:1.5px solid #24292e;border-radius:10px;background:white;color:#24292e;font-size:0.88rem;font-weight:700;cursor:pointer;">
+            📂 Cargar desde archivo .json
+          </button>
           <input type="text" id="ghOwner" placeholder="Usuario GitHub"
                  style="width:100%;border:1.5px solid #ddd;border-radius:8px;padding:8px 10px;font-size:0.88rem;margin-bottom:6px;box-sizing:border-box;">
           <input type="text" id="ghRepo" placeholder="Nombre del repo"
@@ -15110,7 +15374,7 @@ abrirNuevoProducto = function() {
 
 <!-- ========== MODAL SALIDA INTERNA ========== -->
 <div id="modalSalidaInterna" style="display:none;position:fixed;inset:0;z-index:5000;background:rgba(0,0,0,0.75);align-items:flex-start;justify-content:center;">
-  <div style="background:white;width:100%;height:100%;max-width:600px;display:flex;flex-direction:column;overflow:hidden;">
+  <div style="background:white;width:100%;height:100%;max-width:600px;display:flex;flex-direction:column;overflow:hidden;position:relative;">
     <!-- Header -->
     <div style="padding:16px 20px 12px;border-bottom:1px solid #eee;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;background:white;">
       <div>
@@ -15120,50 +15384,48 @@ abrirNuevoProducto = function() {
       <button onclick="cerrarSalidaInterna()" style="background:#f44336;color:white;border:none;border-radius:50%;width:32px;height:32px;font-size:1rem;cursor:pointer;">✕</button>
     </div>
 
+    <!-- v571: envoltorio relativo para anclar el botón flotante de confirmar -->
+    <div style="position:relative;flex:1;min-height:0;display:flex;flex-direction:column;">
     <!-- Scroll area -->
     <div style="flex:1;overflow-y:auto;display:flex;flex-direction:column;min-height:0;">
 
       <!-- Buscador -->
       <div style="padding:12px 16px 8px;border-bottom:1px solid #f0f0f0;flex:1;display:flex;flex-direction:column;min-height:0;">
-        <input id="salidaBuscador" type="text" placeholder="Buscar producto..."
+        <input id="salidaBuscador" type="text" placeholder="Buscar · tocar suma · deslizar ← resta"
           oninput="salidaBuscar()"
           style="width:100%;padding:10px 14px;border:2px solid #ddd;border-radius:12px;font-size:0.95rem;box-sizing:border-box;flex-shrink:0;">
-        <div id="salidaResultados" style="flex:1;overflow-y:auto;margin-top:6px;min-height:0;"></div>
+        <div id="salidaResultados" style="flex:1;overflow-y:auto;margin-top:6px;min-height:0;padding-bottom:4px;box-sizing:border-box;"></div>
       </div>
 
-      <!-- Producto seleccionado -->
-      <div id="salidaProductoSelWrap" style="display:none;padding:12px 16px;border-bottom:1px solid #f0f0f0;">
-        <!-- v548: lista de productos a sacar (como el carrito) -->
-        <div style="font-size:0.8rem;font-weight:700;color:#555;margin-bottom:6px;">Productos a sacar: <span id="salidaCuenta"></span></div>
-        <div id="salidaLista" style="max-height:34vh;overflow-y:auto;"></div>
-
-        <!-- Motivo -->
-        <div style="margin-top:12px;">
-          <div style="font-size:0.8rem;font-weight:700;color:#555;margin-bottom:8px;">Motivo:</div>
-          <div style="display:flex;flex-wrap:wrap;gap:6px;" id="salidaMotivosBtns">
-            <button onclick="salidaSelMotivo(this,'CONSUMO')"    class="salida-motivo" style="padding:7px 14px;border-radius:20px;border:2px solid #ddd;background:white;font-size:0.82rem;cursor:pointer;">🍽️ Consumo</button>
-            <button onclick="salidaSelMotivo(this,'MERMA')"      class="salida-motivo" style="padding:7px 14px;border-radius:20px;border:2px solid #ddd;background:white;font-size:0.82rem;cursor:pointer;">📉 Merma</button>
-            <button onclick="salidaSelMotivo(this,'VENCIDO')"    class="salida-motivo" style="padding:7px 14px;border-radius:20px;border:2px solid #ddd;background:white;font-size:0.82rem;cursor:pointer;">⏰ Vencido</button>
-            <button onclick="salidaSelMotivo(this,'REGALO')"     class="salida-motivo" style="padding:7px 14px;border-radius:20px;border:2px solid #ddd;background:white;font-size:0.82rem;cursor:pointer;">🎁 Regalo</button>
-            <button onclick="salidaSelMotivo(this,'ROTURA')"     class="salida-motivo" style="padding:7px 14px;border-radius:20px;border:2px solid #ddd;background:white;font-size:0.82rem;cursor:pointer;">💥 Rotura</button>
-            <button onclick="salidaSelMotivo(this,'USO_INTERNO')" class="salida-motivo" style="padding:7px 14px;border-radius:20px;border:2px solid #ddd;background:white;font-size:0.82rem;cursor:pointer;">🏪 Uso interno</button>
+      <!-- Producto seleccionado — v571: franja compacta (motivo colapsado + observación colapsada) -->
+      <div id="salidaProductoSelWrap" style="display:none;padding:8px 16px;border-bottom:1px solid #f0f0f0;">
+        <span id="salidaCuenta" style="display:none"></span><div id="salidaLista" style="display:none"></div>
+        <div style="display:flex;align-items:center;gap:6px;padding-top:3px;">
+          <button id="salidaObsBtn" onclick="salidaToggleObs()" title="Observación" style="position:relative;flex-shrink:0;width:38px;height:36px;border-radius:18px;border:2px solid #ddd;background:white;font-size:1rem;cursor:pointer;">📝<span id="salidaObsDot" style="display:none;position:absolute;top:-2px;right:-2px;width:10px;height:10px;border-radius:5px;background:#e53935;"></span></button>
+          <button id="salidaMotivoChip" onclick="salidaToggleMotivos()" style="flex-shrink:0;white-space:nowrap;padding:7px 9px;border-radius:20px;border:2px solid #546e7a;background:#546e7a;color:white;font-size:0.82rem;font-weight:700;cursor:pointer;">🍽️ Consumo ▾</button>
+          <!-- v572: Confirmar va en la MISMA fila (con el badge de productos); ya no flota sobre el catálogo -->
+          <div id="salidaFabWrap" style="position:relative;flex:1;min-width:0;">
+            <button id="salidaFab" onclick="salidaPedirConfirmacion()" style="width:100%;padding:9px 4px;border:none;border-radius:20px;background:#2e7d32;color:white;font-weight:800;font-size:0.86rem;cursor:pointer;white-space:nowrap;">✅ Confirmar</button>
+            <span id="salidaFabN" style="position:absolute;top:-9px;right:-3px;min-width:21px;height:21px;padding:0 5px;box-sizing:border-box;border-radius:11px;background:#e53935;color:#fff;font-weight:800;font-size:0.75rem;display:flex;align-items:center;justify-content:center;border:2px solid #fff;pointer-events:none;"></span>
           </div>
         </div>
-
-        <!-- Observación -->
-        <div style="margin-top:10px;">
-          <textarea id="salidaObs" placeholder="Observación opcional..."
+        <div style="display:none;flex-wrap:wrap;gap:6px;margin-top:8px;" id="salidaMotivosBtns">
+          <button onclick="salidaSelMotivo(this,'CONSUMO')"    class="salida-motivo" style="padding:7px 14px;border-radius:20px;border:2px solid #ddd;background:white;font-size:0.82rem;cursor:pointer;">🍽️ Consumo</button>
+          <button onclick="salidaSelMotivo(this,'MERMA')"      class="salida-motivo" style="padding:7px 14px;border-radius:20px;border:2px solid #ddd;background:white;font-size:0.82rem;cursor:pointer;">📉 Merma</button>
+          <button onclick="salidaSelMotivo(this,'VENCIDO')"    class="salida-motivo" style="padding:7px 14px;border-radius:20px;border:2px solid #ddd;background:white;font-size:0.82rem;cursor:pointer;">⏰ Vencido</button>
+          <button onclick="salidaSelMotivo(this,'REGALO')"     class="salida-motivo" style="padding:7px 14px;border-radius:20px;border:2px solid #ddd;background:white;font-size:0.82rem;cursor:pointer;">🎁 Regalo</button>
+          <button onclick="salidaSelMotivo(this,'ROTURA')"     class="salida-motivo" style="padding:7px 14px;border-radius:20px;border:2px solid #ddd;background:white;font-size:0.82rem;cursor:pointer;">💥 Rotura</button>
+          <button onclick="salidaSelMotivo(this,'USO_INTERNO')" class="salida-motivo" style="padding:7px 14px;border-radius:20px;border:2px solid #ddd;background:white;font-size:0.82rem;cursor:pointer;">🏪 Uso interno</button>
+        </div>
+        <div id="salidaObsWrap" style="display:none;margin-top:8px;">
+          <textarea id="salidaObs" placeholder="Observación opcional..." oninput="_salidaObsPunto()"
             style="width:100%;padding:9px 12px;border:2px solid #ddd;border-radius:10px;font-size:0.85rem;resize:none;height:52px;box-sizing:border-box;font-family:inherit;"></textarea>
         </div>
-
-        <!-- Confirmar -->
-        <button onclick="confirmarSalidaInterna()"
-          style="width:100%;margin-top:12px;padding:13px;border:none;border-radius:12px;background:#546e7a;color:white;font-weight:700;font-size:0.95rem;cursor:pointer;">
-          ✅ Confirmar salida
-        </button>
       </div>
 
     </div>
+
+    </div><!-- /envoltorio v571 -->
 
     <!-- Historial — v432: pie FIJO al final del modal (fuera del área que
          scrollea el medio), siempre en el mismo lugar en vez de quedar
@@ -15180,6 +15442,18 @@ abrirNuevoProducto = function() {
                   padding:12px 16px;">
         <span>📋 Últimas salidas</span>
         <span id="salidaHistorialFlecha" style="font-size:0.75rem;color:#888;">Tocá para ver ▾</span>
+      </div>
+    </div>
+    <!-- v571: «¿Seguro?» antes de registrar la salida -->
+    <div id="salidaConfirmDlg" style="display:none;position:absolute;inset:0;z-index:30;background:rgba(0,0,0,0.55);align-items:center;justify-content:center;padding:20px;box-sizing:border-box;">
+      <div style="background:white;border-radius:16px;padding:18px;width:100%;max-width:360px;">
+        <div id="salidaConfirmTitulo" style="font-weight:900;font-size:1.05rem;color:#1a1a1a;margin-bottom:8px;">¿Seguro que es Consumo?</div>
+        <div id="salidaConfirmResumen" style="font-size:0.85rem;color:#444;max-height:30vh;overflow-y:auto;margin-bottom:14px;line-height:1.5;"></div>
+        <div style="display:flex;gap:8px;">
+          <button onclick="salidaCambiarMotivo()" style="flex:1;padding:12px;border-radius:12px;border:2px solid #ddd;background:white;font-weight:700;font-size:0.9rem;cursor:pointer;">Cambiar motivo</button>
+          <button onclick="salidaSiConfirmar()" style="flex:1;padding:12px;border:none;border-radius:12px;background:#2e7d32;color:white;font-weight:800;font-size:0.9rem;cursor:pointer;">✅ Sí, confirmar</button>
+        </div>
+        <button onclick="salidaCerrarConfirm()" style="width:100%;margin-top:8px;padding:8px;border:none;background:none;color:#888;font-size:0.85rem;cursor:pointer;">Volver</button>
       </div>
     </div>
   </div>
@@ -15620,6 +15894,30 @@ function guardarConfigGH(){
     document.getElementById('fotosGHConfig').style.display='none';
     mostrarToast('✅ Config guardada','verde');
     publicarEnGitHub();
+}
+
+// v573: cargar la configuración de GitHub desde un archivo .json (mismo formato que copihue-fotos: {owner,repo,branch,token[,anthropicKey]})
+function cargarConfigGHDesdeArchivo(event){
+    var file=event.target.files&&event.target.files[0]; if(!file) return;
+    var reader=new FileReader();
+    reader.onload=function(e){
+        var d;
+        try{ d=JSON.parse(e.target.result); }catch(err){ mostrarToast('⚠️ Archivo inválido (no es JSON)','naranja'); event.target.value=''; return; }
+        if(!d||typeof d!=='object'){ mostrarToast('⚠️ Archivo inválido','naranja'); event.target.value=''; return; }
+        function _g(){ for(var i=0;i<arguments.length;i++){ var v=d[arguments[i]]; if(typeof v==='string'&&v.trim()) return v.trim(); } return ''; }
+        var owner=_g('owner','usuario','user'), repo=_g('repo','repositorio'), branch=_g('branch','rama'),
+            token=_g('token','github_token','ghToken'), ak=_g('anthropicKey','anthropic_key','api_key','apiKey');
+        if(!owner&&!repo&&!token&&!ak){ mostrarToast('⚠️ El archivo no tiene datos conocidos (owner, repo, token)','naranja'); event.target.value=''; return; }
+        if(owner) document.getElementById('ghOwner').value=owner;
+        if(repo) document.getElementById('ghRepo').value=repo;
+        if(branch) document.getElementById('ghBranch').value=branch;
+        if(token) document.getElementById('ghToken').value=token;
+        if(ak) document.getElementById('anthropicKey').value=ak;
+        event.target.value='';
+        mostrarToast('✅ Datos cargados — tocá «Guardar configuración»','verde');
+    };
+    reader.onerror=function(){ mostrarToast('⚠️ No se pudo leer el archivo','naranja'); };
+    reader.readAsText(file);
 }
 
 function _mostrarConfigGH(){
@@ -16219,6 +16517,7 @@ function abrirCobrarSeleccionados() {
     const cliente = seleccionados[0].cliente;
     const mismoCliente = seleccionados.every(f => f.cliente === cliente);
     _metodoCobroPendiente = 'EFECTIVO';
+    window._idOpCobroPend = 'cp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8); // v560: mismo código en todos los reintentos de ESTE cobro
     selMetodoCobrarFiado('EFECTIVO');
     document.getElementById('cobrarFiadoInfo').innerHTML =
         `<strong>${mismoCliente ? cliente : seleccionados.length + ' clientes'}</strong><br>` +
@@ -16244,9 +16543,14 @@ async function confirmarCobroPendiente() {
     try {
         const fechaPago = new Date().toISOString().split('T')[0];
         for (const fiad of seleccionados) {
-            const datos = { idFiado: fiad.idFiado, metodoPago: _metodoCobroPendiente, fechaPago };
+            const datos = { idFiado: fiad.idFiado, metodoPago: _metodoCobroPendiente, fechaPago, idOperacion: window._idOpCobroPend || ('cp_' + Date.now()) }; // v560: idOperacion
             const resp = await _apiFetch('cobrarFiado', datos);
-            if (!resp.success) throw new Error('Error en ' + fiad.idFiado + ': ' + (resp.mensaje || 'Error'));
+            if (!resp.success) {
+                // v560: "ocupado" y "ya estaba pagado" se explican tal cual (no es una falla de red ni un error genérico)
+                if (resp.ocupado) throw new Error('⏳ La planilla está ocupada: no se registró nada. Tocá Confirmar de nuevo (no se cobra dos veces).');
+                if (resp.yaPagado) throw new Error(resp.mensaje || 'Este fiado ya estaba pagado — no se registró de nuevo');
+                throw new Error('Error en ' + fiad.idFiado + ': ' + (resp.mensaje || 'Error'));
+            }
         }
         document.getElementById('modalCobrarFiado').style.display = 'none';
         if (btn) { btn.disabled = false; btn.textContent = '✅ Confirmar pago'; }
@@ -16563,9 +16867,11 @@ function abrirSalidaInterna() {
     document.getElementById('salidaObs').value = '';
     document.querySelectorAll('.salida-motivo').forEach(b => { b.style.background = 'white'; b.style.borderColor = '#ddd'; b.style.color = '#333'; });
     _salidaMotivo   = null;
+    _salidaMotivoPorDefecto();   // v571: Consumo por defecto (todo colapsado)
     _idOperacionSalidaActual = null; // sesión nueva del modal — id nuevo para la próxima salida
     _salidaHistorialCargado = false;
     salidaMostrarTodos(); // mostrar todos los productos con stock al abrir
+    _salidaGestosInit(document.getElementById('salidaResultados'));   // v570: tocar/deslizar en el catálogo desde el primer toque
     setTimeout(() => document.getElementById('salidaBuscador').focus(), 100);
 }
 
@@ -16593,14 +16899,16 @@ function cerrarSalidaInterna() {
     document.getElementById('salidaHistorialFlecha').textContent = 'Tocá para ver ▾';
     _salidaProducto = null; _salidaItems = [];
     _salidaMotivo   = null;
-    const btn = document.querySelector('#modalSalidaInterna button[onclick="confirmarSalidaInterna()"]');
-    if (btn) { btn.disabled = false; btn.textContent = '✅ Confirmar salida'; }
+    const _dlg = document.getElementById('salidaConfirmDlg'); if (_dlg) _dlg.style.display = 'none';   // v571
+    try { _salidaFabActualizar(); } catch (e) {}
+    const btn = document.getElementById('salidaFab');   // v571: botón flotante
+    if (btn) { btn.disabled = false; btn.textContent = _salidaFabTexto(); }
 }
 
 function salidaMostrarTodos() {
     const div = document.getElementById('salidaResultados');
-    const todos = productos.filter(p => p.stock > 0)
-        .sort((a,b) => a.name.localeCompare(b.name, 'es'));
+    const todos = _salidaOrdenarElegidos(productos.filter(p => p.stock > 0)
+        .sort((a,b) => a.name.localeCompare(b.name, 'es')));
     if (!todos.length) { div.innerHTML = '<div style="padding:10px;color:#aaa;font-size:0.85rem;">Sin productos con stock</div>'; return; }
     div.innerHTML = todos.map(p => _salidaFilaProducto(p)).join('');
 }
@@ -16609,9 +16917,10 @@ function salidaMostrarTodos() {
 // tener que leer nombres uno por uno (pedido: "fotos de producto para
 // facilitar la búsqueda visual").
 function _salidaFilaProducto(p) {
+    const _it = _salidaItems.find(x => x.p.id === p.id);   // v570: badge con la cantidad elegida
     return `
-        <div onclick="salidaSeleccionar(${p.id})"
-          style="padding:8px 14px;border-bottom:1px solid #f0f0f0;cursor:pointer;display:flex;align-items:center;gap:10px;background:#f1f9f2;">
+        <div data-pid="${p.id}"
+          style="padding:8px 14px;border-bottom:1px solid #f0f0f0;cursor:pointer;display:flex;align-items:center;gap:10px;background:#f1f9f2;touch-action:pan-y;user-select:none;-webkit-user-select:none;">
           <div style="position:relative;flex-shrink:0;width:38px;height:38px;">
             <img src="${p.image}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"
                  alt="${p.name}" style="width:38px;height:38px;border-radius:8px;object-fit:cover;display:block;">
@@ -16622,7 +16931,35 @@ function _salidaFilaProducto(p) {
             <div style="font-size:0.7rem;color:#888;">Stock: ${p.stock}</div>
           </div>
           <div style="font-size:0.85rem;color:#555;flex-shrink:0;">$${p.price.toLocaleString('es-AR')}</div>
+          <div class="salida-badge" style="flex-shrink:0;min-width:26px;height:26px;padding:0 7px;box-sizing:border-box;border-radius:13px;background:${_it && _it.cant >= p.stock ? '#c62828' : '#37474f'};color:#fff;font-weight:800;font-size:0.85rem;display:${_it ? 'flex' : 'none'};align-items:center;justify-content:center;">${_it ? _it.cant : ''}</div>
         </div>`;
+}
+
+// v570 — los productos ya elegidos suben al principio del catálogo (en el orden en que se eligieron); el resto queda como siempre.
+function _salidaOrdenarElegidos(arr) {
+    const idx = id => _salidaItems.findIndex(x => x.p.id === id);
+    const sel = arr.filter(p => idx(p.id) >= 0).sort((a, b) => idx(a.id) - idx(b.id));
+    return sel.concat(arr.filter(p => idx(p.id) < 0));
+}
+// v570 — actualiza SOLO los badges del catálogo (sin redibujar la lista: no se pierde el scroll)
+function _salidaActualizarBadges() {
+    document.querySelectorAll('#salidaResultados [data-pid]').forEach(function (f) {
+        const id = Number(f.getAttribute('data-pid')), it = _salidaItems.find(x => x.p.id === id), bd = f.querySelector('.salida-badge');
+        if (!bd) return;
+        if (it) { bd.textContent = it.cant; bd.style.display = 'flex'; bd.style.background = it.cant >= it.p.stock ? '#c62828' : '#37474f'; }
+        else { bd.style.display = 'none'; bd.textContent = ''; }
+    });
+}
+// v570 — 1 s después del último toque, los elegidos suben al principio y la lista vuelve arriba (mientras se toca seguido, nada se mueve)
+var _salidaOrdenTimer = null;
+function _salidaProgramarOrden() {
+    clearTimeout(_salidaOrdenTimer);
+    _salidaOrdenTimer = setTimeout(function () {
+        const m = document.getElementById('modalSalidaInterna');
+        if (!m || m.style.display === 'none') return;
+        salidaBuscar();
+        const div = document.getElementById('salidaResultados'); if (div) div.scrollTop = 0;
+    }, 1000);
 }
 
 function salidaBuscar() {
@@ -16637,7 +16974,7 @@ function salidaBuscar() {
         div.innerHTML = '<div style="padding:10px;color:#aaa;font-size:0.85rem;">Sin resultados</div>';
         return;
     }
-    div.innerHTML = matches.map(p => _salidaFilaProducto(p)).join('');
+    div.innerHTML = _salidaOrdenarElegidos(matches).map(p => _salidaFilaProducto(p)).join('');
 }
 
 // v548 — la salida es una LISTA de productos (como el carrito): un motivo y una observación para todos.
@@ -16647,21 +16984,48 @@ function _salidaRender() {
     const wrap = document.getElementById('salidaProductoSelWrap');
     const lista = document.getElementById('salidaLista');
     wrap.style.display = _salidaItems.length ? 'block' : 'none';
-    document.getElementById('salidaCuenta').textContent = _salidaItems.length ? '(' + _salidaItems.length + ')' : '';
-    lista.innerHTML = _salidaItems.map(it => `
-        <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:#f5f5f5;border-radius:10px;margin-bottom:6px;">
-          <div style="flex:1;min-width:0;">
-            <div style="font-weight:700;font-size:0.85rem;color:#1a1a1a;">${it.p.name}</div>
-            <div style="font-size:0.7rem;color:#888;">Stock: ${it.p.stock}</div>
-          </div>
-          <button onclick="salidaCantItem(${it.p.id},-1)" style="width:30px;height:30px;border-radius:50%;border:2px solid #ddd;background:white;font-size:1.1rem;cursor:pointer;">−</button>
-          <input type="number" min="1" value="${it.cant}" onchange="salidaCantSet(${it.p.id},this.value)" class="salida-cant"
-            style="width:48px;text-align:center;padding:4px;border:2px solid #ddd;border-radius:8px;font-size:0.95rem;font-weight:700;">
-          <button onclick="salidaCantItem(${it.p.id},1)" style="width:30px;height:30px;border-radius:50%;border:2px solid #ddd;background:white;font-size:1.1rem;cursor:pointer;">+</button>
-          <button onclick="salidaQuitar(${it.p.id})" style="background:none;border:none;color:#e53935;font-size:1.1rem;cursor:pointer;">✕</button>
-        </div>`).join('');
-    const btn = document.querySelector('#modalSalidaInterna button[onclick="confirmarSalidaInterna()"]');
-    if (btn && !btn.disabled) btn.textContent = '✅ Confirmar salida' + (_salidaItems.length > 1 ? ' (' + _salidaItems.length + ' productos)' : '');
+    // v570 — ya no hay lista aparte: la cantidad se ve como badge en cada fila del catálogo
+    lista.innerHTML = '';
+    _salidaActualizarBadges();
+    _salidaGestosInit(document.getElementById('salidaResultados'));
+    _salidaProgramarOrden();
+    const btn = document.getElementById('salidaFab');   // v571: botón flotante
+    _salidaFabActualizar();
+}
+
+// v570 — gestos sobre las filas del catálogo: tocar = +1, deslizar a la izquierda = −1 (con cantidad 1 quita el producto de la salida).
+// Un solo escuchador delegado (se instala una vez). El scroll vertical sigue siendo del navegador (touch-action: pan-y).
+var _salidaG = null;
+function _salidaGestosInit(cont) {
+    if (!cont || cont._gestosOk) return;
+    cont._gestosOk = true;
+    cont.addEventListener('pointerdown', function (e) {
+        const fila = e.target.closest('[data-pid]');
+        _salidaG = fila ? { id: Number(fila.getAttribute('data-pid')), x: e.clientX, y: e.clientY, dx: 0, dy: 0, fila: fila } : null;
+    });
+    cont.addEventListener('pointermove', function (e) {
+        if (!_salidaG) return;
+        _salidaG.dx = e.clientX - _salidaG.x; _salidaG.dy = e.clientY - _salidaG.y;
+        if (_salidaG.dx < -8 && Math.abs(_salidaG.dx) > Math.abs(_salidaG.dy) * 1.5) {
+            _salidaG.fila.style.transition = 'none';
+            _salidaG.fila.style.transform = 'translateX(' + Math.max(_salidaG.dx, -80) + 'px)';
+        }
+    });
+    const fin = function (cancelado) {
+        const g = _salidaG; _salidaG = null;
+        if (!g) return;
+        g.fila.style.transition = 'transform .15s'; g.fila.style.transform = '';
+        if (cancelado) return;
+        const it = _salidaItems.find(x => x.p.id === g.id);
+        if (g.dx <= -40 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5) {
+            if (!it) return;
+            if (it.cant <= 1) salidaQuitar(g.id); else salidaCantItem(g.id, -1);
+        } else if (Math.abs(g.dx) < 10 && Math.abs(g.dy) < 10) {
+            if (it) salidaCantItem(g.id, 1); else salidaSeleccionar(g.id);
+        }
+    };
+    cont.addEventListener('pointerup', function () { fin(false); });
+    cont.addEventListener('pointercancel', function () { fin(true); });
 }
 
 function salidaSeleccionar(id) {
@@ -16701,12 +17065,65 @@ function salidaCantSet(id, val) {
     _salidaRender();
 }
 
+// ── v571: motivo colapsado (Consumo por defecto), observación colapsada, botón flotante y «¿Seguro?» ──
+var _SAL_MOTIVO_TXT = { CONSUMO: '🍽️ Consumo', MERMA: '📉 Merma', VENCIDO: '⏰ Vencido', REGALO: '🎁 Regalo', ROTURA: '💥 Rotura', USO_INTERNO: '🏪 Uso interno' };
+function _salidaMotivoPorDefecto() {
+    const primero = document.querySelector('#salidaMotivosBtns .salida-motivo');   // el primero es Consumo
+    if (primero) salidaSelMotivo(primero, 'CONSUMO'); else _salidaMotivo = 'CONSUMO';
+    const o = document.getElementById('salidaObsWrap'); if (o) o.style.display = 'none';
+    const ob = document.getElementById('salidaObs'); if (ob) ob.value = '';
+    _salidaObsPunto();
+}
+function salidaToggleMotivos() {
+    const c = document.getElementById('salidaMotivosBtns'); if (!c) return;
+    c.style.display = c.style.display === 'none' ? 'flex' : 'none';
+    _salidaFabPos();
+}
+function salidaToggleObs() {
+    const w = document.getElementById('salidaObsWrap'); if (!w) return;
+    w.style.display = w.style.display === 'none' ? 'block' : 'none';
+    if (w.style.display === 'block') { const t = document.getElementById('salidaObs'); if (t) t.focus(); }
+    _salidaFabPos();
+}
+function _salidaObsPunto() {
+    const t = document.getElementById('salidaObs'), d = document.getElementById('salidaObsDot');
+    if (t && d) d.style.display = t.value.trim() ? 'block' : 'none';
+}
+function _salidaFabTexto() { return '✅ Confirmar'; }   // v572: el motivo ya se ve en el chip de al lado
+function _salidaFabActualizar() {
+    const w = document.getElementById('salidaFabWrap'), b = document.getElementById('salidaFab'), n = document.getElementById('salidaFabN');
+    if (!w || !b) return;
+    w.style.display = 'block';   // v572: la franja entera ya se muestra/oculta según haya productos
+    if (n) n.textContent = _salidaItems.length || '';
+    if (!b.disabled) b.textContent = _salidaFabTexto();
+    _salidaFabPos();
+}
+function _salidaFabPos() { /* v572: ya no flota — va dentro de la franja */ }
+function salidaPedirConfirmacion() {
+    if (!_salidaItems.length) { mostrarToast('⚠️ Agregá al menos un producto', 'rojo'); return; }
+    if (!_salidaMotivo) { mostrarToast('⚠️ Seleccioná un motivo', 'rojo'); return; }
+    const nom = (_SAL_MOTIVO_TXT[_salidaMotivo] || _salidaMotivo).replace(/^\S+\s/, '');
+    document.getElementById('salidaConfirmTitulo').textContent = '¿Seguro que es ' + nom + '?';
+    document.getElementById('salidaConfirmResumen').innerHTML = _salidaItems.map(it => '• ' + it.p.name.replace(/</g, '&lt;') + ' <b>×' + it.cant + '</b>').join('<br>');
+    document.getElementById('salidaConfirmDlg').style.display = 'flex';
+}
+function salidaCerrarConfirm() { document.getElementById('salidaConfirmDlg').style.display = 'none'; }
+function salidaCambiarMotivo() {
+    salidaCerrarConfirm();
+    const c = document.getElementById('salidaMotivosBtns'); if (c) c.style.display = 'flex';
+    _salidaFabPos();
+}
+function salidaSiConfirmar() { salidaCerrarConfirm(); confirmarSalidaInterna(); }
+
 function salidaSelMotivo(btn, motivo) {
     _salidaMotivo = motivo;
     document.querySelectorAll('.salida-motivo').forEach(b => {
         b.style.background = 'white'; b.style.borderColor = '#ddd'; b.style.color = '#333';
     });
     btn.style.background = '#546e7a'; btn.style.borderColor = '#546e7a'; btn.style.color = 'white';
+    const chip = document.getElementById('salidaMotivoChip'); if (chip) chip.textContent = btn.textContent.trim() + ' ▾';   // v571
+    const cj = document.getElementById('salidaMotivosBtns'); if (cj) cj.style.display = 'none';   // v571: al elegir, se colapsa
+    _salidaFabActualizar();
 }
 
 // v19/09/2026 — BLINDAJE anti-duplicado, mismo criterio que confirmarVenta/
@@ -16726,7 +17143,7 @@ async function confirmarSalidaInterna() {
         if (it.cant > it.p.stock) { mostrarToast(`⚠️ ${it.p.name}: stock insuficiente (hay ${it.p.stock})`, 'rojo'); return; }
     }
 
-    const btn = document.querySelector('#modalSalidaInterna button[onclick="confirmarSalidaInterna()"]');
+    const btn = document.getElementById('salidaFab');   // v571: botón flotante
     if (btn && btn.disabled) return;   // doble toque
     if (btn) { btn.disabled = true; btn.textContent = '⏳ Registrando...'; }
 
@@ -16765,7 +17182,7 @@ async function confirmarSalidaInterna() {
             }
         }
     } finally {
-        if (btn && btn.disabled) { btn.disabled = false; btn.textContent = '✅ Confirmar salida'; }
+        if (btn && btn.disabled) { btn.disabled = false; btn.textContent = _salidaFabTexto(); }
     }
 
     if (ok) _cargarYRenderSalidaHistorial();
@@ -17226,6 +17643,8 @@ async function _confirmarFiadoSinTel() {
 // Seguridad: si algo del grupo no es el caso simple (producto por peso, precio ya modificado, precio
 // distinto al de lista, cantidades/precios no enteros, o la suma no cierra) NO se toca ese grupo y
 // queda igual que antes. Solo lee; no cambia el carrito ni lo que se muestra o cobra.
+// v567 — el redondeo aplicado viaja a la planilla (Code.gs v11.3): la fila TOTAL guarda lo COBRADO. Solo se agrega el campo si hubo redondeo.
+function _drCampo(d) { d = Math.round(Number(d) || 0); return d > 0 ? { descuentoRedondeo: d } : {}; }
 function _itemsParaServidor(lista) {
     const fila = (i, qty, precioVenta, modif, orig) => ({
         id: i.esPeso ? i.idOriginal : i.id, name: i.name, qty: qty,
@@ -17562,7 +17981,8 @@ async function _procesarVentaFiado(datosFiado, itemsSnapshot) {
             items: ventaData, metodoPago: 'FIADO', vendedor: vendedorActual,
             clienteFiado: datosFiado.cliente || '',
             telefonoFiado: datosFiado.telefono || '',
-            idVenta: idVentaFiado  // ← deduplicación GAS
+            idVenta: idVentaFiado,  // ← deduplicación GAS
+            ..._drCampo(totalOriginal - total)   // v567
         };
         const url = API_URL + '?action=vender&data=' + encodeURIComponent(JSON.stringify(ventaPayload));
         const resp = await _apiFetchUrl('vender', url);
@@ -17577,7 +17997,7 @@ async function _procesarVentaFiado(datosFiado, itemsSnapshot) {
             const pendientes = JSON.parse(localStorage.getItem('ventas_pendientes') || '[]');
             pendientes.push({
                 items: ventaDataRetry, metodoPago: 'FIADO', vendedor: vendedorActual,
-                idVenta: idVentaFiado, idFiado: datosFiado.idFiado, ts: Date.now()
+                idVenta: idVentaFiado, idFiado: datosFiado.idFiado, ts: Date.now(), ..._drCampo(totalOriginal - total)   // v567
             });
             localStorage.setItem('ventas_pendientes', JSON.stringify(pendientes));
             _fiadoEncolado = true;
