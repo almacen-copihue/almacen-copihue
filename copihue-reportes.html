@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>ver.36 · Copihue · Reportes</title>
+<title>ver.37 · Copihue · Reportes</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
@@ -376,7 +376,7 @@ let aniosAbiertos=new Set(); // años anteriores expandidos en el selector
 let metActivos=new Set(['TODOS']);
 let vendActivos=new Set(['TODOS']);
 let topOrden='venta'; // 'venta' | 'ganancia'
-let showVenc=false, showDiaSem=false, showHoras=false, showPDias=false, showGanDias=false, showMetodos=false, showVendedores=false, showTopProd=false, showMejDias=false, showCompMeses=false;
+let showVenc=false, showDiaSem=false, showHoras=false, showPDias=false, showGanDias=false, showMetodos=true, showVendedores=false, showTopProd=false, showMejDias=false, showCompMeses=true;
 let prodSelIdx=-1; // índice del producto seleccionado en el top (-1 = ninguno)
 // v36 — top: ver todos los productos y ordenar
 let topTodos=false;      // false = top 15 | true = todos los productos del período
@@ -926,6 +926,33 @@ function renderApp(){
     '</div>';
   }).join('');
 
+  // ── ver.37 — GRÁFICOS (solo visual, mismos datos) ──
+  const _gK=v=>{const a=Math.abs(v);return (v<0?'-':'')+'$'+(a>=1e6?(a/1e6).toFixed(1)+'M':a>=1000?Math.round(a/1000)+'k':Math.round(a));};
+  const _g12=Object.keys(vXMes).sort().slice(-12);
+  const _gMax=Math.max(..._g12.map(m=>Math.max(vXMes[m]||0,gXMes[m]||0)),1);
+  const graf12H=_g12.length<2?'':
+    '<div class="tar"><div class="tar-t">📊 Mes por mes <span style="font-size:.58rem;color:var(--gris)">🟩 venta 🟧 ganancia</span></div>'+
+      '<div style="display:flex;align-items:flex-end;gap:4px;height:150px;border-bottom:1px solid var(--borde);padding-top:4px">'+
+      _g12.map(m=>{const v=vXMes[m]||0,g=Math.max(0,gXMes[m]||0);const [a,mo]=m.split('-');
+        return '<div style="flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%" title="'+MESES[parseInt(mo)-1]+' '+a+': venta '+fmt(v)+' · ganancia '+fmt(gXMes[m]||0)+'">'+
+          '<div style="font-size:.5rem;color:var(--gris);white-space:nowrap;margin-bottom:2px">'+(v?_gK(v):'')+'</div>'+
+          '<div style="display:flex;align-items:flex-end;gap:1px;width:100%;justify-content:center">'+
+            '<div style="width:45%;max-width:14px;height:'+Math.round(v/_gMax*120)+'px;background:linear-gradient(180deg,#66bb6a,var(--vd));border-radius:3px 3px 0 0"></div>'+
+            '<div style="width:45%;max-width:14px;height:'+Math.round(g/_gMax*120)+'px;background:linear-gradient(180deg,#ffd54f,var(--naranja));border-radius:3px 3px 0 0"></div>'+
+          '</div></div>';}).join('')+
+      '</div>'+
+      '<div style="display:flex;gap:4px">'+_g12.map(m=>{const [a,mo]=m.split('-');return '<div style="flex:1;min-width:0;text-align:center;font-size:.55rem;color:var(--gris)">'+MESES[parseInt(mo)-1].substring(0,3)+'</div>';}).join('')+'</div>'+
+    '</div>';
+  const _gCols=['#2e7d32','#1565c0','#f9a825','#6a1b9a','#00838f','#9e9e9e'];
+  const _gSegs=_metNormales.map(([m,t])=>({lbl:m,val:t})).concat(_totalFiado>0?[{lbl:'📋 FIADO',val:_totalFiado}]:[]).filter(x=>x.val>0).sort((a,b)=>b.val-a.val);
+  const _gTot=_gSegs.reduce((a,x)=>a+x.val,0);
+  let _gAcc=0;
+  const tortaMetH=!_gTot?'':
+    '<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:2px 0 8px">'+
+      '<div style="width:105px;height:105px;border-radius:50%;flex:none;background:conic-gradient('+_gSegs.map((x,i)=>{const a=_gAcc;_gAcc+=x.val/_gTot*360;const c=/FIADO/i.test(x.lbl)?'#f57c00':_gCols[i%_gCols.length];x.col=c;return c+' '+a+'deg '+_gAcc+'deg';}).join(',')+')"></div>'+
+      '<div style="flex:1;min-width:130px">'+_gSegs.map(x=>'<div style="display:flex;justify-content:space-between;gap:6px;font-size:.72rem;padding:2px 0"><span style="display:inline-flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:3px;display:inline-block;background:'+x.col+'"></span>'+x.lbl+'</span><b>'+Math.round(x.val/_gTot*100)+'%</b></div>').join('')+'</div>'+
+    '</div>';
+
   // Vencimientos — separados en dos grupos, sin stock 0
   const venc=raw.vencProximos||[];
   const vencVencidos=venc.filter(v=>v.vencido&&v.stock>0);
@@ -1131,13 +1158,14 @@ function renderApp(){
         :'')+
       // Resumen
       cardsH+
+      graf12H+   // ver.37
       // ── Separador ──
       '<div style="height:1px;background:var(--borde);margin:8px 0 10px"></div>'+
       // Métodos (colapsable)
       '<button class="toggle-btn" onclick="showMetodos=!showMetodos;renderApp()" style="margin-bottom:6px">'+
         (showMetodos?'▲':'▼')+' 💳 Por método de pago'+
       '</button>'+
-      (showMetodos&&Object.keys(stats.metodos).length?'<div class="tar">'+metRowsH+'</div>':'')+
+      (showMetodos&&Object.keys(stats.metodos).length?'<div class="tar">'+tortaMetH+metRowsH+'</div>':'')+
       // Vendedores (colapsable)
       (Object.keys(stats.vendedores).length>1?
         '<button class="toggle-btn" onclick="showVendedores=!showVendedores;renderApp()" style="margin-bottom:6px">'+
