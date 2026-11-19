@@ -1878,7 +1878,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>🛒 POS · Copihue v580</title>
+    <title>🛒 POS · Copihue v581</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -7535,7 +7535,7 @@ function _vdPendReintentables() { return _vdPendLeer().filter(x => x && x.estado
 // Un intento. Devuelve { tipo: 'ok' | 'ocupado' | 'rechazado' | 'sinRespuesta', r?, error? }
 async function _vdEnviarAbono(idFiado, monto, metodo, idOp) {
     try {
-        const r = await _apiFetchUrl('abonarFiado', API_URL + '?action=abonarFiado&data=' + encodeURIComponent(JSON.stringify({ idFiado: idFiado, abono: monto, metodoPago: (metodo || 'EFECTIVO'), idOperacion: idOp })) + '&t=' + Date.now());
+        const r = await _apiFetchUrl('abonarFiado', API_URL + '?action=abonarFiado&data=' + encodeURIComponent(JSON.stringify({ idFiado: idFiado, abono: monto, metodoPago: (metodo || 'EFECTIVO'), idOperacion: idOp, cobrador: _fiadoCobrador() })) + '&t=' + Date.now());
         if (r && r.success === true) return { tipo: 'ok', r: r };
         if (r && r.ocupado === true) return { tipo: 'ocupado', r: r };
         return { tipo: 'rechazado', r: r };
@@ -7731,6 +7731,31 @@ function _pmRenderResumen() {
 // a vender() por cada método. El detalle completo viaja junto en
 // detallePagos. Si hay fiado, es una segunda llamada aparte (guardarFiado),
 // coordinada con cola de reintento idempotente si falla — nunca silenciosa.
+// v581 — detalle del fiado: nombres COMPLETOS (antes se cortaban en 15 letras: «COMIDA DE GATO»),
+// hasta 6 productos y como máximo ~160 letras (para que no se rompan los mensajes de WhatsApp).
+function _fiadoDescripcion(items, prefijo) {
+    const MAX = 160;
+    const parte = i => (i.esPeso ? i.gramos + 'gr' : i.qty + 'x') + ' ' + String(i.name || '').trim();
+    let txt = prefijo ? prefijo + ' · ' : '';
+    let n = 0;
+    for (const i of items.slice(0, 6)) {
+        const p = parte(i);
+        const sep = n ? ' · ' : '';
+        if (n && (txt + sep + p).length > MAX) break;
+        txt += sep + (p.length > MAX ? p.substring(0, MAX) : p);
+        n++;
+    }
+    if (items.length > n) txt += ' (+' + (items.length - n) + ')';
+    return txt;
+}
+// v581 — vencimiento por defecto a 7 días (fecha LOCAL, no UTC)
+function _fiadoVenc7() {
+    const d = new Date(); d.setDate(d.getDate() + 7);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+// v581 — quién cobra (va a la nota del fiado como «· cobró Nombre»)
+function _fiadoCobrador() { try { return String(vendedorActual || '').trim(); } catch (e) { return ''; } }
+
 async function confirmarVentaMixta() {
     const totalV = _totalCarritoConDescuentosGrupales();
     const total = window._totalConRedondeo || totalV;
@@ -7754,6 +7779,14 @@ async function confirmarVentaMixta() {
     try {
         const itemsSnapshot = [...ventaActual];
         const pagoFiado = _pagosMixtos.find(p => p.metodo === 'FIADO');
+        // v581 — texto «Parte fiada · Ticket N ($total, pagó $X EFECTIVO)» armado ANTES de que se limpie _pagosMixtos
+        let _fiadoMixtoPrefijo = '';
+        try {
+            if (pagoFiado) {
+                const otros = _pagosMixtos.filter(p => p.metodo !== 'FIADO').map(p => '$' + Math.round(p.equivalenteARS).toLocaleString('es-AR') + ' ' + (p.moneda && p.moneda !== 'ARS' ? p.metodo + ' ' + p.moneda : p.metodo).toLowerCase());
+                _fiadoMixtoPrefijo = '🔀 Parte fiada de venta de $' + Math.round(total).toLocaleString('es-AR') + (otros.length ? ' (pagó ' + otros.join(' + ') + ')' : '');
+            }
+        } catch (e) {}
         // v538 — vuelto aplicado a deuda: se congela lo elegido antes de que se limpie el panel
         let _vdSnap = null;
         if (_vd && !pagoFiado && vueltoARS > 0) {
@@ -7846,6 +7879,7 @@ async function confirmarVentaMixta() {
         let _fiadoMixtoGuardado = false, _datosFiadoMixto = null; // v533
         if (pagoFiado) {
             const idFiado = 'f_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+            if (ticketNum && _fiadoMixtoPrefijo) _fiadoMixtoPrefijo = _fiadoMixtoPrefijo.replace('🔀 Parte fiada de venta', '🔀 Parte fiada del ticket ' + ticketNum); // v581
             const datosFiado = {
                 idFiado,
                 cliente: pagoFiado.cliente,
@@ -7854,9 +7888,10 @@ async function confirmarVentaMixta() {
                 ticket: ticketNum,
                 items: itemsSnapshot.map(i => i.name + ' x' + i.qty).join(', '),
                 // v534 — mismo formato que el fiado normal (antes la planilla ponía "TICKET COMPLETO")
-                descripcion: itemsSnapshot.slice(0,3).map(i => (i.esPeso ? i.gramos + 'gr' : i.qty + 'x') + ' ' + i.name.substring(0,15)).join(' · ') + (itemsSnapshot.length > 3 ? ' (+' + (itemsSnapshot.length-3) + ')' : ''),
+                // v581 — detalle completo + aclara que es la parte fiada de una venta mixta
+                descripcion: _fiadoDescripcion(itemsSnapshot, _fiadoMixtoPrefijo),
                 cantItems: itemsSnapshot.length,
-                vencimiento: ''
+                vencimiento: _fiadoVenc7()                       // v581 — antes '' (nunca vencía)
             };
             _datosFiadoMixto = datosFiado; // v533
             try {
@@ -16964,9 +16999,10 @@ async function confirmarCobroPendiente() {
     const btn = document.getElementById('btnConfirmarCobroPendiente');
     if (btn) { btn.disabled = true; btn.textContent = '⏳ Guardando...'; }
     try {
-        const fechaPago = new Date().toISOString().split('T')[0];
+        // v581 — ya no se manda fechaPago: era la fecha UTC (después de las 21 h quedaba el día siguiente) y sin hora.
+        // Ahora la pone la planilla con fecha Y hora locales. Se agrega quién cobró.
         for (const fiad of seleccionados) {
-            const datos = { idFiado: fiad.idFiado, metodoPago: _metodoCobroPendiente, fechaPago, idOperacion: window._idOpCobroPend || ('cp_' + Date.now()) }; // v560: idOperacion
+            const datos = { idFiado: fiad.idFiado, metodoPago: _metodoCobroPendiente, idOperacion: window._idOpCobroPend || ('cp_' + Date.now()), cobrador: _fiadoCobrador() }; // v560: idOperacion
             const resp = await _apiFetch('cobrarFiado', datos);
             if (!resp.success) {
                 // v560: "ocupado" y "ya estaba pagado" se explican tal cual (no es una falla de red ni un error genérico)
@@ -17970,9 +18006,7 @@ async function confirmarFiado() {
         String(now.getMinutes()).padStart(2,'0') +
         String(now.getSeconds()).padStart(2,'0');
 
-    const descripcion = itemsSnapshot.slice(0,3).map(i =>
-        (i.esPeso ? i.gramos + 'gr' : i.qty + 'x') + ' ' + i.name.substring(0,15)
-    ).join(' · ') + (itemsSnapshot.length > 3 ? ' (+' + (itemsSnapshot.length-3) + ')' : '');
+    const descripcion = _fiadoDescripcion(itemsSnapshot);   // v581 — nombres completos (antes cortaba en 15 letras)
 
     const datosFiado = {
         idFiado, cliente, telefono,
@@ -18030,9 +18064,7 @@ async function _confirmarFiadoSinTel() {
         String(now.getMinutes()).padStart(2,'0') +
         String(now.getSeconds()).padStart(2,'0');
 
-    const descripcion = itemsSnapshot.slice(0,3).map(i =>
-        (i.esPeso ? i.gramos + 'gr' : i.qty + 'x') + ' ' + i.name.substring(0,15)
-    ).join(' · ') + (itemsSnapshot.length > 3 ? ' (+' + (itemsSnapshot.length-3) + ')' : '');
+    const descripcion = _fiadoDescripcion(itemsSnapshot);   // v581 — nombres completos (antes cortaba en 15 letras)
 
     const datosFiado = {
         idFiado, cliente, telefono: '',
