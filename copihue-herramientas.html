@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-  <script>const APP_VERSION = 14;</script>
+  <script>const APP_VERSION = 15;</script>
   <title>Herramientas · Copihue</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -224,7 +224,7 @@
         <div id="header-sub">Cargando...</div>
       </div>
     </div>
-    <button id="btn-back" title="Volver al panel" onclick="pedirSalida('seba21.html')">←</button>
+    <button id="btn-back" title="Volver al panel" onclick="pedirSalida(POS_URL)">←</button>
   </div>
 
   <div id="search-wrap">
@@ -257,7 +257,9 @@
 <script>
 // ══ copihue-herramientas.html ════════════════════════════════════════════
 // APP_VERSION es la única fuente de verdad (declarada en el <head>)
-const API_URL  = 'https://script.google.com/macros/s/AKfycbxZ2ZVMOXAVVAxCPmtGE8q_yQT6mQpTWcf-X0IrpjI7Tcyq1ub3xZCoFO3gKcvebKR3/exec';
+// v15 — lee la hoja HERRAMIENTAS de la planilla del POS de ESTE ambiente (antes leía otro Apps Script: …KebR3)
+const API_URL  = 'https://script.google.com/macros/s/AKfycbx-84yapENFqCNS1nfivFOR4P25l8U27gEoeWvVL6Nu5HmKr8e7m3KIJjshqtR_2brrHA/exec';
+const POS_URL  = 'seba21.html';
 const CACHE_KEY = 'copihue_herramientas_cache_v' + APP_VERSION;
 const CACHE_TTL = 10 * 60 * 1000;
 
@@ -271,7 +273,7 @@ let _destinoPendiente = null;
 history.pushState({ app: true }, '', location.href);
 window.addEventListener('popstate', function() {
   history.pushState({ app: true }, '', location.href); // neutraliza el back real
-  pedirSalida('seba21.html');
+  pedirSalida(POS_URL);
 });
 function pedirSalida(destino) {
   _destinoPendiente = destino;
@@ -291,7 +293,7 @@ let _todas  = [];
 let _filtro = '';
 
 // ── ESTADO POR ORDEN ──────────────────────────────────────────────────────
-const ESTADO_ORDER = ['CORRECTO','TRABAJANDO','ESPERAR','PENDIENTE','DESCARTADA',''];
+const ESTADO_ORDER = ['CORRECTO','TRABAJANDO','ESPERAR','PENDIENTE','INACTIVA','DESCARTADA',''];
 
 function estadoSort(a, b) {
   const ia = ESTADO_ORDER.indexOf((a.estado||'').toUpperCase());
@@ -336,8 +338,9 @@ async function cargar(forzar=false) {
   try {
     const r = await fetch(API_URL + '?action=getHerramientas&t=' + Date.now(), { cache: 'no-store' });
     const d = await r.json();
-    if (d.status === 'ok' && Array.isArray(d.herramientas) && d.herramientas.length > 0) {
-      _todas = d.herramientas;
+    if ((d.status === 'ok' || d.ok === true) && Array.isArray(d.herramientas) && d.herramientas.length > 0) {
+      // v15 — el Code del POS manda {nombre, url, icono, descripcion, activo}: ACTIVO = SI → «CORRECTO» (lista); NO → «INACTIVA»
+      _todas = d.herramientas.map(h => ({ ...h, estado: h.estado || (h.activo === false ? 'INACTIVA' : 'CORRECTO') }));
       try { sessionStorage.setItem(CACHE_KEY, JSON.stringify({ts: Date.now(), herramientas: _todas})); } catch(e){}
       renderizar();
     } else {
@@ -428,6 +431,7 @@ function cardHTML(h) {
     'ESPERAR':    'est-esperar',
     'PENDIENTE':  'est-pendiente',
     'DESCARTADA': 'est-descartada',
+    'INACTIVA':   'est-descartada',
   }[estado] || 'est-otro';
 
   const claseTag = {
@@ -436,6 +440,7 @@ function cardHTML(h) {
     'ESPERAR':    'tag-esperar',
     'PENDIENTE':  'tag-pendiente',
     'DESCARTADA': 'tag-descartada',
+    'INACTIVA':   'tag-descartada',
   }[estado] || 'tag-otro';
 
   // La tarjeta ya NO es un <a> completo: es un contenedor tocable que
