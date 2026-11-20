@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>ver.40 · Copihue · Reportes</title>
+<title>ver.41 · Copihue · Reportes</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
@@ -2045,24 +2045,41 @@ function cliSearch(val){
   });
 }
 
+// ver.41 — ARREGLADO: antes mandaba ticket/fecha sin el código del fiado y la planilla contestaba «Falta ID del fiado».
+// Ahora busca el fiado en la hoja FIADOS (rawFiados) por número de ticket, cobra el SALDO real (si hubo abonos),
+// manda código de operación (si se reintenta no cobra dos veces) y quién cobró.
+const _repIdOpCobro={};   // idFiado → idOperacion (se reutiliza si el mismo cobro se reintenta)
+function _repCobrador(){
+  try{ const x=JSON.parse(sessionStorage.getItem('copihue_sesion')||'null'); if(x&&x.vendedor) return String(x.vendedor).trim(); }catch(e){}
+  try{ return String(localStorage.getItem('copihue_vendedor')||'').trim(); }catch(e){ return ''; }
+}
 async function cobrarFiadoReporte(nomEnc,tkEnc,feEnc,total,clienteNomEnc,phoneEnc,btn){
   const nombre=decodeURIComponent(nomEnc);
   const ticket=decodeURIComponent(tkEnc);
-  const fecha=decodeURIComponent(feEnc);
   const clienteNom=decodeURIComponent(clienteNomEnc);
   const phone=decodeURIComponent(phoneEnc);
-  const metodo=prompt('💰 Cobrar fiado — '+nombre+'\nTicket #'+ticket+' · Total: '+fmt(total)+'\n\nMétodo de pago:\n1 → Efectivo\n2 → Transferencia\n3 → QR\n\nEscribí el número:');
+  const tkN=t=>{const x=String(t==null?'':t).trim(); return /^\d+$/.test(x)?String(parseInt(x,10)):x;};
+  if(!rawFiados||!rawFiados.length){ alert('⚠️ No se pudo leer la hoja FIADOS. Tocá 🔄 o cobrá desde Fiados.'); return; }
+  const cand=rawFiados.filter(f=>tkN(f.ticket)===tkN(ticket)&&String(f.estado||'').toUpperCase()!=='PAGADO');
+  if(!cand.length){ alert('⚠️ No encontré un fiado pendiente con el ticket #'+ticket+' en la hoja FIADOS (puede estar ya pagado o anotado con otro número).\n\nNo se cobró nada. Revisalo en Fiados o en «🔍 Control Ventas ↔ Fiados».'); return; }
+  if(cand.length>1){ alert('⚠️ Hay '+cand.length+' fiados pendientes con el ticket #'+ticket+'. Para no cobrar el equivocado, cobralo desde Fiados.'); return; }
+  const f=cand[0];
+  const saldo=parseFloat(f.total)||0, orig=parseFloat(f.totalOriginal)||saldo;
+  const metodo=prompt('💰 Cobrar fiado — '+nombre+'\nTicket #'+ticket+(orig>saldo+0.5?' · Total '+fmt(orig)+' · ya abonó '+fmt(orig-saldo):'')+
+    '\nA COBRAR: '+fmt(saldo)+'\n\nMétodo de pago:\n1 → Efectivo\n2 → Transferencia\n3 → Posnet\n4 → QR\n\nEscribí el número:');
   if(!metodo) return;
-  const metMap={'1':'EFECTIVO','2':'TRANSFERENCIA','3':'QR'};
-  const metodoStr=metMap[metodo.trim()]||metodo.trim().toUpperCase();
+  const metMap={'1':'EFECTIVO','2':'TRANSFERENCIA','3':'POSNET','4':'QR'};
+  const metodoStr=metMap[metodo.trim()];
+  if(!metodoStr){ alert('⚠️ Opción no válida. No se cobró nada.'); return; }
+  const idOp=_repIdOpCobro[f.idFiado]||(_repIdOpCobro[f.idFiado]='rep_'+Date.now()+'_'+Math.random().toString(36).slice(2,8));
   btn.disabled=true; btn.textContent='⏳...';
   try{
     const r=await fetch(API_FIADOS+'?action=cobrarFiado&data='+encodeURIComponent(JSON.stringify({
-      ticket, fecha, metodoPago:metodoStr
-    })),{redirect:'follow',signal:AbortSignal.timeout(12000)});
+      idFiado:f.idFiado, metodoPago:metodoStr, idOperacion:idOp, cobrador:_repCobrador()
+    })),{redirect:'follow',signal:AbortSignal.timeout(40000)});
     const resp=await r.json();
     if(resp.success||resp.ok){
-      // Enviar comprobante por WA si tiene teléfono
+      delete _repIdOpCobro[f.idFiado];
       if(phone){
         const MNOM3=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
         const hoy=new Date();
@@ -2074,21 +2091,22 @@ async function cobrarFiadoReporte(nomEnc,tkEnc,feEnc,total,clienteNomEnc,phoneEn
           '🎫 Ticket #'+ticket+'\n'+
           '📅 '+fechaHoy+' · '+horaHoy+'hs\n'+
           '💳 Método: '+metodoStr+'\n'+
-          '💰 Total abonado: *'+fmt(total)+'*\n\n'+
+          '💰 Pagado: *'+fmt(saldo)+'*\n\n'+
           '¡Muchas gracias! 🙏'
         );
         const waHref='intent://send/'+phone+'?text='+txt+'#Intent;package=com.whatsapp.w4b;scheme=whatsapp;end';
         window.open(waHref,'_blank');
       }
-      alert('✅ Cobrado: '+fmt(total)+' · '+metodoStr);
+      alert(resp.yaExistia?'✅ Ese cobro ya estaba registrado (no se cobró dos veces).':'✅ Cobrado: '+fmt(saldo)+' · '+metodoStr);
       rawFiados=[];
       await init();
     } else {
-      alert('❌ '+(resp.mensaje||resp.error||'Error al cobrar'));
+      if(resp.yaPagado) delete _repIdOpCobro[f.idFiado];
+      alert('❌ '+(resp.ocupado?'La planilla está ocupada: no se registró nada. Probá de nuevo en unos segundos (no se cobra dos veces).':(resp.mensaje||resp.error||'Error al cobrar')));
       btn.disabled=false; btn.textContent='💰 Cobrar';
     }
   }catch(e){
-    alert('❌ Sin conexión');
+    alert('⚠️ No hubo respuesta de la planilla. Puede que SÍ se haya registrado.\nVolvé a tocar «💰 Cobrar» con el mismo método: usa el mismo código y no se cobra dos veces.');
     btn.disabled=false; btn.textContent='💰 Cobrar';
   }
 }
