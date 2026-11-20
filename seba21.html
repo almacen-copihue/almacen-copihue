@@ -1878,7 +1878,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>🛒 POS · Copihue v581</title>
+    <title>🛒 POS · Copihue v582</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -9725,6 +9725,13 @@ async function _reenviarVentasPendientes() {
             }
             try {
                 const payload = { items: venta.items, metodoPago: venta.metodoPago, vendedor: venta.vendedor, idVenta: venta.idVenta, ..._drCampo(venta.descuentoRedondeo) };   // v567
+                // v582 — venta FIADO reintentada: mandar también el cliente (antes la hoja Ventas quedaba «🧾 FIADO» sin nombre, ej. ticket 3199).
+                // Pendientes viejos sin cliente: se busca en el fiado encolado con el mismo idFiado.
+                if (String(venta.metodoPago || '').toUpperCase() === 'FIADO') {
+                    let cF = venta.clienteFiado || '', tF = venta.telefonoFiado || '';
+                    if (!cF && venta.idFiado) { try { const fp = _fiadoPendLeer().find(x => x && x.tipo === 'fiadoPendiente' && x.datosFiado && x.datosFiado.idFiado === venta.idFiado); if (fp) { cF = fp.datosFiado.cliente || ''; tF = tF || fp.datosFiado.telefono || ''; } } catch (eCF) {} }
+                    if (cF) { payload.clienteFiado = cF; if (tF) payload.telefonoFiado = tF; }
+                }
                 const url = API_URL + '?action=vender&data=' + encodeURIComponent(JSON.stringify(payload));
                 const resp = await _apiFetchUrl('vender', url);
                 if (resp.success) {
@@ -18452,6 +18459,7 @@ async function _procesarVentaFiado(datosFiado, itemsSnapshot) {
             const pendientes = JSON.parse(localStorage.getItem('ventas_pendientes') || '[]');
             pendientes.push({
                 items: ventaDataRetry, metodoPago: 'FIADO', vendedor: vendedorActual,
+                clienteFiado: datosFiado.cliente || '', telefonoFiado: datosFiado.telefono || '',   // v582: antes se perdía el cliente en el reintento
                 idVenta: idVentaFiado, idFiado: datosFiado.idFiado, ts: Date.now(), ..._drCampo(totalOriginal - total)   // v567
             });
             localStorage.setItem('ventas_pendientes', JSON.stringify(pendientes));
