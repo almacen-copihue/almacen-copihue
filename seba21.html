@@ -1878,7 +1878,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>🛒 POS · Copihue v592</title>
+    <title>🛒 POS · Copihue v594</title>
     <meta name="theme-color" content="#991b1b">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2863,6 +2863,8 @@
             <button class="btn-resumen" onclick="abrirResumen()" title="Resumen del día" style="flex:1;text-align:center;">📊 Hoy</button>
             <a href="copihue-reportes.html?v=123" class="btn-resumen" title="Reportes" style="background:rgba(156,39,176,0.3);border-color:rgba(156,39,176,0.6);flex:1;text-align:center;text-decoration:none;display:flex;align-items:center;justify-content:center;">📈</a>
             <button class="btn-resumen" onclick="abrirFotos()" title="Editor de fotos" style="background:rgba(0,150,136,0.3);border-color:rgba(0,150,136,0.6);flex:1;text-align:center;">📷</button>
+            <button class="btn-resumen" onclick="abrirPagina('index.html')" title="Catálogo (se abre encima del POS)" style="background:rgba(46,125,50,0.35);border-color:rgba(46,125,50,0.7);flex:1;text-align:center;">🏪</button>
+            <button class="btn-resumen" onclick="abrirPagina('copihue-revista.html')" title="Revista — configurar" style="background:rgba(198,40,40,0.3);border-color:rgba(198,40,40,0.65);flex:1;text-align:center;">🎄</button>
         </div>
 
         <!-- FILA 2a: Sistema (primera mitad) -->
@@ -4471,7 +4473,7 @@ window.addEventListener('popstate', function() {
 
     // v588 — si hay una página abierta encima del POS, «atrás» la cierra
     if (typeof _vitAbierta === 'function' && _vitAbierta()) { cerrarVitrina(); return; }   // v591
-    if (typeof _ppAbierto === 'function' && _ppAbierto()) { cerrarPagina(); return; }
+    if (typeof _ppAbierto === 'function' && _ppAbierto()) { cerrarPagina(true); return; }
     // Cerrar cualquier modal abierto, en orden de prioridad — usar funciones de cierre correctas
     const cierres = [
         { id: 'modalConfirm',         fn: () => cerrarConfirm() },
@@ -12494,7 +12496,7 @@ function sugerirRelampago() {
                             </button>
                         </div>
                         <div style="display:flex;gap:10px;margin-bottom:10px;">
-                            <button onclick="window.open('https://almacen-copihue.vercel.app','_blank')"
+                            <button onclick="abrirPagina('index.html')"
                                     style="flex:1;padding:12px;border:1px solid #ff6f00;border-radius:14px;
                                            background:white;color:#e65100;font-weight:700;cursor:pointer;">
                                 👁 Ver página
@@ -12886,32 +12888,44 @@ document.addEventListener('keydown', e => {
 // Horario, Herramientas, Reportes, Fiados, Tickets, Finanzas y Retiros se abren en un panel de pantalla completa.
 // El POS queda abierto debajo (venta en curso, catálogo y ofertas intactos). El «Volver» de cada página
 // (que apunta a seba21…html o usa history.back) y el botón atrás del celular cierran el panel.
-const _PP_RE = /(^|\/)copihue-(horario|herramientas|reportes|fiado|tickets|finanzas|retiros-de-caja)\.html/i;
+const _PP_RE = /(^|\/)(?:copihue-)?(horario|herramientas|reportes|fiado|tickets|finanzas|retiros-de-caja|revista|index)\.html/i;   // v593: + catálogo y revista
 const _PP_POS_RE = /(^|\/)seba21[^\/]*\.html/i;
-let _ppPagina = '';
+let _ppPagina = '', _ppCatTimer = null;
 function _ppAbierto() { const p = document.getElementById('ppPanel'); return !!(p && p.style.display !== 'none'); }
 function abrirPagina(url) {
     try {
         let p = document.getElementById('ppPanel');
         if (!p) {
             p = document.createElement('div'); p.id = 'ppPanel';
-            p.innerHTML = '<div class="pp-barra"><button type="button" class="pp-volver" onclick="cerrarPagina()">← Volver al POS</button><span id="ppTitulo"></span><span class="pp-carga" id="ppCarga">⏳</span></div>';
+            p.innerHTML = '<div class="pp-barra"><button type="button" class="pp-volver" onclick="cerrarPagina(true)">← Volver al POS</button><span id="ppTitulo"></span><span class="pp-carga" id="ppCarga">⏳</span></div>';
             document.body.appendChild(p);
         }
-        const viejo = document.getElementById('ppFrame'); if (viejo) viejo.remove();
-        const f = document.createElement('iframe'); f.id = 'ppFrame'; f.setAttribute('title', 'Página');
+        const viejo = document.getElementById('ppFrame');
+        if (viejo) { if (viejo.classList.contains('pp-cat')) { viejo.style.display = 'none'; viejo.removeAttribute('id'); } else viejo.remove(); }
+        _ppPagina = (String(url).match(_PP_RE) || [, ''])[2].toLowerCase();
+        // v593 — el catálogo queda cargado y escondido al volver: si se reabre antes de 10 min, aparece al instante
+        let f = _ppPagina === 'index' ? p.querySelector('iframe.pp-cat') : null;
+        const nombres = { horario: '🕐 Horario', herramientas: '🧰 Herramientas', reportes: '📈 Reportes', fiado: '🧾 Fiados', tickets: '🎫 Tickets', finanzas: '💰 Finanzas', 'retiros-de-caja': '💸 Retiros de caja', revista: '🎄 Revista', index: '🏪 Catálogo' };
+        document.getElementById('ppTitulo').textContent = nombres[_ppPagina] || '';
+        p.style.display = 'flex'; document.body.classList.add('pp-abierto');
+        if (f) { clearTimeout(_ppCatTimer); f.style.display = ''; f.id = 'ppFrame'; document.getElementById('ppCarga').style.display = 'none'; return; }
+        f = document.createElement('iframe'); f.id = 'ppFrame'; f.setAttribute('title', 'Página');
+        if (_ppPagina === 'index') f.classList.add('pp-cat');
         f.addEventListener('load', _ppAlCargar);
         p.appendChild(f);
-        _ppPagina = (String(url).match(_PP_RE) || [, , ''])[2].toLowerCase();
-        const nombres = { horario: '🕐 Horario', herramientas: '🧰 Herramientas', reportes: '📈 Reportes', fiado: '🧾 Fiados', tickets: '🎫 Tickets', finanzas: '💰 Finanzas', 'retiros-de-caja': '💸 Retiros de caja' };
-        document.getElementById('ppTitulo').textContent = nombres[_ppPagina] || '';
         document.getElementById('ppCarga').style.display = '';
-        p.style.display = 'flex'; document.body.classList.add('pp-abierto');
         f.src = url;
     } catch (e) { location.href = url; }   // si algo falla, como antes
 }
+// v594 — dentro del panel queda un solo «Volver» (la barra verde): se esconde el «Volver al POS» propio de cada página.
+// Lo hace el POS desde afuera; las páginas abiertas solas no cambian. No se esconde el «Volver» interno de las páginas.
+const _PP_CSS_VOLVER = 'a[href*="seba21"],[onclick*="seba21"],#btn-back[onclick*="pedirSalida"],.btn-back[onclick="volver()"]{display:none!important}';
+function _ppSinGuardar(w) {   // ¿la página tiene cambios sin guardar? (revista: SUCIO · ingreso: hayDatosSinGuardar)
+    try { return !!w.eval("(typeof SUCIO!=='undefined'&&SUCIO)||(typeof hayDatosSinGuardar==='function'&&hayDatosSinGuardar())"); } catch (e) { return false; }
+}
 function _ppAlCargar() {
     const f = document.getElementById('ppFrame'); if (!f) return;
+    try { const d = f.contentDocument; if (d && !d.getElementById('ppSinVolver')) { const st = d.createElement('style'); st.id = 'ppSinVolver'; st.textContent = _PP_CSS_VOLVER; (d.head || d.documentElement).appendChild(st); } } catch (e) {}
     const c = document.getElementById('ppCarga'); if (c) c.style.display = 'none';
     let w = null; try { w = f.contentWindow; void w.location.href; } catch (e) { return; }   // otra web (no debería pasar)
     if (_PP_POS_RE.test(w.location.pathname)) { cerrarPagina(); return; }   // respaldo: llegó a cargar el POS adentro
@@ -12927,8 +12941,9 @@ function _ppAlCargar() {
         });
     } catch (e) {}
 }
-function cerrarPagina() {
+function cerrarPagina(confirmar) {
     const p = document.getElementById('ppPanel'); if (!p || p.style.display === 'none') return;
+    if (confirmar) { const fa = document.getElementById('ppFrame'); if (fa && fa.contentWindow && _ppSinGuardar(fa.contentWindow) && !confirm('Tenés cambios sin guardar en esta página. ¿Volver al POS igual?')) return; }
     const pag = _ppPagina; _ppPagina = '';
     p.style.display = 'none'; document.body.classList.remove('pp-abierto');
     // Las páginas guardan pasos en el historial (para su propio «atrás»). Al cerrar, se retrocede esa misma
@@ -12936,7 +12951,10 @@ function cerrarPagina() {
     let pasos = 0;
     const f = document.getElementById('ppFrame');
     try { const nv = f && f.contentWindow && f.contentWindow.navigation; if (nv && nv.currentEntry) pasos = Math.max(0, nv.currentEntry.index || 0); } catch (e) {}
-    if (f) { try { f.removeEventListener('load', _ppAlCargar); } catch (e) {} f.remove(); }   // libera memoria
+    if (f && f.classList.contains('pp-cat')) {   // v593 — el catálogo queda escondido 10 min (después se descarta: consulta la planilla cada minuto)
+        f.style.display = 'none'; f.removeAttribute('id');
+        clearTimeout(_ppCatTimer); _ppCatTimer = setTimeout(() => { try { const c = document.querySelector('#ppPanel iframe.pp-cat'); if (c && c.id !== 'ppFrame') c.remove(); } catch (e) {} }, 10 * 60 * 1000);
+    } else if (f) { try { f.removeEventListener('load', _ppAlCargar); } catch (e) {} f.remove(); }   // libera memoria
     if (pasos > 0 && pasos < 60) { try { history.go(-pasos); } catch (e) {} }
     // refrescar en segundo plano SOLO lo que esa página pudo cambiar
     setTimeout(() => {
@@ -20929,7 +20947,7 @@ try { _cotizRefrescar(); } catch (e) {}
 </script>
 <!-- AVISO-VERSION — regla de oro: avisa «se actualizó a vX» y detecta versión nueva publicada (tocar = recargar de verdad) -->
 <script>
-/*AV*/var AV_PAG='seba21',AV_VER='592';
+/*AV*/var AV_PAG='seba21',AV_VER='594';
 (function () {
   var CLAVE = 'copihue_av_' + AV_PAG, ult = 0, aviso = null;
   function cartel(txt, color, alTocar, ms) {
